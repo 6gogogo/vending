@@ -1,0 +1,84 @@
+:root {
+  --admin-bg: #f4efe7;
+  --admin-panel: rgba(255, 250, 242, 0.88);
+  --admin-panel-strong: rgba(255, 248, 236, 0.98);
+  --admin-line: rgba(71, 85, 105, 0.14);
+  --admin-text: #111827;
+  --admin-muted: #58667f;
+  --admin-accent: #0d9488;
+  --admin-accent-strong: #0f766e;
+  --admin-warning: #c26a24;
+  --admin-shadow: 0 28px 80px rgba(68, 47, 16, 0.12);
+  font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  color: var(--admin-text);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(13, 148, 136, 0.18), transparent 28%),
+    radial-gradient(circle at 100% 0%, rgba(217, 119, 6, 0.14), transparent 24%),
+    linear-gradient(180deg, #f7f1e7 0%, #f3eee7 56%, #ede5d7 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.admin-shell {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.admin-card {
+  border: 1px solid var(--admin-line);
+  border-radius: 28px;
+  background: var(--admin-panel);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-title {
+  font-size: clamp(2rem, 4vw, 3.75rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  margin: 0;
+}
+
+.admin-subtitle {
+  margin: 0;
+  color: var(--admin-muted);
+  line-height: 1.6;
+}
+
+.admin-button {
+  border: none;
+  border-radius: 999px;
+  padding: 0.9rem 1.4rem;
+  background: linear-gradient(135deg, #0d9488, #2dd4bf);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-button--ghost {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--admin-text);
+}
+
+.admin-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(13, 148, 136, 0.12);
+  color: var(--admin-accent-strong);
+  font-size: 0.84rem;
+  font-weight: 700;
+}

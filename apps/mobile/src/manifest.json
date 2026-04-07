@@ -1,0 +1,14 @@
+{
+  "name": "公益智助柜移动端",
+  "appid": "__UNI__SMARTRELIEF",
+  "description": "面向特殊群体与商户的公益智助柜移动端。",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true,
+    "optimization": {
+      "subPackages": true
+    }
+  }
+}

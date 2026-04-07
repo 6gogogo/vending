@@ -1,0 +1,33 @@
+{
+  "name": "@vm/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "uni -p h5",
+    "dev:weixin": "uni -p mp-weixin",
+    "dev:alipay": "uni -p mp-alipay",
+    "dev:app": "uni -p app",
+    "build": "uni build -p h5",
+    "build:weixin": "uni build -p mp-weixin",
+    "build:alipay": "uni build -p mp-alipay",
+    "build:app": "uni build -p app",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-4030620241128001",
+    "@dcloudio/uni-app-plus": "3.0.0-4030620241128001",
+    "@dcloudio/uni-mp-alipay": "3.0.0-4030620241128001",
+    "@dcloudio/uni-mp-weixin": "3.0.0-4030620241128001",
+    "@vm/shared-client": "file:../../packages/shared-client",
+    "@vm/shared-types": "file:../../packages/shared-types",
+    "pinia": "^3.0.1",
+    "vue": "3.4.21"
+  },
+  "devDependencies": {
+    "@dcloudio/vite-plugin-uni": "3.0.0-4030620241128001",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.14"
+  }
+}

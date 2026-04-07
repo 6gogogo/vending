@@ -1,0 +1,35 @@
+{
+  "pages": [
+    {
+      "path": "pages/common/login",
+      "style": {
+        "navigationStyle": "custom",
+        "disableScroll": true
+      }
+    },
+    {
+      "path": "pages/special/home",
+      "style": {
+        "navigationBarTitleText": "公益领取"
+      }
+    },
+    {
+      "path": "pages/special/history",
+      "style": {
+        "navigationBarTitleText": "领取记录"
+      }
+    },
+    {
+      "path": "pages/merchant/home",
+      "style": {
+        "navigationBarTitleText": "商户中心"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "公益智助柜",
+    "navigationBarBackgroundColor": "#0f172a",
+    "backgroundColor": "#08111f"
+  }
+}

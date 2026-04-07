@@ -1,0 +1,33 @@
+{
+  "name": "vending-machine-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:api": "npm run start:dev --workspace @vm/api",
+    "dev:api:once": "npm run start:once --workspace @vm/api",
+    "dev:admin": "npm run dev --workspace @vm/admin-web",
+    "dev:mobile": "npm run dev --workspace @vm/mobile",
+    "dev:mobile:weixin": "npm run dev:weixin --workspace @vm/mobile",
+    "dev:mobile:alipay": "npm run dev:alipay --workspace @vm/mobile",
+    "dev:mobile:app": "npm run dev:app --workspace @vm/mobile",
+    "build:mobile:app": "npm run build:app --workspace @vm/mobile",
+    "build:mobile:weixin": "npm run build:weixin --workspace @vm/mobile",
+    "build:mobile:alipay": "npm run build:alipay --workspace @vm/mobile",
+    "sandbox:device": "node sandbox/scripts/query-device-info.mjs",
+    "sandbox:door": "node sandbox/scripts/open-door.mjs sandbox/fixtures/open-door.sample.json",
+    "sandbox:door-status": "node sandbox/scripts/simulate-door-status.mjs sandbox/fixtures/door-status.sample.json",
+    "sandbox:goods": "node sandbox/scripts/query-goods.mjs",
+    "sandbox:latest-event": "node sandbox/scripts/simulate-latest-event.mjs",
+    "sandbox:mock-device": "node sandbox/scripts/upsert-mock-device.mjs sandbox/fixtures/mock-device.sample.json",
+    "sandbox:payment-success": "node sandbox/scripts/payment-success.mjs sandbox/fixtures/payment-success.sample.json",
+    "sandbox:refund": "node sandbox/scripts/refund.mjs sandbox/fixtures/refund.sample.json",
+    "sandbox:settlement": "node sandbox/scripts/simulate-settlement.mjs sandbox/fixtures/settlement.sample.json",
+    "sandbox:sign": "node sandbox/scripts/generate-signature.mjs sandbox/fixtures/open-door.sample.json",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

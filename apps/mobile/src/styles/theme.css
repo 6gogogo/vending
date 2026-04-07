@@ -1,0 +1,107 @@
+:root,
+page {
+  --vm-bg: #08111f;
+  --vm-bg-soft: #102038;
+  --vm-surface: rgba(15, 23, 42, 0.82);
+  --vm-surface-strong: rgba(20, 32, 56, 0.96);
+  --vm-line: rgba(148, 163, 184, 0.18);
+  --vm-text: #f8fafc;
+  --vm-muted: #9fb0c7;
+  --vm-accent: #8be9bf;
+  --vm-accent-strong: #3dd0a5;
+  --vm-alert: #f6b37d;
+  --vm-shadow: 0 24rpx 90rpx rgba(0, 0, 0, 0.28);
+  font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+  color: var(--vm-text);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(61, 208, 165, 0.25), transparent 38%),
+    radial-gradient(circle at 100% 0%, rgba(88, 160, 255, 0.2), transparent 35%),
+    linear-gradient(180deg, #06111e 0%, #08111f 48%, #09182d 100%);
+}
+
+view,
+text,
+button,
+input {
+  box-sizing: border-box;
+}
+
+.vm-page {
+  min-height: 100vh;
+  padding: 40rpx 28rpx 64rpx;
+}
+
+.vm-card {
+  border: 1rpx solid var(--vm-line);
+  border-radius: 36rpx;
+  background: linear-gradient(180deg, rgba(18, 28, 49, 0.92), rgba(10, 18, 32, 0.88));
+  box-shadow: var(--vm-shadow);
+  backdrop-filter: blur(28rpx);
+}
+
+.vm-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  background: rgba(139, 233, 191, 0.12);
+  color: var(--vm-accent);
+  font-size: 24rpx;
+}
+
+.vm-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  border-radius: 999rpx;
+  border: none;
+  background: linear-gradient(135deg, #3dd0a5, #7bd7ff);
+  color: #07111d;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.vm-button--ghost {
+  background: rgba(159, 176, 199, 0.1);
+  color: var(--vm-text);
+}
+
+.vm-title {
+  font-size: 50rpx;
+  font-weight: 700;
+  line-height: 1.08;
+}
+
+.vm-subtitle {
+  color: var(--vm-muted);
+  font-size: 26rpx;
+  line-height: 1.55;
+}
+
+.vm-grid {
+  display: grid;
+  gap: 20rpx;
+}
+
+.vm-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.vm-fade-up {
+  animation: fade-up 420ms ease both;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

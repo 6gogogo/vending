@@ -1,0 +1,25 @@
+{
+  "deviceCode": "CAB-MOCK-2001",
+  "name": "联调模拟柜 1 号",
+  "location": "本地联调点位",
+  "status": "online",
+  "doorNum": "1",
+  "goods": [
+    {
+      "goodsId": "goods-mock-001",
+      "goodsCode": "690000009001",
+      "name": "模拟三明治",
+      "category": "food",
+      "stock": 12,
+      "price": 0
+    },
+    {
+      "goodsId": "goods-mock-002",
+      "goodsCode": "690000009002",
+      "name": "模拟矿泉水",
+      "category": "drink",
+      "stock": 20,
+      "price": 0
+    }
+  ]
+}

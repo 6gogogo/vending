@@ -1,0 +1,16 @@
+{
+  "orderNo": "mock-order-event-sandbox-001",
+  "eventId": "event-sandbox-001",
+  "phone": "13800000002",
+  "deviceCode": "CAB-1001",
+  "amount": 0,
+  "notifyUrl": "http://localhost:4000/api/cabinet-events/callbacks/payment-success",
+  "detail": [
+    {
+      "goodsName": "Water",
+      "quantity": 1,
+      "unitPrice": 0,
+      "goodsId": "goods-1002"
+    }
+  ]
+}
