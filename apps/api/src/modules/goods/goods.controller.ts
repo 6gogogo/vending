@@ -25,6 +25,85 @@ export class GoodsController {
     return ok(this.goodsService.listCatalog());
   }
 
+  @Get("goods/:goodsId")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  detail(@Param("goodsId") goodsId: string) {
+    return ok(this.goodsService.getDetail(goodsId));
+  }
+
+  @Post("goods")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  createGoods(
+    @Body()
+    body: {
+      goodsCode: string;
+      goodsId: string;
+      name: string;
+      category: "food" | "drink" | "daily";
+      price: number;
+      imageUrl: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.goodsService.createCatalogItem(body, request.authUser?.id), "货品种类已创建。");
+  }
+
+  @Patch("goods/:goodsId")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  updateGoods(
+    @Param("goodsId") goodsId: string,
+    @Body()
+    body: {
+      goodsCode?: string;
+      name?: string;
+      category?: "food" | "drink" | "daily";
+      price?: number;
+      imageUrl?: string;
+      status?: "active" | "inactive";
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.goodsService.updateCatalogItem(goodsId, body, request.authUser?.id), "货品信息已更新。");
+  }
+
+  @Post("goods/:goodsId/batches")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  addBatch(
+    @Param("goodsId") goodsId: string,
+    @Body()
+    body: {
+      deviceCode: string;
+      quantity: number;
+      expiresAt?: string;
+      sourceType?: "admin" | "merchant" | "system";
+      sourceUserId?: string;
+      sourceUserName?: string;
+      note?: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.goodsService.addBatch(goodsId, body, request.authUser?.id), "货物批次已入库。");
+  }
+
+  @Post("goods/batches/:batchId/remove")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  removeBatch(
+    @Param("batchId") batchId: string,
+    @Body()
+    body: {
+      quantity: number;
+      note?: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.goodsService.removeBatch(batchId, body, request.authUser?.id), "批次库存已去除。");
+  }
+
   @Get("goods-alert-policies")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
@@ -88,6 +167,25 @@ export class GoodsController {
     return ok(
       await this.goodsService.syncDeviceGoods(deviceCode, doorNum, request.authUser?.id),
       "柜机货品种类已同步。"
+    );
+  }
+
+  @Patch("devices/:deviceCode/goods/:goodsId/threshold")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  updateThreshold(
+    @Param("deviceCode") deviceCode: string,
+    @Param("goodsId") goodsId: string,
+    @Body()
+    body: {
+      enabled: boolean;
+      lowStockThreshold?: number;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(
+      this.goodsService.updateDeviceThreshold(deviceCode, goodsId, body, request.authUser?.id),
+      "柜机货品阈值已更新。"
     );
   }
 }

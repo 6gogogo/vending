@@ -64,9 +64,36 @@ export class InventoryOrdersService {
       this.store.inventory.unshift(movement);
 
       if (movement.type === "pickup") {
-        this.devicesService.adjustStock(movement.deviceCode, movement.goodsId, -movement.quantity);
+        this.store.consumeGoodsBatches(movement.deviceCode, movement.goodsId, movement.quantity);
       } else if (movement.type === "donation") {
-        this.devicesService.adjustStock(movement.deviceCode, movement.goodsId, movement.quantity);
+        const catalogItem = this.store.ensureGoodsCatalogItem({
+          goodsCode: movement.goodsId,
+          goodsId: movement.goodsId,
+          name: movement.goodsName,
+          category: movement.category,
+          price: movement.unitPrice,
+          imageUrl:
+            this.store.goodsCatalog.find((entry) => entry.goodsId === movement.goodsId)?.imageUrl ??
+            "https://dummyimage.com/160x160/d8e8ff/0b1220.png&text=%E7%89%A9%E8%B5%84",
+          status: "active"
+        });
+        this.store.ensureDeviceGoodsEntry(movement.deviceCode, {
+          goodsCode: catalogItem.goodsCode,
+          goodsId: catalogItem.goodsId,
+          name: catalogItem.name,
+          category: catalogItem.category,
+          price: catalogItem.price,
+          imageUrl: catalogItem.imageUrl
+        });
+        this.store.createGoodsBatch({
+          goodsId: movement.goodsId,
+          deviceCode: movement.deviceCode,
+          quantity: movement.quantity,
+          expiresAt: movement.expiresAt,
+          sourceType: "merchant",
+          sourceUserId: movement.userId,
+          sourceUserName: this.store.users.find((entry) => entry.id === movement.userId)?.name
+        });
 
         if (movement.expiresAt) {
           this.alertsService.create({
@@ -201,7 +228,8 @@ export class InventoryOrdersService {
       relatedOrderNo: orderNo,
       metadata: {
         amount,
-        transactionId
+        transactionId,
+        undoState: "not_undoable"
       }
     });
 

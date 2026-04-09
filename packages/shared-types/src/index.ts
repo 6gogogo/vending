@@ -11,6 +11,8 @@ export type CabinetEventStatus =
   | "closed"
   | "settled"
   | "failed"
+  | "timeout_unopened"
+  | "stuck_open"
   | "refunded";
 
 export type InventoryMovementType =
@@ -22,9 +24,12 @@ export type InventoryMovementType =
   | "manual-deduction"
   | "refund";
 
-export type AlertStatus = "open" | "resolved";
+export type AlertStatus = "open" | "acknowledged" | "resolved";
+export type AlertGrade = "fault" | "feedback" | "warning";
 
 export type PolicyStatus = "active" | "inactive";
+export type GoodsBatchSource = "admin" | "merchant" | "system";
+export type OperationLogUndoState = "undoable" | "undone" | "not_undoable";
 
 export type ServiceCompletionStatus = "complete" | "partial" | "unserved" | "not_applicable";
 
@@ -61,6 +66,9 @@ export interface GoodsCatalogItem {
   category: GoodsCategory;
   price: number;
   imageUrl: string;
+  status?: PolicyStatus;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DeviceGoods extends GoodsCatalogItem {
@@ -158,6 +166,7 @@ export interface InventoryMovement {
 export interface AlertTask {
   id: string;
   type: "expiry" | "callback" | "inventory" | "device_fault" | "user_feedback";
+  grade: AlertGrade;
   title: string;
   status: AlertStatus;
   deviceCode?: string;
@@ -168,6 +177,7 @@ export interface AlertTask {
   createdAt: string;
   detail: string;
   sourceLogId?: string;
+  relatedEventId?: string;
   resolvedAt?: string;
   resolvedByUserId?: string;
   resolutionNote?: string;
@@ -256,8 +266,10 @@ export interface GoodsOverviewItem {
   goodsName: string;
   category: GoodsCategory;
   stock: number;
-  lowStockThreshold: number;
+  thresholdEnabled: boolean;
+  lowStockThreshold?: number;
   status: "ok" | "low" | "empty";
+  nearestExpiryAt?: string;
 }
 
 export interface GoodsAlertPolicyThreshold {
@@ -275,10 +287,36 @@ export interface GoodsAlertPolicy {
   status: PolicyStatus;
 }
 
+export interface GoodsBatchRecord {
+  batchId: string;
+  goodsId: string;
+  deviceCode: string;
+  quantity: number;
+  remainingQuantity: number;
+  expiresAt?: string;
+  createdAt: string;
+  sourceType: GoodsBatchSource;
+  sourceUserId?: string;
+  sourceUserName?: string;
+  sourcePolicyId?: string;
+  note?: string;
+}
+
+export interface DeviceGoodsSetting {
+  deviceCode: string;
+  goodsId: string;
+  enabled: boolean;
+  lowStockThreshold?: number;
+  sourcePolicyId?: string;
+  updatedAt: string;
+}
+
 export interface GoodsOverviewSnapshot {
   totalKinds: number;
   lowStockKinds: number;
   outOfStockKinds: number;
+  policyCount: number;
+  settingCount: number;
   flaggedGoods: GoodsOverviewItem[];
   byDevice: Array<{
     deviceCode: string;
@@ -294,7 +332,25 @@ export interface GoodsOverviewSnapshot {
     totalStock: number;
     lowStockDevices: number;
     outOfStockDevices: number;
+    nearestExpiryAt?: string;
     deviceDistribution: GoodsOverviewItem[];
+  }>;
+  recentLogs: OperationLogRecord[];
+}
+
+export interface GoodsDetailSnapshot {
+  goods: GoodsCatalogItem;
+  totalStock: number;
+  nearestExpiryAt?: string;
+  deviceDistribution: GoodsOverviewItem[];
+  batches: GoodsBatchRecord[];
+  deviceSettings: Array<{
+    deviceCode: string;
+    deviceName: string;
+    enabled: boolean;
+    lowStockThreshold?: number;
+    currentStock: number;
+    nearestExpiryAt?: string;
   }>;
   recentLogs: OperationLogRecord[];
 }
@@ -318,6 +374,7 @@ export interface DashboardSnapshot {
   businessDateKey: string;
   stats: DashboardStats;
   weeklyTrend: TrendPoint[];
+  taskGradeSummary: Record<AlertGrade, number>;
   serviceOverview: {
     completeUsers: ServiceOverviewBucket;
     partialUsers: ServiceOverviewBucket;
@@ -352,6 +409,9 @@ export interface DeviceMonitoringDetail {
     category: GoodsCategory;
     currentStock: number;
     deltaSinceStartOfBusinessDay: number;
+    thresholdEnabled: boolean;
+    lowStockThreshold?: number;
+    nearestExpiryAt?: string;
   }>;
 }
 
@@ -619,7 +679,10 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     name: "三明治",
     category: "food",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/dae4ff/0b1220.png"
+    imageUrl: "https://dummyimage.com/160x160/dae4ff/0b1220.png",
+    status: "active",
+    createdAt: "2026-04-07T08:00:00.000Z",
+    updatedAt: "2026-04-08T00:22:00.000Z"
   },
   {
     goodsCode: "690000000002",
@@ -627,7 +690,10 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     name: "牛奶",
     category: "drink",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/c8f7e7/0b1220.png"
+    imageUrl: "https://dummyimage.com/160x160/c8f7e7/0b1220.png",
+    status: "active",
+    createdAt: "2026-04-07T08:00:00.000Z",
+    updatedAt: "2026-04-08T00:22:00.000Z"
   },
   {
     goodsCode: "690000000003",
@@ -635,7 +701,10 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     name: "方便面",
     category: "food",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/f8d9c8/0b1220.png"
+    imageUrl: "https://dummyimage.com/160x160/f8d9c8/0b1220.png",
+    status: "active",
+    createdAt: "2026-04-07T08:00:00.000Z",
+    updatedAt: "2026-04-08T00:22:00.000Z"
   },
   {
     goodsCode: "690000000004",
@@ -643,7 +712,10 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     name: "牙刷",
     category: "daily",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/f7f3b8/0b1220.png"
+    imageUrl: "https://dummyimage.com/160x160/f7f3b8/0b1220.png",
+    status: "active",
+    createdAt: "2026-04-07T08:00:00.000Z",
+    updatedAt: "2026-04-08T00:22:00.000Z"
   }
 ];
 
@@ -699,6 +771,73 @@ export const seedGoodsAlertPolicies: GoodsAlertPolicy[] = [
         lowStockThreshold: 2
       }
     ]
+  }
+];
+
+export const seedDeviceGoodsSettings: DeviceGoodsSetting[] = [
+  {
+    deviceCode: "CAB-1001",
+    goodsId: "goods-1001",
+    enabled: true,
+    lowStockThreshold: 2,
+    sourcePolicyId: "goods-policy-001",
+    updatedAt: "2026-04-08T00:25:00.000Z"
+  },
+  {
+    deviceCode: "CAB-1001",
+    goodsId: "goods-1002",
+    enabled: true,
+    lowStockThreshold: 1,
+    sourcePolicyId: "goods-policy-001",
+    updatedAt: "2026-04-08T00:25:00.000Z"
+  },
+  {
+    deviceCode: "CAB-1002",
+    goodsId: "goods-1003",
+    enabled: true,
+    lowStockThreshold: 2,
+    sourcePolicyId: "goods-policy-001",
+    updatedAt: "2026-04-08T00:25:00.000Z"
+  }
+];
+
+export const seedGoodsBatches: GoodsBatchRecord[] = [
+  {
+    batchId: "batch-001",
+    goodsId: "goods-1001",
+    deviceCode: "CAB-1001",
+    quantity: 4,
+    remainingQuantity: 2,
+    expiresAt: "2026-04-09T08:00:00.000Z",
+    createdAt: "2026-04-08T00:22:00.000Z",
+    sourceType: "merchant",
+    sourceUserId: "merchant-001",
+    sourceUserName: "鲜食爱心商户",
+    note: "早餐批次"
+  },
+  {
+    batchId: "batch-002",
+    goodsId: "goods-1002",
+    deviceCode: "CAB-1001",
+    quantity: 2,
+    remainingQuantity: 1,
+    expiresAt: "2026-04-09T08:00:00.000Z",
+    createdAt: "2026-04-08T00:22:00.000Z",
+    sourceType: "merchant",
+    sourceUserId: "merchant-001",
+    sourceUserName: "鲜食爱心商户",
+    note: "早餐批次"
+  },
+  {
+    batchId: "batch-003",
+    goodsId: "goods-1004",
+    deviceCode: "CAB-1002",
+    quantity: 6,
+    remainingQuantity: 6,
+    createdAt: "2026-04-08T00:10:00.000Z",
+    sourceType: "system",
+    sourceUserName: "系统补录",
+    note: "日用品初始化"
   }
 ];
 
@@ -873,6 +1012,7 @@ export const seedAlerts: AlertTask[] = [
   {
     id: "task-001",
     type: "expiry",
+    grade: "warning",
     title: "物资即将过期",
     status: "open",
     deviceCode: "CAB-1001",
@@ -886,16 +1026,20 @@ export const seedAlerts: AlertTask[] = [
   {
     id: "task-002",
     type: "device_fault",
+    grade: "fault",
     title: "柜机开门无响应",
     status: "open",
     deviceCode: "CAB-1002",
     dueAt: "2026-04-08T02:02:00.000Z",
     createdAt: "2026-04-08T02:01:30.000Z",
-    detail: "远程开门后超过 90 秒未收到成功开门确认。"
+    detail: "远程开门后超过 90 秒未收到成功开门确认。",
+    relatedEventId: "evt-004",
+    sourceLogId: "log-004"
   },
   {
     id: "task-003",
     type: "user_feedback",
+    grade: "feedback",
     title: "用户反馈柜门关闭缓慢",
     status: "open",
     deviceCode: "CAB-1001",
@@ -937,7 +1081,8 @@ export const seedOperationLogs: OperationLogRecord[] = [
       quantity: 4,
       deviceCode: "CAB-1001",
       goodsId: "goods-1001",
-      goodsName: "三明治"
+      goodsName: "三明治",
+      undoState: "not_undoable"
     }
   },
   {
@@ -970,7 +1115,8 @@ export const seedOperationLogs: OperationLogRecord[] = [
       quantity: 1,
       deviceCode: "CAB-1001",
       goodsId: "goods-1002",
-      goodsName: "牛奶"
+      goodsName: "牛奶",
+      undoState: "not_undoable"
     }
   },
   {
@@ -997,7 +1143,8 @@ export const seedOperationLogs: OperationLogRecord[] = [
     detail: "到期巡检命中三明治批次，已生成开放状态的临期任务。",
     metadata: {
       goodsId: "goods-1001",
-      deviceCode: "CAB-1001"
+      deviceCode: "CAB-1001",
+      undoState: "not_undoable"
     }
   },
   {
@@ -1027,7 +1174,8 @@ export const seedOperationLogs: OperationLogRecord[] = [
     relatedEventId: "evt-004",
     relatedOrderNo: "ord-004",
     metadata: {
-      deviceCode: "CAB-1002"
+      deviceCode: "CAB-1002",
+      undoState: "not_undoable"
     }
   },
   {
@@ -1054,7 +1202,8 @@ export const seedOperationLogs: OperationLogRecord[] = [
     detail: "陈师傅反馈柜门关闭缓慢，已进入待处理任务池。",
     metadata: {
       deviceCode: "CAB-1001",
-      targetUserId: "special-002"
+      targetUserId: "special-002",
+      undoState: "not_undoable"
     }
   },
   {
@@ -1080,7 +1229,8 @@ export const seedOperationLogs: OperationLogRecord[] = [
     description: "系统记录了 CAB-1002 的开门无响应异常。",
     detail: "远程开门超过 90 秒未得到成功反馈，已进入待处理任务池。",
     metadata: {
-      deviceCode: "CAB-1002"
+      deviceCode: "CAB-1002",
+      undoState: "not_undoable"
     }
   }
 ];
@@ -1092,6 +1242,8 @@ export const cloneSeedState = () => ({
   goodsCatalog: structuredClone(seedGoodsCatalog),
   specialAccessPolicies: structuredClone(seedSpecialAccessPolicies),
   goodsAlertPolicies: structuredClone(seedGoodsAlertPolicies),
+  deviceGoodsSettings: structuredClone(seedDeviceGoodsSettings),
+  goodsBatches: structuredClone(seedGoodsBatches),
   events: structuredClone(seedEvents),
   inventory: structuredClone(seedInventory),
   alerts: structuredClone(seedAlerts),

@@ -160,6 +160,9 @@ export class UsersService {
         type: "user",
         id: created.id,
         label: created.name
+      },
+      metadata: {
+        undoState: "not_undoable"
       }
     });
 
@@ -179,6 +182,7 @@ export class UsersService {
     actorUserId?: string
   ) {
     const user = this.findById(userId);
+    const before = structuredClone(user);
 
     if (payload.phone !== undefined) {
       user.phone = payload.phone;
@@ -213,6 +217,11 @@ export class UsersService {
         type: "user",
         id: user.id,
         label: user.name
+      },
+      metadata: {
+        undoState: "undoable",
+        beforeSnapshot: before,
+        afterSnapshot: structuredClone(user)
       }
     });
 
@@ -267,6 +276,7 @@ export class UsersService {
   batchUpdate(payload: BatchUpdatePayload, actorUserId?: string) {
     const updated = payload.userIds.map((userId) => {
       const user = this.findById(userId);
+      const before = structuredClone(user);
 
       if (payload.patch.status !== undefined) {
         user.status = payload.patch.status;
@@ -294,7 +304,12 @@ export class UsersService {
           id: user.id,
           label: user.name
         },
-        metadata: payload.patch as Record<string, unknown>
+        metadata: {
+          ...(payload.patch as Record<string, unknown>),
+          undoState: "undoable",
+          beforeSnapshot: before,
+          afterSnapshot: structuredClone(user)
+        }
       });
 
       return user;
@@ -336,11 +351,46 @@ export class UsersService {
     };
 
     this.store.inventory.unshift(movement);
-    this.devicesService.adjustStock(
-      payload.deviceCode,
-      payload.goodsId,
-      payload.direction === "restock" ? payload.quantity : -payload.quantity
-    );
+    let createdBatchId: string | undefined;
+    let consumedBatches: Array<{ batchId: string; quantity: number }> = [];
+
+    if (payload.direction === "restock") {
+      const catalogItem = this.store.ensureGoodsCatalogItem({
+        goodsCode: localGoods?.goodsCode ?? payload.goodsId,
+        goodsId: payload.goodsId,
+        name: movement.goodsName,
+        category: movement.category,
+        price: movement.unitPrice,
+        imageUrl:
+          localGoods?.imageUrl ??
+          this.store.goodsCatalog.find((entry) => entry.goodsId === payload.goodsId)?.imageUrl ??
+          "https://dummyimage.com/160x160/d8e8ff/0b1220.png&text=%E7%89%A9%E8%B5%84",
+        status: "active"
+      });
+      this.store.ensureDeviceGoodsEntry(payload.deviceCode, {
+        goodsCode: catalogItem.goodsCode,
+        goodsId: catalogItem.goodsId,
+        name: catalogItem.name,
+        category: catalogItem.category,
+        price: catalogItem.price,
+        imageUrl: catalogItem.imageUrl
+      });
+      createdBatchId = this.store.createGoodsBatch({
+        goodsId: payload.goodsId,
+        deviceCode: payload.deviceCode,
+        quantity: payload.quantity,
+        sourceType: "admin",
+        sourceUserId: actorUserId,
+        sourceUserName: this.store.users.find((entry) => entry.id === actorUserId)?.name,
+        note: payload.note
+      }).batchId;
+    } else {
+      consumedBatches = this.store.consumeGoodsBatches(
+        payload.deviceCode,
+        payload.goodsId,
+        payload.quantity
+      ).consumed;
+    }
 
     this.store.logOperation({
       category: "inventory",
@@ -362,7 +412,11 @@ export class UsersService {
         quantity: payload.quantity,
         goodsId: payload.goodsId,
         goodsName: movement.goodsName,
-        note: payload.note ?? ""
+        note: payload.note ?? "",
+        deviceCode: payload.deviceCode,
+        batchId: createdBatchId,
+        consumedBatches,
+        undoState: "undoable"
       }
     });
 

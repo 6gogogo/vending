@@ -6,7 +6,7 @@ import type { GoodsAlertPolicy, GoodsCatalogItem, GoodsOverviewSnapshot } from "
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 
-type DrawerMode = "" | "create-policy" | "edit-policy";
+type DrawerMode = "" | "create-policy" | "edit-policy" | "create-goods";
 
 interface PolicyFormState {
   name: string;
@@ -17,6 +17,15 @@ interface PolicyFormState {
   }>;
 }
 
+interface GoodsFormState {
+  goodsCode: string;
+  goodsId: string;
+  name: string;
+  category: GoodsCatalogItem["category"];
+  price: number;
+  imageUrl: string;
+}
+
 const overview = ref<GoodsOverviewSnapshot>();
 const policies = ref<GoodsAlertPolicy[]>([]);
 const goodsCatalog = ref<GoodsCatalogItem[]>([]);
@@ -24,6 +33,14 @@ const loading = ref(false);
 const saving = ref(false);
 const drawerMode = ref<DrawerMode>("");
 const editingPolicyId = ref("");
+const goodsForm = ref<GoodsFormState>({
+  goodsCode: "",
+  goodsId: "",
+  name: "",
+  category: "daily",
+  price: 0,
+  imageUrl: ""
+});
 
 const selectedDeviceCodes = ref<string[]>([]);
 const batchPolicyIds = ref<string[]>([]);
@@ -43,7 +60,11 @@ const policyForm = ref<PolicyFormState>({
 const goodsMap = computed(() => new Map(goodsCatalog.value.map((item) => [item.goodsId, item])));
 
 const currentDrawerTitle = computed(() =>
-  drawerMode.value === "create-policy" ? "新增货品预警模板" : "编辑货品预警模板"
+  drawerMode.value === "create-policy"
+    ? "新增货品预警模板"
+    : drawerMode.value === "edit-policy"
+      ? "编辑货品预警模板"
+      : "新增货品种类"
 );
 
 const allDevicesSelected = computed(
@@ -107,6 +128,18 @@ const openCreatePolicy = () => {
   editingPolicyId.value = "";
   resetPolicyForm();
   drawerMode.value = "create-policy";
+};
+
+const openCreateGoods = () => {
+  goodsForm.value = {
+    goodsCode: "",
+    goodsId: "",
+    name: "",
+    category: "daily",
+    price: 0,
+    imageUrl: ""
+  };
+  drawerMode.value = "create-goods";
 };
 
 const openEditPolicy = (policy: GoodsAlertPolicy) => {
@@ -191,6 +224,28 @@ const submitPolicyForm = async () => {
   }
 };
 
+const submitGoodsForm = async () => {
+  if (!goodsForm.value.goodsCode.trim() || !goodsForm.value.goodsId.trim() || !goodsForm.value.name.trim()) {
+    return;
+  }
+
+  saving.value = true;
+  try {
+    await adminApi.createGoods({
+      goodsCode: goodsForm.value.goodsCode.trim(),
+      goodsId: goodsForm.value.goodsId.trim(),
+      name: goodsForm.value.name.trim(),
+      category: goodsForm.value.category,
+      price: goodsForm.value.price,
+      imageUrl: goodsForm.value.imageUrl.trim()
+    });
+    closeDrawer();
+    await load();
+  } finally {
+    saving.value = false;
+  }
+};
+
 const applyBatchPolicies = async () => {
   if (!selectedDeviceCodes.value.length || !batchPolicyIds.value.length) {
     return;
@@ -235,14 +290,17 @@ onMounted(load);
           <p class="admin-kicker">货物总览</p>
           <h3 class="admin-page__section-title">查看商品种类、库存分布和货品预警模板</h3>
         </div>
-        <button class="admin-button" @click="openCreatePolicy">新增货品预警模板</button>
+        <div class="admin-toolbar">
+          <button class="admin-button admin-button--ghost" @click="openCreateGoods">新增货品种类</button>
+          <button class="admin-button" @click="openCreatePolicy">新增货品预警模板</button>
+        </div>
       </div>
 
       <div class="admin-grid admin-grid--stats-4">
         <StatTile title="货品总种类" :value="overview?.totalKinds ?? 0" hint="本地货物主数据中的种类数" />
         <StatTile title="低库存种类" :value="overview?.lowStockKinds ?? 0" hint="命中模板阈值的货品种类数" tone="warning" />
         <StatTile title="缺货种类" :value="overview?.outOfStockKinds ?? 0" hint="库存为 0 的货品种类数" tone="warning" />
-        <StatTile title="预警模板数" :value="policies.length" hint="可批量绑定到选中柜机" />
+        <StatTile title="预警模板数" :value="overview?.policyCount ?? policies.length" hint="可批量绑定到选中柜机" />
       </div>
     </section>
 
@@ -262,18 +320,23 @@ onMounted(load);
               <th>总库存</th>
               <th>低库存柜机</th>
               <th>缺货柜机</th>
+              <th>最短保质期</th>
               <th>柜机分布</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="item in overview.byGoods" :key="item.goodsId">
               <td>
-                <span class="admin-table__strong">{{ item.goodsName }}</span>
+                <RouterLink class="admin-link admin-table__strong" :to="`/goods/${item.goodsId}`">
+                  {{ item.goodsName }}
+                </RouterLink>
                 <span class="admin-table__subtext">{{ item.goodsId }} · {{ item.category }}</span>
               </td>
               <td class="admin-code">{{ item.totalStock }}</td>
               <td class="admin-code">{{ item.lowStockDevices }}</td>
               <td class="admin-code">{{ item.outOfStockDevices }}</td>
+              <td class="admin-code">{{ item.nearestExpiryAt ? item.nearestExpiryAt.slice(0, 16).replace("T", " ") : "-" }}</td>
               <td>
                 <div class="goods-distribution">
                   <div
@@ -285,10 +348,13 @@ onMounted(load);
                       {{ distribution.deviceName }}
                     </RouterLink>
                     <span class="admin-table__subtext">
-                      {{ distribution.deviceCode }} · 库存 {{ distribution.stock }} · 阈值 {{ distribution.lowStockThreshold }}
+                      {{ distribution.deviceCode }} · 库存 {{ distribution.stock }} · 阈值 {{ distribution.thresholdEnabled ? distribution.lowStockThreshold : "未启用" }}
                     </span>
                   </div>
                 </div>
+              </td>
+              <td>
+                <RouterLink class="admin-link" :to="`/goods/${item.goodsId}`">详情</RouterLink>
               </td>
             </tr>
           </tbody>
@@ -417,10 +483,48 @@ onMounted(load);
         <button class="admin-button admin-button--ghost" @click="closeDrawer">关闭</button>
       </div>
 
-      <div class="goods-drawer__body">
-        <label class="admin-field">
-          <span class="admin-field__label">模板名称</span>
-          <input v-model="policyForm.name" class="admin-input" placeholder="例如早餐柜机低库存模板" />
+        <div v-if="drawerMode === 'create-goods'" class="goods-drawer__body">
+          <label class="admin-field">
+            <span class="admin-field__label">货品码</span>
+            <input v-model="goodsForm.goodsCode" class="admin-input" placeholder="例如 690000000001" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">货品编号</span>
+            <input v-model="goodsForm.goodsId" class="admin-input" placeholder="例如 93020323" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">名称</span>
+            <input v-model="goodsForm.name" class="admin-input" placeholder="例如 可口可乐" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">分类</span>
+            <select v-model="goodsForm.category" class="admin-select">
+              <option value="food">食品</option>
+              <option value="drink">饮品</option>
+              <option value="daily">日用品</option>
+            </select>
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">价格</span>
+            <input v-model.number="goodsForm.price" class="admin-input" type="number" min="0" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">图片地址</span>
+            <input v-model="goodsForm.imageUrl" class="admin-input" placeholder="http://example.com/goods.png" />
+          </label>
+          <button
+            class="admin-button"
+            :disabled="saving || !goodsForm.goodsCode.trim() || !goodsForm.goodsId.trim() || !goodsForm.name.trim()"
+            @click="submitGoodsForm"
+          >
+            {{ saving ? "保存中" : "保存货品种类" }}
+          </button>
+        </div>
+
+        <div v-else class="goods-drawer__body">
+          <label class="admin-field">
+            <span class="admin-field__label">模板名称</span>
+            <input v-model="policyForm.name" class="admin-input" placeholder="例如早餐柜机低库存模板" />
         </label>
         <label class="admin-field">
           <span class="admin-field__label">状态</span>

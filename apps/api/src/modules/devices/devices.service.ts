@@ -14,6 +14,7 @@ export class DevicesService {
   ) {}
 
   list() {
+    this.store.syncDeviceStocksFromBatches();
     return this.store.devices.map((device) => ({
       ...device,
       runtime: this.store.getDeviceRuntime(device.deviceCode)
@@ -21,6 +22,7 @@ export class DevicesService {
   }
 
   getByCode(deviceCode: string) {
+    this.store.syncDeviceStocksFromBatches(deviceCode);
     const device = this.store.devices.find((entry) => entry.deviceCode === deviceCode);
 
     if (!device) {
@@ -98,6 +100,7 @@ export class DevicesService {
     const stockChanges = device.doors
       .flatMap((door) => door.goods)
       .map((goods) => {
+        const setting = this.store.getDeviceGoodsSetting(deviceCode, goods.goodsId);
         const deltaSinceStartOfBusinessDay = businessDayRecords.reduce((sum, entry) => {
           if (entry.goodsId !== goods.goodsId) {
             return sum;
@@ -118,8 +121,11 @@ export class DevicesService {
           goodsId: goods.goodsId,
           goodsName: goods.name,
           category: goods.category,
-          currentStock: goods.stock,
-          deltaSinceStartOfBusinessDay
+          currentStock: this.store.getCurrentStock(deviceCode, goods.goodsId),
+          deltaSinceStartOfBusinessDay,
+          thresholdEnabled: Boolean(setting?.enabled),
+          lowStockThreshold: setting?.enabled ? setting.lowStockThreshold : undefined,
+          nearestExpiryAt: this.store.getNearestExpiryAt(deviceCode, goods.goodsId)
         };
       });
 
@@ -132,9 +138,11 @@ export class DevicesService {
           .filter((entry) => entry.deviceCode === deviceCode && entry.type === "pickup")
           .map((entry) => entry.userId)
       ).size,
-      totalStock: device.doors.flatMap((door) => door.goods).reduce((sum, goods) => sum + goods.stock, 0),
+      totalStock: device.doors
+        .flatMap((door) => door.goods)
+        .reduce((sum, goods) => sum + this.store.getCurrentStock(deviceCode, goods.goodsId), 0),
       pendingTasks: this.store.alerts
-        .filter((entry) => entry.deviceCode === deviceCode && entry.status === "open")
+        .filter((entry) => entry.deviceCode === deviceCode && entry.status !== "resolved")
         .sort((left, right) => left.dueAt.localeCompare(right.dueAt)),
       recentEvents,
       recentLogs,
@@ -161,7 +169,7 @@ export class DevicesService {
           return {
             ...remoteItem,
             category: localMatch?.category ?? "daily",
-            stock: localMatch?.stock ?? 0
+            stock: this.store.getCurrentStock(deviceCode, remoteItem.goodsId)
           };
         });
       }
@@ -277,25 +285,24 @@ export class DevicesService {
   }
 
   adjustStock(deviceCode: string, goodsId: string, delta: number) {
-    const goods = this.findGoods(deviceCode, goodsId);
-
-    if (goods) {
-      goods.stock = Math.max(0, goods.stock + delta);
+    if (delta > 0) {
+      const existing = this.store.getGoodsBatches(deviceCode, goodsId).at(0);
+      this.store.createGoodsBatch({
+        goodsId,
+        deviceCode,
+        quantity: delta,
+        sourceType: "system",
+        sourceUserName: "系统补录",
+        expiresAt: existing?.expiresAt
+      });
+      return;
     }
+
+    this.store.consumeGoodsBatches(deviceCode, goodsId, Math.abs(delta));
   }
 
   addOrUpdateGoods(deviceCode: string, goods: DeviceGoods) {
-    const device = this.getByCode(deviceCode);
-    const primaryDoor = device.doors[0];
-    const existing = primaryDoor.goods.find((entry) => entry.goodsId === goods.goodsId);
-
-    if (existing) {
-      Object.assign(existing, goods);
-      return existing;
-    }
-
-    primaryDoor.goods.push(goods);
-    return goods;
+    return this.store.ensureDeviceGoodsEntry(deviceCode, goods);
   }
 
   upsertMockDevice(payload: {
@@ -351,6 +358,33 @@ export class DevicesService {
         })();
 
       targetDoor.goods = normalizedGoods;
+      for (let index = this.store.goodsBatches.length - 1; index >= 0; index -= 1) {
+        if (this.store.goodsBatches[index].deviceCode === existing.deviceCode) {
+          this.store.goodsBatches.splice(index, 1);
+        }
+      }
+      for (const goods of normalizedGoods) {
+        this.store.ensureGoodsCatalogItem({
+          goodsCode: goods.goodsCode,
+          goodsId: goods.goodsId,
+          name: goods.name,
+          category: goods.category,
+          price: goods.price,
+          imageUrl: goods.imageUrl,
+          status: "active"
+        });
+        if (goods.stock > 0) {
+          this.store.createGoodsBatch({
+            goodsId: goods.goodsId,
+            deviceCode: existing.deviceCode,
+            quantity: goods.stock,
+            expiresAt: goods.expiresAt,
+            sourceType: "system",
+            sourceUserName: "系统补录"
+          });
+        }
+      }
+      this.store.syncDeviceStocksFromBatches(existing.deviceCode);
       this.store.logOperation({
         category: "device",
         type: "upsert-mock-device",
@@ -386,6 +420,28 @@ export class DevicesService {
     };
 
     this.store.devices.unshift(created);
+    for (const goods of normalizedGoods) {
+      this.store.ensureGoodsCatalogItem({
+        goodsCode: goods.goodsCode,
+        goodsId: goods.goodsId,
+        name: goods.name,
+        category: goods.category,
+        price: goods.price,
+        imageUrl: goods.imageUrl,
+        status: "active"
+      });
+      if (goods.stock > 0) {
+        this.store.createGoodsBatch({
+          goodsId: goods.goodsId,
+          deviceCode: created.deviceCode,
+          quantity: goods.stock,
+          expiresAt: goods.expiresAt,
+          sourceType: "system",
+          sourceUserName: "系统补录"
+        });
+      }
+    }
+    this.store.syncDeviceStocksFromBatches(created.deviceCode);
     this.store.logOperation({
       category: "device",
       type: "create-mock-device",

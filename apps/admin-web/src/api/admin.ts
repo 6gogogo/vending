@@ -1,9 +1,11 @@
 import type {
+  AlertTask,
   DashboardSnapshot,
   DeviceMonitoringDetail,
   DeviceRecord,
   GoodsAlertPolicy,
   GoodsCatalogItem,
+  GoodsDetailSnapshot,
   GoodsOverviewSnapshot,
   OperationLogCategory,
   OperationLogRecord,
@@ -113,19 +115,6 @@ export const adminApi = {
   }) {
     return adminClient.post<SpecialAccessPolicy[]>("/special-access-policies/batch-assign", payload);
   },
-  alerts() {
-    return adminClient.get<
-      Array<{
-        id: string;
-        title: string;
-        detail: string;
-        dueAt: string;
-        status: string;
-        deviceCode?: string;
-        targetUserId?: string;
-      }>
-    >("/alerts");
-  },
   resolveAlert(id: string, note?: string) {
     return adminClient.patch(`/alerts/${id}/resolve`, { note });
   },
@@ -150,6 +139,49 @@ export const adminApi = {
   goodsCatalog() {
     return adminClient.get<GoodsCatalogItem[]>("/goods-catalog");
   },
+  goodsDetail(goodsId: string) {
+    return adminClient.get<GoodsDetailSnapshot>(`/goods/${goodsId}`);
+  },
+  createGoods(payload: {
+    goodsCode: string;
+    goodsId: string;
+    name: string;
+    category: "food" | "drink" | "daily";
+    price: number;
+    imageUrl: string;
+  }) {
+    return adminClient.post<GoodsCatalogItem>("/goods", payload);
+  },
+  updateGoods(
+    goodsId: string,
+    payload: Partial<{
+      goodsCode: string;
+      name: string;
+      category: "food" | "drink" | "daily";
+      price: number;
+      imageUrl: string;
+      status: "active" | "inactive";
+    }>
+  ) {
+    return adminClient.patch<GoodsCatalogItem>(`/goods/${goodsId}`, payload);
+  },
+  addGoodsBatch(
+    goodsId: string,
+    payload: {
+      deviceCode: string;
+      quantity: number;
+      expiresAt?: string;
+      sourceType?: "admin" | "merchant" | "system";
+      sourceUserId?: string;
+      sourceUserName?: string;
+      note?: string;
+    }
+  ) {
+    return adminClient.post(`/goods/${goodsId}/batches`, payload);
+  },
+  removeGoodsBatch(batchId: string, payload: { quantity: number; note?: string }) {
+    return adminClient.post(`/goods/batches/${batchId}/remove`, payload);
+  },
   goodsAlertPolicies() {
     return adminClient.get<GoodsAlertPolicy[]>("/goods-alert-policies");
   },
@@ -171,6 +203,19 @@ export const adminApi = {
       query: { doorNum }
     });
   },
+  updateDeviceGoodsThreshold(
+    deviceCode: string,
+    goodsId: string,
+    payload: {
+      enabled: boolean;
+      lowStockThreshold?: number;
+    }
+  ) {
+    return adminClient.patch(`/devices/${deviceCode}/goods/${goodsId}/threshold`, payload);
+  },
+  alerts() {
+    return adminClient.get<AlertTask[]>("/alerts");
+  },
   logs(filters?: {
     category?: OperationLogCategory;
     status?: OperationLogStatus;
@@ -183,5 +228,8 @@ export const adminApi = {
   },
   logDetail(id: string) {
     return adminClient.get<OperationLogRecord>(`/operation-logs/${id}`);
+  },
+  undoLog(id: string) {
+    return adminClient.post<OperationLogRecord>(`/operation-logs/${id}/undo`);
   }
 };

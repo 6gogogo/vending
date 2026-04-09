@@ -146,7 +146,10 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "resolve-alert":
       return {
-        description: `${actor}处理了${primary}。`,
+        description:
+          entry.metadata?.action === "acknowledge"
+            ? `${actor}已知晓${primary}。`
+            : `${actor}完成了${primary}的处理。`,
         detail: baseDetail([
           `动作人 ${actor}`,
           entry.secondarySubject ? `柜机 ${secondary}` : undefined,
@@ -156,6 +159,86 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
             : undefined,
           `状态 ${result}`
         ])
+      };
+    case "manual-add-batch":
+      return {
+        description: `${actor}向${device}新增了${goods}批次${quantity ? ` x${quantity}` : ""}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `数量 ${quantity}` : undefined,
+          typeof entry.metadata?.expiresAt === "string" ? `保质期 ${entry.metadata.expiresAt}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "manual-remove-batch":
+      return {
+        description: `${actor}从${device}去除了${goods}批次${quantity ? ` x${quantity}` : ""}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `数量 ${quantity}` : undefined,
+          typeof entry.metadata?.note === "string" && entry.metadata.note ? `说明 ${entry.metadata.note}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "create-goods-catalog":
+      return {
+        description: `${actor}新增了货品种类${goods}。`,
+        detail: baseDetail([`动作人 ${actor}`, `货品 ${goods}`, `状态 ${result}`])
+      };
+    case "update-goods-catalog":
+      return {
+        description: `${actor}修改了货品${goods}的基础信息。`,
+        detail: baseDetail([`动作人 ${actor}`, `货品 ${goods}`, `状态 ${result}`])
+      };
+    case "update-device-goods-threshold":
+      return {
+        description: `${actor}修改了${device}的${goods}库存阈值。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          typeof entry.metadata?.enabled === "boolean"
+            ? `阈值${entry.metadata.enabled ? "已开启" : "已关闭"}`
+            : undefined,
+          typeof entry.metadata?.lowStockThreshold === "number"
+            ? `阈值 ${entry.metadata.lowStockThreshold}`
+            : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "undo-manual-restock":
+      return {
+        description: `${actor}撤销了对${device}的${goods}补货${quantity ? ` x${quantity}` : ""}。`,
+        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
+      };
+    case "undo-manual-deduction":
+      return {
+        description: `${actor}撤销了对${device}的${goods}补扣${quantity ? ` x${quantity}` : ""}。`,
+        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
+      };
+    case "undo-user-update":
+      return {
+        description: `${actor}撤销了对${primary}的人员信息修改。`,
+        detail: baseDetail([`动作人 ${actor}`, `人员 ${primary}`, `状态 ${result}`])
+      };
+    case "undo-goods-catalog":
+      return {
+        description: `${actor}撤销了货品${goods}的信息修改。`,
+        detail: baseDetail([`动作人 ${actor}`, `货品 ${goods}`, `状态 ${result}`])
+      };
+    case "undo-manual-add-batch":
+      return {
+        description: `${actor}撤销了向${device}新增${goods}批次的操作。`,
+        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
+      };
+    case "undo-manual-remove-batch":
+      return {
+        description: `${actor}撤销了从${device}去除${goods}批次的操作。`,
+        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
       };
     case "create-user":
       return {

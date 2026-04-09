@@ -48,6 +48,12 @@ const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.acto
 const formatLogStatus = (status: OperationLogRecord["status"]) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
 
+const taskActionLabel = (task: NonNullable<typeof pendingTasks.value>[number]) =>
+  task.grade === "fault" ? "标记已知晓" : "手动完成";
+
+const taskGradeLabel = (grade: "fault" | "feedback" | "warning") =>
+  grade === "fault" ? "故障" : grade === "feedback" ? "反馈" : "预警";
+
 const load = async () => {
   loading.value = true;
   try {
@@ -66,9 +72,13 @@ const closeBucket = () => {
 };
 
 const resolveTask = async (id: string) => {
+  const task = pendingTasks.value.find((entry) => entry.id === id);
   resolvingTaskId.value = id;
   try {
-    await adminApi.resolveAlert(id, "管理员手动完成");
+    await adminApi.resolveAlert(
+      id,
+      task?.grade === "fault" ? "管理员已知晓并接手处理" : "管理员手动完成"
+    );
     await load();
   } finally {
     resolvingTaskId.value = undefined;
@@ -115,6 +125,21 @@ onMounted(load);
           tone="warning"
         />
       </div>
+
+      <div class="dashboard-grade-strip">
+        <div class="dashboard-grade-strip__item dashboard-grade-strip__item--danger">
+          <span class="admin-kicker">故障</span>
+          <strong class="admin-code">{{ dashboard.taskGradeSummary.fault }}</strong>
+        </div>
+        <div class="dashboard-grade-strip__item dashboard-grade-strip__item--warning">
+          <span class="admin-kicker">反馈</span>
+          <strong class="admin-code">{{ dashboard.taskGradeSummary.feedback }}</strong>
+        </div>
+        <div class="dashboard-grade-strip__item">
+          <span class="admin-kicker">预警</span>
+          <strong class="admin-code">{{ dashboard.taskGradeSummary.warning }}</strong>
+        </div>
+      </div>
     </section>
 
     <section class="admin-grid admin-grid--main-aside">
@@ -142,6 +167,7 @@ onMounted(load);
               <td class="admin-code">{{ task.dueAt.slice(0, 16).replace("T", " ") }}</td>
               <td>
                 <span class="admin-table__strong">{{ task.title }}</span>
+                <span class="admin-table__subtext">分级：{{ taskGradeLabel(task.grade) }} · 状态：{{ task.status === "acknowledged" ? "已知晓" : "待处理" }}</span>
                 <span class="admin-table__subtext">{{ task.detail }}</span>
               </td>
               <td>
@@ -162,7 +188,7 @@ onMounted(load);
                   :disabled="resolvingTaskId === task.id"
                   @click="resolveTask(task.id)"
                 >
-                  {{ resolvingTaskId === task.id ? "处理中" : "手动完成" }}
+                  {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
                 </button>
               </td>
             </tr>
@@ -355,7 +381,37 @@ onMounted(load);
   overflow: auto;
 }
 
+.dashboard-grade-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.dashboard-grade-strip__item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel);
+}
+
+.dashboard-grade-strip__item--danger {
+  border-color: rgba(198, 40, 40, 0.28);
+  background: rgba(198, 40, 40, 0.06);
+}
+
+.dashboard-grade-strip__item--warning {
+  border-color: rgba(237, 164, 32, 0.28);
+  background: rgba(237, 164, 32, 0.06);
+}
+
 @media (max-width: 720px) {
+  .dashboard-grade-strip {
+    grid-template-columns: 1fr;
+  }
+
   .dashboard-drawer-backdrop {
     justify-items: stretch;
     padding: 0;

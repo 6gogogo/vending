@@ -5,6 +5,7 @@ import AdminLayout from "../layouts/AdminLayout.vue";
 import AdminLoginPage from "../pages/AdminLoginPage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
 import DeviceDetailPage from "../pages/DeviceDetailPage.vue";
+import GoodsDetailPage from "../pages/GoodsDetailPage.vue";
 import LogsPage from "../pages/LogsPage.vue";
 import LogDetailPage from "../pages/LogDetailPage.vue";
 import OperationsPage from "../pages/OperationsPage.vue";
@@ -45,6 +46,16 @@ export const router = createRouter({
             eyebrow: "货物总览",
             title: "货物总览与预警模板",
             description: "查看各商品种类数量、柜机分布，并批量设置货品预警模板。"
+          }
+        },
+        {
+          path: "/goods/:goodsId",
+          component: GoodsDetailPage,
+          meta: {
+            group: "运营总览",
+            eyebrow: "货物详情",
+            title: "货物批次与阈值设置",
+            description: "查看单个货品的批次、来源、保质期和柜机级阈值。"
           }
         },
         {

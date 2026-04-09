@@ -11,6 +11,7 @@ const router = useRouter();
 
 const logs = ref<OperationLogRecord[]>([]);
 const loading = ref(false);
+const undoingLogId = ref("");
 const category = ref<"" | OperationLogCategory>("");
 const status = ref<"" | OperationLogStatus>("");
 const subjectType = ref<"" | OperationLogSubject["type"]>("");
@@ -20,6 +21,20 @@ const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.acto
 
 const formatLogStatus = (value: OperationLogRecord["status"]) =>
   value === "success" ? "成功" : value === "warning" ? "预警" : value === "failed" ? "失败" : "待处理";
+
+const undoStateLabel = (log: OperationLogRecord) => {
+  const state = log.metadata?.undoState;
+
+  if (state === "undoable") {
+    return "可撤销";
+  }
+
+  if (state === "undone") {
+    return "已撤销";
+  }
+
+  return "不可撤销";
+};
 
 const syncFromRoute = () => {
   category.value = (route.query.category as OperationLogCategory | undefined) ?? "";
@@ -52,6 +67,16 @@ const applyFilters = async () => {
       subjectId: subjectId.value || undefined
     }
   });
+};
+
+const undoLog = async (logId: string) => {
+  undoingLogId.value = logId;
+  try {
+    await adminApi.undoLog(logId);
+    await load();
+  } finally {
+    undoingLogId.value = "";
+  }
 };
 
 watch(
@@ -133,6 +158,7 @@ onMounted(async () => {
               <th>动作人</th>
               <th>主体</th>
               <th>状态</th>
+              <th>撤销</th>
               <th>详情</th>
             </tr>
           </thead>
@@ -173,6 +199,18 @@ onMounted(async () => {
                 <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
                   {{ formatLogStatus(log.status) }}
                 </span>
+                <span class="admin-table__subtext">{{ undoStateLabel(log) }}</span>
+              </td>
+              <td>
+                <button
+                  v-if="log.metadata?.undoState === 'undoable'"
+                  class="admin-button admin-button--ghost"
+                  :disabled="undoingLogId === log.id"
+                  @click="undoLog(log.id)"
+                >
+                  {{ undoingLogId === log.id ? "撤销中" : "撤销" }}
+                </button>
+                <span v-else class="admin-table__subtext">{{ undoStateLabel(log) }}</span>
               </td>
               <td>
                 <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>

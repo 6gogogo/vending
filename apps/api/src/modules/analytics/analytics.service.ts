@@ -39,11 +39,11 @@ export class AnalyticsService {
         };
       })
       .filter((entry) => entry.summary.totalGoods > 0);
-    const pendingTasks = this.alertsService
+    const allPendingTasks = this.alertsService
       .list("open")
       .slice()
-      .sort((left, right) => left.dueAt.localeCompare(right.dueAt))
-      .slice(0, 12);
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+    const pendingTasks = allPendingTasks.slice(0, 12);
     const goodsOverview = this.goodsService.getOverview();
 
     const mapPerson = (entry: (typeof usersWithPolicies)[number]) => ({
@@ -78,6 +78,11 @@ export class AnalyticsService {
         outOfStockKinds: goodsOverview.outOfStockKinds
       },
       weeklyTrend: this.buildWeeklyTrend(),
+      taskGradeSummary: {
+        fault: allPendingTasks.filter((entry) => entry.grade === "fault").length,
+        feedback: allPendingTasks.filter((entry) => entry.grade === "feedback").length,
+        warning: allPendingTasks.filter((entry) => entry.grade === "warning").length
+      },
       serviceOverview: {
         completeUsers: {
           count: completeUsers.length,

@@ -13,6 +13,10 @@ export const resolveSubjectLink = (subject?: Pick<OperationLogSubject, "type" | 
     return `/users/${subject.id}`;
   }
 
+  if (subject.type === "goods") {
+    return `/goods/${subject.id}`;
+  }
+
   return `/logs?subjectType=${subject.type}&subjectId=${subject.id}`;
 };
 

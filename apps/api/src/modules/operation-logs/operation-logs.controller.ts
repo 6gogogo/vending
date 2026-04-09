@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, Query, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type { OperationLogCategory, OperationLogStatus, OperationLogSubject } from "@vm/shared-types";
 
@@ -33,5 +33,10 @@ export class OperationLogsController {
   @Get(":id")
   detail(@Param("id") id: string) {
     return ok(this.operationLogsService.detail(id));
+  }
+
+  @Post(":id/undo")
+  undo(@Param("id") id: string, @Req() request: { authUser?: { id: string } }) {
+    return ok(this.operationLogsService.undo(id, request.authUser?.id), "撤销已记录。");
   }
 }

@@ -1,10 +1,8 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 
-import type { AlertTask } from "@vm/shared-types";
+import type { AlertGrade, AlertTask } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
-
-const LOW_STOCK_THRESHOLD = 2;
 
 @Injectable()
 export class AlertsService {
@@ -17,27 +15,25 @@ export class AlertsService {
       ? this.store.alerts.filter((alert) => alert.status === status)
       : this.store.alerts;
 
+    const statusWeight: Record<AlertTask["status"], number> = {
+      open: 0,
+      acknowledged: 1,
+      resolved: 2
+    };
+
     return alerts
       .slice()
       .sort((left, right) => {
         if (left.status !== right.status) {
-          return left.status === "open" ? -1 : 1;
+          return statusWeight[left.status] - statusWeight[right.status];
         }
 
         return left.dueAt.localeCompare(right.dueAt);
       });
   }
 
-  create(payload: Omit<AlertTask, "id" | "createdAt" | "status">) {
-    const duplicated = this.store.alerts.find(
-      (entry) =>
-        entry.status === "open" &&
-        entry.type === payload.type &&
-        entry.deviceCode === payload.deviceCode &&
-        entry.targetUserId === payload.targetUserId &&
-        entry.goodsId === payload.goodsId &&
-        entry.title === payload.title
-    );
+  create(payload: Omit<AlertTask, "id" | "createdAt" | "status" | "grade"> & { grade?: AlertGrade }) {
+    const duplicated = this.findDuplicateTask(payload);
 
     if (duplicated) {
       return duplicated;
@@ -47,6 +43,7 @@ export class AlertsService {
       id: this.store.createId("alert"),
       createdAt: new Date().toISOString(),
       status: "open",
+      grade: payload.grade ?? this.resolveGrade(payload.type),
       ...payload
     };
 
@@ -68,14 +65,17 @@ export class AlertsService {
         ? {
             type: "device",
             id: alert.deviceCode,
-            label: alert.deviceCode
+            label: this.getDeviceLabel(alert.deviceCode)
           }
         : undefined,
       metadata: {
         dueAt: alert.dueAt,
         deviceCode: alert.deviceCode,
         goodsId: alert.goodsId,
-        goodsName: alert.goodsName
+        goodsName: alert.goodsName,
+        grade: alert.grade,
+        relatedEventId: alert.relatedEventId,
+        undoState: "not_undoable"
       }
     });
     return alert;
@@ -88,7 +88,7 @@ export class AlertsService {
       throw new NotFoundException("未找到预警记录。");
     }
 
-    alert.status = "resolved";
+    alert.status = alert.grade === "fault" ? "acknowledged" : "resolved";
     alert.resolvedAt = new Date().toISOString();
     alert.resolvedByUserId = actorUserId;
     alert.resolutionNote = note;
@@ -106,11 +106,14 @@ export class AlertsService {
         ? {
             type: "device",
             id: alert.deviceCode,
-            label: alert.deviceCode
+            label: this.getDeviceLabel(alert.deviceCode)
           }
         : undefined,
       metadata: {
-        note: note ?? ""
+        note: note ?? "",
+        grade: alert.grade,
+        action: alert.grade === "fault" ? "acknowledge" : "resolve",
+        undoState: "not_undoable"
       }
     });
     return alert;
@@ -163,18 +166,18 @@ export class AlertsService {
   }
 
   private refreshInventoryAlerts() {
+    this.store.syncDeviceStocksFromBatches();
+
     for (const device of this.store.devices) {
       for (const goods of device.doors.flatMap((door) => door.goods)) {
-        const lowStockThreshold = this.store.goodsAlertPolicies
-          .filter(
-            (policy) =>
-              policy.status === "active" && policy.applicableDeviceCodes.includes(device.deviceCode)
-          )
-          .flatMap((policy) => policy.thresholds)
-          .filter((threshold) => threshold.goodsId === goods.goodsId)
-          .at(-1)?.lowStockThreshold ?? LOW_STOCK_THRESHOLD;
+        const setting = this.store.getDeviceGoodsSetting(device.deviceCode, goods.goodsId);
+        const currentStock = this.store.getCurrentStock(device.deviceCode, goods.goodsId);
 
-        if (goods.stock <= 0) {
+        if (!setting?.enabled) {
+          continue;
+        }
+
+        if (currentStock <= 0) {
           this.create({
             type: "inventory",
             title: "柜机缺货提醒",
@@ -187,7 +190,10 @@ export class AlertsService {
           continue;
         }
 
-        if (goods.stock <= lowStockThreshold) {
+        if (
+          setting.lowStockThreshold !== undefined &&
+          currentStock <= setting.lowStockThreshold
+        ) {
           this.create({
             type: "inventory",
             title: "柜机低库存提醒",
@@ -195,7 +201,7 @@ export class AlertsService {
             goodsId: goods.goodsId,
             goodsName: goods.name,
             dueAt: new Date().toISOString(),
-            detail: `${device.name} 的 ${goods.name} 当前库存仅剩 ${goods.stock} 件，低于模板阈值 ${lowStockThreshold} 件。`
+            detail: `${device.name} 的 ${goods.name} 当前库存仅剩 ${currentStock} 件，低于阈值 ${setting.lowStockThreshold} 件。`
           });
         }
       }
@@ -207,30 +213,36 @@ export class AlertsService {
       const pendingDuration = Date.now() - new Date(event.updatedAt).getTime();
       const sourceLog = this.store.logs.find((entry) => entry.relatedEventId === event.eventId);
 
-      if (
-        ["created", "opening"].includes(event.status) &&
-        pendingDuration > 90 * 1000
-      ) {
+      if (["created", "opening"].includes(event.status) && pendingDuration > 90 * 1000) {
+        if (event.status !== "timeout_unopened") {
+          event.status = "timeout_unopened";
+          event.updatedAt = new Date().toISOString();
+        }
+
         this.create({
           type: "device_fault",
-          title: "开门无响应",
+          title: "超时未开门",
           deviceCode: event.deviceCode,
           targetUserId: event.userId,
-          dueAt: new Date(event.updatedAt).toISOString(),
+          dueAt: event.updatedAt,
           detail: `事件 ${event.orderNo} 超过 90 秒未收到成功开门确认。`,
-          sourceLogId: sourceLog?.id
+          sourceLogId: sourceLog?.id,
+          relatedEventId: event.eventId
         });
       }
 
       if (event.status === "opened" && pendingDuration > 10 * 60 * 1000) {
+        event.status = "stuck_open";
+        event.updatedAt = new Date().toISOString();
         this.create({
           type: "device_fault",
           title: "柜门持续敞开",
           deviceCode: event.deviceCode,
           targetUserId: event.userId,
-          dueAt: new Date(event.updatedAt).toISOString(),
+          dueAt: event.updatedAt,
           detail: `事件 ${event.orderNo} 开门后超过 10 分钟未收到关门确认。`,
-          sourceLogId: sourceLog?.id
+          sourceLogId: sourceLog?.id,
+          relatedEventId: event.eventId
         });
       }
 
@@ -240,9 +252,10 @@ export class AlertsService {
           title: "开门失败",
           deviceCode: event.deviceCode,
           targetUserId: event.userId,
-          dueAt: new Date(event.updatedAt).toISOString(),
+          dueAt: event.updatedAt,
           detail: `事件 ${event.orderNo} 返回 FAIL，请人工检查设备。`,
-          sourceLogId: sourceLog?.id
+          sourceLogId: sourceLog?.id,
+          relatedEventId: event.eventId
         });
       }
     }
@@ -253,7 +266,7 @@ export class AlertsService {
       if (log.status === "pending" && ["remote-open-device", "open-cabinet"].includes(log.type)) {
         const pendingDuration = Date.now() - new Date(log.occurredAt).getTime();
 
-        if (pendingDuration > 90 * 1000) {
+        if (pendingDuration > 90 * 1000 && !log.relatedEventId) {
           this.create({
             type: "device_fault",
             title: "开门无响应",
@@ -272,7 +285,7 @@ export class AlertsService {
         }
       }
 
-      if (log.status === "failed" && log.type === "door-status-callback") {
+      if (log.status === "failed" && log.type === "door-status-callback" && !log.relatedEventId) {
         this.create({
           type: "device_fault",
           title: "开门失败",
@@ -288,6 +301,56 @@ export class AlertsService {
         });
       }
     }
+  }
+
+  private findDuplicateTask(payload: Omit<AlertTask, "id" | "createdAt" | "status" | "grade">) {
+    if (payload.relatedEventId) {
+      return this.store.alerts.find(
+        (entry) =>
+          entry.relatedEventId === payload.relatedEventId &&
+          entry.type === payload.type &&
+          entry.title === payload.title
+      );
+    }
+
+    if (payload.sourceLogId) {
+      return this.store.alerts.find(
+        (entry) =>
+          entry.sourceLogId === payload.sourceLogId &&
+          entry.type === payload.type &&
+          entry.title === payload.title
+      );
+    }
+
+    return this.store.alerts.find(
+      (entry) =>
+        entry.status !== "resolved" &&
+        entry.type === payload.type &&
+        entry.deviceCode === payload.deviceCode &&
+        entry.targetUserId === payload.targetUserId &&
+        entry.goodsId === payload.goodsId &&
+        entry.title === payload.title
+    );
+  }
+
+  private resolveGrade(type: AlertTask["type"]): AlertGrade {
+    if (type === "device_fault" || type === "callback") {
+      return "fault";
+    }
+
+    if (type === "user_feedback") {
+      return "feedback";
+    }
+
+    return "warning";
+  }
+
+  private getDeviceLabel(deviceCode?: string) {
+    if (!deviceCode) {
+      return "柜机";
+    }
+
+    return this.store.devices.find((entry) => entry.deviceCode === deviceCode)?.name ?? deviceCode;
   }
 
   private getAdminActor(actorUserId?: string) {

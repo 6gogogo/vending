@@ -11,6 +11,7 @@ const loading = ref(false);
 const refreshing = ref(false);
 const syncing = ref(false);
 const remoteOpening = ref(false);
+const resolvingTaskId = ref("");
 const selectedDoorNum = ref("1");
 const lastUpdatedAt = ref("");
 
@@ -50,6 +51,8 @@ const formatEventStatus = (status: string) => {
   if (status === "closed") return "门已关";
   if (status === "settled") return "已结算";
   if (status === "failed") return "失败";
+  if (status === "timeout_unopened") return "超时未开门";
+  if (status === "stuck_open") return "久开未关";
   if (status === "refunded") return "已退款";
   return status;
 };
@@ -59,6 +62,12 @@ const formatLogStatus = (status: string) =>
 
 const formatUserRole = (role: "admin" | "merchant" | "special") =>
   role === "admin" ? "管理员" : role === "merchant" ? "商户" : "特殊群体";
+
+const taskActionLabel = (task: NonNullable<typeof pendingTasks.value>[number]) =>
+  task.grade === "fault" ? "标记已知晓" : "手动完成";
+
+const taskGradeLabel = (grade: "fault" | "feedback" | "warning") =>
+  grade === "fault" ? "故障" : grade === "feedback" ? "反馈" : "预警";
 
 const load = async () => {
   loading.value = true;
@@ -100,6 +109,20 @@ const remoteOpen = async () => {
     await load();
   } finally {
     remoteOpening.value = false;
+  }
+};
+
+const resolveTask = async (taskId: string) => {
+  const task = pendingTasks.value.find((entry) => entry.id === taskId);
+  resolvingTaskId.value = taskId;
+  try {
+    await adminApi.resolveAlert(
+      taskId,
+      task?.grade === "fault" ? "管理员已知晓并接手处理" : "管理员手动完成"
+    );
+    await load();
+  } finally {
+    resolvingTaskId.value = "";
   }
 };
 
@@ -197,6 +220,7 @@ onUnmounted(() => {
                 <th>分类</th>
                 <th>库存</th>
                 <th>今日变化</th>
+                <th>阈值</th>
                 <th>临期</th>
               </tr>
             </thead>
@@ -220,7 +244,15 @@ onUnmounted(() => {
                     {{ (stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? "+" : "" }}{{ stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0 }}
                   </span>
                 </td>
-                <td class="admin-code">{{ goods.expiresAt ? goods.expiresAt.slice(0, 16).replace("T", " ") : "-" }}</td>
+                <td>
+                  <span v-if="stockChangeMap.get(goods.goodsId)?.thresholdEnabled" class="admin-code">
+                    {{ stockChangeMap.get(goods.goodsId)?.lowStockThreshold }}
+                  </span>
+                  <span v-else class="admin-table__subtext">未启用</span>
+                </td>
+                <td class="admin-code">
+                  {{ stockChangeMap.get(goods.goodsId)?.nearestExpiryAt ? stockChangeMap.get(goods.goodsId)?.nearestExpiryAt?.slice(0, 16).replace("T", " ") : "-" }}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -292,10 +324,23 @@ onUnmounted(() => {
               <div v-for="task in pendingTasks" :key="task.id" class="admin-list__row">
                 <div class="admin-list__main">
                   <span class="admin-list__title">{{ task.title }}</span>
-                  <span class="admin-list__meta">{{ task.dueAt.slice(0, 16).replace("T", " ") }}</span>
+                  <span class="admin-list__meta">
+                    {{ taskGradeLabel(task.grade) }} · {{ task.status === "acknowledged" ? "已知晓" : "待处理" }} · {{ task.dueAt.slice(0, 16).replace("T", " ") }}
+                  </span>
                   <span class="admin-table__subtext">{{ task.detail }}</span>
                 </div>
-                <RouterLink class="admin-link" :to="`/logs?subjectType=alert&subjectId=${task.id}`">日志</RouterLink>
+                <div class="device-task-actions">
+                  <button
+                    v-if="task.status === 'open'"
+                    class="admin-button admin-button--ghost"
+                    :disabled="resolvingTaskId === task.id"
+                    @click="resolveTask(task.id)"
+                  >
+                    {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
+                  </button>
+                  <span v-else class="admin-table__subtext">已知晓</span>
+                  <RouterLink class="admin-link" :to="`/logs?subjectType=alert&subjectId=${task.id}`">日志</RouterLink>
+                </div>
               </div>
             </div>
             <div v-else class="admin-empty">
@@ -410,6 +455,12 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.device-task-actions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
 }
 
 .admin-field--inline {

@@ -175,7 +175,8 @@ export class CabinetEventsService {
           deviceCode: payload.deviceCode,
           targetUserId: event.userId,
           dueAt: event.updatedAt,
-          detail: `事件 ${payload.eventId} 已关门，但回调显示用户未实际拉开柜门。`
+          detail: `事件 ${payload.eventId} 已关门，但回调显示用户未实际拉开柜门。`,
+          relatedEventId: event.eventId
         });
       }
     } else if (payload.status === "FAIL") {
@@ -189,7 +190,8 @@ export class CabinetEventsService {
         deviceCode: payload.deviceCode,
         targetUserId: event.userId,
         dueAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-        detail: `设备 ${payload.deviceCode} 对事件 ${payload.eventId} 返回了 FAIL。`
+        detail: `设备 ${payload.deviceCode} 对事件 ${payload.eventId} 返回了 FAIL。`,
+        relatedEventId: event.eventId
       });
     }
 

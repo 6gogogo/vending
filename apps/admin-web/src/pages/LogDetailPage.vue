@@ -9,11 +9,26 @@ import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 const route = useRoute();
 const log = ref<OperationLogRecord>();
 const loading = ref(false);
+const undoing = ref(false);
 
 const resolveActorRoute = (entry?: OperationLogRecord) => resolveActorLink(entry?.actor);
 
 const formatLogStatus = (status?: OperationLogRecord["status"]) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
+
+const undoStateLabel = (entry?: OperationLogRecord) => {
+  const state = entry?.metadata?.undoState;
+
+  if (state === "undoable") {
+    return "可撤销";
+  }
+
+  if (state === "undone") {
+    return "已撤销";
+  }
+
+  return "不可撤销";
+};
 
 const load = async () => {
   loading.value = true;
@@ -21,6 +36,20 @@ const load = async () => {
     log.value = await adminApi.logDetail(String(route.params.logId));
   } finally {
     loading.value = false;
+  }
+};
+
+const undoLog = async () => {
+  if (!log.value) {
+    return;
+  }
+
+  undoing.value = true;
+  try {
+    await adminApi.undoLog(log.value.id);
+    await load();
+  } finally {
+    undoing.value = false;
   }
 };
 
@@ -60,6 +89,10 @@ onMounted(load);
             <span class="admin-kv__label">详细说明</span>
             <span class="admin-kv__value">{{ log.detail }}</span>
           </div>
+          <div class="admin-kv__row">
+            <span class="admin-kv__label">撤销状态</span>
+            <span class="admin-kv__value">{{ undoStateLabel(log) }}</span>
+          </div>
           <div v-if="log.relatedOrderNo || log.relatedEventId" class="admin-kv__row">
             <span class="admin-kv__label">关联业务编号</span>
             <span class="admin-kv__value admin-code">
@@ -97,6 +130,26 @@ onMounted(load);
                 {{ log.secondarySubject.label }}
               </RouterLink>
             </div>
+          </div>
+        </article>
+
+        <article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">操作</span>
+              <h3 class="admin-panel__title">撤销与继续追踪</h3>
+            </div>
+          </div>
+          <div class="admin-list">
+            <button
+              v-if="log.metadata?.undoState === 'undoable'"
+              class="admin-button admin-button--ghost"
+              :disabled="undoing"
+              @click="undoLog"
+            >
+              {{ undoing ? "撤销中" : "撤销这条操作" }}
+            </button>
+            <span v-else class="admin-table__subtext">{{ undoStateLabel(log) }}</span>
           </div>
         </article>
 
