@@ -1,53 +1,66 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
-
-import type { CabinetEventRecord, DeviceRecord } from "@vm/shared-types";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { RouterLink } from "vue-router";
+import type { DeviceRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 
-interface CallbackLogRow {
-  id: string;
-  type: string;
-  receivedAt: string;
-  payload: Record<string, unknown>;
-}
-
 const devices = ref<DeviceRecord[]>([]);
-const events = ref<CabinetEventRecord[]>([]);
-const callbackLogs = ref<CallbackLogRow[]>([]);
 const loading = ref(false);
 const lastUpdatedAt = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
-const formatTime = (value: string) =>
-  new Date(value).toLocaleString("zh-CN", {
-    hour12: false
-  });
+const sortedDevices = computed(() =>
+  [...devices.value].sort((left, right) => {
+    if (left.status === right.status) {
+      return left.deviceCode.localeCompare(right.deviceCode);
+    }
 
-const summarizeCallback = (entry: CallbackLogRow) => {
-  const payload = entry.payload;
-  const eventId = typeof payload.eventId === "string" ? payload.eventId : "-";
-  const orderNo = typeof payload.orderNo === "string" ? payload.orderNo : "-";
-  const deviceCode = typeof payload.deviceCode === "string" ? payload.deviceCode : "-";
-  const status = typeof payload.status === "string" ? payload.status : "-";
+    if (left.status === "online") {
+      return -1;
+    }
 
-  return `设备 ${deviceCode} / 事件 ${eventId} / 订单 ${orderNo} / 状态 ${status}`;
+    if (right.status === "online") {
+      return 1;
+    }
+
+    return left.deviceCode.localeCompare(right.deviceCode);
+  })
+);
+
+const totalStock = (device: DeviceRecord) =>
+  device.doors.flatMap((door) => door.goods).reduce((sum, goods) => sum + goods.stock, 0);
+
+const previewGoods = (device: DeviceRecord) => device.doors.flatMap((door) => door.goods).slice(0, 5);
+
+const remainingGoodsCount = (device: DeviceRecord) =>
+  Math.max(0, device.doors.flatMap((door) => door.goods).length - 5);
+
+const formatStatus = (status: DeviceRecord["status"]) =>
+  status === "online" ? "在线" : status === "maintenance" ? "维护中" : "离线";
+
+const formatDoorState = (doorState?: "open" | "closed" | "unknown") => {
+  if (doorState === "open") {
+    return "门已开";
+  }
+
+  if (doorState === "closed") {
+    return "门已关";
+  }
+
+  return "门状态未知";
 };
+
+const hasDoorWarning = (device: DeviceRecord) =>
+  device.runtime?.doorState === "closed" &&
+  Boolean(device.runtime.lastCommandAt) &&
+  device.runtime.openedAfterLastCommand === false;
 
 const load = async () => {
   loading.value = true;
-
   try {
-    const [deviceResponse, eventResponse, callbackResponse] = await Promise.all([
-      adminApi.devices(),
-      adminApi.events(),
-      adminApi.callbackLogs()
-    ]);
-
-    devices.value = deviceResponse;
-    events.value = eventResponse.slice(0, 12);
-    callbackLogs.value = callbackResponse;
+    devices.value = await adminApi.devices();
     lastUpdatedAt.value = new Date().toLocaleString("zh-CN", {
       hour12: false
     });
@@ -58,7 +71,7 @@ const load = async () => {
 
 onMounted(async () => {
   await load();
-  timer = setInterval(load, 3_000);
+  timer = setInterval(load, 8_000);
 });
 
 onUnmounted(() => {
@@ -69,181 +82,161 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__hero">
-      <div>
-        <span class="admin-pill">联调监控</span>
-        <h1 class="admin-title">柜机状态、开柜事件和回调日志</h1>
+  <section class="admin-page">
+    <section class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">柜机面板</p>
+          <h3 class="admin-page__section-title">每列一个柜机，集中查看状态、门状态和货品数量</h3>
+        </div>
+        <div class="admin-toolbar">
+          <span class="admin-copy">自动刷新 8 秒一次</span>
+          <span class="admin-copy">最近刷新：{{ lastUpdatedAt || "尚未加载" }}</span>
+          <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
+            {{ loading ? "刷新中" : "立即刷新" }}
+          </button>
+        </div>
       </div>
-      <p class="admin-subtitle page__lead">
-        这个页面每 3 秒自动刷新一次，适合在你用小程序点“开柜”时同步盯后台变化。
-      </p>
-    </header>
+    </section>
 
-    <p class="admin-subtitle">最近刷新：{{ lastUpdatedAt || "尚未加载" }}{{ loading ? " · 刷新中" : "" }}</p>
-
-    <div class="grid">
-      <article class="admin-card panel">
-        <div class="panel__header">
+    <section v-if="sortedDevices.length" class="operations-grid">
+      <article v-for="device in sortedDevices" :key="device.deviceCode" class="admin-panel admin-panel-block operations-card">
+        <div class="operations-card__head">
           <div>
-            <span class="admin-pill">设备</span>
-            <h2 class="panel__title">柜机库存与在线状态</h2>
+            <h3 class="operations-card__title">{{ device.name }}</h3>
+            <p class="admin-copy admin-code">{{ device.deviceCode }} · {{ device.location }}</p>
+          </div>
+          <div class="admin-inline-links">
+            <span
+              class="admin-pill"
+              :class="device.status === 'online' ? 'admin-pill--success' : device.status === 'maintenance' ? 'admin-pill--warning' : 'admin-pill--danger'"
+            >
+              {{ formatStatus(device.status) }}
+            </span>
+            <span class="admin-pill" :class="device.runtime?.doorState === 'open' ? 'admin-pill--warning' : 'admin-pill--neutral'">
+              {{ formatDoorState(device.runtime?.doorState) }}
+            </span>
           </div>
         </div>
 
-        <div class="stack">
-          <div v-for="device in devices" :key="device.deviceCode" class="row row--device">
-            <div>
-              <strong>{{ device.name }}</strong>
-              <p class="admin-subtitle">{{ device.deviceCode }} · {{ device.location }}</p>
-              <p class="admin-subtitle">
-                最近心跳：{{ formatTime(device.lastSeenAt) }}
-              </p>
-            </div>
-            <div class="meta">
-              <span class="admin-pill">{{ device.status }}</span>
-              <div class="goods-list">
-                <span v-for="goods in device.doors[0]?.goods ?? []" :key="goods.goodsId" class="goods-pill">
-                  {{ goods.name }}：{{ goods.stock }}
-                </span>
-              </div>
-            </div>
+        <div class="operations-card__rows">
+          <div class="operations-card__row">
+            <span>总库存</span>
+            <strong class="admin-code">{{ totalStock(device) }}</strong>
           </div>
+          <div class="operations-card__row">
+            <span>最近在线</span>
+            <span class="admin-code">{{ device.lastSeenAt.slice(0, 16).replace("T", " ") }}</span>
+          </div>
+          <div class="operations-card__row">
+            <span>最近开门</span>
+            <span class="admin-code">{{ device.runtime?.lastOpenedAt ? device.runtime.lastOpenedAt.slice(0, 16).replace("T", " ") : "-" }}</span>
+          </div>
+          <div class="operations-card__row">
+            <span>最近关门</span>
+            <span class="admin-code">{{ device.runtime?.lastClosedAt ? device.runtime.lastClosedAt.slice(0, 16).replace("T", " ") : "-" }}</span>
+          </div>
+        </div>
+
+        <div v-if="hasDoorWarning(device)" class="admin-note operations-card__warning">
+          该柜机最近一次开门后未收到“门已打开”确认。
+        </div>
+
+        <table class="admin-table operations-card__table">
+          <thead>
+            <tr>
+              <th>货品</th>
+              <th>数量</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="goods in previewGoods(device)" :key="goods.goodsId">
+              <td>
+                <span class="admin-table__strong">{{ goods.name }}</span>
+                <span class="admin-table__subtext">{{ goods.goodsId }}</span>
+              </td>
+              <td class="admin-code">{{ goods.stock }}</td>
+            </tr>
+            <tr v-if="remainingGoodsCount(device)">
+              <td colspan="2" class="admin-code">其余 {{ remainingGoodsCount(device) }} 个货品请进入详情页查看</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="operations-card__actions">
+          <RouterLink class="admin-link" :to="`/operations/${device.deviceCode}`">详情</RouterLink>
+          <RouterLink class="admin-link" :to="`/logs?subjectType=device&subjectId=${device.deviceCode}`">日志</RouterLink>
         </div>
       </article>
+    </section>
 
-      <article class="admin-card panel">
-        <div class="panel__header">
-          <div>
-            <span class="admin-pill">事件</span>
-            <h2 class="panel__title">最近开柜记录</h2>
-          </div>
-        </div>
-
-        <div class="stack">
-          <div v-for="event in events" :key="event.eventId" class="row">
-            <div>
-              <strong>{{ event.orderNo }}</strong>
-              <p class="admin-subtitle">{{ event.eventId }}</p>
-              <p class="admin-subtitle">
-                {{ event.deviceCode }} / {{ event.role }} / {{ formatTime(event.updatedAt) }}
-              </p>
-            </div>
-            <span class="admin-pill">{{ event.status }}</span>
-          </div>
-        </div>
-      </article>
-
-      <article class="admin-card panel">
-        <div class="panel__header">
-          <div>
-            <span class="admin-pill">回调</span>
-            <h2 class="panel__title">柜机回调日志</h2>
-          </div>
-        </div>
-
-        <div class="stack">
-          <div v-for="entry in callbackLogs" :key="entry.id" class="row">
-            <div>
-              <strong>{{ entry.type }}</strong>
-              <p class="admin-subtitle">{{ summarizeCallback(entry) }}</p>
-              <p class="admin-subtitle">{{ formatTime(entry.receivedAt) }}</p>
-            </div>
-            <span class="admin-pill">{{ entry.type }}</span>
-          </div>
-        </div>
-      </article>
+    <div v-else class="admin-empty">
+      <div class="admin-empty__title">{{ loading ? "正在加载柜机列表" : "当前没有柜机数据" }}</div>
+      <div class="admin-empty__body">请确认设备种子数据或模拟设备是否已经写入。</div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.page {
+.operations-grid {
   display: grid;
-  gap: 20px;
-}
-
-.page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
-  gap: 20px;
-}
-
-.page__lead {
-  max-width: 38ch;
-}
-
-.grid {
-  display: grid;
-  gap: 20px;
-}
-
-.panel {
-  padding: 22px;
-}
-
-.panel__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.panel__title {
-  margin: 0.8rem 0 0;
-  font-size: 1.5rem;
-}
-
-.stack {
-  display: grid;
-  gap: 14px;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--admin-line);
-}
-
-.row--device {
-  align-items: start;
-}
-
-.meta {
-  display: grid;
-  justify-items: end;
-  gap: 12px;
-}
-
-.goods-list {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: end;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 8px;
 }
 
-.goods-pill {
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(13, 148, 136, 0.08);
-  color: var(--admin-muted);
-  font-size: 0.85rem;
+.operations-card {
+  display: grid;
+  gap: 10px;
 }
 
-@media (max-width: 1100px) {
-  .page__hero,
-  .row,
-  .row--device {
-    display: grid;
-  }
+.operations-card__head,
+.operations-card__row,
+.operations-card__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
 
-  .meta,
-  .goods-list {
-    justify-items: start;
-    justify-content: start;
-  }
+.operations-card__head {
+  align-items: flex-start;
+}
+
+.operations-card__title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.operations-card__rows {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.operations-card__row {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--admin-line);
+  background: var(--admin-panel-muted);
+  color: var(--admin-muted);
+}
+
+.operations-card__row:last-child {
+  border-bottom: 0;
+}
+
+.operations-card__table :deep(td:last-child),
+.operations-card__table :deep(th:last-child) {
+  width: 72px;
+}
+
+.operations-card__actions {
+  align-items: center;
+}
+
+.operations-card__warning {
+  background: #fff7e8;
+  border-color: #efcf8d;
+  color: #8e6414;
 }
 </style>

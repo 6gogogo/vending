@@ -9,7 +9,10 @@ import { AnalyticsModule } from "./modules/analytics/analytics.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { CabinetEventsModule } from "./modules/cabinet-events/cabinet-events.module";
 import { DevicesModule } from "./modules/devices/devices.module";
+import { GoodsModule } from "./modules/goods/goods.module";
 import { InventoryOrdersModule } from "./modules/inventory-orders/inventory-orders.module";
+import { OperationLogsModule } from "./modules/operation-logs/operation-logs.module";
+import { SpecialAccessPoliciesModule } from "./modules/special-access-policies/special-access-policies.module";
 import { UsersModule } from "./modules/users/users.module";
 
 @Module({
@@ -21,11 +24,14 @@ import { UsersModule } from "./modules/users/users.module";
     UsersModule,
     AccessRulesModule,
     DevicesModule,
+    GoodsModule,
     AlertsModule,
+    OperationLogsModule,
     InventoryOrdersModule,
     CabinetEventsModule,
     AnalyticsModule,
-    AuthModule
+    AuthModule,
+    SpecialAccessPoliciesModule
   ],
   controllers: [AppController]
 })

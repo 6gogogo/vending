@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, Patch, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type { AlertTask } from "@vm/shared-types";
 
@@ -19,7 +19,26 @@ export class AlertsController {
   }
 
   @Patch(":id/resolve")
-  resolve(@Param("id") id: string) {
-    return ok(this.alertsService.resolve(id));
+  @AllowedRoles("admin")
+  resolve(
+    @Param("id") id: string,
+    @Body() body: { note?: string },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.alertsService.resolve(id, request.authUser?.id, body?.note));
+  }
+
+  @Post("feedback")
+  @AllowedRoles("special", "merchant", "admin")
+  createFeedback(
+    @Body()
+    body: {
+      title: string;
+      detail: string;
+      deviceCode?: string;
+      targetUserId?: string;
+    }
+  ) {
+    return ok(this.alertsService.createFeedbackTask(body), "反馈任务已提交。");
   }
 }

@@ -71,6 +71,40 @@ export class CabinetEventsService {
       goods: []
     });
 
+    this.store.updateDeviceRuntime(payload.deviceCode, {
+      lastCommandAt: new Date().toISOString(),
+      openedAfterLastCommand: false
+    });
+    this.store.logOperation({
+      category: user.role === "merchant" ? "restock" : "pickup",
+      type: "open-cabinet",
+      status: "pending",
+      actor: {
+        type: user.role,
+        id: user.id,
+        name: user.name,
+        role: user.role
+      },
+      primarySubject: {
+        type: "device",
+        id: payload.deviceCode,
+        label: payload.deviceCode
+      },
+      secondarySubject: {
+        type: "user",
+        id: user.id,
+        label: user.name
+      },
+      description: `${user.name} 发起了 ${payload.deviceCode} 的开柜请求。`,
+      detail: `事件 ${eventId} 已创建，等待设备返回门状态。`,
+      relatedEventId: eventId,
+      relatedOrderNo: openResult.orderNo,
+      metadata: {
+        deviceCode: payload.deviceCode,
+        category: payload.category
+      }
+    });
+
     return {
       orderNo: openResult.orderNo,
       eventId,
@@ -114,14 +148,43 @@ export class CabinetEventsService {
 
     if (payload.status === "OPENDING") {
       event.status = "opening";
+      this.store.updateDeviceRuntime(payload.deviceCode, {
+        doorState: "unknown"
+      });
     } else if (payload.status === "SUCCESS") {
       event.status = "opened";
+      this.store.updateDeviceRuntime(payload.deviceCode, {
+        doorState: "open",
+        lastOpenedAt: event.updatedAt,
+        openedAfterLastCommand: true
+      });
     } else if (payload.status === "CLOSED") {
       event.status = "closed";
+      this.store.updateDeviceRuntime(payload.deviceCode, {
+        doorState: "closed",
+        lastClosedAt: event.updatedAt,
+        openedAfterLastCommand:
+          payload.doorIsOpen === "Y"
+            ? true
+            : this.store.getDeviceRuntime(payload.deviceCode).openedAfterLastCommand
+      });
+      if (payload.doorIsOpen === "N") {
+        this.alertsService.create({
+          type: "device_fault",
+          title: "开门后未实际拉开柜门",
+          deviceCode: payload.deviceCode,
+          targetUserId: event.userId,
+          dueAt: event.updatedAt,
+          detail: `事件 ${payload.eventId} 已关门，但回调显示用户未实际拉开柜门。`
+        });
+      }
     } else if (payload.status === "FAIL") {
       event.status = "failed";
+      this.store.updateDeviceRuntime(payload.deviceCode, {
+        doorState: "unknown"
+      });
       this.alertsService.create({
-        type: "callback",
+        type: "device_fault",
         title: "开门失败",
         deviceCode: payload.deviceCode,
         targetUserId: event.userId,
@@ -129,6 +192,34 @@ export class CabinetEventsService {
         detail: `设备 ${payload.deviceCode} 对事件 ${payload.eventId} 返回了 FAIL。`
       });
     }
+
+    this.store.logOperation({
+      category: "device",
+      type: "door-status-callback",
+      status: payload.status === "FAIL" ? "failed" : "success",
+      actor: {
+        type: "system",
+        name: "设备回调"
+      },
+      primarySubject: {
+        type: "device",
+        id: payload.deviceCode,
+        label: payload.deviceCode
+      },
+      secondarySubject: {
+        type: "event",
+        id: payload.eventId,
+        label: event.orderNo
+      },
+      description: `设备 ${payload.deviceCode} 返回门状态 ${payload.status}。`,
+      detail: `事件 ${payload.eventId} 已更新为 ${event.status}。`,
+      relatedEventId: payload.eventId,
+      relatedOrderNo: event.orderNo,
+      metadata: {
+        deviceCode: payload.deviceCode,
+        status: payload.status
+      }
+    });
 
     return { eventId: payload.eventId };
   }
@@ -152,7 +243,36 @@ export class CabinetEventsService {
             .find((goods) => goods.goodsId === item.goodsId)?.category ?? "daily",
         quantity: item.quantity,
         unitPrice: item.unitPrice
-      })) ?? [];
+          })) ?? [];
+
+    this.store.logOperation({
+      category: event.role === "merchant" ? "restock" : "pickup",
+      type: "settlement-callback",
+      status: "success",
+      actor: {
+        type: event.role === "admin" ? "admin" : event.role,
+        id: event.userId,
+        name: this.store.users.find((entry) => entry.id === event.userId)?.name ?? event.phone,
+        role: event.role
+      },
+      primarySubject: {
+        type: "device",
+        id: event.deviceCode,
+        label: event.deviceCode
+      },
+      secondarySubject: {
+        type: "event",
+        id: event.eventId,
+        label: event.orderNo
+      },
+      description: `订单 ${event.orderNo} 已完成结算。`,
+      detail: `设备 ${event.deviceCode} 的结算回调已入库，事件状态更新为 settled。`,
+      relatedEventId: event.eventId,
+      relatedOrderNo: event.orderNo,
+      metadata: {
+        amount: payload.amount
+      }
+    });
 
     return this.inventoryOrdersService.recordSettlement(event, payload);
   }
@@ -165,6 +285,33 @@ export class CabinetEventsService {
     event.updatedAt = new Date().toISOString();
 
     this.inventoryOrdersService.recordAdjustment(event, payload);
+
+    this.store.logOperation({
+      category: "inventory",
+      type: "adjustment-callback",
+      status: payload.amount > 0 ? "warning" : "success",
+      actor: {
+        type: "system",
+        name: "补扣回调"
+      },
+      primarySubject: {
+        type: "device",
+        id: payload.deviceCode,
+        label: payload.deviceCode
+      },
+      secondarySubject: {
+        type: "event",
+        id: event.eventId,
+        label: event.orderNo
+      },
+      description: `订单 ${payload.orderNo} 收到补扣回调。`,
+      detail: payload.amount > 0 ? "补扣订单仍需等待用户支付。" : "补扣订单已完成。",
+      relatedEventId: event.eventId,
+      relatedOrderNo: payload.orderNo,
+      metadata: {
+        amount: payload.amount
+      }
+    });
 
     if (payload.amount > 0) {
       return {
@@ -186,6 +333,34 @@ export class CabinetEventsService {
     event.updatedAt = new Date().toISOString();
 
     await this.smartVmGateway.notifyPaymentSuccess(payload);
+
+    this.store.logOperation({
+      category: "inventory",
+      type: "payment-success-callback",
+      status: "success",
+      actor: {
+        type: "system",
+        name: "支付回调"
+      },
+      primarySubject: {
+        type: "device",
+        id: payload.deviceCode,
+        label: payload.deviceCode
+      },
+      secondarySubject: {
+        type: "event",
+        id: event.eventId,
+        label: event.orderNo
+      },
+      description: `订单 ${payload.orderNo} 收到支付成功通知。`,
+      detail: `支付结果已转发给设备侧，交易号 ${payload.transactionId}。`,
+      relatedEventId: event.eventId,
+      relatedOrderNo: payload.orderNo,
+      metadata: {
+        transactionId: payload.transactionId,
+        amount: payload.amount
+      }
+    });
 
     return {
       orderNo: payload.orderNo,

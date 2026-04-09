@@ -1,78 +1,133 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+
+import { useAdminSessionStore } from "../stores/session";
+
+interface NavItem {
+  to: string;
+  label: string;
+}
+
+const route = useRoute();
+const router = useRouter();
+const sessionStore = useAdminSessionStore();
+
+const navSections: Array<{ title: string; items: NavItem[] }> = [
+  {
+    title: "运营总览",
+    items: [
+      {
+        to: "/dashboard",
+        label: "总览"
+      },
+      {
+        to: "/goods",
+        label: "货物总览"
+      },
+      {
+        to: "/operations",
+        label: "柜机监控"
+      }
+    ]
+  },
+  {
+    title: "人员与日志",
+    items: [
+      {
+        to: "/users",
+        label: "人员管理"
+      },
+      {
+        to: "/logs",
+        label: "日志总览"
+      }
+    ]
+  },
+];
+
+const currentMeta = computed(() => ({
+  eyebrow: typeof route.meta.eyebrow === "string" ? route.meta.eyebrow : "后台工作台",
+  title: typeof route.meta.title === "string" ? route.meta.title : "公益智助柜后台",
+  description:
+    typeof route.meta.description === "string"
+      ? route.meta.description
+      : "围绕柜机、人员和日志组织后台运营工作流。"
+}));
+
+const currentGroup = computed(() =>
+  typeof route.meta.group === "string" ? route.meta.group : "运营总览"
+);
+
+const logout = async () => {
+  sessionStore.clearSession();
+  await router.replace("/login");
+};
+
+const isActive = (target: string) => {
+  if (target === "/operations") {
+    return route.path.startsWith("/operations");
+  }
+
+  if (target === "/goods") {
+    return route.path.startsWith("/goods");
+  }
+
+  if (target === "/users") {
+    return route.path.startsWith("/users");
+  }
+
+  if (target === "/logs") {
+    return route.path.startsWith("/logs");
+  }
+
+  return route.path === target;
+};
+</script>
+
 <template>
-  <div class="admin-shell layout">
-    <aside class="admin-card layout__nav">
-      <div>
-        <span class="admin-pill">电脑后台</span>
-        <h1 class="layout__brand">公益智助柜</h1>
-        <p class="admin-subtitle">在一个桌面视图里查看角色数据、领取规则、柜机状态和过期预警。</p>
+  <div class="admin-shell workbench">
+    <aside class="workbench__sidebar">
+      <div class="workbench__brand-panel admin-panel">
+        <span class="admin-kicker">公益智助柜</span>
+        <h1 class="workbench__brand">后台管理台</h1>
       </div>
 
-      <nav class="layout__links">
-        <RouterLink to="/dashboard" class="layout__link" active-class="layout__link--active">总览</RouterLink>
-        <RouterLink to="/operations" class="layout__link" active-class="layout__link--active">柜机监控</RouterLink>
-        <RouterLink to="/users" class="layout__link" active-class="layout__link--active">用户管理</RouterLink>
-        <RouterLink to="/rules" class="layout__link" active-class="layout__link--active">规则配置</RouterLink>
-        <RouterLink to="/alerts" class="layout__link" active-class="layout__link--active">预警处理</RouterLink>
+      <nav class="workbench__nav">
+        <section v-for="section in navSections" :key="section.title" class="workbench__nav-group">
+          <p class="workbench__nav-title">{{ section.title }}</p>
+          <RouterLink
+            v-for="item in section.items"
+            :key="item.to"
+            :to="item.to"
+            class="workbench__nav-link"
+            :class="{ 'workbench__nav-link--active': isActive(item.to) }"
+          >
+            <span class="workbench__nav-label">{{ item.label }}</span>
+          </RouterLink>
+        </section>
       </nav>
+
+      <div class="workbench__status admin-panel">
+        <p class="admin-kicker">当前模块</p>
+        <h2 class="workbench__status-title">{{ currentGroup }}</h2>
+        <p class="admin-copy">{{ sessionStore.user?.name ?? "管理员" }}</p>
+        <button class="admin-button admin-button--ghost" @click="logout">退出登录</button>
+      </div>
     </aside>
 
-    <main class="layout__main">
-      <RouterView />
+    <main class="workbench__main">
+      <header class="workbench__header admin-panel">
+        <div>
+          <span class="admin-kicker">{{ currentMeta.eyebrow }}</span>
+          <h2 class="admin-page-title">{{ currentMeta.title }}</h2>
+        </div>
+        <p class="admin-copy workbench__header-copy">{{ currentMeta.description }}</p>
+      </header>
+
+      <section class="workbench__content">
+        <RouterView />
+      </section>
     </main>
   </div>
 </template>
-
-<style scoped>
-.layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 24px;
-}
-
-.layout__nav {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-height: calc(100vh - 48px);
-  padding: 28px;
-}
-
-.layout__brand {
-  margin: 1rem 0 0.75rem;
-  font-size: 2.7rem;
-  line-height: 0.95;
-}
-
-.layout__links {
-  display: grid;
-  gap: 0.7rem;
-}
-
-.layout__link {
-  padding: 0.95rem 1rem;
-  border-radius: 18px;
-  color: var(--admin-muted);
-  text-decoration: none;
-  transition: 180ms ease;
-}
-
-.layout__link:hover,
-.layout__link--active {
-  background: rgba(13, 148, 136, 0.12);
-  color: var(--admin-accent-strong);
-}
-
-.layout__main {
-  min-width: 0;
-}
-
-@media (max-width: 960px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-
-  .layout__nav {
-    min-height: auto;
-  }
-}
-</style>

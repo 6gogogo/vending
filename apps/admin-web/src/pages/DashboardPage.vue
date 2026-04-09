@@ -1,150 +1,370 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import type { DashboardSnapshot } from "@vm/shared-types";
+import { computed, onMounted, ref } from "vue";
+import { RouterLink } from "vue-router";
+import type { DashboardSnapshot, OperationLogRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
-import SparkBars from "../components/charts/SparkBars.vue";
-import { categoryLabelMap } from "../utils/labels";
+import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
+
+type BucketKey = "completeUsers" | "partialUsers" | "unservedUsers";
 
 const dashboard = ref<DashboardSnapshot>();
+const loading = ref(false);
+const activeBucket = ref<BucketKey>();
+const resolvingTaskId = ref<string>();
 
-onMounted(async () => {
-  dashboard.value = await adminApi.dashboard();
+const summaryLogs = computed(() => dashboard.value?.summaryLogs ?? []);
+const pendingTasks = computed(() => dashboard.value?.pendingTasks ?? []);
+
+const bucketMeta: Record<BucketKey, { title: string; hint: string; tone: "accent" | "warning" | "neutral" }> = {
+  completeUsers: {
+    title: "今日完全服务人数",
+    hint: "业务日内所有应领物资都已完成",
+    tone: "accent"
+  },
+  partialUsers: {
+    title: "今日部分服务人数",
+    hint: "业务日内只完成了部分应领物资",
+    tone: "warning"
+  },
+  unservedUsers: {
+    title: "今日未服务人数",
+    hint: "业务日内尚未领取任何应领物资",
+    tone: "neutral"
+  }
+};
+
+const activeBucketData = computed(() => {
+  if (!dashboard.value || !activeBucket.value) {
+    return undefined;
+  }
+
+  return dashboard.value.serviceOverview[activeBucket.value];
 });
+
+const resolveLogLink = (log: OperationLogRecord) => `/logs/${log.id}`;
+const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.actor);
+const formatLogStatus = (status: OperationLogRecord["status"]) =>
+  status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
+
+const load = async () => {
+  loading.value = true;
+  try {
+    dashboard.value = await adminApi.dashboard();
+  } finally {
+    loading.value = false;
+  }
+};
+
+const openBucket = (bucket: BucketKey) => {
+  activeBucket.value = bucket;
+};
+
+const closeBucket = () => {
+  activeBucket.value = undefined;
+};
+
+const resolveTask = async (id: string) => {
+  resolvingTaskId.value = id;
+  try {
+    await adminApi.resolveAlert(id, "管理员手动完成");
+    await load();
+  } finally {
+    resolvingTaskId.value = undefined;
+  }
+};
+
+onMounted(load);
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__hero">
-      <div>
-        <span class="admin-pill">实时总览</span>
-        <h1 class="admin-title">街道公益柜运行情况一屏掌握。</h1>
+  <section class="admin-page">
+    <section v-if="dashboard" class="admin-page__section">
+      <div class="admin-grid admin-grid--stats-4">
+        <button class="dashboard-stat-button" @click="openBucket('completeUsers')">
+          <StatTile
+            :title="bucketMeta.completeUsers.title"
+            :value="dashboard.serviceOverview.completeUsers.count"
+            :hint="bucketMeta.completeUsers.hint"
+            action-label="展开名单 >"
+            :tone="bucketMeta.completeUsers.tone"
+          />
+        </button>
+        <button class="dashboard-stat-button" @click="openBucket('partialUsers')">
+          <StatTile
+            :title="bucketMeta.partialUsers.title"
+            :value="dashboard.serviceOverview.partialUsers.count"
+            :hint="bucketMeta.partialUsers.hint"
+            action-label="展开名单 >"
+            :tone="bucketMeta.partialUsers.tone"
+          />
+        </button>
+        <button class="dashboard-stat-button" @click="openBucket('unservedUsers')">
+          <StatTile
+            :title="bucketMeta.unservedUsers.title"
+            :value="dashboard.serviceOverview.unservedUsers.count"
+            :hint="bucketMeta.unservedUsers.hint"
+            action-label="展开名单 >"
+          />
+        </button>
+        <StatTile
+          title="待处理事件数"
+          :value="dashboard.pendingTasks.length"
+          hint="缺货、临期、设备异常与用户反馈"
+          tone="warning"
+        />
       </div>
-      <p class="admin-subtitle page__lead">
-        当前首版先聚焦真实业务流、领取额度控制和过期预警，用户画像与布局建议接口已经预留，后续可继续扩展。
-      </p>
-    </header>
+    </section>
 
-    <div v-if="dashboard" class="page__grid">
-      <div class="page__stats">
-        <StatTile title="活跃特殊群体" :value="dashboard.stats.activeSpecialUsers" hint="今日处于可用状态的登记用户" />
-        <StatTile title="活跃商户" :value="dashboard.stats.activeMerchants" hint="可执行投放的商户账号" />
-        <StatTile title="今日开柜事件" :value="dashboard.stats.todayOpenEvents" hint="今日累计开柜申请次数" />
-        <StatTile title="待处理预警" :value="dashboard.stats.pendingAlerts" hint="需要人工跟进的任务" />
-      </div>
-
-      <article class="admin-card panel">
-        <div class="panel__header">
+    <section class="admin-grid admin-grid--main-aside">
+      <article class="admin-panel admin-panel-block">
+        <div class="admin-panel__head">
           <div>
-            <span class="admin-pill">近 7 天趋势</span>
-            <h2 class="panel__title">领取与投放对比</h2>
+            <span class="admin-kicker">待处理事件</span>
+            <h3 class="admin-panel__title">统一任务池</h3>
           </div>
-          <p class="admin-subtitle">在高级分析上线前，先保证基础报表足够能看、能用。</p>
+          <span class="admin-pill admin-pill--warning">OPEN {{ pendingTasks.length }}</span>
         </div>
-        <SparkBars :points="dashboard.weeklyTrend" />
+
+        <table v-if="pendingTasks.length" class="admin-table">
+          <thead>
+            <tr>
+              <th>到期时间</th>
+              <th>任务</th>
+              <th>柜机</th>
+              <th>人员</th>
+              <th>处理</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="task in pendingTasks" :key="task.id">
+              <td class="admin-code">{{ task.dueAt.slice(0, 16).replace("T", " ") }}</td>
+              <td>
+                <span class="admin-table__strong">{{ task.title }}</span>
+                <span class="admin-table__subtext">{{ task.detail }}</span>
+              </td>
+              <td>
+                <RouterLink v-if="task.deviceCode" class="admin-link" :to="`/operations/${task.deviceCode}`">
+                  {{ task.deviceCode }}
+                </RouterLink>
+                <span v-else>-</span>
+              </td>
+              <td>
+                <RouterLink v-if="task.targetUserId" class="admin-link" :to="`/users/${task.targetUserId}`">
+                  {{ task.targetUserId }}
+                </RouterLink>
+                <span v-else>-</span>
+              </td>
+              <td class="dashboard-task-cell">
+                <button
+                  class="admin-button admin-button--ghost"
+                  :disabled="resolvingTaskId === task.id"
+                  @click="resolveTask(task.id)"
+                >
+                  {{ resolvingTaskId === task.id ? "处理中" : "手动完成" }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="admin-empty">
+          <div class="admin-empty__title">{{ loading ? "正在加载任务" : "当前没有待处理事件" }}</div>
+          <div class="admin-empty__body">缺货、设备异常、临期和用户反馈会统一进入这里。</div>
+        </div>
       </article>
 
-      <article class="admin-card panel">
-        <div class="panel__header">
-          <div>
-            <span class="admin-pill">需求结构</span>
-            <h2 class="panel__title">品类需求分布</h2>
-          </div>
-        </div>
-        <div class="demand">
-          <div v-for="item in dashboard.demandByCategory" :key="item.category" class="demand__row">
-            <span>{{ categoryLabelMap[item.category] }}</span>
-            <strong>{{ item.count }}</strong>
-          </div>
-        </div>
-      </article>
-
-      <article class="admin-card panel">
-        <div class="panel__header">
-          <div>
-            <span class="admin-pill">预警队列</span>
-            <h2 class="panel__title">当前待办</h2>
-          </div>
-        </div>
-        <div class="alert-list">
-          <div v-for="alert in dashboard.openAlerts" :key="alert.id" class="alert-list__row">
+      <aside class="admin-grid">
+        <article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
             <div>
-              <strong>{{ alert.title }}</strong>
-              <p class="admin-subtitle">{{ alert.detail }}</p>
+              <span class="admin-kicker">快速入口</span>
+              <h3 class="admin-panel__title">货物、柜机与日志工作台</h3>
             </div>
-            <span class="admin-pill">{{ alert.dueAt.slice(5, 10) }}</span>
           </div>
+
+          <div class="admin-list">
+            <div class="admin-list__row">
+              <div class="admin-list__main">
+                <span class="admin-list__title">货物总览</span>
+                <span class="admin-table__subtext">查看各商品种类数量、柜机分布和货品预警模板。</span>
+              </div>
+              <RouterLink class="admin-link" to="/goods">打开</RouterLink>
+            </div>
+            <div class="admin-list__row">
+              <div class="admin-list__main">
+                <span class="admin-list__title">柜机监控</span>
+                <span class="admin-table__subtext">按柜机查看门状态、库存和当前异常。</span>
+              </div>
+              <RouterLink class="admin-link" to="/operations">打开</RouterLink>
+            </div>
+            <div class="admin-list__row">
+              <div class="admin-list__main">
+                <span class="admin-list__title">日志总览</span>
+                <span class="admin-table__subtext">按人、柜、货和事件查看动作日志。</span>
+              </div>
+              <RouterLink class="admin-link" to="/logs">打开</RouterLink>
+            </div>
+          </div>
+        </article>
+      </aside>
+    </section>
+
+    <section class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">汇总日志</p>
+          <h3 class="admin-page__section-title">货物调动、告警与关键操作</h3>
         </div>
+        <RouterLink class="admin-link" to="/logs">进入日志总览</RouterLink>
+      </div>
+
+      <article class="admin-panel admin-panel-block">
+        <table v-if="summaryLogs.length" class="admin-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>动作</th>
+              <th>动作人</th>
+              <th>主体</th>
+              <th>状态</th>
+              <th>详情</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="log in summaryLogs" :key="log.id">
+              <td class="admin-code">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</td>
+              <td>
+                <RouterLink class="admin-link" :to="resolveLogLink(log)">{{ log.description }}</RouterLink>
+                <span class="admin-table__subtext">{{ log.detail }}</span>
+              </td>
+              <td>
+                <RouterLink v-if="resolveActorRoute(log)" class="admin-link" :to="resolveActorRoute(log)!">
+                  {{ log.actor.name }}
+                </RouterLink>
+                <span v-else>{{ log.actor.name }}</span>
+                <span class="admin-table__subtext">{{ log.actor.type }} · {{ log.type }}</span>
+              </td>
+              <td>
+                <div class="admin-inline-links">
+                  <RouterLink
+                    v-if="resolveSubjectLink(log.primarySubject)"
+                    class="admin-link"
+                    :to="resolveSubjectLink(log.primarySubject)!"
+                  >
+                    {{ log.primarySubject?.label }}
+                  </RouterLink>
+                  <RouterLink
+                    v-if="resolveSubjectLink(log.secondarySubject)"
+                    class="admin-link"
+                    :to="resolveSubjectLink(log.secondarySubject)!"
+                  >
+                    {{ log.secondarySubject?.label }}
+                  </RouterLink>
+                  <span v-if="!log.primarySubject && !log.secondarySubject">-</span>
+                </div>
+              </td>
+              <td>
+                <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
+                  {{ formatLogStatus(log.status) }}
+                </span>
+              </td>
+              <td>
+                <RouterLink class="admin-link" :to="resolveLogLink(log)">详情</RouterLink>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="admin-empty">
+          <div class="admin-empty__title">{{ loading ? "正在加载汇总日志" : "当前没有可展示日志" }}</div>
+          <div class="admin-empty__body">补货、取货、异常和手工处理日志会显示在这里。</div>
+        </div>
+      </article>
+    </section>
+
+    <div v-if="activeBucket && activeBucketData" class="dashboard-drawer-backdrop" @click.self="closeBucket">
+      <article class="dashboard-drawer admin-panel">
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">服务名单</span>
+            <h3 class="admin-panel__title">{{ bucketMeta[activeBucket].title }}</h3>
+          </div>
+          <button class="admin-button admin-button--ghost" @click="closeBucket">关闭</button>
+        </div>
+
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>人员</th>
+              <th>手机号</th>
+              <th>片区</th>
+              <th>完成度</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="person in activeBucketData.users" :key="person.userId">
+              <td>
+                <RouterLink class="admin-link" :to="`/users/${person.userId}`" @click="closeBucket">
+                  {{ person.name }}
+                </RouterLink>
+              </td>
+              <td class="admin-code">{{ person.phone }}</td>
+              <td>{{ person.neighborhood ?? "-" }}</td>
+              <td>
+                <span class="admin-table__strong">{{ person.summary }}</span>
+                <span class="admin-table__subtext">{{ person.fulfilledGoods }}/{{ person.totalGoods }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </article>
     </div>
   </section>
 </template>
 
 <style scoped>
-.page {
+.dashboard-stat-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dashboard-task-cell {
+  width: 112px;
+  white-space: nowrap;
+}
+
+.dashboard-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
   display: grid;
-  gap: 24px;
+  justify-items: end;
+  padding: 16px;
+  background: rgba(21, 31, 43, 0.26);
 }
 
-.page__hero {
+.dashboard-drawer {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
   display: grid;
-  grid-template-columns: 1.35fr 1fr;
-  gap: 24px;
-  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  overflow: auto;
 }
 
-.page__lead {
-  max-width: 42ch;
-}
+@media (max-width: 720px) {
+  .dashboard-drawer-backdrop {
+    justify-items: stretch;
+    padding: 0;
+  }
 
-.page__grid {
-  display: grid;
-  gap: 24px;
-}
-
-.page__stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.panel {
-  padding: 22px;
-}
-
-.panel__header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.panel__title {
-  margin: 0.8rem 0 0;
-  font-size: 1.6rem;
-}
-
-.demand,
-.alert-list {
-  display: grid;
-  gap: 14px;
-}
-
-.demand__row,
-.alert-list__row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--admin-line);
-}
-
-@media (max-width: 1100px) {
-  .page__hero,
-  .page__stats {
-    grid-template-columns: 1fr;
+  .dashboard-drawer {
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
   }
 }
 </style>

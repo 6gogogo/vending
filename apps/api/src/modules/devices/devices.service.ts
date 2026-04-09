@@ -1,7 +1,8 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 
-import type { DeviceGoods, DeviceRecord, DeviceStatus, GoodsCategory } from "@vm/shared-types";
+import type { DeviceGoods, DeviceMonitoringDetail, DeviceRecord, DeviceStatus, GoodsCategory } from "@vm/shared-types";
 
+import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { SmartVmGateway } from "./smartvm.gateway";
 
@@ -13,17 +14,133 @@ export class DevicesService {
   ) {}
 
   list() {
-    return this.store.devices;
+    return this.store.devices.map((device) => ({
+      ...device,
+      runtime: this.store.getDeviceRuntime(device.deviceCode)
+    }));
   }
 
   getByCode(deviceCode: string) {
     const device = this.store.devices.find((entry) => entry.deviceCode === deviceCode);
 
     if (!device) {
-      throw new NotFoundException("Device not found.");
+      throw new NotFoundException("未找到对应柜机。");
     }
 
     return device;
+  }
+
+  monitoringDetail(deviceCode: string): DeviceMonitoringDetail {
+    const device = this.getByCode(deviceCode);
+    const businessDateKey = getBusinessDayKey(new Date());
+    const recentEvents = this.store.events
+      .filter((entry) => entry.deviceCode === deviceCode)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, 12);
+    const recentLogs = this.store.logs
+      .filter(
+        (entry) =>
+          entry.primarySubject?.id === deviceCode ||
+          entry.secondarySubject?.id === deviceCode ||
+          entry.metadata?.deviceCode === deviceCode
+      )
+      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+      .slice(0, 12);
+    const businessDayRecords = this.store.inventory.filter(
+      (entry) =>
+        entry.deviceCode === deviceCode && getBusinessDayKey(entry.happenedAt) === businessDateKey
+    );
+    const businessDayServedUsers = Object.values(
+      businessDayRecords.reduce<Record<string, {
+        userId: string;
+        userName: string;
+        role: DeviceMonitoringDetail["businessDayServedUsers"][number]["role"];
+        goods: Map<string, number>;
+        totalQuantity: number;
+        lastServedAt: string;
+      }>>((accumulator, entry) => {
+        if (!["pickup", "donation", "manual-restock", "manual-deduction"].includes(entry.type)) {
+          return accumulator;
+        }
+
+        const user = this.store.users.find((candidate) => candidate.id === entry.userId);
+        const existing =
+          accumulator[entry.userId] ??
+          {
+            userId: entry.userId,
+            userName: user?.name ?? entry.userId,
+            role: user?.role ?? "special",
+            goods: new Map<string, number>(),
+            totalQuantity: 0,
+            lastServedAt: entry.happenedAt
+          };
+
+        existing.goods.set(entry.goodsName, (existing.goods.get(entry.goodsName) ?? 0) + entry.quantity);
+        existing.totalQuantity += entry.quantity;
+        if (entry.happenedAt > existing.lastServedAt) {
+          existing.lastServedAt = entry.happenedAt;
+        }
+        accumulator[entry.userId] = existing;
+        return accumulator;
+      }, {})
+    )
+      .map((entry) => ({
+        userId: entry.userId,
+        userName: entry.userName,
+        role: entry.role,
+        goodsSummary: Array.from(entry.goods.entries())
+          .map(([goodsName, quantity]) => `${goodsName} x${quantity}`)
+          .join("，"),
+        totalQuantity: entry.totalQuantity,
+        lastServedAt: entry.lastServedAt
+      }))
+      .sort((left, right) => right.lastServedAt.localeCompare(left.lastServedAt));
+    const stockChanges = device.doors
+      .flatMap((door) => door.goods)
+      .map((goods) => {
+        const deltaSinceStartOfBusinessDay = businessDayRecords.reduce((sum, entry) => {
+          if (entry.goodsId !== goods.goodsId) {
+            return sum;
+          }
+
+          if (entry.type === "pickup" || entry.type === "expired" || entry.type === "manual-deduction") {
+            return sum - entry.quantity;
+          }
+
+          if (entry.type === "donation" || entry.type === "manual-restock") {
+            return sum + entry.quantity;
+          }
+
+          return sum;
+        }, 0);
+
+        return {
+          goodsId: goods.goodsId,
+          goodsName: goods.name,
+          category: goods.category,
+          currentStock: goods.stock,
+          deltaSinceStartOfBusinessDay
+        };
+      });
+
+    return {
+      device,
+      runtime: this.store.getDeviceRuntime(deviceCode),
+      businessDateKey,
+      servedUsers: new Set(
+        this.store.inventory
+          .filter((entry) => entry.deviceCode === deviceCode && entry.type === "pickup")
+          .map((entry) => entry.userId)
+      ).size,
+      totalStock: device.doors.flatMap((door) => door.goods).reduce((sum, goods) => sum + goods.stock, 0),
+      pendingTasks: this.store.alerts
+        .filter((entry) => entry.deviceCode === deviceCode && entry.status === "open")
+        .sort((left, right) => left.dueAt.localeCompare(right.dueAt)),
+      recentEvents,
+      recentLogs,
+      businessDayServedUsers,
+      stockChanges
+    };
   }
 
   async getGoods(deviceCode: string, doorNum?: string) {
@@ -55,6 +172,102 @@ export class DevicesService {
     return localDevice.doors
       .filter((door) => !doorNum || door.doorNum === doorNum)
       .flatMap((door) => door.goods);
+  }
+
+  async refreshDevice(deviceCode: string, actorUserId?: string) {
+    const device = this.getByCode(deviceCode);
+    const now = new Date().toISOString();
+    device.lastSeenAt = now;
+    this.store.updateDeviceRuntime(deviceCode, {
+      lastRefreshAt: now
+    });
+    this.store.logOperation({
+      category: "device",
+      type: "manual-refresh-device",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: device.deviceCode,
+        label: device.name
+      },
+      description: `管理员刷新了 ${device.name} 的设备状态。`,
+      detail: `设备 ${device.deviceCode} 已执行手工刷新，最近心跳时间更新为 ${now}。`,
+      metadata: {
+        deviceCode: device.deviceCode
+      }
+    });
+
+    return this.monitoringDetail(deviceCode);
+  }
+
+  async remoteOpen(deviceCode: string, payload?: { doorNum?: string }, actorUserId?: string) {
+    const device = this.getByCode(deviceCode);
+    const admin =
+      this.store.users.find((entry) => entry.id === actorUserId) ??
+      this.store.users.find((entry) => entry.role === "admin");
+    const eventId = this.store.createId("event");
+    const createdAt = new Date().toISOString();
+    const openResult = await this.smartVmGateway.openDoor({
+      userId: admin?.id ?? "admin-virtual",
+      eventId,
+      deviceCode,
+      payStyle: "2",
+      doorNum: payload?.doorNum ?? "1",
+      phone: admin?.phone ?? "13800000001"
+    });
+
+    this.store.events.unshift({
+      eventId,
+      orderNo: openResult.orderNo,
+      userId: admin?.id ?? "admin-virtual",
+      phone: admin?.phone ?? "13800000001",
+      role: "admin",
+      deviceCode,
+      doorNum: payload?.doorNum ?? "1",
+      status: "created",
+      createdAt,
+      updatedAt: createdAt,
+      amount: 0,
+      goods: []
+    });
+
+    this.store.updateDeviceRuntime(deviceCode, {
+      lastCommandAt: createdAt,
+      openedAfterLastCommand: false
+    });
+
+    this.store.logOperation({
+      category: "admin",
+      type: "remote-open-device",
+      status: "pending",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: device.deviceCode,
+        label: device.name
+      },
+      secondarySubject: {
+        type: "event",
+        id: eventId,
+        label: openResult.orderNo
+      },
+      description: `管理员向 ${device.name} 下发了远程开门指令。`,
+      detail: `设备 ${device.deviceCode} 已收到远程开门请求，等待门状态回调。`,
+      relatedEventId: eventId,
+      relatedOrderNo: openResult.orderNo,
+      metadata: {
+        deviceCode,
+        doorNum: payload?.doorNum ?? "1"
+      }
+    });
+
+    return {
+      eventId,
+      orderNo: openResult.orderNo,
+      deviceCode,
+      doorNum: payload?.doorNum ?? "1"
+    };
   }
 
   findGoods(deviceCode: string, goodsId: string) {
@@ -101,7 +314,7 @@ export class DevicesService {
       imageUrl?: string;
       expiresAt?: string;
     }>;
-  }) {
+  }, actorUserId?: string) {
     const now = new Date().toISOString();
     const doorNum = payload.doorNum ?? "1";
     const normalizedGoods: DeviceGoods[] = payload.goods.map((goods) => ({
@@ -138,6 +351,22 @@ export class DevicesService {
         })();
 
       targetDoor.goods = normalizedGoods;
+      this.store.logOperation({
+        category: "device",
+        type: "upsert-mock-device",
+        status: "success",
+        actor: this.getAdminActor(actorUserId),
+        primarySubject: {
+          type: "device",
+          id: existing.deviceCode,
+          label: existing.name
+        },
+        description: `管理员更新了模拟柜机 ${existing.name}。`,
+        detail: `设备 ${existing.deviceCode} 的模拟货道数据已重新写入。`,
+        metadata: {
+          deviceCode: existing.deviceCode
+        }
+      });
       return existing;
     }
 
@@ -157,6 +386,42 @@ export class DevicesService {
     };
 
     this.store.devices.unshift(created);
+    this.store.logOperation({
+      category: "device",
+      type: "create-mock-device",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: created.deviceCode,
+        label: created.name
+      },
+      description: `管理员新增了模拟柜机 ${created.name}。`,
+      detail: `设备 ${created.deviceCode} 已创建，并写入初始货道与库存数据。`,
+      metadata: {
+        deviceCode: created.deviceCode
+      }
+    });
     return created;
+  }
+
+  private getAdminActor(actorUserId?: string) {
+    const admin =
+      this.store.users.find((entry) => entry.id === actorUserId) ??
+      this.store.users.find((entry) => entry.role === "admin");
+
+    if (admin) {
+      return {
+        type: "admin" as const,
+        id: admin.id,
+        name: admin.name,
+        role: admin.role
+      };
+    }
+
+    return {
+      type: "system" as const,
+      name: "系统"
+    };
   }
 }

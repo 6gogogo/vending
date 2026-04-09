@@ -27,9 +27,9 @@
     }
   ],
   "globalStyle": {
-    "navigationBarTextStyle": "white",
+    "navigationBarTextStyle": "black",
     "navigationBarTitleText": "公益智助柜",
-    "navigationBarBackgroundColor": "#0f172a",
-    "backgroundColor": "#08111f"
+    "navigationBarBackgroundColor": "#f6efe3",
+    "backgroundColor": "#f6efe3"
   }
 }

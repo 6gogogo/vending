@@ -2,10 +2,11 @@ import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 
 import type { GoodsCategory, UserRecord } from "@vm/shared-types";
 
+import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
-
-const isSameDay = (left: string, right: string) =>
-  new Date(left).toDateString() === new Date(right).toDateString();
+import {
+  getActiveWindowCategoryQuota
+} from "../../common/policies/special-access-policy.utils";
 
 @Injectable()
 export class AccessRulesService {
@@ -30,6 +31,24 @@ export class AccessRulesService {
       rule.categoryLimit = patch.categoryLimit;
     }
 
+    this.store.logOperation({
+      category: "admin",
+      type: "update-access-rule",
+      status: "success",
+      actor: {
+        type: "admin",
+        id: this.store.users.find((entry) => entry.role === "admin")?.id,
+        name: this.store.users.find((entry) => entry.role === "admin")?.name ?? "管理员",
+        role: "admin"
+      },
+      description: `管理员更新了 ${role} 角色的领取规则。`,
+      detail: `每日上限 ${rule.dailyLimit}，品类限制 ${JSON.stringify(rule.categoryLimit)}。`,
+      metadata: {
+        role,
+        dailyLimit: rule.dailyLimit
+      }
+    });
+
     return rule;
   }
 
@@ -47,27 +66,37 @@ export class AccessRulesService {
       (entry) =>
         entry.userId === user.id &&
         entry.type === "pickup" &&
-        isSameDay(entry.happenedAt, new Date().toISOString())
+        getBusinessDayKey(entry.happenedAt) === getBusinessDayKey(new Date())
+    );
+    const policyQuota = getActiveWindowCategoryQuota(
+      this.store.specialAccessPolicies,
+      user.id,
+      this.store.inventory,
+      this.store.goodsCatalog,
+      new Date()
     );
 
-    const usedByCategory = todayPickups.reduce<Record<string, number>>((accumulator, entry) => {
-      accumulator[entry.category] = (accumulator[entry.category] ?? 0) + entry.quantity;
-      return accumulator;
-    }, {});
-
-    const remainingToday = Object.entries(quota?.categoryLimit ?? {}).reduce<Record<string, number>>(
-      (accumulator, [category, limit]) => {
-        accumulator[category] = Math.max(0, (limit ?? 0) - (usedByCategory[category] ?? 0));
-        return accumulator;
-      },
-      {}
-    );
+    const remainingToday =
+      Object.keys(policyQuota.remainingByCategory).length > 0
+        ? policyQuota.remainingByCategory
+        : Object.entries(quota?.categoryLimit ?? {}).reduce<Record<string, number>>(
+            (accumulator, [category, limit]) => {
+              const usedByCategory = todayPickups
+                .filter((entry) => entry.category === category)
+                .reduce((sum, entry) => sum + entry.quantity, 0);
+              accumulator[category] = Math.max(0, (limit ?? 0) - usedByCategory);
+              return accumulator;
+            },
+            {}
+          );
 
     return {
       role: user.role,
       limit: quota,
       remainingToday,
-      usedCount: todayPickups.reduce((sum, entry) => sum + entry.quantity, 0)
+      remainingByGoods: policyQuota.remainingByGoods,
+      usedCount: todayPickups.reduce((sum, entry) => sum + entry.quantity, 0),
+      activeWindows: policyQuota.activeWindows
     };
   }
 
@@ -83,10 +112,10 @@ export class AccessRulesService {
 
   assertCanOpenSpecialCabinet(user: UserRecord, category?: GoodsCategory) {
     const summary = this.getQuotaSummaryForUser(user);
-    const dailyLimit = summary.limit?.dailyLimit ?? 0;
+    const activeWindows = summary.activeWindows ?? [];
 
-    if ((summary.usedCount ?? 0) >= dailyLimit) {
-      throw new BadRequestException("今日免费领取次数已用完。");
+    if (!activeWindows.length) {
+      throw new BadRequestException("当前不在可领取时间段内。");
     }
 
     if (category) {
@@ -95,6 +124,12 @@ export class AccessRulesService {
       if (remainingForCategory <= 0) {
         throw new BadRequestException(`当前品类 ${category} 的领取额度已用完。`);
       }
+    } else if (
+      Object.values((summary.remainingByGoods as Record<string, number> | undefined) ?? {}).every(
+        (value) => value <= 0
+      )
+    ) {
+      throw new BadRequestException("当前时间段内没有可领取额度。");
     }
 
     return summary;

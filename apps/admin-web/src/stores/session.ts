@@ -1,7 +1,81 @@
 import { defineStore } from "pinia";
 
+const storageKey = "vm-admin-session";
+
+interface AdminSessionUser {
+  id: string;
+  role: "admin";
+  name: string;
+  phone: string;
+  tags: string[];
+}
+
+interface AdminSessionState {
+  token?: string;
+  user?: AdminSessionUser;
+  validatedToken?: string;
+}
+
+const readStoredState = (): AdminSessionState => {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const raw = window.localStorage.getItem(storageKey);
+
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw) as AdminSessionState;
+  } catch {
+    return {};
+  }
+};
+
 export const useAdminSessionStore = defineStore("admin-session", {
-  state: () => ({
-    role: "admin" as const
-  })
+  state: (): AdminSessionState => ({
+    ...readStoredState(),
+    validatedToken: undefined
+  }),
+  getters: {
+    isAuthenticated: (state) => Boolean(state.token && state.user),
+    needsValidation: (state) => Boolean(state.token && state.token !== state.validatedToken)
+  },
+  actions: {
+    setSession(payload: { token: string; user: AdminSessionUser }) {
+      this.token = payload.token;
+      this.user = payload.user;
+      this.validatedToken = payload.token;
+      this.persist();
+    },
+    markValidated(token: string) {
+      this.validatedToken = token;
+    },
+    clearSession() {
+      this.token = undefined;
+      this.user = undefined;
+      this.validatedToken = undefined;
+      this.persist();
+    },
+    persist() {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      if (!this.token || !this.user) {
+        window.localStorage.removeItem(storageKey);
+        return;
+      }
+
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          token: this.token,
+          user: this.user
+        })
+      );
+    }
+  }
 });

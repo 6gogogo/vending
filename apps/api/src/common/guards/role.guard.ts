@@ -10,11 +10,15 @@ import { Reflector } from "@nestjs/core";
 import type { UserRole } from "@vm/shared-types";
 
 import { ALLOWED_ROLES_KEY } from "./allowed-roles.decorator";
+import { InMemoryStoreService } from "../store/in-memory-store.service";
 
 @Injectable()
 export class RoleGuard implements CanActivate {
   // 双保险：正常情况下由 Nest 注入 Reflector；如果未来某处把 Guard 当普通类用，也不会直接崩掉。
-  constructor(@Inject(Reflector) private readonly reflector: Reflector = new Reflector()) {}
+  constructor(
+    @Inject(Reflector) private readonly reflector: Reflector = new Reflector(),
+    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService = new InMemoryStoreService()
+  ) {}
 
   canActivate(context: ExecutionContext) {
     const allowedRoles = this.reflector.getAllAndOverride<UserRole[]>(ALLOWED_ROLES_KEY, [
@@ -31,7 +35,34 @@ export class RoleGuard implements CanActivate {
       query: Record<string, string | undefined>;
       body?: Record<string, unknown>;
       userRole?: UserRole;
+      authUser?: { id: string; role: UserRole; name: string };
     }>();
+
+    const authHeader = request.headers.authorization ?? request.headers.Authorization;
+    const bearerToken = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length)
+      : undefined;
+    const sessionUser = this.store.getSessionUser(bearerToken);
+
+    if (sessionUser) {
+      if (!allowedRoles.includes(sessionUser.role)) {
+        throw new ForbiddenException("当前角色无权访问该接口。");
+      }
+
+      request.userRole = sessionUser.role;
+      request.authUser = {
+        id: sessionUser.id,
+        role: sessionUser.role,
+        name: sessionUser.name
+      };
+      return true;
+    }
+
+    const allowsAdmin = allowedRoles.includes("admin");
+
+    if (allowsAdmin) {
+      throw new ForbiddenException("当前接口需要管理员登录后访问。");
+    }
 
     const headerRole = request.headers["x-role"];
     const queryRole = request.query.role;

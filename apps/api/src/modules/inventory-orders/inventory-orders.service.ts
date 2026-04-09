@@ -79,6 +79,42 @@ export class InventoryOrdersService {
           });
         }
       }
+
+      const actorUser = this.store.users.find((entry) => entry.id === movement.userId);
+      this.store.logOperation({
+        category: movement.type === "donation" ? "restock" : "pickup",
+        type: movement.type === "donation" ? "inventory-restock" : "inventory-pickup",
+        status: "success",
+        actor: actorUser
+          ? {
+              type: actorUser.role === "admin" ? "admin" : actorUser.role,
+              id: actorUser.id,
+              name: actorUser.name,
+              role: actorUser.role
+            }
+          : {
+              type: "system",
+              name: "系统"
+            },
+        primarySubject: {
+          type: "device",
+          id: movement.deviceCode,
+          label: movement.deviceCode
+        },
+        secondarySubject: {
+          type: "goods",
+          id: movement.goodsId,
+          label: movement.goodsName
+        },
+        relatedEventId: event.eventId,
+        relatedOrderNo: event.orderNo,
+        metadata: {
+          goodsId: movement.goodsId,
+          goodsName: movement.goodsName,
+          quantity: movement.quantity,
+          deviceCode: movement.deviceCode
+        }
+      });
     }
 
     return movements;
@@ -139,6 +175,35 @@ export class InventoryOrdersService {
     event.status = "refunded";
     event.updatedAt = new Date().toISOString();
     this.store.inventory.unshift(movement);
+    this.store.logOperation({
+      category: "inventory",
+      type: "manual-refund",
+      status: "success",
+      actor: {
+        type: "admin",
+        id: this.store.users.find((entry) => entry.role === "admin")?.id,
+        name: this.store.users.find((entry) => entry.role === "admin")?.name ?? "管理员",
+        role: "admin"
+      },
+      primarySubject: {
+        type: "device",
+        id: event.deviceCode,
+        label: event.deviceCode
+      },
+      secondarySubject: {
+        type: "event",
+        id: event.eventId,
+        label: event.orderNo
+      },
+      description: `管理员对订单 ${orderNo} 执行了退款。`,
+      detail: `退款金额 ${amount}，交易号 ${transactionId}。`,
+      relatedEventId: event.eventId,
+      relatedOrderNo: orderNo,
+      metadata: {
+        amount,
+        transactionId
+      }
+    });
 
     return {
       movement,

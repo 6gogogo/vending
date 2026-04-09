@@ -1,4 +1,4 @@
-import { Body, Controller, Inject, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Inject, Post } from "@nestjs/common";
 
 import { ok } from "../../common/dto/api-response";
 import { AuthService } from "./auth.service";
@@ -15,5 +15,18 @@ export class AuthController {
   @Post("login")
   login(@Body() body: { phone: string; code: string }) {
     return ok(this.authService.login(body.phone, body.code));
+  }
+
+  @Post("admin-login")
+  adminLogin(@Body() body: { phone: string; code: string }) {
+    return ok(this.authService.adminLogin(body.phone, body.code));
+  }
+
+  @Get("session")
+  session(@Headers("authorization") authorization?: string) {
+    const token = authorization?.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length)
+      : undefined;
+    return ok(this.authService.getAdminSession(token));
   }
 }

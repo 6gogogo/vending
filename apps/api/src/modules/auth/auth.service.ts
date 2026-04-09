@@ -49,4 +49,33 @@ export class AuthService {
       quota: this.accessRulesService.getQuotaSummaryForUser(user)
     };
   }
+
+  adminLogin(phone: string, code: string) {
+    const response = this.login(phone, code);
+
+    if (response.user.role !== "admin") {
+      throw new UnauthorizedException("当前账号不是管理员，无法登录后台。");
+    }
+
+    return response;
+  }
+
+  getAdminSession(token?: string) {
+    const user = this.store.getSessionUser(token);
+
+    if (!user || user.role !== "admin") {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        role: user.role,
+        name: user.name,
+        phone: user.phone,
+        tags: user.tags
+      }
+    };
+  }
 }
