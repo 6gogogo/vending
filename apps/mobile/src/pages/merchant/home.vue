@@ -1,43 +1,29 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
-import type { DeviceStatus, DeviceRecord, InventoryMovement } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
-import { useCabinetFlow } from "../../composables/useCabinetFlow";
-import { appCopy } from "../../constants/copy";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
 
 const sessionStore = useSessionStore();
-const devices = ref<DeviceRecord[]>([]);
-const records = ref<InventoryMovement[]>([]);
-const alerts = ref<Array<{ id: string; title: string; detail: string; dueAt: string }>>([]);
 const loading = ref(false);
 const summary = ref({
   donatedUnits: 0,
   expiredUnits: 0,
   pendingAlerts: 0
 });
-const { openCabinet, latestOrder, latestEventId, loading: opening } = useCabinetFlow();
-
-const statusLabelMap: Record<DeviceStatus, string> = {
-  online: "在线",
-  offline: "离线",
-  maintenance: "维护"
-};
-
-const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
-  online: "success",
-  offline: "danger",
-  maintenance: "warning"
-};
+const templateCount = ref(0);
+const recentLogs = ref<Array<{ id: string; description: string; occurredAt: string }>>([]);
 
 const load = async () => {
+  await sessionStore.bootstrap();
+
   if (!sessionStore.user) {
     uni.reLaunch({
       url: "/pages/common/login"
@@ -47,20 +33,23 @@ const load = async () => {
 
   loading.value = true;
   try {
-    const [deviceResponse, summaryResponse, alertResponse] = await Promise.all([
-      mobileApi.listDevices(),
+    const [summaryResponse, templateResponse, traceResponse] = await Promise.all([
       mobileApi.merchantSummary(sessionStore.user.id),
-      mobileApi.alerts("merchant")
+      mobileApi.merchantTemplates(),
+      mobileApi.merchantRestockTraces()
     ]);
 
-    devices.value = deviceResponse;
-    records.value = summaryResponse.records;
     summary.value = {
       donatedUnits: summaryResponse.donatedUnits,
       expiredUnits: summaryResponse.expiredUnits,
       pendingAlerts: summaryResponse.pendingAlerts
     };
-    alerts.value = alertResponse;
+    templateCount.value = templateResponse.length;
+    recentLogs.value = traceResponse.logs.slice(0, 4).map((entry) => ({
+      id: entry.id,
+      description: entry.description,
+      occurredAt: entry.occurredAt
+    }));
   } catch (error) {
     uni.showToast({
       title: getErrorMessage(error),
@@ -71,187 +60,135 @@ const load = async () => {
   }
 };
 
-const formatDateTime = (value: string) => value.slice(0, 16).replace("T", " ");
+const navigate = (url: string) => {
+  uni.navigateTo({ url });
+};
 
-onShow(load);
+onShow(() => {
+  load();
+});
 </script>
 
 <template>
-  <MobileShell eyebrow="商户端" :title="sessionStore.user?.name ?? '商户账号'" :subtitle="appCopy.merchantWelcome">
-    <template #hero-extra>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-box">
-          <text class="hero-box__label">近期协同</text>
-          <text class="hero-box__value">{{ latestOrder ?? "等待新的投放动作" }}</text>
-          <text class="hero-box__meta">{{ latestEventId ? `事件 ${latestEventId}` : "发起开柜后将在这里展示最近进度" }}</text>
-        </view>
-      </GlassCard>
-    </template>
-
+  <MobileShell eyebrow="爱心商户" :title="sessionStore.user?.name ?? '爱心商户'" :subtitle="appCopy.merchantWelcome">
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日运营概览</text>
-          <text class="vm-subtitle">先看投放量、预警压力和过期处理，再安排补货动作。</text>
+          <text class="vm-subtitle">关注补货量、待处理问题和模板维护情况。</text>
         </view>
 
         <view class="metric-grid">
-          <ServiceMetric label="累计投放件数" :value="summary.donatedUnits" hint="近阶段已完成入柜" />
-          <ServiceMetric label="待处理预警" :value="summary.pendingAlerts" hint="优先查看到期任务" tone="warning" />
-          <ServiceMetric label="过期处理件数" :value="summary.expiredUnits" hint="用于核对回收与补扣" />
+          <ServiceMetric label="累计补货件数" :value="summary.donatedUnits" hint="当前账号历史累计" />
+          <ServiceMetric label="待处理反馈/预警" :value="summary.pendingAlerts" hint="优先处理异常与到期问题" tone="warning" />
+          <ServiceMetric label="模板数量" :value="templateCount" hint="常用货品模板总数" />
         </view>
-      </view>
-    </GlassCard>
-
-    <view class="vm-section">
-      <view class="section-heading">
-        <text class="section-heading__title">投放开柜</text>
-        <text class="vm-subtitle">按设备逐个发起开柜，便于线下补货和巡检。</text>
-      </view>
-
-      <view v-if="devices.length" class="device-list">
-        <GlassCard v-for="device in devices" :key="device.deviceCode">
-          <view class="vm-stack">
-            <view class="device-head">
-              <view>
-                <text class="device-head__title">{{ device.name }}</text>
-                <text class="vm-subtitle">{{ device.location }}</text>
-              </view>
-              <text class="vm-status" :class="`vm-status--${statusToneMap[device.status]}`">{{ statusLabelMap[device.status] }}</text>
-            </view>
-
-            <view class="device-foot">
-              <text class="device-foot__meta">柜机编号 {{ device.deviceCode }}</text>
-              <text class="device-foot__meta">最近在线 {{ formatDateTime(device.lastSeenAt) }}</text>
-            </view>
-
-            <button class="vm-button" :loading="opening" @tap="openCabinet(device.deviceCode)">发起投放开柜</button>
-          </view>
-        </GlassCard>
-      </view>
-      <GlassCard v-else tone="quiet">
-        <EmptyState
-          :title="loading ? '正在加载设备信息' : '暂无可操作设备'"
-          :description="loading ? '系统正在同步设备状态，请稍候。' : '请联系后台确认商户绑定的默认设备。'"
-        />
-      </GlassCard>
-    </view>
-
-    <GlassCard tone="warning">
-      <view class="vm-stack">
-        <view class="section-heading">
-          <text class="section-heading__title">待处理预警</text>
-          <text class="vm-subtitle">优先处理即将到期或需要回收的物资，避免库存浪费。</text>
-        </view>
-
-        <view v-if="alerts.length" class="task-list">
-          <view v-for="alert in alerts.slice(0, 4)" :key="alert.id" class="task-item">
-            <view class="task-item__main">
-              <text class="task-item__title">{{ alert.title }}</text>
-              <text class="task-item__meta">{{ alert.detail }}</text>
-            </view>
-            <text class="task-item__due">截至 {{ alert.dueAt.slice(5, 16).replace('T', ' ') }}</text>
-          </view>
-        </view>
-        <EmptyState v-else title="当前没有待处理预警" description="系统有新预警时，这里会优先提醒你处理。" />
       </view>
     </GlassCard>
 
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">最近投放记录</text>
-          <text class="vm-subtitle">便于对照实际投放批次与领取截止时间。</text>
+          <text class="section-heading__title">常用操作</text>
+          <text class="vm-subtitle">先建模板，再按模板补货，最后查看货物流向。</text>
         </view>
 
-        <view v-if="records.length" class="task-list">
-          <view v-for="record in records.slice(0, 4)" :key="record.id" class="task-item">
-            <view class="task-item__main">
-              <text class="task-item__title">{{ record.goodsName }}</text>
-              <text class="task-item__meta">
-                {{ record.expiresAt ? `领取截止 ${record.expiresAt.slice(5, 16).replace('T', ' ')}` : formatDateTime(record.happenedAt) }}
-              </text>
-            </view>
-            <text class="vm-status vm-status--success">投放 {{ record.quantity }} 件</text>
+        <view class="menu-grid">
+          <button class="menu-card" @tap="navigate('/pages/merchant/templates')">
+            <text class="menu-card__title">货品模板</text>
+            <text class="menu-card__desc">维护名称、分类、默认数量与保质天数</text>
+          </button>
+          <button class="menu-card" @tap="navigate('/pages/merchant/restock')">
+            <text class="menu-card__title">按模板补货</text>
+            <text class="menu-card__desc">选择柜机、数量、生产日期快速登记</text>
+          </button>
+          <button class="menu-card" @tap="navigate('/pages/merchant/traces')">
+            <text class="menu-card__title">货物去向</text>
+            <text class="menu-card__desc">查看自己补货批次、剩余量和日志去向</text>
+          </button>
+          <button class="menu-card" @tap="navigate('/pages/common/feedback')">
+            <text class="menu-card__title">提交反馈</text>
+            <text class="menu-card__desc">反馈机器故障、服务问题或其他情况</text>
+          </button>
+        </view>
+      </view>
+    </GlassCard>
+
+    <GlassCard tone="warning">
+      <view class="vm-stack">
+        <view class="section-heading">
+          <text class="section-heading__title">最近货物流动</text>
+          <text class="vm-subtitle">补货与异常处理会同步写入日志，便于追踪货物去向。</text>
+        </view>
+
+        <view v-if="recentLogs.length" class="log-list">
+          <view v-for="entry in recentLogs" :key="entry.id" class="log-item">
+            <text class="log-item__desc">{{ entry.description }}</text>
+            <text class="log-item__time">{{ entry.occurredAt.slice(0, 16).replace('T', ' ') }}</text>
           </view>
         </view>
-        <EmptyState v-else title="还没有投放记录" description="首次投放并完成结算后，这里会自动展示。" />
+        <EmptyState v-else :title="loading ? '正在加载日志' : '还没有补货日志'" description="完成首次补货后，这里会展示最近的货物流动记录。" />
       </view>
     </GlassCard>
   </MobileShell>
 </template>
 
 <style scoped>
-.hero-box,
 .section-heading {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
 }
 
-.hero-box__label,
-.hero-box__meta,
-.device-foot__meta,
-.task-item__meta {
-  font-size: 22rpx;
-  color: var(--vm-text-soft);
-}
-
-.hero-box__value,
-.section-heading__title,
-.device-head__title,
-.task-item__title {
+.section-heading__title {
   font-size: 30rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
 .metric-grid,
-.device-list,
-.task-list {
+.menu-grid,
+.log-list {
   display: grid;
   gap: 18rpx;
 }
 
-.device-head,
-.device-foot,
-.task-item {
+.menu-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-}
-
-.device-head {
+  flex-direction: column;
   align-items: flex-start;
+  gap: 10rpx;
+  min-height: 116rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid rgba(159, 127, 94, 0.14);
+  background: rgba(255, 255, 255, 0.62);
 }
 
-.device-foot {
-  flex-wrap: wrap;
+.menu-card__title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--vm-text);
 }
 
-.task-item {
+.menu-card__desc,
+.log-item__time {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+  text-align: left;
+}
+
+.log-item {
+  display: grid;
+  gap: 10rpx;
   padding: 22rpx 24rpx;
-  border-radius: 26rpx;
-  background: rgba(255, 255, 255, 0.6);
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.62);
   border: 1rpx solid rgba(159, 127, 94, 0.12);
 }
 
-.task-item__main {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.task-item__due {
-  font-size: 22rpx;
-  color: #8a5b11;
-  text-align: right;
-}
-
-@media screen and (min-width: 720px) {
-  .metric-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+.log-item__desc {
+  font-size: 26rpx;
+  color: var(--vm-text);
 }
 </style>

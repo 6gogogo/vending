@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const sandboxRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(sandboxRoot, "..");
 const demoSmartVmCredentials = {
   clientId: "sandbox-demo-client",
   key: "sandbox-demo-key"
@@ -22,6 +23,9 @@ const defaultSandboxConfig = {
 };
 
 const envFileCandidates = [
+  resolve(repoRoot, "apps/api/.env.example"),
+  resolve(repoRoot, "apps/api/.env"),
+  resolve(repoRoot, "apps/api/.env.local"),
   resolve(sandboxRoot, ".env.example"),
   resolve(sandboxRoot, ".env"),
   resolve(sandboxRoot, ".env.local")
@@ -65,6 +69,10 @@ const parseEnvFile = (filePath) => {
     const value = stripQuotes(line.slice(separatorIndex + 1));
 
     if (!key) {
+      continue;
+    }
+
+    if (value === "") {
       continue;
     }
 

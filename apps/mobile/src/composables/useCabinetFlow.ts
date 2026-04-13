@@ -19,21 +19,23 @@ export const useCabinetFlow = () => {
 
     loading.value = true;
     try {
-      const response = await mobileApi.openCabinet(
-        {
-          phone: sessionStore.user.phone,
-          deviceCode,
-          doorNum: "1",
-          category
-        },
-        sessionStore.user.role
-      );
+      const response = await mobileApi.openCabinet({
+        phone: sessionStore.user.phone,
+        deviceCode,
+        doorNum: "1",
+        category
+      });
 
       latestOrder.value = response.orderNo;
       latestEventId.value = response.eventId;
       if (response.remainingQuota) {
+        const normalizedQuota = Object.fromEntries(
+          Object.entries(response.remainingQuota).filter(([, value]) => value !== undefined)
+        ) as Record<string, number>;
+
         sessionStore.setQuota({
-          remainingToday: response.remainingQuota
+          ...(sessionStore.quota ?? { remainingToday: {} }),
+          remainingToday: normalizedQuota
         });
       }
 

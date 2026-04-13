@@ -8,21 +8,153 @@
       }
     },
     {
+      "path": "pages/common/app-login",
+      "style": {
+        "navigationBarTitleText": "登录"
+      }
+    },
+    {
+      "path": "pages/common/register",
+      "style": {
+        "navigationBarTitleText": "注册"
+      }
+    },
+    {
+      "path": "pages/common/profile",
+      "style": {
+        "navigationBarTitleText": "资料补全"
+      }
+    },
+    {
+      "path": "pages/common/review-status",
+      "style": {
+        "navigationBarTitleText": "审核状态"
+      }
+    },
+    {
+      "path": "pages/common/feedback",
+      "style": {
+        "navigationBarTitleText": "反馈"
+      }
+    },
+    {
+      "path": "pages/common/result",
+      "style": {
+        "navigationBarTitleText": "处理结果"
+      }
+    },
+    {
+      "path": "pages/tabs/primary",
+      "style": {
+        "navigationBarTitleText": "主入口"
+      }
+    },
+    {
+      "path": "pages/tabs/nearby",
+      "style": {
+        "navigationBarTitleText": "附近柜机"
+      }
+    },
+    {
+      "path": "pages/tabs/records",
+      "style": {
+        "navigationBarTitleText": "记录"
+      }
+    },
+    {
+      "path": "pages/tabs/settings",
+      "style": {
+        "navigationBarTitleText": "设置"
+      }
+    },
+    {
       "path": "pages/special/home",
       "style": {
         "navigationBarTitleText": "公益领取"
       }
     },
     {
+      "path": "pages/special/device-detail",
+      "style": {
+        "navigationBarTitleText": "柜机详情"
+      }
+    },
+    {
       "path": "pages/special/history",
       "style": {
-        "navigationBarTitleText": "领取记录"
+        "navigationBarTitleText": "服务记录"
       }
     },
     {
       "path": "pages/merchant/home",
       "style": {
         "navigationBarTitleText": "商户中心"
+      }
+    },
+    {
+      "path": "pages/merchant/templates",
+      "style": {
+        "navigationBarTitleText": "商品属性"
+      }
+    },
+    {
+      "path": "pages/merchant/restock",
+      "style": {
+        "navigationBarTitleText": "补货登记"
+      }
+    },
+    {
+      "path": "pages/merchant/traces",
+      "style": {
+        "navigationBarTitleText": "货物去向"
+      }
+    },
+    {
+      "path": "pages/admin/home",
+      "style": {
+        "navigationBarTitleText": "管理员端"
+      }
+    },
+    {
+      "path": "pages/admin/reviews",
+      "style": {
+        "navigationBarTitleText": "审核工作台"
+      }
+    },
+    {
+      "path": "pages/admin/users",
+      "style": {
+        "navigationBarTitleText": "人员管理"
+      }
+    },
+    {
+      "path": "pages/admin/user-detail",
+      "style": {
+        "navigationBarTitleText": "人员详情"
+      }
+    },
+    {
+      "path": "pages/admin/devices",
+      "style": {
+        "navigationBarTitleText": "柜机列表"
+      }
+    },
+    {
+      "path": "pages/admin/device-detail",
+      "style": {
+        "navigationBarTitleText": "柜机详情"
+      }
+    },
+    {
+      "path": "pages/admin/logs",
+      "style": {
+        "navigationBarTitleText": "日志记录"
+      }
+    },
+    {
+      "path": "pages/admin/log-detail",
+      "style": {
+        "navigationBarTitleText": "日志详情"
       }
     }
   ],
@@ -31,5 +163,37 @@
     "navigationBarTitleText": "公益智助柜",
     "navigationBarBackgroundColor": "#f6efe3",
     "backgroundColor": "#f6efe3"
+  },
+  "tabBar": {
+    "color": "#836d4d",
+    "selectedColor": "#2f8f66",
+    "backgroundColor": "#fffaf1",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/tabs/primary",
+        "text": "主入口",
+        "iconPath": "static/tabs/blank.png",
+        "selectedIconPath": "static/tabs/blank.png"
+      },
+      {
+        "pagePath": "pages/tabs/nearby",
+        "text": "柜机",
+        "iconPath": "static/tabs/blank.png",
+        "selectedIconPath": "static/tabs/blank.png"
+      },
+      {
+        "pagePath": "pages/tabs/records",
+        "text": "记录",
+        "iconPath": "static/tabs/blank.png",
+        "selectedIconPath": "static/tabs/blank.png"
+      },
+      {
+        "pagePath": "pages/tabs/settings",
+        "text": "设置",
+        "iconPath": "static/tabs/blank.png",
+        "selectedIconPath": "static/tabs/blank.png"
+      }
+    ]
   }
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 
 import type { OperationLogCategory, OperationLogStatus, OperationLogSubject } from "@vm/shared-types";
 
@@ -28,6 +28,29 @@ export class OperationLogsController {
         subjectId
       })
     );
+  }
+
+  @Get("export/file")
+  export(
+    @Res()
+    response: {
+      setHeader: (name: string, value: string) => void;
+      send: (body: string) => void;
+    },
+    @Query("category") category?: OperationLogCategory,
+    @Query("status") status?: OperationLogStatus,
+    @Query("subjectType") subjectType?: OperationLogSubject["type"],
+    @Query("subjectId") subjectId?: string
+  ) {
+    const file = this.operationLogsService.buildExport({
+      category,
+      status,
+      subjectType,
+      subjectId
+    });
+    response.setHeader("Content-Type", file.contentType);
+    response.setHeader("Content-Disposition", `attachment; filename=\"${file.filename}\"`);
+    response.send(file.body);
   }
 
   @Get(":id")

@@ -12,6 +12,7 @@ import OperationsPage from "../pages/OperationsPage.vue";
 import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
 import UserDetailPage from "../pages/UserDetailPage.vue";
 import UsersPage from "../pages/UsersPage.vue";
+import WarehousePage from "../pages/WarehousePage.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -46,6 +47,16 @@ export const router = createRouter({
             eyebrow: "货物总览",
             title: "货物总览与预警模板",
             description: "查看各商品种类数量、柜机分布，并批量设置货品预警模板。"
+          }
+        },
+        {
+          path: "/warehouse",
+          component: WarehousePage,
+          meta: {
+            group: "运营总览",
+            eyebrow: "本地仓库",
+            title: "本地仓库与盘点",
+            description: "处理本地仓库库存、调拨、盘点和 Excel 导出。"
           }
         },
         {
@@ -141,7 +152,7 @@ router.beforeEach(async (to) => {
   if (sessionStore.token && sessionStore.needsValidation) {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api"}/auth/session`,
+        `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/auth/session`,
         {
           headers: {
             Authorization: `Bearer ${sessionStore.token}`

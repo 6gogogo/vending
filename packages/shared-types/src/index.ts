@@ -1,6 +1,9 @@
 export type UserRole = "admin" | "merchant" | "special";
+export type MobileDisplayRole = "admin" | "merchant" | "normal";
+export type RegistrationStatus = "pending" | "approved" | "rejected";
 
 export type GoodsCategory = "food" | "drink" | "daily";
+export type InventoryLocationType = "device" | "warehouse";
 
 export type DeviceStatus = "online" | "offline" | "maintenance";
 
@@ -30,6 +33,12 @@ export type AlertGrade = "fault" | "feedback" | "warning";
 export type PolicyStatus = "active" | "inactive";
 export type GoodsBatchSource = "admin" | "merchant" | "system";
 export type OperationLogUndoState = "undoable" | "undone" | "not_undoable";
+export type UserLedgerStatus =
+  | "unregistered"
+  | "registered"
+  | "quota_unclaimed"
+  | "quota_partial"
+  | "quota_complete";
 
 export type ServiceCompletionStatus = "complete" | "partial" | "unserved" | "not_applicable";
 
@@ -51,22 +60,202 @@ export interface UserRecord {
   name: string;
   status: "active" | "inactive";
   neighborhood?: string;
+  regionId?: string;
+  regionName?: string;
+  ledgerStatus?: UserLedgerStatus;
   tags: string[];
   quota?: AccessQuota;
+  mobileProfileCompleted?: boolean;
+  profile?: {
+    note?: string;
+    contactName?: string;
+    address?: string;
+    organization?: string;
+    title?: string;
+  };
   merchantProfile?: {
     donationWindowDays: number;
     defaultDeviceCodes: string[];
   };
+  accessPolicies?: UserAccessPolicy[];
+}
+
+export interface RegistrationApplicationProfile {
+  name: string;
+  neighborhood?: string;
+  regionId?: string;
+  regionName?: string;
+  note?: string;
+  merchantName?: string;
+  contactName?: string;
+  address?: string;
+  organization?: string;
+  title?: string;
+}
+
+export interface RegistrationApplication {
+  id: string;
+  phone: string;
+  requestedRole: UserRole;
+  profile: RegistrationApplicationProfile;
+  status: RegistrationStatus;
+  reviewReason?: string;
+  linkedUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MobileAuthDraft {
+  token: string;
+  phone: string;
+  requestedRole?: UserRole;
+  linkedUserId?: string;
+  applicationId?: string;
+}
+
+export interface MobileSessionSnapshot {
+  token: string;
+  user: {
+    id: string;
+    role: UserRole;
+    name: string;
+    phone: string;
+    tags: string[];
+  };
+  quota?: {
+    role?: UserRole;
+    limit?: AccessQuota | CabinetAccessRule;
+    remainingToday: Record<string, number>;
+    remainingByGoods?: Record<string, number>;
+    usedCount?: number;
+    activeWindows?: Array<{
+      policyId: string;
+      policyName: string;
+      weekdays: number[];
+      dateKey: string;
+      startHour: number;
+      endHour: number;
+      goodsLimits: SpecialAccessPolicyGoodsLimit[];
+    }>;
+  };
+}
+
+export type MobileLoginResult =
+  | ({
+      state: "approved";
+    } & MobileSessionSnapshot)
+  | {
+      state: "needs_profile";
+      draft: MobileAuthDraft;
+      phone: string;
+      role: UserRole;
+      profile?: RegistrationApplicationProfile;
+      isExistingUser: boolean;
+    }
+  | {
+      state: "pending_review";
+      draft: MobileAuthDraft;
+      application: RegistrationApplication;
+    }
+  | {
+      state: "rejected";
+      draft: MobileAuthDraft;
+      application: RegistrationApplication;
+    };
+
+export type AppLoginResult =
+  | ({
+      state: "approved";
+    } & MobileSessionSnapshot)
+  | {
+      state: "not_registered";
+      phone: string;
+      message: string;
+    }
+  | {
+      state: "pending_review";
+      phone: string;
+      application: RegistrationApplication;
+      message: string;
+    }
+  | {
+      state: "rejected";
+      phone: string;
+      application: RegistrationApplication;
+      message: string;
+    };
+
+export interface RegistrationPhoneLookup {
+  phone: string;
+  state: "new" | "existing_user" | "pending" | "rejected" | "approved";
+  fixedRole?: UserRole;
+  profile?: RegistrationApplicationProfile;
+  application?: RegistrationApplication;
+  linkedUser?: Pick<UserRecord, "id" | "role" | "name" | "phone" | "mobileProfileCompleted">;
+  message?: string;
+}
+
+export interface MerchantGoodsTemplate {
+  id: string;
+  ownerUserId: string;
+  goodsId?: string;
+  goodsCode?: string;
+  goodsName: string;
+  fullName?: string;
+  category: GoodsCategory;
+  categoryName?: string;
+  packageForm?: string;
+  specification?: string;
+  manufacturer?: string;
+  defaultQuantity: number;
+  defaultShelfLifeDays: number;
+  imageUrl?: string;
+  status: PolicyStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface GoodsCatalogItem {
   goodsCode: string;
   goodsId: string;
   name: string;
+  fullName?: string;
   category: GoodsCategory;
+  categoryName?: string;
   price: number;
   imageUrl: string;
+  packageForm?: string;
+  specification?: string;
+  manufacturer?: string;
   status?: PolicyStatus;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GoodsCategoryRecord {
+  id: string;
+  name: string;
+  category: GoodsCategory;
+  status: PolicyStatus;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface RegionRecord {
+  id: string;
+  name: string;
+  status: PolicyStatus;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface WarehouseRecord {
+  code: string;
+  name: string;
+  location?: string;
+  status: PolicyStatus;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -74,6 +263,10 @@ export interface GoodsCatalogItem {
 export interface DeviceGoods extends GoodsCatalogItem {
   stock: number;
   expiresAt?: string;
+  thresholdEnabled?: boolean;
+  lowStockThreshold?: number;
+  stockHint?: string;
+  expiringSoon?: boolean;
 }
 
 export interface DeviceDoor {
@@ -96,6 +289,10 @@ export interface DeviceRecord {
   deviceCode: string;
   name: string;
   location: string;
+  address?: string;
+  longitude?: number;
+  latitude?: number;
+  distanceMeters?: number;
   status: DeviceStatus;
   doors: DeviceDoor[];
   lastSeenAt: string;
@@ -116,6 +313,10 @@ export interface CabinetOpenRequest {
   doorNum?: string;
   payStyle?: "2" | "3";
   category?: GoodsCategory;
+  intentItems?: Array<{
+    goodsId: string;
+    quantity: number;
+  }>;
 }
 
 export interface CabinetOpenResult {
@@ -125,6 +326,10 @@ export interface CabinetOpenResult {
   doorNum: string;
   role: UserRole;
   remainingQuota?: Partial<Record<string, number>>;
+  acceptedIntentItems?: Array<{
+    goodsId: string;
+    quantity: number;
+  }>;
 }
 
 export interface CabinetEventRecord {
@@ -176,6 +381,7 @@ export interface AlertTask {
   dueAt: string;
   createdAt: string;
   detail: string;
+  previewDetail?: string;
   sourceLogId?: string;
   relatedEventId?: string;
   resolvedAt?: string;
@@ -204,7 +410,7 @@ export interface OperationLogActor {
 }
 
 export interface OperationLogSubject {
-  type: "user" | "device" | "event" | "alert" | "goods";
+  type: "user" | "device" | "event" | "alert" | "goods" | "warehouse" | "stocktake";
   id: string;
   label: string;
 }
@@ -241,6 +447,21 @@ export interface SpecialAccessPolicy {
   goodsLimits: SpecialAccessPolicyGoodsLimit[];
   applicableUserIds: string[];
   status: PolicyStatus;
+}
+
+export interface UserAccessPolicy {
+  id: string;
+  name: string;
+  weekdays: number[];
+  startHour: number;
+  endHour: number;
+  goodsLimits: SpecialAccessPolicyGoodsLimit[];
+  status: PolicyStatus;
+  sourcePolicyId?: string;
+  effectiveFromDateKey?: string;
+  effectiveToDateKey?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ServiceOverviewPerson {
@@ -291,6 +512,8 @@ export interface GoodsBatchRecord {
   batchId: string;
   goodsId: string;
   deviceCode: string;
+  locationType?: InventoryLocationType;
+  locationName?: string;
   quantity: number;
   remainingQuantity: number;
   expiresAt?: string;
@@ -300,6 +523,22 @@ export interface GoodsBatchRecord {
   sourceUserName?: string;
   sourcePolicyId?: string;
   note?: string;
+}
+
+export interface BatchConsumptionTrace {
+  id: string;
+  batchId: string;
+  goodsId: string;
+  goodsName: string;
+  deviceCode: string;
+  sourceUserId?: string;
+  sourceUserName?: string;
+  consumerUserId?: string;
+  consumerUserName?: string;
+  quantity: number;
+  happenedAt: string;
+  orderNo?: string;
+  eventId?: string;
 }
 
 export interface DeviceGoodsSetting {
@@ -317,6 +556,7 @@ export interface GoodsOverviewSnapshot {
   outOfStockKinds: number;
   policyCount: number;
   settingCount: number;
+  warehouseStockTotal: number;
   flaggedGoods: GoodsOverviewItem[];
   byDevice: Array<{
     deviceCode: string;
@@ -330,6 +570,7 @@ export interface GoodsOverviewSnapshot {
     goodsName: string;
     category: GoodsCategory;
     totalStock: number;
+    warehouseStock: number;
     lowStockDevices: number;
     outOfStockDevices: number;
     nearestExpiryAt?: string;
@@ -341,6 +582,7 @@ export interface GoodsOverviewSnapshot {
 export interface GoodsDetailSnapshot {
   goods: GoodsCatalogItem;
   totalStock: number;
+  warehouseStock: number;
   nearestExpiryAt?: string;
   deviceDistribution: GoodsOverviewItem[];
   batches: GoodsBatchRecord[];
@@ -353,6 +595,77 @@ export interface GoodsDetailSnapshot {
     nearestExpiryAt?: string;
   }>;
   recentLogs: OperationLogRecord[];
+}
+
+export interface WarehouseInventoryItem {
+  goodsId: string;
+  goodsName: string;
+  category: GoodsCategory;
+  totalStock: number;
+  nearestExpiryAt?: string;
+  batchCount: number;
+}
+
+export interface InventoryTransferRecord {
+  id: string;
+  fromType: InventoryLocationType;
+  fromCode: string;
+  fromName: string;
+  toType: InventoryLocationType;
+  toCode: string;
+  toName: string;
+  goodsId: string;
+  goodsName: string;
+  quantity: number;
+  happenedAt: string;
+  actorUserId?: string;
+  actorUserName?: string;
+  note?: string;
+  batches: Array<{
+    sourceBatchId: string;
+    quantity: number;
+    expiresAt?: string;
+  }>;
+}
+
+export interface StocktakeItem {
+  goodsId: string;
+  goodsName: string;
+  category: GoodsCategory;
+  systemQuantity: number;
+  actualQuantity: number;
+  delta: number;
+  nearestExpiryAt?: string;
+  batchCount: number;
+}
+
+export interface StocktakeRecord {
+  id: string;
+  deviceCode: string;
+  deviceName: string;
+  createdAt: string;
+  actorUserId?: string;
+  actorUserName?: string;
+  note?: string;
+  items: StocktakeItem[];
+}
+
+export interface WarehouseInventorySnapshot {
+  warehouse: WarehouseRecord;
+  totalStock: number;
+  goodsKinds: number;
+  items: WarehouseInventoryItem[];
+  transfers: InventoryTransferRecord[];
+  stocktakes: StocktakeRecord[];
+  recentLogs: OperationLogRecord[];
+}
+
+export interface MerchantRestockDailySummary {
+  dateKey: string;
+  claimedUnits: number;
+  helpedUsers: number;
+  helpTimes: number;
+  cumulativeHelpTimes: number;
 }
 
 export interface DashboardStats {
@@ -419,6 +732,7 @@ export interface SpecialAccessWindowUsage {
   policyId: string;
   policyName: string;
   weekdays: number[];
+  dateKey: string;
   startHour: number;
   endHour: number;
   goodsUsage: Array<{
@@ -428,6 +742,28 @@ export interface SpecialAccessWindowUsage {
     quantityLimit: number;
     usedQuantity: number;
   }>;
+}
+
+export interface UserPolicyCalendarDay {
+  dateKey: string;
+  day: number;
+  inCurrentMonth: boolean;
+  completionStatus: ServiceCompletionStatus;
+  hasPickup: boolean;
+  hasAdjustment: boolean;
+}
+
+export interface UserPolicyCalendarSummary {
+  monthKey: string;
+  selectedDateKey: string;
+  days: UserPolicyCalendarDay[];
+  selectedDateSummary?: {
+    businessDateKey: string;
+    completionStatus: ServiceCompletionStatus;
+    fulfilledGoods: number;
+    totalGoods: number;
+    windows: SpecialAccessWindowUsage[];
+  };
 }
 
 export interface UserManagementDetail {
@@ -443,11 +779,13 @@ export interface UserManagementDetail {
   recentLogs: OperationLogRecord[];
   relatedTasks?: AlertTask[];
   applicablePolicies?: SpecialAccessPolicy[];
+  accessPolicies?: UserAccessPolicy[];
   businessDaySummary?: {
     businessDateKey: string;
     completionStatus: ServiceCompletionStatus;
     windows: SpecialAccessWindowUsage[];
   };
+  policyCalendar?: UserPolicyCalendarSummary;
 }
 
 export interface SmartVmCredentials {
@@ -517,7 +855,14 @@ export const seedUsers: UserRecord[] = [
     phone: "13800000001",
     name: "街道管理员",
     status: "active",
-    tags: ["运营"]
+    regionId: "region-001",
+    regionName: "扬名街道",
+    tags: ["运营"],
+    mobileProfileCompleted: false,
+    profile: {
+      organization: "扬名街道办",
+      title: "值班管理员"
+    }
   },
   {
     id: "special-001",
@@ -526,7 +871,13 @@ export const seedUsers: UserRecord[] = [
     name: "林阿姨",
     status: "active",
     neighborhood: "扬名街道",
+    regionId: "region-001",
+    regionName: "扬名街道",
     tags: ["老人", "重点关怀"],
+    mobileProfileCompleted: false,
+    profile: {
+      note: "首批导入"
+    },
     quota: {
       dailyLimit: 2,
       categoryLimit: {
@@ -542,7 +893,13 @@ export const seedUsers: UserRecord[] = [
     name: "陈师傅",
     status: "active",
     neighborhood: "扬名街道",
+    regionId: "region-001",
+    regionName: "扬名街道",
     tags: ["新业态劳动者"],
+    mobileProfileCompleted: false,
+    profile: {
+      note: "首批导入"
+    },
     quota: {
       dailyLimit: 2,
       categoryLimit: {
@@ -558,7 +915,13 @@ export const seedUsers: UserRecord[] = [
     name: "赵阿姨",
     status: "active",
     neighborhood: "扬名街道",
+    regionId: "region-001",
+    regionName: "扬名街道",
     tags: ["独居老人"],
+    mobileProfileCompleted: false,
+    profile: {
+      note: "首批导入"
+    },
     quota: {
       dailyLimit: 2,
       categoryLimit: {
@@ -573,7 +936,14 @@ export const seedUsers: UserRecord[] = [
     phone: "13800000004",
     name: "鲜食爱心商户",
     status: "active",
+    regionId: "region-001",
+    regionName: "扬名街道",
     tags: ["食品捐赠"],
+    mobileProfileCompleted: false,
+    profile: {
+      contactName: "王店长",
+      address: "扬名路 18 号"
+    },
     merchantProfile: {
       donationWindowDays: 2,
       defaultDeviceCodes: ["CAB-1001", "CAB-1002"]
@@ -607,6 +977,9 @@ export const seedDevices: DeviceRecord[] = [
     deviceCode: "CAB-1001",
     name: "扬名西点位",
     location: "扬名街道西侧公益柜",
+    address: "扬名路 18 号西侧广场",
+    longitude: 120.28921,
+    latitude: 31.55224,
     status: "online",
     lastSeenAt: "2026-04-08T02:30:00.000Z",
     doors: [
@@ -641,6 +1014,9 @@ export const seedDevices: DeviceRecord[] = [
     deviceCode: "CAB-1002",
     name: "扬名东点位",
     location: "扬名街道东侧公益柜",
+    address: "扬名路 26 号东侧便民点",
+    longitude: 120.29382,
+    latitude: 31.55347,
     status: "online",
     lastSeenAt: "2026-04-08T02:35:00.000Z",
     doors: [
@@ -677,9 +1053,14 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     goodsCode: "690000000001",
     goodsId: "goods-1001",
     name: "三明治",
+    fullName: "鲜食火腿三明治 180g",
     category: "food",
+    categoryName: "鲜食面包",
     price: 0,
     imageUrl: "https://dummyimage.com/160x160/dae4ff/0b1220.png",
+    packageForm: "盒装",
+    specification: "180g",
+    manufacturer: "社区鲜食工坊",
     status: "active",
     createdAt: "2026-04-07T08:00:00.000Z",
     updatedAt: "2026-04-08T00:22:00.000Z"
@@ -688,9 +1069,14 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     goodsCode: "690000000002",
     goodsId: "goods-1002",
     name: "牛奶",
+    fullName: "高钙纯牛奶 250ml",
     category: "drink",
+    categoryName: "乳饮",
     price: 0,
     imageUrl: "https://dummyimage.com/160x160/c8f7e7/0b1220.png",
+    packageForm: "盒装",
+    specification: "250ml",
+    manufacturer: "社区乳品合作社",
     status: "active",
     createdAt: "2026-04-07T08:00:00.000Z",
     updatedAt: "2026-04-08T00:22:00.000Z"
@@ -699,9 +1085,14 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     goodsCode: "690000000003",
     goodsId: "goods-1003",
     name: "方便面",
+    fullName: "红烧牛肉面 103g",
     category: "food",
+    categoryName: "方便食品",
     price: 0,
     imageUrl: "https://dummyimage.com/160x160/f8d9c8/0b1220.png",
+    packageForm: "桶装",
+    specification: "103g",
+    manufacturer: "民生食品厂",
     status: "active",
     createdAt: "2026-04-07T08:00:00.000Z",
     updatedAt: "2026-04-08T00:22:00.000Z"
@@ -710,12 +1101,94 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     goodsCode: "690000000004",
     goodsId: "goods-1004",
     name: "牙刷",
+    fullName: "软毛成人牙刷",
     category: "daily",
+    categoryName: "洗护清洁",
     price: 0,
     imageUrl: "https://dummyimage.com/160x160/f7f3b8/0b1220.png",
+    packageForm: "袋装",
+    specification: "1 支",
+    manufacturer: "公益日用品厂",
     status: "active",
     createdAt: "2026-04-07T08:00:00.000Z",
     updatedAt: "2026-04-08T00:22:00.000Z"
+  }
+];
+
+export const seedGoodsCategories: GoodsCategoryRecord[] = [
+  {
+    id: "goods-category-001",
+    name: "鲜食面包",
+    category: "food",
+    status: "active",
+    sortOrder: 1,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
+  },
+  {
+    id: "goods-category-002",
+    name: "方便食品",
+    category: "food",
+    status: "active",
+    sortOrder: 2,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
+  },
+  {
+    id: "goods-category-003",
+    name: "乳饮",
+    category: "drink",
+    status: "active",
+    sortOrder: 3,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
+  },
+  {
+    id: "goods-category-004",
+    name: "洗护清洁",
+    category: "daily",
+    status: "active",
+    sortOrder: 4,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
+  }
+];
+
+export const seedRegions: RegionRecord[] = [
+  {
+    id: "region-001",
+    name: "扬名街道",
+    status: "active",
+    sortOrder: 1,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
+  },
+  {
+    id: "region-002",
+    name: "清名桥片区",
+    status: "active",
+    sortOrder: 2,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
+  },
+  {
+    id: "region-other",
+    name: "其他",
+    status: "active",
+    sortOrder: 99,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
+  }
+];
+
+export const seedWarehouses: WarehouseRecord[] = [
+  {
+    code: "WAREHOUSE-LOCAL",
+    name: "本地仓库",
+    location: "街道物资中转点",
+    status: "active",
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z"
   }
 ];
 
@@ -771,6 +1244,62 @@ export const seedGoodsAlertPolicies: GoodsAlertPolicy[] = [
         lowStockThreshold: 2
       }
     ]
+  }
+];
+
+export const seedRegistrationApplications: RegistrationApplication[] = [
+  {
+    id: "application-001",
+    phone: "13800000006",
+    requestedRole: "merchant",
+    profile: {
+      name: "社区烘焙坊",
+      merchantName: "社区烘焙坊",
+      contactName: "李店长",
+      address: "扬名路 26 号",
+      note: "等待街道审核"
+    },
+    status: "pending",
+    createdAt: "2026-04-08T03:20:00.000Z",
+    updatedAt: "2026-04-08T03:20:00.000Z"
+  },
+  {
+    id: "application-002",
+    phone: "13800000007",
+    requestedRole: "special",
+    profile: {
+      name: "周阿姨",
+      neighborhood: "扬名街道",
+      regionId: "region-001",
+      regionName: "扬名街道",
+      note: "资料不完整，已驳回"
+    },
+    status: "rejected",
+    reviewReason: "缺少区域补充信息，请完善后重新提交。",
+    createdAt: "2026-04-08T01:20:00.000Z",
+    updatedAt: "2026-04-08T02:00:00.000Z"
+  }
+];
+
+export const seedMerchantGoodsTemplates: MerchantGoodsTemplate[] = [
+  {
+    id: "template-001",
+    ownerUserId: "merchant-001",
+    goodsId: "goods-1001",
+    goodsCode: "690000000001",
+    goodsName: "三明治",
+    fullName: "鲜食火腿三明治 180g",
+    category: "food",
+    categoryName: "鲜食面包",
+    packageForm: "盒装",
+    specification: "180g",
+    manufacturer: "社区鲜食工坊",
+    defaultQuantity: 6,
+    defaultShelfLifeDays: 2,
+    imageUrl: "https://dummyimage.com/160x160/dae4ff/0b1220.png",
+    status: "active",
+    createdAt: "2026-04-08T00:05:00.000Z",
+    updatedAt: "2026-04-08T00:05:00.000Z"
   }
 ];
 
@@ -832,14 +1361,83 @@ export const seedGoodsBatches: GoodsBatchRecord[] = [
     batchId: "batch-003",
     goodsId: "goods-1004",
     deviceCode: "CAB-1002",
+    locationType: "device",
+    locationName: "扬名东点位",
     quantity: 6,
     remainingQuantity: 6,
     createdAt: "2026-04-08T00:10:00.000Z",
     sourceType: "system",
     sourceUserName: "系统补录",
     note: "日用品初始化"
+  },
+  {
+    batchId: "batch-warehouse-001",
+    goodsId: "goods-1001",
+    deviceCode: "WAREHOUSE-LOCAL",
+    locationType: "warehouse",
+    locationName: "本地仓库",
+    quantity: 8,
+    remainingQuantity: 8,
+    expiresAt: "2026-04-10T08:00:00.000Z",
+    createdAt: "2026-04-08T00:30:00.000Z",
+    sourceType: "admin",
+    sourceUserId: "admin-001",
+    sourceUserName: "街道管理员",
+    note: "仓库备货"
   }
 ];
+
+export const seedBatchConsumptionTraces: BatchConsumptionTrace[] = [
+  {
+    id: "trace-001",
+    batchId: "batch-001",
+    goodsId: "goods-1001",
+    goodsName: "三明治",
+    deviceCode: "CAB-1001",
+    sourceUserId: "merchant-001",
+    sourceUserName: "鲜食爱心商户",
+    consumerUserId: "special-001",
+    consumerUserName: "林阿姨",
+    quantity: 1,
+    happenedAt: "2026-04-08T01:06:00.000Z",
+    orderNo: "ord-001",
+    eventId: "evt-001"
+  },
+  {
+    id: "trace-002",
+    batchId: "batch-002",
+    goodsId: "goods-1002",
+    goodsName: "牛奶",
+    deviceCode: "CAB-1001",
+    sourceUserId: "merchant-001",
+    sourceUserName: "鲜食爱心商户",
+    consumerUserId: "special-001",
+    consumerUserName: "林阿姨",
+    quantity: 1,
+    happenedAt: "2026-04-08T01:08:00.000Z",
+    orderNo: "ord-001",
+    eventId: "evt-001"
+  },
+  {
+    id: "trace-003",
+    batchId: "batch-001",
+    goodsId: "goods-1001",
+    goodsName: "三明治",
+    deviceCode: "CAB-1001",
+    sourceUserId: "merchant-001",
+    sourceUserName: "鲜食爱心商户",
+    consumerUserId: "special-002",
+    consumerUserName: "陈师傅",
+    quantity: 1,
+    happenedAt: "2026-04-08T01:30:00.000Z",
+    orderNo: "ord-002",
+    eventId: "evt-002"
+  }
+];
+
+export const seedInventoryTransfers: InventoryTransferRecord[] = [];
+
+export const seedStocktakes: StocktakeRecord[] = [];
 
 export const seedEvents: CabinetEventRecord[] = [
   {
@@ -1240,10 +1838,18 @@ export const cloneSeedState = () => ({
   rules: structuredClone(seedRules),
   devices: structuredClone(seedDevices),
   goodsCatalog: structuredClone(seedGoodsCatalog),
+  goodsCategories: structuredClone(seedGoodsCategories),
+  regions: structuredClone(seedRegions),
+  warehouses: structuredClone(seedWarehouses),
   specialAccessPolicies: structuredClone(seedSpecialAccessPolicies),
   goodsAlertPolicies: structuredClone(seedGoodsAlertPolicies),
+  registrationApplications: structuredClone(seedRegistrationApplications),
+  merchantGoodsTemplates: structuredClone(seedMerchantGoodsTemplates),
   deviceGoodsSettings: structuredClone(seedDeviceGoodsSettings),
   goodsBatches: structuredClone(seedGoodsBatches),
+  batchConsumptionTraces: structuredClone(seedBatchConsumptionTraces),
+  inventoryTransfers: structuredClone(seedInventoryTransfers),
+  stocktakes: structuredClone(seedStocktakes),
   events: structuredClone(seedEvents),
   inventory: structuredClone(seedInventory),
   alerts: structuredClone(seedAlerts),

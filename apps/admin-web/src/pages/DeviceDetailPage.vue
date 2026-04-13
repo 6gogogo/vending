@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 
 import { adminApi } from "../api/admin";
+import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 
 const route = useRoute();
 
@@ -14,6 +15,8 @@ const remoteOpening = ref(false);
 const resolvingTaskId = ref("");
 const selectedDoorNum = ref("1");
 const lastUpdatedAt = ref("");
+const mapPickerVisible = ref(false);
+const updatingLocation = ref(false);
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -62,6 +65,27 @@ const formatLogStatus = (status: string) =>
 
 const formatUserRole = (role: "admin" | "merchant" | "special") =>
   role === "admin" ? "管理员" : role === "merchant" ? "商户" : "特殊群体";
+
+const formatGoodsStock = (goods: NonNullable<typeof selectedDoorGoods.value>[number]) => {
+  const base =
+    goods.thresholdEnabled && goods.lowStockThreshold !== undefined
+      ? `${goods.stock}/${goods.lowStockThreshold}`
+      : `${goods.stock}`;
+  const tags: string[] = [];
+
+  if (
+    (goods.thresholdEnabled && goods.lowStockThreshold !== undefined && goods.stock <= goods.lowStockThreshold) ||
+    goods.stock <= 0
+  ) {
+    tags.push("缺货");
+  }
+
+  if (goods.expiringSoon) {
+    tags.push("临期");
+  }
+
+  return tags.length ? `${base}（${tags.join("，")}）` : base;
+};
 
 const taskActionLabel = (task: NonNullable<typeof pendingTasks.value>[number]) =>
   task.grade === "fault" ? "标记已知晓" : "手动完成";
@@ -114,6 +138,9 @@ const remoteOpen = async () => {
 
 const resolveTask = async (taskId: string) => {
   const task = pendingTasks.value.find((entry) => entry.id === taskId);
+  if (!task || !window.confirm(`确认${taskActionLabel(task)}？`)) {
+    return;
+  }
   resolvingTaskId.value = taskId;
   try {
     await adminApi.resolveAlert(
@@ -123,6 +150,22 @@ const resolveTask = async (taskId: string) => {
     await load();
   } finally {
     resolvingTaskId.value = "";
+  }
+};
+
+const saveLocation = async (payload: { longitude: number; latitude: number; location: string }) => {
+  updatingLocation.value = true;
+  try {
+    await adminApi.updateDeviceLocation(String(route.params.deviceCode), {
+      location: payload.location,
+      address: payload.location,
+      longitude: payload.longitude,
+      latitude: payload.latitude
+    });
+    mapPickerVisible.value = false;
+    await load();
+  } finally {
+    updatingLocation.value = false;
   }
 };
 
@@ -220,7 +263,6 @@ onUnmounted(() => {
                 <th>分类</th>
                 <th>库存</th>
                 <th>今日变化</th>
-                <th>阈值</th>
                 <th>临期</th>
               </tr>
             </thead>
@@ -231,11 +273,7 @@ onUnmounted(() => {
                   <span class="admin-table__subtext">{{ goods.goodsId }}</span>
                 </td>
                 <td>{{ goods.category }}</td>
-                <td>
-                  <span class="admin-pill" :class="goods.stock <= 0 ? 'admin-pill--danger' : goods.stock <= 2 ? 'admin-pill--warning' : 'admin-pill--success'">
-                    {{ goods.stock }}
-                  </span>
-                </td>
+                <td class="admin-code">{{ formatGoodsStock(goods) }}</td>
                 <td>
                   <span
                     class="admin-pill"
@@ -244,14 +282,8 @@ onUnmounted(() => {
                     {{ (stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? "+" : "" }}{{ stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0 }}
                   </span>
                 </td>
-                <td>
-                  <span v-if="stockChangeMap.get(goods.goodsId)?.thresholdEnabled" class="admin-code">
-                    {{ stockChangeMap.get(goods.goodsId)?.lowStockThreshold }}
-                  </span>
-                  <span v-else class="admin-table__subtext">未启用</span>
-                </td>
                 <td class="admin-code">
-                  {{ stockChangeMap.get(goods.goodsId)?.nearestExpiryAt ? stockChangeMap.get(goods.goodsId)?.nearestExpiryAt?.slice(0, 16).replace("T", " ") : "-" }}
+                  {{ goods.expiresAt ? goods.expiresAt.slice(0, 16).replace("T", " ") : "-" }}
                 </td>
               </tr>
             </tbody>
@@ -259,6 +291,34 @@ onUnmounted(() => {
         </article>
 
         <aside class="admin-grid">
+          <article class="admin-panel admin-panel-block">
+            <div class="admin-panel__head">
+              <div>
+                <span class="admin-kicker">地图位置</span>
+                <h3 class="admin-panel__title">保存柜机坐标后，移动端会按距离排序</h3>
+              </div>
+              <button class="admin-button admin-button--ghost" :disabled="updatingLocation" @click="mapPickerVisible = true">
+                {{ updatingLocation ? "保存中" : "设置位置" }}
+              </button>
+            </div>
+            <div class="admin-kv">
+              <div class="admin-kv__row">
+                <span class="admin-kv__label">位置说明</span>
+                <span class="admin-kv__value">{{ detail.device.location }}</span>
+              </div>
+              <div class="admin-kv__row">
+                <span class="admin-kv__label">坐标</span>
+                <span class="admin-kv__value admin-code">
+                  {{
+                    detail.device.longitude !== undefined && detail.device.latitude !== undefined
+                      ? `${detail.device.longitude.toFixed(6)}, ${detail.device.latitude.toFixed(6)}`
+                      : "未设置"
+                  }}
+                </span>
+              </div>
+            </div>
+          </article>
+
           <article class="admin-panel admin-panel-block">
             <div class="admin-panel__head">
               <div>
@@ -432,6 +492,18 @@ onUnmounted(() => {
         </article>
       </section>
     </section>
+
+    <div v-if="mapPickerVisible" class="device-map-backdrop" @click.self="mapPickerVisible = false">
+      <section class="device-map-panel admin-panel">
+        <AmapLocationPicker
+          :initial-longitude="detail.device.longitude"
+          :initial-latitude="detail.device.latitude"
+          :initial-location="detail.device.location"
+          @close="mapPickerVisible = false"
+          @confirm="saveLocation"
+        />
+      </section>
+    </div>
   </section>
 </template>
 
@@ -461,6 +533,21 @@ onUnmounted(() => {
   display: grid;
   justify-items: end;
   gap: 6px;
+}
+
+.device-map-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.device-map-panel {
+  width: min(960px, 100%);
+  padding: 14px;
 }
 
 .admin-field--inline {

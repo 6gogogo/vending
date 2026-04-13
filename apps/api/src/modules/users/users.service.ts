@@ -1,10 +1,22 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
-import type { AccessQuota, InventoryMovement, UserManagementDetail, UserRecord, UserRole } from "@vm/shared-types";
+import type {
+  AccessQuota,
+  InventoryMovement,
+  SpecialAccessPolicyGoodsLimit,
+  UserAccessPolicy,
+  UserLedgerStatus,
+  UserManagementDetail,
+  UserRecord,
+  UserRole
+} from "@vm/shared-types";
 
 import {
+  buildCalendarMonthDays,
+  getEffectivePoliciesForUser,
   summarizeBusinessDayForUser
 } from "../../common/policies/special-access-policy.utils";
+import { addDaysToDateKey, getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { DevicesService } from "../devices/devices.service";
 
@@ -19,6 +31,8 @@ interface BatchUpdatePayload {
     status?: UserRecord["status"];
     tags?: string[];
     neighborhood?: string;
+    regionId?: string;
+    regionName?: string;
     quota?: AccessQuota;
   };
 }
@@ -31,11 +45,11 @@ export class UsersService {
   ) {}
 
   list(role?: UserRole) {
-    if (!role) {
-      return this.store.users;
-    }
+    const users = role
+      ? this.store.users.filter((user) => user.role === role)
+      : this.store.users;
 
-    return this.store.users.filter((user) => user.role === role);
+    return users.map((user) => this.decorateUser(user));
   }
 
   findByPhone(phone: string) {
@@ -52,7 +66,13 @@ export class UsersService {
     return user;
   }
 
-  detail(userId: string): UserManagementDetail {
+  detail(
+    userId: string,
+    options?: {
+      monthKey?: string;
+      dateKey?: string;
+    }
+  ): UserManagementDetail {
     const user = this.findById(userId);
     const recentRecords = this.store.inventory
       .filter((entry) => entry.userId === userId)
@@ -72,14 +92,6 @@ export class UsersService {
       .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
       .slice(0, 20);
 
-    const applicablePolicies =
-      user.role === "special"
-        ? this.store.specialAccessPolicies.filter(
-            (policy) =>
-              policy.status === "active" && policy.applicableUserIds.includes(user.id)
-          )
-        : undefined;
-
     const businessDaySummary =
       user.role === "special"
         ? summarizeBusinessDayForUser(
@@ -88,6 +100,91 @@ export class UsersService {
             this.store.inventory,
             this.store.goodsCatalog
           )
+        : undefined;
+    const monthKey = options?.monthKey ?? getBusinessDayKey(new Date()).slice(0, 7);
+    const defaultDateKey = (() => {
+      const businessDateKey = getBusinessDayKey(new Date());
+      if (businessDateKey.startsWith(monthKey)) {
+        return businessDateKey;
+      }
+
+      return `${monthKey}-01`;
+    })();
+    const selectedDateKey = options?.dateKey ?? defaultDateKey;
+    const accessPolicies =
+      user.role === "special"
+        ? getEffectivePoliciesForUser(user, this.store.specialAccessPolicies, "active", selectedDateKey).map((policy) => ({
+            id: policy.id,
+            name: policy.name,
+            weekdays: [...policy.weekdays],
+            startHour: policy.startHour,
+            endHour: policy.endHour,
+            goodsLimits: policy.goodsLimits.map((limit) => ({ ...limit })),
+            status: policy.status,
+            sourcePolicyId:
+              "sourcePolicyId" in policy && typeof policy.sourcePolicyId === "string"
+                ? policy.sourcePolicyId
+                : undefined,
+            effectiveFromDateKey:
+              "effectiveFromDateKey" in policy && typeof policy.effectiveFromDateKey === "string"
+                ? policy.effectiveFromDateKey
+                : undefined,
+            effectiveToDateKey:
+              "effectiveToDateKey" in policy && typeof policy.effectiveToDateKey === "string"
+                ? policy.effectiveToDateKey
+                : undefined
+          }))
+        : undefined;
+    const policyCalendar =
+      user.role === "special"
+        ? {
+            monthKey,
+            selectedDateKey,
+            days: buildCalendarMonthDays(monthKey).map((day) => {
+              const summary = summarizeBusinessDayForUser(
+                user,
+                this.store.specialAccessPolicies,
+                this.store.inventory,
+                this.store.goodsCatalog,
+                day.dateKey
+              );
+
+              return {
+                dateKey: day.dateKey,
+                day: day.day,
+                inCurrentMonth: day.inCurrentMonth,
+                completionStatus: summary.completionStatus,
+                hasPickup: summary.fulfilledGoods > 0,
+                hasAdjustment: this.store.inventory.some(
+                  (entry) =>
+                    entry.userId === user.id &&
+                    ["manual-restock", "manual-deduction", "adjustment"].includes(entry.type) &&
+                    getBusinessDayKey(entry.happenedAt) === day.dateKey
+                )
+              };
+            }),
+            selectedDateSummary: (() => {
+              const summary = summarizeBusinessDayForUser(
+                user,
+                this.store.specialAccessPolicies,
+                this.store.inventory,
+                this.store.goodsCatalog,
+                selectedDateKey
+              );
+
+              if (summary.fulfilledGoods <= 0) {
+                return undefined;
+              }
+
+              return {
+                businessDateKey: summary.businessDateKey,
+                completionStatus: summary.completionStatus,
+                fulfilledGoods: summary.fulfilledGoods,
+                totalGoods: summary.totalGoods,
+                windows: summary.windows
+              };
+            })()
+          }
         : undefined;
     const relatedTasks = this.store.alerts
       .filter(
@@ -103,7 +200,7 @@ export class UsersService {
       .at(-1);
 
     return {
-      user,
+      user: this.decorateUser(user),
       stats:
         user.role === "special"
           ? {
@@ -125,8 +222,10 @@ export class UsersService {
       recentEvents,
       recentLogs,
       relatedTasks,
-      applicablePolicies,
-      businessDaySummary
+      applicablePolicies: undefined,
+      accessPolicies,
+      businessDaySummary,
+      policyCalendar
     };
   }
 
@@ -136,18 +235,24 @@ export class UsersService {
     name: string;
     status?: UserRecord["status"];
     neighborhood?: string;
+    regionId?: string;
+    regionName?: string;
     tags?: string[];
     quota?: AccessQuota;
   }, actorUserId?: string) {
+    const region = this.resolveRegion(payload.regionId, payload.regionName ?? payload.neighborhood);
     const created: UserRecord = {
       id: this.store.createId(payload.role),
       role: payload.role,
       phone: payload.phone,
       name: payload.name,
       status: payload.status ?? "active",
-      neighborhood: payload.neighborhood,
+      neighborhood: region.regionName,
+      regionId: region.regionId,
+      regionName: region.regionName,
       tags: payload.tags ?? [],
-      quota: payload.role === "special" ? payload.quota : undefined
+      quota: payload.role === "special" ? payload.quota : undefined,
+      mobileProfileCompleted: false
     };
 
     this.store.users.unshift(created);
@@ -176,6 +281,8 @@ export class UsersService {
       name?: string;
       status?: UserRecord["status"];
       neighborhood?: string;
+      regionId?: string;
+      regionName?: string;
       tags?: string[];
       quota?: AccessQuota;
     },
@@ -196,8 +303,11 @@ export class UsersService {
       user.status = payload.status;
     }
 
-    if (payload.neighborhood !== undefined) {
-      user.neighborhood = payload.neighborhood;
+    if (payload.regionId !== undefined || payload.regionName !== undefined || payload.neighborhood !== undefined) {
+      const region = this.resolveRegion(payload.regionId, payload.regionName ?? payload.neighborhood);
+      user.regionId = region.regionId;
+      user.regionName = region.regionName;
+      user.neighborhood = region.regionName;
     }
 
     if (payload.tags !== undefined) {
@@ -247,9 +357,12 @@ export class UsersService {
         name: entry.name,
         status: "active",
         tags: entry.tags ?? [],
-        neighborhood: entry.neighborhood,
+        neighborhood: entry.regionName ?? entry.neighborhood,
+        regionId: entry.regionId,
+        regionName: entry.regionName ?? entry.neighborhood,
         quota: entry.quota,
-        merchantProfile: entry.merchantProfile
+        merchantProfile: entry.merchantProfile,
+        mobileProfileCompleted: false
       };
 
       this.store.users.push(created);
@@ -286,8 +399,18 @@ export class UsersService {
         user.tags = payload.patch.tags;
       }
 
-      if (payload.patch.neighborhood !== undefined) {
-        user.neighborhood = payload.patch.neighborhood;
+      if (
+        payload.patch.regionId !== undefined ||
+        payload.patch.regionName !== undefined ||
+        payload.patch.neighborhood !== undefined
+      ) {
+        const region = this.resolveRegion(
+          payload.patch.regionId,
+          payload.patch.regionName ?? payload.patch.neighborhood
+        );
+        user.regionId = region.regionId;
+        user.regionName = region.regionName;
+        user.neighborhood = region.regionName;
       }
 
       if (payload.patch.quota && user.role === "special") {
@@ -319,6 +442,180 @@ export class UsersService {
       count: updated.length,
       updated
     };
+  }
+
+  saveAccessPolicy(
+    userId: string,
+    payload: {
+      id?: string;
+      name: string;
+      weekdays: number[];
+      startHour: number;
+      endHour: number;
+      goodsLimits: Array<{
+        goodsId: string;
+        quantity: number;
+      }>;
+      status: UserAccessPolicy["status"];
+      sourcePolicyId?: string;
+    },
+    actorUserId?: string
+  ) {
+    const user = this.findById(userId);
+
+    if (user.role !== "special") {
+      throw new BadRequestException("只有普通用户支持设置取货策略。");
+    }
+
+    if (payload.endHour <= payload.startHour) {
+      throw new BadRequestException("结束时间必须晚于开始时间。");
+    }
+
+    const normalizedLimits: SpecialAccessPolicyGoodsLimit[] = payload.goodsLimits
+      .filter((item) => item.goodsId && item.quantity > 0)
+      .map((item) => {
+        const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === item.goodsId);
+
+        if (!goods) {
+          throw new NotFoundException(`未找到货品 ${item.goodsId}。`);
+        }
+
+        return {
+          goodsId: goods.goodsId,
+          goodsName: goods.name,
+          category: goods.category,
+          quantity: item.quantity
+        };
+      });
+
+    if (!normalizedLimits.length) {
+      throw new BadRequestException("请至少设置一种货品。");
+    }
+
+    const targetPolicies = user.accessPolicies ?? [];
+    user.accessPolicies = targetPolicies;
+    const businessDateKey = getBusinessDayKey(new Date());
+    const nextBusinessDateKey = addDaysToDateKey(businessDateKey, 1);
+
+    if (payload.id) {
+      const existing = targetPolicies.find((entry) => entry.id === payload.id);
+
+      if (!existing) {
+        throw new NotFoundException("未找到对应的个人取货设定。");
+      }
+
+      existing.status = "inactive";
+      existing.effectiveToDateKey = businessDateKey;
+      existing.updatedAt = new Date().toISOString();
+
+      const created: UserAccessPolicy = {
+        id: this.store.createId("user-policy"),
+        name: payload.name.trim(),
+        weekdays: Array.from(new Set(payload.weekdays)).sort((left, right) => left - right),
+        startHour: payload.startHour,
+        endHour: payload.endHour,
+        goodsLimits: normalizedLimits,
+        status: payload.status,
+        sourcePolicyId: payload.sourcePolicyId,
+        effectiveFromDateKey: nextBusinessDateKey,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      targetPolicies.unshift(created);
+
+      this.store.logOperation({
+        category: "policy",
+        type: "update-user-access-policy",
+        status: "success",
+        actor: this.getAdminActor(actorUserId),
+        primarySubject: {
+          type: "user",
+          id: user.id,
+          label: user.name
+        },
+        metadata: {
+          policyId: created.id,
+          policyName: created.name,
+          undoState: "not_undoable"
+        }
+      });
+
+      return created;
+    }
+
+    const created: UserAccessPolicy = {
+      id: this.store.createId("user-policy"),
+      name: payload.name.trim(),
+      weekdays: Array.from(new Set(payload.weekdays)).sort((left, right) => left - right),
+      startHour: payload.startHour,
+      endHour: payload.endHour,
+      goodsLimits: normalizedLimits,
+      status: payload.status,
+      sourcePolicyId: payload.sourcePolicyId,
+      effectiveFromDateKey: businessDateKey,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    targetPolicies.unshift(created);
+    this.store.logOperation({
+      category: "policy",
+      type: "create-user-access-policy",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "user",
+        id: user.id,
+        label: user.name
+      },
+      metadata: {
+        policyId: created.id,
+        policyName: created.name,
+        undoState: "not_undoable"
+      }
+    });
+
+    return created;
+  }
+
+  deleteAccessPolicy(userId: string, policyId: string, actorUserId?: string) {
+    const user = this.findById(userId);
+
+    if (user.role !== "special") {
+      throw new BadRequestException("只有普通用户支持删除取货策略。");
+    }
+
+    const targetPolicies = user.accessPolicies ?? [];
+    user.accessPolicies = targetPolicies;
+
+    const existing = targetPolicies.find((entry) => entry.id === policyId);
+
+    if (!existing) {
+      throw new NotFoundException("未找到对应的个人取货设定。");
+    }
+
+    existing.status = "inactive";
+    existing.effectiveToDateKey = getBusinessDayKey(new Date());
+    existing.updatedAt = new Date().toISOString();
+
+    this.store.logOperation({
+      category: "policy",
+      type: "delete-user-access-policy",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "user",
+        id: user.id,
+        label: user.name
+      },
+      metadata: {
+        policyId: existing.id,
+        policyName: existing.name,
+        undoState: "not_undoable"
+      }
+    });
+
+    return existing;
   }
 
   manualAdjustment(
@@ -421,6 +718,113 @@ export class UsersService {
     });
 
     return movement;
+  }
+
+  private decorateUser(user: UserRecord): UserRecord {
+    const region = this.store.normalizeUserRegion(user);
+
+    return {
+      ...user,
+      regionId: region.regionId,
+      regionName: region.regionName,
+      neighborhood: region.regionName,
+      ledgerStatus: this.getLedgerStatus(user)
+    };
+  }
+
+  private getLedgerStatus(user: UserRecord): UserLedgerStatus {
+    if (!user.mobileProfileCompleted) {
+      return "unregistered";
+    }
+
+    if (user.role !== "special") {
+      return "registered";
+    }
+
+    const hasAssignedQuota =
+      (user.quota?.dailyLimit ?? 0) > 0 ||
+      Object.values(user.quota?.categoryLimit ?? {}).some((value) => (value ?? 0) > 0);
+    const activePolicies = getEffectivePoliciesForUser(user, this.store.specialAccessPolicies);
+
+    if (activePolicies.length) {
+      const summary = summarizeBusinessDayForUser(
+        user,
+        this.store.specialAccessPolicies,
+        this.store.inventory,
+        this.store.goodsCatalog
+      );
+
+      if (summary.completionStatus === "complete") {
+        return "quota_complete";
+      }
+
+      if (summary.completionStatus === "partial") {
+        return "quota_partial";
+      }
+
+      if (summary.completionStatus === "unserved") {
+        return "quota_unclaimed";
+      }
+    }
+
+    if (hasAssignedQuota) {
+      const businessDateKey = getBusinessDayKey(new Date());
+      const usedCount = this.store.inventory
+        .filter(
+          (entry) =>
+            entry.userId === user.id &&
+            entry.type === "pickup" &&
+            getBusinessDayKey(entry.happenedAt) === businessDateKey
+        )
+        .reduce((sum, entry) => sum + entry.quantity, 0);
+      const dailyLimit = Math.max(0, user.quota?.dailyLimit ?? 0);
+
+      if (usedCount <= 0) {
+        return "quota_unclaimed";
+      }
+
+      if (dailyLimit > 0 && usedCount >= dailyLimit) {
+        return "quota_complete";
+      }
+
+      return "quota_partial";
+    }
+
+    return "registered";
+  }
+
+  private resolveRegion(regionId?: string, regionName?: string) {
+    const matched = this.store.getRegion(regionId);
+
+    if (matched) {
+      return {
+        regionId: matched.id,
+        regionName: matched.name
+      };
+    }
+
+    const normalizedName = regionName?.trim();
+
+    if (!normalizedName) {
+      return {
+        regionId: undefined,
+        regionName: undefined
+      };
+    }
+
+    const namedRegion = this.store.regions.find((entry) => entry.name === normalizedName);
+
+    if (namedRegion) {
+      return {
+        regionId: namedRegion.id,
+        regionName: namedRegion.name
+      };
+    }
+
+    return {
+      regionId: undefined,
+      regionName: normalizedName
+    };
   }
 
   private getAdminActor(actorUserId?: string) {

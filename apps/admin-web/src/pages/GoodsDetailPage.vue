@@ -1,20 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
+import type { GoodsCategory, GoodsCategoryRecord, WarehouseRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 
 const route = useRoute();
+const packageFormOptions = ["瓶装", "盒装", "袋装", "杯装", "罐装", "桶装", "份装", "散装", "其他"];
 
 const detail = ref<Awaited<ReturnType<typeof adminApi.goodsDetail>>>();
+const warehouses = ref<WarehouseRecord[]>([]);
+const goodsCategories = ref<GoodsCategoryRecord[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+const uploadingImage = ref(false);
 
 const goodsForm = ref({
   goodsCode: "",
   name: "",
-  category: "daily" as "food" | "drink" | "daily",
+  fullName: "",
+  category: "daily" as GoodsCategory,
+  categoryName: "",
   price: 0,
+  packageForm: "盒装",
+  specification: "",
+  manufacturer: "",
   imageUrl: "",
   status: "active" as "active" | "inactive"
 });
@@ -35,21 +45,85 @@ const goods = computed(() => detail.value?.goods);
 const batches = computed(() => detail.value?.batches ?? []);
 const deviceSettings = computed(() => detail.value?.deviceSettings ?? []);
 const recentLogs = computed(() => detail.value?.recentLogs ?? []);
+const filteredGoodsCategories = computed(() =>
+  goodsCategories.value.filter(
+    (item) => item.status === "active" && item.category === goodsForm.value.category
+  )
+);
+const locationOptions = computed(() => [
+  ...warehouses.value.map((item) => ({
+    code: item.code,
+    name: item.name
+  })),
+  ...deviceSettings.value.map((item) => ({
+    code: item.deviceCode,
+    name: item.deviceName
+  }))
+]);
+const actionMode = computed(() => {
+  if (route.query.action === "inbound") {
+    return "inbound";
+  }
+
+  if (route.query.action === "outbound") {
+    return "outbound";
+  }
+
+  return "";
+});
+
+const focusActionSection = async () => {
+  await nextTick();
+
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const targetId =
+    actionMode.value === "inbound"
+      ? "goods-inbound-section"
+      : actionMode.value === "outbound"
+        ? "goods-batches-section"
+        : "";
+
+  if (!targetId) {
+    return;
+  }
+
+  document.getElementById(targetId)?.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
+};
 
 const load = async () => {
   loading.value = true;
   try {
-    const response = await adminApi.goodsDetail(String(route.params.goodsId));
+    const [response, warehouseResponse, categoryResponse] = await Promise.all([
+      adminApi.goodsDetail(String(route.params.goodsId)),
+      adminApi.warehouses(),
+      adminApi.goodsCategories()
+    ]);
     detail.value = response;
+    warehouses.value = warehouseResponse;
+    goodsCategories.value = categoryResponse;
     goodsForm.value = {
       goodsCode: response.goods.goodsCode,
       name: response.goods.name,
+      fullName: response.goods.fullName ?? response.goods.name,
       category: response.goods.category,
+      categoryName: response.goods.categoryName ?? "",
       price: response.goods.price,
+      packageForm: response.goods.packageForm ?? "盒装",
+      specification: response.goods.specification ?? "",
+      manufacturer: response.goods.manufacturer ?? "",
       imageUrl: response.goods.imageUrl,
       status: response.goods.status ?? "active"
     };
-    batchForm.value.deviceCode = response.deviceSettings[0]?.deviceCode ?? "";
+    batchForm.value.deviceCode =
+      actionMode.value === "inbound"
+        ? warehouseResponse[0]?.code ?? response.deviceSettings[0]?.deviceCode ?? ""
+        : response.deviceSettings[0]?.deviceCode ?? warehouseResponse[0]?.code ?? "";
     thresholdForm.value = Object.fromEntries(
       response.deviceSettings.map((item) => [
         item.deviceCode,
@@ -68,6 +142,8 @@ const load = async () => {
         }
       ])
     );
+
+    await focusActionSection();
   } finally {
     loading.value = false;
   }
@@ -83,14 +159,41 @@ const saveGoods = async () => {
     await adminApi.updateGoods(goods.value.goodsId, {
       goodsCode: goodsForm.value.goodsCode,
       name: goodsForm.value.name,
+      fullName: goodsForm.value.fullName,
       category: goodsForm.value.category,
+      categoryName: goodsForm.value.categoryName || undefined,
       price: goodsForm.value.price,
+      packageForm: goodsForm.value.packageForm || undefined,
+      specification: goodsForm.value.specification || undefined,
+      manufacturer: goodsForm.value.manufacturer || undefined,
       imageUrl: goodsForm.value.imageUrl,
       status: goodsForm.value.status
     });
     await load();
   } finally {
     saving.value = false;
+  }
+};
+
+const uploadGoodsImage = async (event: Event) => {
+  const target = event.target as HTMLInputElement | null;
+  const file = target?.files?.[0];
+
+  if (!file) {
+    return;
+  }
+
+  uploadingImage.value = true;
+  try {
+    const uploaded = await adminApi.uploadImage(file);
+    goodsForm.value.imageUrl = uploaded.url;
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    uploadingImage.value = false;
+    if (target) {
+      target.value = "";
+    }
   }
 };
 
@@ -161,9 +264,25 @@ const saveThreshold = async (deviceCode: string) => {
 };
 
 watch(
+  () => goodsForm.value.category,
+  () => {
+    if (!filteredGoodsCategories.value.some((item) => item.name === goodsForm.value.categoryName)) {
+      goodsForm.value.categoryName = filteredGoodsCategories.value[0]?.name ?? "";
+    }
+  }
+);
+
+watch(
   () => route.params.goodsId,
   async () => {
     await load();
+  }
+);
+
+watch(
+  () => route.query.action,
+  async () => {
+    await focusActionSection();
   }
 );
 
@@ -182,7 +301,7 @@ onMounted(load);
           <RouterLink class="admin-link" to="/goods">返回货物总览</RouterLink>
         </div>
 
-        <div class="admin-grid admin-grid--stats-4">
+          <div class="admin-grid admin-grid--stats-4">
           <div class="device-detail-status__item">
             <span class="admin-kicker">货品编号</span>
             <strong class="admin-code">{{ detail.goods.goodsId }}</strong>
@@ -194,12 +313,17 @@ onMounted(load);
             <span class="admin-table__subtext">按批次剩余量聚合</span>
           </div>
           <div class="device-detail-status__item">
+            <span class="admin-kicker">仓库在库</span>
+            <strong class="admin-code">{{ detail.warehouseStock }}</strong>
+            <span class="admin-table__subtext">本地仓库当前可调拨库存</span>
+          </div>
+          <div class="device-detail-status__item">
             <span class="admin-kicker">最短保质期</span>
             <strong class="admin-code">{{ detail.nearestExpiryAt ? detail.nearestExpiryAt.slice(0, 16).replace("T", " ") : "-" }}</strong>
             <span class="admin-table__subtext">取当前剩余批次中最早到期的一批</span>
           </div>
           <div class="device-detail-status__item">
-            <span class="admin-kicker">柜机分布</span>
+            <span class="admin-kicker">设备分布</span>
             <strong class="admin-code">{{ detail.deviceDistribution.length }}</strong>
             <span class="admin-table__subtext">已覆盖柜机 / 阈值设置同时在下方可改</span>
           </div>
@@ -217,15 +341,19 @@ onMounted(load);
 
           <div class="goods-detail-form">
             <label class="admin-field">
-              <span class="admin-field__label">货品码</span>
+              <span class="admin-field__label">商品编号</span>
               <input v-model="goodsForm.goodsCode" class="admin-input" />
             </label>
             <label class="admin-field">
-              <span class="admin-field__label">名称</span>
+              <span class="admin-field__label">商品全称</span>
+              <input v-model="goodsForm.fullName" class="admin-input" />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">商品名称</span>
               <input v-model="goodsForm.name" class="admin-input" />
             </label>
             <label class="admin-field">
-              <span class="admin-field__label">分类</span>
+              <span class="admin-field__label">商品大类</span>
               <select v-model="goodsForm.category" class="admin-select">
                 <option value="food">食品</option>
                 <option value="drink">饮品</option>
@@ -233,12 +361,39 @@ onMounted(load);
               </select>
             </label>
             <label class="admin-field">
+              <span class="admin-field__label">分类</span>
+              <select v-model="goodsForm.categoryName" class="admin-select">
+                <option value="">未分类</option>
+                <option v-for="item in filteredGoodsCategories" :key="item.id" :value="item.name">
+                  {{ item.name }}
+                </option>
+              </select>
+            </label>
+            <label class="admin-field">
               <span class="admin-field__label">价格</span>
               <input v-model.number="goodsForm.price" type="number" min="0" class="admin-input" />
             </label>
             <label class="admin-field">
-              <span class="admin-field__label">图片地址</span>
-              <input v-model="goodsForm.imageUrl" class="admin-input" />
+              <span class="admin-field__label">包装形式</span>
+              <select v-model="goodsForm.packageForm" class="admin-select">
+                <option v-for="item in packageFormOptions" :key="item" :value="item">
+                  {{ item }}
+                </option>
+              </select>
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">商品规格</span>
+              <input v-model="goodsForm.specification" class="admin-input" />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">厂家</span>
+              <input v-model="goodsForm.manufacturer" class="admin-input" />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">图片</span>
+              <input class="admin-input" type="file" accept="image/*" @change="uploadGoodsImage" />
+              <span class="admin-table__subtext">{{ uploadingImage ? "上传中" : "选择本地图片后会自动上传" }}</span>
+              <img v-if="goodsForm.imageUrl" class="goods-detail-preview" :src="goodsForm.imageUrl" alt="货品图片预览" />
             </label>
             <label class="admin-field">
               <span class="admin-field__label">状态</span>
@@ -255,7 +410,11 @@ onMounted(load);
         </article>
 
         <aside class="admin-grid">
-          <article class="admin-panel admin-panel-block">
+          <article
+            id="goods-inbound-section"
+            class="admin-panel admin-panel-block"
+            :class="{ 'panel-focus': actionMode === 'inbound' }"
+          >
             <div class="admin-panel__head">
               <div>
                 <span class="admin-kicker">手工入库</span>
@@ -265,10 +424,10 @@ onMounted(load);
 
             <div class="goods-detail-form">
               <label class="admin-field">
-                <span class="admin-field__label">柜机</span>
+                <span class="admin-field__label">所在位置</span>
                 <select v-model="batchForm.deviceCode" class="admin-select">
-                  <option v-for="item in detail.deviceSettings" :key="item.deviceCode" :value="item.deviceCode">
-                    {{ item.deviceName }} / {{ item.deviceCode }}
+                  <option v-for="item in locationOptions" :key="item.code" :value="item.code">
+                    {{ item.name }} / {{ item.code }}
                   </option>
                 </select>
               </label>
@@ -328,7 +487,7 @@ onMounted(load);
         </aside>
       </section>
 
-      <section class="admin-page__section">
+      <section id="goods-batches-section" class="admin-page__section" :class="{ 'panel-focus-section': actionMode === 'outbound' }">
         <div class="admin-page__section-head">
           <div>
             <p class="admin-kicker">批次列表</p>
@@ -342,7 +501,7 @@ onMounted(load);
               <tr>
                 <th>批次</th>
                 <th>来源</th>
-                <th>所在柜机</th>
+                <th>所在位置</th>
                 <th>数量</th>
                 <th>保质期</th>
                 <th>去除</th>
@@ -359,7 +518,9 @@ onMounted(load);
                   <span class="admin-table__subtext">{{ batch.sourceType }}{{ batch.sourceUserId ? ` · ${batch.sourceUserId}` : "" }}</span>
                 </td>
                 <td>
-                  <RouterLink class="admin-link" :to="`/operations/${batch.deviceCode}`">{{ batch.deviceCode }}</RouterLink>
+                  <RouterLink v-if="batch.locationType === 'device'" class="admin-link" :to="`/operations/${batch.deviceCode}`">{{ batch.locationName || batch.deviceCode }}</RouterLink>
+                  <RouterLink v-else class="admin-link" to="/warehouse">{{ batch.locationName || "本地仓库" }}</RouterLink>
+                  <span class="admin-table__subtext">{{ batch.deviceCode }}</span>
                 </td>
                 <td class="admin-code">{{ batch.remainingQuantity }} / {{ batch.quantity }}</td>
                 <td class="admin-code">{{ batch.expiresAt ? batch.expiresAt.slice(0, 16).replace("T", " ") : "-" }}</td>
@@ -478,6 +639,15 @@ onMounted(load);
   gap: 6px;
 }
 
+.goods-detail-preview {
+  width: 100%;
+  max-width: 180px;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--admin-line);
+}
+
 .device-detail-status__item {
   display: grid;
   gap: 6px;
@@ -485,6 +655,12 @@ onMounted(load);
   border: 1px solid var(--admin-line);
   border-radius: 8px;
   background: var(--admin-panel-muted);
+}
+
+.panel-focus,
+.panel-focus-section .admin-panel {
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
 }
 
 @media (max-width: 960px) {

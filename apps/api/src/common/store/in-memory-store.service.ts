@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import {
   cloneSeedState,
+  type BatchConsumptionTrace,
   type AlertTask,
   type CabinetAccessRule,
   type CabinetEventRecord,
@@ -14,33 +15,22 @@ import {
   type GoodsBatchRecord,
   type GoodsCatalogItem,
   type GoodsCategory,
+  type GoodsCategoryRecord,
+  type InventoryTransferRecord,
   type InventoryMovement,
+  type MerchantGoodsTemplate,
   type OperationLogRecord,
+  type RegionRecord,
+  type RegistrationApplication,
   type SpecialAccessPolicy,
+  type StocktakeRecord,
   type UserRecord,
-  type UserRole
+  type UserRole,
+  type WarehouseRecord
 } from "@vm/shared-types";
 
 import { formatOperationLog } from "../logging/operation-log-template";
-
-interface VerificationRecord {
-  code: string;
-  expiresAt: string;
-}
-
-interface SessionRecord {
-  token: string;
-  userId: string;
-  role: UserRole;
-  createdAt: string;
-}
-
-interface CallbackLog {
-  id: string;
-  type: string;
-  receivedAt: string;
-  payload: unknown;
-}
+import { createSeededPersistedState, readPersistedState, type CallbackLog, type DraftSessionRecord, type PersistedStoreState, type SessionRecord, type VerificationRecord, writePersistedState } from "./persistence";
 
 interface BatchConsumptionEntry {
   batchId: string;
@@ -58,10 +48,18 @@ export class InMemoryStoreService {
   readonly rules: CabinetAccessRule[] = this.seed.rules;
   readonly devices: DeviceRecord[] = this.seed.devices;
   readonly goodsCatalog: GoodsCatalogItem[] = this.seed.goodsCatalog;
+  readonly goodsCategories: GoodsCategoryRecord[] = this.seed.goodsCategories;
+  readonly regions: RegionRecord[] = this.seed.regions;
+  readonly warehouses: WarehouseRecord[] = this.seed.warehouses;
   readonly specialAccessPolicies: SpecialAccessPolicy[] = this.seed.specialAccessPolicies;
   readonly goodsAlertPolicies: GoodsAlertPolicy[] = this.seed.goodsAlertPolicies;
+  readonly registrationApplications: RegistrationApplication[] = this.seed.registrationApplications;
+  readonly merchantGoodsTemplates: MerchantGoodsTemplate[] = this.seed.merchantGoodsTemplates;
   readonly deviceGoodsSettings: DeviceGoodsSetting[] = this.seed.deviceGoodsSettings;
   readonly goodsBatches: GoodsBatchRecord[] = this.seed.goodsBatches;
+  readonly batchConsumptionTraces: BatchConsumptionTrace[] = this.seed.batchConsumptionTraces;
+  readonly inventoryTransfers: InventoryTransferRecord[] = this.seed.inventoryTransfers;
+  readonly stocktakes: StocktakeRecord[] = this.seed.stocktakes;
   readonly events: CabinetEventRecord[] = this.seed.events;
   readonly inventory: InventoryMovement[] = this.seed.inventory;
   readonly alerts: AlertTask[] = this.seed.alerts;
@@ -72,6 +70,7 @@ export class InMemoryStoreService {
 
   readonly verificationCodes = new Map<string, VerificationRecord>();
   readonly sessions = new Map<string, SessionRecord>();
+  readonly draftSessions = new Map<string, DraftSessionRecord>();
   readonly callbackLog: CallbackLog[] = [];
   readonly deviceRuntime = new Map<string, DeviceRuntimeState>(
     this.seed.devices.map((device) => [
@@ -96,6 +95,14 @@ export class InMemoryStoreService {
   );
 
   constructor() {
+    const persisted = readPersistedState();
+
+    if (persisted) {
+      this.hydrate(persisted);
+    } else {
+      this.persist();
+    }
+
     this.syncDeviceStocksFromBatches();
   }
 
@@ -134,6 +141,24 @@ export class InMemoryStoreService {
     return token;
   }
 
+  createDraftSession(payload: {
+    phone: string;
+    requestedRole?: UserRole;
+    linkedUserId?: string;
+    applicationId?: string;
+  }) {
+    const token = this.createId("draft");
+    this.draftSessions.set(token, {
+      token,
+      phone: payload.phone,
+      requestedRole: payload.requestedRole,
+      linkedUserId: payload.linkedUserId,
+      applicationId: payload.applicationId,
+      createdAt: new Date().toISOString()
+    });
+    return token;
+  }
+
   getSession(token?: string) {
     if (!token) {
       return undefined;
@@ -150,6 +175,36 @@ export class InMemoryStoreService {
     }
 
     return this.users.find((entry) => entry.id === session.userId);
+  }
+
+  getDraftSession(token?: string) {
+    if (!token) {
+      return undefined;
+    }
+
+    return this.draftSessions.get(token);
+  }
+
+  updateDraftSession(
+    token: string,
+    patch: Partial<Pick<DraftSessionRecord, "requestedRole" | "linkedUserId" | "applicationId">>
+  ) {
+    const draft = this.draftSessions.get(token);
+
+    if (!draft) {
+      return undefined;
+    }
+
+    Object.assign(draft, patch);
+    return draft;
+  }
+
+  clearDraftSession(token?: string) {
+    if (!token) {
+      return;
+    }
+
+    this.draftSessions.delete(token);
   }
 
   logCallback(type: string, payload: unknown) {
@@ -189,6 +244,34 @@ export class InMemoryStoreService {
     );
   }
 
+  getRegion(regionId?: string) {
+    if (!regionId) {
+      return undefined;
+    }
+
+    return this.regions.find((entry) => entry.id === regionId);
+  }
+
+  getWarehouse(code?: string) {
+    if (!code) {
+      return undefined;
+    }
+
+    return this.warehouses.find((entry) => entry.code === code);
+  }
+
+  isWarehouseCode(code?: string) {
+    return Boolean(code && this.getWarehouse(code));
+  }
+
+  getLocationName(locationCode: string) {
+    return (
+      this.devices.find((entry) => entry.deviceCode === locationCode)?.name ??
+      this.getWarehouse(locationCode)?.name ??
+      locationCode
+    );
+  }
+
   upsertDeviceGoodsSetting(setting: DeviceGoodsSetting) {
     const existing = this.getDeviceGoodsSetting(setting.deviceCode, setting.goodsId);
 
@@ -222,6 +305,14 @@ export class InMemoryStoreService {
     );
   }
 
+  getGoodsCategoryRecord(categoryId?: string) {
+    if (!categoryId) {
+      return undefined;
+    }
+
+    return this.goodsCategories.find((entry) => entry.id === categoryId);
+  }
+
   getNearestExpiryAt(deviceCode: string, goodsId: string) {
     return this.getGoodsBatches(deviceCode, goodsId)
       .filter((entry) => entry.remainingQuantity > 0 && entry.expiresAt)
@@ -236,6 +327,11 @@ export class InMemoryStoreService {
     if (existing) {
       Object.assign(existing, {
         ...item,
+        fullName: item.fullName ?? existing.fullName ?? item.name,
+        categoryName: item.categoryName ?? existing.categoryName,
+        packageForm: item.packageForm ?? existing.packageForm,
+        specification: item.specification ?? existing.specification,
+        manufacturer: item.manufacturer ?? existing.manufacturer,
         updatedAt: new Date().toISOString()
       });
       return existing;
@@ -243,12 +339,51 @@ export class InMemoryStoreService {
 
     const created: GoodsCatalogItem = {
       ...item,
+      fullName: item.fullName ?? item.name,
       status: item.status ?? "active",
       createdAt: item.createdAt ?? new Date().toISOString(),
       updatedAt: item.updatedAt ?? new Date().toISOString()
     };
     this.goodsCatalog.unshift(created);
     return created;
+  }
+
+  upsertGoodsCategory(
+    category: Omit<GoodsCategoryRecord, "id" | "createdAt" | "updatedAt"> & {
+      id?: string;
+      createdAt?: string;
+      updatedAt?: string;
+    }
+  ) {
+    const existing = category.id
+      ? this.goodsCategories.find((entry) => entry.id === category.id)
+      : undefined;
+
+    if (existing) {
+      Object.assign(existing, {
+        ...category,
+        updatedAt: category.updatedAt ?? new Date().toISOString()
+      });
+      return existing;
+    }
+
+    const created: GoodsCategoryRecord = {
+      id: category.id ?? this.createId("goods-category"),
+      name: category.name,
+      category: category.category,
+      status: category.status,
+      sortOrder: category.sortOrder,
+      createdAt: category.createdAt ?? new Date().toISOString(),
+      updatedAt: category.updatedAt ?? new Date().toISOString()
+    };
+
+    this.goodsCategories.unshift(created);
+    return created;
+  }
+
+  recordBatchConsumption(trace: BatchConsumptionTrace) {
+    this.batchConsumptionTraces.unshift(trace);
+    return trace;
   }
 
   ensureDeviceGoodsEntry(deviceCode: string, goods: Omit<DeviceGoods, "stock"> & { stock?: number }) {
@@ -299,10 +434,13 @@ export class InMemoryStoreService {
     createdAt?: string;
     batchId?: string;
   }) {
+    const locationType = this.isWarehouseCode(payload.deviceCode) ? "warehouse" : "device";
     const batch: GoodsBatchRecord = {
       batchId: payload.batchId ?? this.createId("batch"),
       goodsId: payload.goodsId,
       deviceCode: payload.deviceCode,
+      locationType,
+      locationName: this.getLocationName(payload.deviceCode),
       quantity: payload.quantity,
       remainingQuantity: payload.quantity,
       expiresAt: payload.expiresAt,
@@ -423,6 +561,15 @@ export class InMemoryStoreService {
     return this.goodsCatalog.find((entry) => entry.goodsId === goodsId)?.category ?? fallback;
   }
 
+  normalizeUserRegion(user: UserRecord) {
+    const regionName = user.regionName ?? user.neighborhood;
+
+    return {
+      regionId: user.regionId,
+      regionName
+    };
+  }
+
   logOperation(entry: OperationLogDraft) {
     const occurredAt = entry.occurredAt ?? new Date().toISOString();
     const id = entry.id ?? this.createId("log");
@@ -444,5 +591,98 @@ export class InMemoryStoreService {
 
     this.logs.unshift(record);
     return record;
+  }
+
+  snapshot(): PersistedStoreState {
+    return {
+      users: structuredClone(this.users),
+      rules: structuredClone(this.rules),
+      devices: structuredClone(this.devices),
+      goodsCatalog: structuredClone(this.goodsCatalog),
+      goodsCategories: structuredClone(this.goodsCategories),
+      regions: structuredClone(this.regions),
+      warehouses: structuredClone(this.warehouses),
+      specialAccessPolicies: structuredClone(this.specialAccessPolicies),
+      goodsAlertPolicies: structuredClone(this.goodsAlertPolicies),
+      registrationApplications: structuredClone(this.registrationApplications),
+      merchantGoodsTemplates: structuredClone(this.merchantGoodsTemplates),
+      deviceGoodsSettings: structuredClone(this.deviceGoodsSettings),
+      goodsBatches: structuredClone(this.goodsBatches),
+      batchConsumptionTraces: structuredClone(this.batchConsumptionTraces),
+      inventoryTransfers: structuredClone(this.inventoryTransfers),
+      stocktakes: structuredClone(this.stocktakes),
+      events: structuredClone(this.events),
+      inventory: structuredClone(this.inventory),
+      alerts: structuredClone(this.alerts),
+      logs: structuredClone(this.logs),
+      verificationCodes: Array.from(this.verificationCodes.entries()).map(([key, value]) => [key, structuredClone(value)]),
+      sessions: Array.from(this.sessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
+      draftSessions: Array.from(this.draftSessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
+      callbackLog: structuredClone(this.callbackLog),
+      deviceRuntime: Array.from(this.deviceRuntime.entries()).map(([key, value]) => [key, structuredClone(value)])
+    };
+  }
+
+  persist() {
+    writePersistedState(this.snapshot());
+  }
+
+  resetToSeed() {
+    this.hydrate(createSeededPersistedState());
+    this.persist();
+  }
+
+  private hydrate(state: PersistedStoreState) {
+    this.replaceArray(this.users, state.users);
+    this.replaceArray(this.rules, state.rules);
+    this.replaceArray(this.devices, state.devices);
+    this.replaceArray(this.goodsCatalog, state.goodsCatalog);
+    this.replaceArray(this.goodsCategories, state.goodsCategories);
+    this.replaceArray(this.regions, state.regions);
+    this.replaceArray(this.warehouses, state.warehouses);
+    this.replaceArray(this.specialAccessPolicies, state.specialAccessPolicies);
+    this.replaceArray(this.goodsAlertPolicies, state.goodsAlertPolicies);
+    this.replaceArray(this.registrationApplications, state.registrationApplications);
+    this.replaceArray(this.merchantGoodsTemplates, state.merchantGoodsTemplates);
+    this.replaceArray(this.deviceGoodsSettings, state.deviceGoodsSettings);
+    this.replaceArray(this.goodsBatches, state.goodsBatches);
+    this.replaceArray(this.batchConsumptionTraces, state.batchConsumptionTraces);
+    this.replaceArray(this.inventoryTransfers, state.inventoryTransfers);
+    this.replaceArray(this.stocktakes, state.stocktakes);
+    this.replaceArray(this.events, state.events);
+    this.replaceArray(this.inventory, state.inventory);
+    this.replaceArray(this.alerts, state.alerts);
+    this.replaceArray(
+      this.logs,
+      state.logs.map((entry) => ({
+        ...entry,
+        ...formatOperationLog(entry)
+      }))
+    );
+
+    this.verificationCodes.clear();
+    for (const [key, value] of state.verificationCodes) {
+      this.verificationCodes.set(key, value);
+    }
+
+    this.sessions.clear();
+    for (const [key, value] of state.sessions) {
+      this.sessions.set(key, value);
+    }
+
+    this.draftSessions.clear();
+    for (const [key, value] of state.draftSessions) {
+      this.draftSessions.set(key, value);
+    }
+
+    this.replaceArray(this.callbackLog, state.callbackLog);
+    this.deviceRuntime.clear();
+    for (const [key, value] of state.deviceRuntime) {
+      this.deviceRuntime.set(key, value);
+    }
+  }
+
+  private replaceArray<T>(target: T[], source: T[]) {
+    target.splice(0, target.length, ...structuredClone(source));
   }
 }

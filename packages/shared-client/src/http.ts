@@ -47,7 +47,7 @@ const buildUrl = (baseUrl: string, path: string, query?: RequestOptions["query"]
 
 export const createJsonClient = ({ baseUrl, getToken, fetchImpl = fetch }: JsonClientOptions) => {
   const request = async <T>(
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     body?: unknown,
     options: RequestOptions = {}
@@ -86,6 +86,8 @@ export const createJsonClient = ({ baseUrl, getToken, fetchImpl = fetch }: JsonC
     post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
       request<T>("POST", path, body, options),
     patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
-      request<T>("PATCH", path, body, options)
+      request<T>("PATCH", path, body, options),
+    delete: <T>(path: string, options?: RequestOptions) =>
+      request<T>("DELETE", path, undefined, options)
   };
 };

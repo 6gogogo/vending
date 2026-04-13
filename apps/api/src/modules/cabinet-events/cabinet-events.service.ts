@@ -43,6 +43,21 @@ export class CabinetEventsService {
 
     if (user.role === "special") {
       quotaSummary = this.accessRulesService.assertCanOpenSpecialCabinet(user, payload.category);
+
+      if (payload.intentItems?.length) {
+        const remainingToday = (quotaSummary.remainingToday ?? {}) as Record<string, number>;
+        const remainingByGoods =
+          ((quotaSummary.remainingByGoods as Record<string, number> | undefined) ?? {});
+
+        for (const item of payload.intentItems) {
+          const fallbackCategory = payload.category ?? "daily";
+          const remaining = remainingByGoods[item.goodsId] ?? remainingToday[fallbackCategory] ?? 0;
+
+          if (item.quantity > remaining) {
+            throw new BadRequestException("意向领取数量超过当前可用额度。");
+          }
+        }
+      }
     }
 
     const eventId = this.store.createId("event");
@@ -101,7 +116,8 @@ export class CabinetEventsService {
       relatedOrderNo: openResult.orderNo,
       metadata: {
         deviceCode: payload.deviceCode,
-        category: payload.category
+        category: payload.category,
+        intentItems: payload.intentItems ?? []
       }
     });
 
@@ -111,7 +127,8 @@ export class CabinetEventsService {
       deviceCode: payload.deviceCode,
       doorNum,
       role: user.role,
-      remainingQuota: quotaSummary?.remainingToday
+      remainingQuota: quotaSummary?.remainingToday,
+      acceptedIntentItems: payload.intentItems ?? []
     };
   }
 

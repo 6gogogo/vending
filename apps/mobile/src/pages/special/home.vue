@@ -6,11 +6,9 @@ import type { DeviceStatus, DeviceRecord, InventoryMovement } from "@vm/shared-t
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
-import ServiceMetric from "../../components/ui/ServiceMetric.vue";
-import { useCabinetFlow } from "../../composables/useCabinetFlow";
+import MobileShell from "../../layouts/MobileShell.vue";
 import { appCopy } from "../../constants/copy";
 import { categoryLabelMap } from "../../constants/labels";
-import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
 
@@ -18,7 +16,6 @@ const sessionStore = useSessionStore();
 const devices = ref<DeviceRecord[]>([]);
 const records = ref<InventoryMovement[]>([]);
 const loading = ref(false);
-const { openCabinet, latestOrder, latestEventId, loading: opening } = useCabinetFlow();
 
 const statusLabelMap: Record<DeviceStatus, string> = {
   online: "在线可用",
@@ -32,19 +29,31 @@ const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
   maintenance: "warning"
 };
 
-const quotaEntries = computed(() => Object.entries(sessionStore.quota?.remainingToday ?? {}));
-const usedCount = computed(() => sessionStore.quota?.usedCount ?? 0);
+const permissionList = computed(() =>
+  Object.entries(sessionStore.quota?.remainingByGoods ?? {}).map(([goodsId, quantity]) => {
+    const matchedGoods = devices.value
+      .flatMap((device) => device.doors)
+      .flatMap((door) => door.goods)
+      .find((item) => item.goodsId === goodsId);
 
-const latestRecordSummary = computed(() => {
-  if (!records.value.length) {
-    return "今天还没有新的领取记录";
-  }
+    return {
+      goodsId,
+      goodsName: matchedGoods?.name ?? goodsId,
+      quantity,
+      category: matchedGoods?.category
+    };
+  })
+);
 
-  const latest = records.value[0];
-  return `${latest.goodsName} · ${latest.deviceCode}`;
-});
+const serviceWindows = computed(() =>
+  (sessionStore.quota?.activeWindows ?? []).map(
+    (window) => `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`
+  )
+);
 
 const load = async () => {
+  await sessionStore.bootstrap();
+
   if (!sessionStore.user) {
     uni.reLaunch({
       url: "/pages/common/login"
@@ -61,8 +70,8 @@ const load = async () => {
     ]);
 
     devices.value = deviceResponse;
-    sessionStore.setQuota(quotaResponse);
     records.value = recordResponse;
+    sessionStore.setQuota(quotaResponse);
   } catch (error) {
     uni.showToast({
       title: getErrorMessage(error),
@@ -73,38 +82,40 @@ const load = async () => {
   }
 };
 
+const openDeviceDetail = (deviceCode: string) => {
+  uni.navigateTo({
+    url: `/pages/special/device-detail?deviceCode=${deviceCode}`
+  });
+};
+
 const goHistory = () => {
   uni.navigateTo({
     url: "/pages/special/history"
   });
 };
 
+const goFeedback = (deviceCode?: string) => {
+  uni.navigateTo({
+    url: deviceCode ? `/pages/common/feedback?deviceCode=${deviceCode}` : "/pages/common/feedback"
+  });
+};
+
 const formatDateTime = (value: string) => value.slice(0, 16).replace("T", " ");
 
-onShow(load);
+onShow(() => {
+  load();
+});
 </script>
 
 <template>
-  <MobileShell eyebrow="特殊群体" :title="`${sessionStore.user?.name ?? '访客'}，您好`" :subtitle="appCopy.specialWelcome">
+  <MobileShell eyebrow="普通用户" :title="`${sessionStore.user?.name ?? '访客'}，您好`" :subtitle="appCopy.specialWelcome">
     <template #hero-extra>
       <GlassCard tone="quiet" compact>
-        <view class="hero-tags">
-          <text class="hero-tags__label">身份标签</text>
-          <view class="hero-tags__list">
-            <text v-for="tag in sessionStore.user?.tags ?? []" :key="tag" class="vm-status vm-status--success">{{ tag }}</text>
-          </view>
-        </view>
-      </GlassCard>
-    </template>
-
-    <template #hero-actions>
-      <GlassCard tone="accent" compact>
-        <view class="hero-action-card">
-          <view>
-            <text class="hero-action-card__label">最近进度</text>
-            <text class="hero-action-card__value">{{ latestOrder ?? "尚未发起开柜" }}</text>
-          </view>
-          <text class="hero-action-card__meta">{{ latestEventId ? `事件 ${latestEventId}` : latestRecordSummary }}</text>
+        <view class="hero-panel">
+          <text class="hero-panel__title">今日服务时间</text>
+          <text class="vm-subtitle">
+            {{ serviceWindows.length ? serviceWindows.join("、") : "当前暂无可领取时段，请稍后再试" }}
+          </text>
         </view>
       </GlassCard>
     </template>
@@ -112,39 +123,34 @@ onShow(load);
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">今日可领状态</text>
-          <text class="vm-subtitle">先确认今日剩余额度，再选择就近柜机领取。</text>
+          <text class="section-heading__title">我的领取权限</text>
+          <text class="vm-subtitle">展示当前业务日和时段内可领取的货品与剩余数量。</text>
         </view>
 
-        <view class="metric-grid">
-          <ServiceMetric label="今日已领次数" :value="usedCount" hint="超过上限后将无法继续开柜" />
-          <ServiceMetric
-            label="可领品类"
-            :value="quotaEntries.length || 0"
-            hint="按角色规则自动核验"
-            tone="accent"
-          />
-        </view>
-
-        <view v-if="quotaEntries.length" class="quota-list">
-          <view v-for="entry in quotaEntries" :key="entry[0]" class="quota-list__item">
-            <view>
-              <text class="quota-list__title">{{ categoryLabelMap[entry[0] as keyof typeof categoryLabelMap] }}</text>
-              <text class="quota-list__hint">今日剩余可领次数</text>
+        <view v-if="permissionList.length" class="permission-list">
+          <view v-for="item in permissionList" :key="item.goodsId" class="permission-item">
+            <view class="permission-item__main">
+              <text class="permission-item__title">{{ item.goodsName }}</text>
+              <text class="permission-item__meta">
+                {{ item.category ? categoryLabelMap[item.category] : "物资" }}
+              </text>
             </view>
-            <text class="vm-number quota-list__value">{{ entry[1] }}</text>
+            <text class="vm-status vm-status--success">今日可领 {{ item.quantity }} 件</text>
           </view>
         </view>
-        <EmptyState v-else title="暂无额度信息" description="请稍后刷新，或联系工作人员确认当前规则。" />
+        <EmptyState v-else title="当前无可领取额度" description="系统会按服务时间段和个人策略自动刷新权限。" />
 
-        <button class="vm-button vm-button--ghost" @tap="goHistory">查看完整领取记录</button>
+        <view class="action-row">
+          <button class="vm-button vm-button--ghost" @tap="goHistory">查看服务记录</button>
+          <button class="vm-button vm-button--soft" @tap="goFeedback()">提交反馈</button>
+        </view>
       </view>
     </GlassCard>
 
     <view class="vm-section">
       <view class="section-heading">
-        <text class="section-heading__title">就近柜机与物资</text>
-        <text class="vm-subtitle">优先展示在线设备和当前可领取物资，减少无效操作。</text>
+        <text class="section-heading__title">附近柜机</text>
+        <text class="vm-subtitle">可查看位置、物资信息和服务时间，确认意向货品后再发起取货。</text>
       </view>
 
       <view v-if="devices.length" class="device-list">
@@ -167,28 +173,23 @@ onShow(load);
               <view v-for="goods in device.doors[0]?.goods ?? []" :key="goods.goodsId" class="goods-item">
                 <view class="goods-item__main">
                   <text class="goods-item__name">{{ goods.name }}</text>
-                  <text class="goods-item__meta">
-                    {{ categoryLabelMap[goods.category] }} · 剩余 {{ goods.stock }} 件
-                  </text>
+                  <text class="goods-item__meta">{{ categoryLabelMap[goods.category] }} · 现有 {{ goods.stock }} 件</text>
                 </view>
-                <text v-if="goods.expiresAt" class="goods-item__tag">截止 {{ goods.expiresAt.slice(5, 10) }}</text>
+                <text v-if="goods.expiresAt" class="goods-item__tag">至 {{ goods.expiresAt.slice(5, 10) }}</text>
               </view>
             </view>
 
-            <button
-              class="vm-button"
-              :loading="opening"
-              @tap="openCabinet(device.deviceCode, device.doors[0]?.goods[0]?.category)"
-            >
-              申请开柜领取
-            </button>
+            <view class="action-row">
+              <button class="vm-button" @tap="openDeviceDetail(device.deviceCode)">选择货品并取货</button>
+              <button class="vm-button vm-button--ghost" @tap="goFeedback(device.deviceCode)">反馈</button>
+            </view>
           </view>
         </GlassCard>
       </view>
       <GlassCard v-else tone="quiet">
         <EmptyState
-          :title="loading ? '正在加载柜机列表' : '当前暂无可用柜机'"
-          :description="loading ? '请稍候，系统正在同步设备状态。' : '请联系工作人员确认柜机是否已接入。'"
+          :title="loading ? '正在加载柜机信息' : '附近暂无可用柜机'"
+          :description="loading ? '请稍候，系统正在同步设备状态。' : '请联系工作人员确认设备接入状态。'"
         />
       </GlassCard>
     </view>
@@ -196,126 +197,90 @@ onShow(load);
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">最近领取记录预览</text>
-          <text class="vm-subtitle">保留最近三条，完整记录可在次级页查看。</text>
+          <text class="section-heading__title">最近服务记录</text>
+          <text class="vm-subtitle">展示最近三次领取结果，完整记录可进入服务记录页查看。</text>
         </view>
 
-        <view v-if="records.length" class="record-list">
-          <view v-for="record in records.slice(0, 3)" :key="record.id" class="record-item">
-            <view class="record-item__main">
-              <text class="record-item__title">{{ record.goodsName }}</text>
-              <text class="record-item__meta">{{ record.deviceCode }} · {{ formatDateTime(record.happenedAt) }}</text>
+        <view v-if="records.length" class="permission-list">
+          <view v-for="record in records.slice(0, 3)" :key="record.id" class="permission-item">
+            <view class="permission-item__main">
+              <text class="permission-item__title">{{ record.goodsName }}</text>
+              <text class="permission-item__meta">{{ record.deviceCode }} · {{ formatDateTime(record.happenedAt) }}</text>
             </view>
             <text class="vm-status vm-status--success">领取 {{ record.quantity }} 件</text>
           </view>
         </view>
-        <EmptyState v-else title="还没有领取记录" description="首次领取成功后，这里会自动展示最近操作。" />
+        <EmptyState v-else title="还没有服务记录" description="首次领取成功后，这里会自动展示最近操作。" />
       </view>
     </GlassCard>
   </MobileShell>
 </template>
 
 <style scoped>
-.hero-tags,
-.hero-action-card,
-.section-heading {
+.hero-panel,
+.section-heading,
+.permission-item__main,
+.device-header__main,
+.goods-item__main {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
+  gap: 10rpx;
 }
 
-.hero-tags__label,
-.hero-action-card__label {
-  font-size: 22rpx;
-  color: var(--vm-text-soft);
-}
-
-.hero-tags__list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
-
-.hero-action-card {
-  gap: 14rpx;
-}
-
-.hero-action-card__value,
+.hero-panel__title,
 .section-heading__title,
+.permission-item__title,
 .device-header__title,
-.quota-list__title,
-.record-item__title,
 .goods-item__name {
   font-size: 30rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
-.hero-action-card__meta,
-.quota-list__hint,
+.permission-item__meta,
 .device-meta,
-.record-item__meta,
 .goods-item__meta {
   font-size: 22rpx;
   color: var(--vm-text-soft);
 }
 
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18rpx;
-}
-
-.quota-list,
+.permission-list,
 .device-list,
-.goods-list,
-.record-list {
+.goods-list {
   display: grid;
   gap: 16rpx;
 }
 
-.quota-list__item,
-.goods-item,
-.record-item {
+.permission-item,
+.goods-item {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 20rpx;
+  align-items: center;
+  gap: 18rpx;
   padding: 22rpx 24rpx;
-  border-radius: 26rpx;
-  background: rgba(255, 255, 255, 0.62);
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.6);
   border: 1rpx solid rgba(159, 127, 94, 0.12);
 }
 
-.quota-list__value {
-  font-size: 48rpx;
-}
-
-.device-header {
+.device-header,
+.device-meta,
+.action-row {
   display: flex;
+  justify-content: space-between;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 20rpx;
+  gap: 16rpx;
 }
 
-.device-header__main {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.device-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 20rpx;
+.device-meta,
+.action-row {
+  align-items: center;
   flex-wrap: wrap;
 }
 
-.goods-item__main,
-.record-item__main {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
+.action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .goods-item__tag {
@@ -325,11 +290,5 @@ onShow(load);
   background: rgba(240, 177, 52, 0.16);
   color: #8a5b11;
   font-size: 22rpx;
-}
-
-@media screen and (min-width: 720px) {
-  .metric-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
 }
 </style>

@@ -5,6 +5,7 @@ import type {
   GoodsAlertPolicy,
   GoodsBatchSource,
   GoodsCatalogItem,
+  GoodsCategoryRecord,
   GoodsDetailSnapshot,
   GoodsOverviewItem,
   GoodsOverviewSnapshot,
@@ -22,14 +23,120 @@ export class GoodsService {
   ) {}
 
   listCatalog() {
-    return [...this.store.goodsCatalog].sort((left, right) => left.goodsId.localeCompare(right.goodsId));
+    return [...this.store.goodsCatalog].sort((left, right) =>
+      (right.createdAt ?? "").localeCompare(left.createdAt ?? "")
+    );
+  }
+
+  listCategories() {
+    return [...this.store.goodsCategories].sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) {
+        return left.sortOrder - right.sortOrder;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+  }
+
+  createCategory(
+    payload: Pick<GoodsCategoryRecord, "name" | "category"> & { sortOrder?: number },
+    actorUserId?: string
+  ) {
+    const duplicated = this.store.goodsCategories.find(
+      (entry) =>
+        entry.status !== "inactive" &&
+        entry.category === payload.category &&
+        entry.name.trim() === payload.name.trim()
+    );
+
+    if (duplicated) {
+      throw new BadRequestException("该分类已存在。");
+    }
+
+    const created = this.store.upsertGoodsCategory({
+      name: payload.name.trim(),
+      category: payload.category,
+      status: "active",
+      sortOrder:
+        payload.sortOrder ??
+        Math.max(0, ...this.store.goodsCategories.map((entry) => entry.sortOrder), 0) + 1
+    });
+
+    this.store.logOperation({
+      category: "goods",
+      type: "create-goods-category",
+      status: "success",
+      actor: this.getActor(actorUserId),
+      primarySubject: {
+        type: "goods",
+        id: created.id,
+        label: created.name
+      },
+      metadata: {
+        categoryId: created.id,
+        categoryName: created.name,
+        undoState: "not_undoable"
+      }
+    });
+
+    return created;
+  }
+
+  updateCategory(
+    id: string,
+    payload: Partial<Pick<GoodsCategoryRecord, "name" | "category" | "status" | "sortOrder">>,
+    actorUserId?: string
+  ) {
+    const category = this.store.getGoodsCategoryRecord(id);
+
+    if (!category) {
+      throw new NotFoundException("未找到对应分类。");
+    }
+
+    const before = structuredClone(category);
+    const updated = this.store.upsertGoodsCategory({
+      ...category,
+      ...payload,
+      id,
+      name: payload.name?.trim() ?? category.name
+    });
+
+    this.store.logOperation({
+      category: "goods",
+      type: payload.status === "inactive" ? "disable-goods-category" : "update-goods-category",
+      status: "success",
+      actor: this.getActor(actorUserId),
+      primarySubject: {
+        type: "goods",
+        id: updated.id,
+        label: updated.name
+      },
+      metadata: {
+        categoryId: updated.id,
+        categoryName: updated.name,
+        beforeSnapshot: before,
+        afterSnapshot: structuredClone(updated),
+        undoState: "not_undoable"
+      }
+    });
+
+    return updated;
   }
 
   getDetail(goodsId: string): GoodsDetailSnapshot {
     const goods = this.findCatalogItem(goodsId);
     const distribution = this.buildDistributionForGoods(goodsId);
+    const warehouseStock = this.store.warehouses.reduce(
+      (sum, warehouse) => sum + this.store.getCurrentStock(warehouse.code, goodsId),
+      0
+    );
     const batches = this.store
       .getGoodsBatches(undefined, goodsId)
+      .map((entry) => ({
+        ...entry,
+        locationType: entry.locationType ?? (this.store.isWarehouseCode(entry.deviceCode) ? "warehouse" : "device"),
+        locationName: entry.locationName ?? this.store.getLocationName(entry.deviceCode)
+      }))
       .slice()
       .sort((left, right) => {
         const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
@@ -44,7 +151,8 @@ export class GoodsService {
 
     return {
       goods,
-      totalStock: distribution.reduce((sum, item) => sum + item.stock, 0),
+      totalStock: distribution.reduce((sum, item) => sum + item.stock, 0) + warehouseStock,
+      warehouseStock,
       nearestExpiryAt: batches
         .filter((entry) => entry.remainingQuantity > 0 && entry.expiresAt)
         .map((entry) => entry.expiresAt as string)
@@ -79,10 +187,26 @@ export class GoodsService {
   }
 
   createCatalogItem(
-    payload: Pick<GoodsCatalogItem, "goodsCode" | "goodsId" | "name" | "category" | "price" | "imageUrl">,
+    payload: Pick<
+      GoodsCatalogItem,
+      | "goodsCode"
+      | "name"
+      | "category"
+      | "price"
+      | "imageUrl"
+      | "fullName"
+      | "categoryName"
+      | "packageForm"
+      | "specification"
+      | "manufacturer"
+    > & { goodsId?: string },
     actorUserId?: string
   ) {
-    const existed = this.store.goodsCatalog.find((entry) => entry.goodsId === payload.goodsId);
+    const goodsCode = payload.goodsCode.trim();
+    const goodsId = payload.goodsId?.trim() || goodsCode;
+    const existed = this.store.goodsCatalog.find(
+      (entry) => entry.goodsId === goodsId || entry.goodsCode === goodsCode
+    );
 
     if (existed) {
       throw new BadRequestException("该货品编号已存在。");
@@ -90,6 +214,14 @@ export class GoodsService {
 
     const created = this.store.ensureGoodsCatalogItem({
       ...payload,
+      goodsCode,
+      goodsId,
+      name: payload.name.trim(),
+      fullName: payload.fullName?.trim() || payload.name.trim(),
+      categoryName: payload.categoryName?.trim(),
+      packageForm: payload.packageForm?.trim(),
+      specification: payload.specification?.trim(),
+      manufacturer: payload.manufacturer?.trim(),
       status: "active",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -118,13 +250,36 @@ export class GoodsService {
 
   updateCatalogItem(
     goodsId: string,
-    payload: Partial<Pick<GoodsCatalogItem, "goodsCode" | "name" | "category" | "price" | "imageUrl" | "status">>,
+    payload: Partial<
+      Pick<
+        GoodsCatalogItem,
+        | "goodsCode"
+        | "name"
+        | "fullName"
+        | "category"
+        | "categoryName"
+        | "price"
+        | "imageUrl"
+        | "packageForm"
+        | "specification"
+        | "manufacturer"
+        | "status"
+      >
+    >,
     actorUserId?: string
   ) {
     const goods = this.findCatalogItem(goodsId);
     const before = structuredClone(goods);
 
-    Object.assign(goods, payload, {
+    Object.assign(goods, {
+      ...payload,
+      goodsCode: payload.goodsCode?.trim() ?? goods.goodsCode,
+      name: payload.name?.trim() ?? goods.name,
+      fullName: payload.fullName?.trim() ?? goods.fullName,
+      categoryName: payload.categoryName?.trim() ?? goods.categoryName,
+      packageForm: payload.packageForm?.trim() ?? goods.packageForm,
+      specification: payload.specification?.trim() ?? goods.specification,
+      manufacturer: payload.manufacturer?.trim() ?? goods.manufacturer,
       updatedAt: new Date().toISOString()
     });
 
@@ -506,6 +661,14 @@ export class GoodsService {
       outOfStockKinds: goodsByDevice.filter((item) => item.status === "empty").length,
       policyCount: this.store.goodsAlertPolicies.filter((entry) => entry.status === "active").length,
       settingCount: this.store.deviceGoodsSettings.filter((entry) => entry.enabled).length,
+      warehouseStockTotal: this.store.warehouses.reduce(
+        (sum, warehouse) =>
+          sum +
+          this.store
+            .getGoodsBatches(warehouse.code)
+            .reduce((total, batch) => total + batch.remainingQuantity, 0),
+        0
+      ),
       flaggedGoods: goodsByDevice
         .filter((item) => item.status !== "ok")
         .sort((left, right) => {
@@ -535,7 +698,16 @@ export class GoodsService {
             goodsId: goods.goodsId,
             goodsName: goods.name,
             category: goods.category,
-            totalStock: distribution.reduce((sum, item) => sum + item.stock, 0),
+            totalStock:
+              distribution.reduce((sum, item) => sum + item.stock, 0) +
+              this.store.warehouses.reduce(
+                (sum, warehouse) => sum + this.store.getCurrentStock(warehouse.code, goods.goodsId),
+                0
+              ),
+            warehouseStock: this.store.warehouses.reduce(
+              (sum, warehouse) => sum + this.store.getCurrentStock(warehouse.code, goods.goodsId),
+              0
+            ),
             lowStockDevices: distribution.filter((item) => item.status === "low").length,
             outOfStockDevices: distribution.filter((item) => item.status === "empty").length,
             nearestExpiryAt: distribution
@@ -552,6 +724,68 @@ export class GoodsService {
           ["pickup", "restock", "inventory", "goods", "alert"].includes(entry.category)
         )
         .slice(0, 12)
+    };
+  }
+
+  buildOverviewExport() {
+    const overview = this.getOverview();
+    const rows = overview.byGoods
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.goodsId}</td>
+            <td>${this.findCatalogItem(item.goodsId).goodsCode}</td>
+            <td>${item.goodsName}</td>
+            <td>${this.findCatalogItem(item.goodsId).fullName ?? item.goodsName}</td>
+            <td>${item.category}</td>
+            <td>${this.findCatalogItem(item.goodsId).categoryName ?? ""}</td>
+            <td>${item.totalStock}</td>
+            <td>${item.warehouseStock}</td>
+            <td>${item.lowStockDevices}</td>
+            <td>${item.outOfStockDevices}</td>
+            <td>${item.nearestExpiryAt ?? ""}</td>
+            <td>${this.findCatalogItem(item.goodsId).packageForm ?? ""}</td>
+            <td>${this.findCatalogItem(item.goodsId).specification ?? ""}</td>
+            <td>${this.findCatalogItem(item.goodsId).manufacturer ?? ""}</td>
+            <td>${item.deviceDistribution
+              .map(
+                (distribution) =>
+                  `${distribution.deviceName}(${distribution.deviceCode}) 库存 ${distribution.stock}`
+              )
+              .join("；")}</td>
+          </tr>`
+      )
+      .join("");
+
+    return {
+      filename: `goods-overview-${new Date().toISOString().slice(0, 10)}.xls`,
+      contentType: "application/vnd.ms-excel; charset=utf-8",
+      body: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /></head>
+<body>
+<table border="1">
+  <tr>
+    <th>货品编号</th>
+    <th>商品编码</th>
+    <th>货品名称</th>
+    <th>商品全称</th>
+    <th>分类</th>
+    <th>细分类</th>
+    <th>总库存</th>
+    <th>仓库在库</th>
+    <th>低库存柜机数</th>
+    <th>缺货柜机数</th>
+    <th>最短保质期</th>
+    <th>包装形式</th>
+    <th>商品规格</th>
+    <th>厂家</th>
+    <th>柜机分布</th>
+  </tr>
+  ${rows}
+</table>
+</body>
+</html>`
     };
   }
 

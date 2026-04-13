@@ -69,8 +69,8 @@ export class AccessRulesService {
         getBusinessDayKey(entry.happenedAt) === getBusinessDayKey(new Date())
     );
     const policyQuota = getActiveWindowCategoryQuota(
+      user,
       this.store.specialAccessPolicies,
-      user.id,
       this.store.inventory,
       this.store.goodsCatalog,
       new Date()

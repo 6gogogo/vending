@@ -300,12 +300,42 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "batch-assign-special-policy":
       return {
-        description: `${actor}批量更新了特殊群体策略绑定。`,
+        description: `${actor}批量套用了普通用户取货模板。`,
         detail: baseDetail([
           `动作人 ${actor}`,
           `涉及人员 ${Array.isArray(entry.metadata?.userIds) ? entry.metadata.userIds.length : 0} 人`,
           `涉及模板 ${Array.isArray(entry.metadata?.policyIds) ? entry.metadata.policyIds.length : 0} 个`,
           typeof entry.metadata?.mode === "string" ? `操作方式 ${String(entry.metadata.mode)}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "create-user-access-policy":
+      return {
+        description: `${actor}为${primary}新增了个人取货设定${String(entry.metadata?.policyName ? ` ${entry.metadata.policyName}` : "")}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `人员 ${primary}`,
+          typeof entry.metadata?.policyName === "string" ? `设定 ${entry.metadata.policyName}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "update-user-access-policy":
+      return {
+        description: `${actor}修改了${primary}的个人取货设定${String(entry.metadata?.policyName ? ` ${entry.metadata.policyName}` : "")}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `人员 ${primary}`,
+          typeof entry.metadata?.policyName === "string" ? `设定 ${entry.metadata.policyName}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "delete-user-access-policy":
+      return {
+        description: `${actor}删除了${primary}的个人取货设定${String(entry.metadata?.policyName ? ` ${entry.metadata.policyName}` : "")}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `人员 ${primary}`,
+          typeof entry.metadata?.policyName === "string" ? `设定 ${entry.metadata.policyName}` : undefined,
           `状态 ${result}`
         ])
       };

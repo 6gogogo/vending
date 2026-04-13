@@ -64,6 +64,56 @@ export class OperationLogsService {
     return log;
   }
 
+  buildExport(filters?: {
+    category?: OperationLogCategory;
+    status?: OperationLogStatus;
+    subjectType?: OperationLogSubject["type"];
+    subjectId?: string;
+  }) {
+    const logs = this.list(filters);
+    const rows = logs
+      .map(
+        (log) => `
+          <tr>
+            <td>${log.occurredAt}</td>
+            <td>${log.category}</td>
+            <td>${log.status}</td>
+            <td>${log.actor.name}</td>
+            <td>${log.actor.type}</td>
+            <td>${log.primarySubject?.label ?? ""}</td>
+            <td>${log.secondarySubject?.label ?? ""}</td>
+            <td>${log.description}</td>
+            <td>${log.detail}</td>
+          </tr>`
+      )
+      .join("");
+
+    return {
+      filename: `operation-logs-${new Date().toISOString().slice(0, 10)}.xls`,
+      contentType: "application/vnd.ms-excel; charset=utf-8",
+      body: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /></head>
+<body>
+<table border="1">
+  <tr>
+    <th>时间</th>
+    <th>分类</th>
+    <th>状态</th>
+    <th>动作人</th>
+    <th>动作人类型</th>
+    <th>主体一</th>
+    <th>主体二</th>
+    <th>动作句式</th>
+    <th>详细说明</th>
+  </tr>
+  ${rows}
+</table>
+</body>
+</html>`
+    };
+  }
+
   undo(id: string, actorUserId?: string) {
     const log = this.detail(id);
 

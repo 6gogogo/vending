@@ -13,12 +13,43 @@ export class DevicesService {
     @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway
   ) {}
 
-  list() {
+  list(origin?: { longitude?: number; latitude?: number }) {
     this.store.syncDeviceStocksFromBatches();
-    return this.store.devices.map((device) => ({
-      ...device,
-      runtime: this.store.getDeviceRuntime(device.deviceCode)
-    }));
+    const devices = this.store.devices.map((device) => {
+      const distanceMeters =
+        origin?.longitude !== undefined &&
+        origin?.latitude !== undefined &&
+        device.longitude !== undefined &&
+        device.latitude !== undefined
+          ? this.calculateDistanceMeters(origin.latitude, origin.longitude, device.latitude, device.longitude)
+          : undefined;
+
+      return {
+        ...this.decorateDevice(device),
+        distanceMeters,
+        runtime: this.store.getDeviceRuntime(device.deviceCode)
+      };
+    });
+
+    if (origin?.longitude === undefined || origin?.latitude === undefined) {
+      return devices;
+    }
+
+    return devices.sort((left, right) => {
+      if (left.distanceMeters === undefined && right.distanceMeters === undefined) {
+        return left.deviceCode.localeCompare(right.deviceCode);
+      }
+
+      if (left.distanceMeters === undefined) {
+        return 1;
+      }
+
+      if (right.distanceMeters === undefined) {
+        return -1;
+      }
+
+      return left.distanceMeters - right.distanceMeters;
+    });
   }
 
   getByCode(deviceCode: string) {
@@ -130,7 +161,7 @@ export class DevicesService {
       });
 
     return {
-      device,
+      device: this.decorateDevice(device),
       runtime: this.store.getDeviceRuntime(deviceCode),
       businessDateKey,
       servedUsers: new Set(
@@ -148,6 +179,32 @@ export class DevicesService {
       recentLogs,
       businessDayServedUsers,
       stockChanges
+    };
+  }
+
+  private decorateDevice(device: DeviceRecord): DeviceRecord {
+    return {
+      ...device,
+      doors: device.doors.map((door) => ({
+        ...door,
+        goods: door.goods.map((goods) => {
+          const setting = this.store.getDeviceGoodsSetting(device.deviceCode, goods.goodsId);
+          const nearestExpiryAt = this.store.getNearestExpiryAt(device.deviceCode, goods.goodsId);
+          const expiringSoon =
+            nearestExpiryAt !== undefined &&
+            new Date(nearestExpiryAt).getTime() - Date.now() < 24 * 60 * 60_000 &&
+            new Date(nearestExpiryAt).getTime() > Date.now();
+
+          return {
+            ...goods,
+            stock: this.store.getCurrentStock(device.deviceCode, goods.goodsId),
+            expiresAt: nearestExpiryAt,
+            thresholdEnabled: Boolean(setting?.enabled),
+            lowStockThreshold: setting?.enabled ? setting.lowStockThreshold : undefined,
+            expiringSoon
+          };
+        })
+      }))
     };
   }
 
@@ -305,10 +362,62 @@ export class DevicesService {
     return this.store.ensureDeviceGoodsEntry(deviceCode, goods);
   }
 
+  updateLocation(
+    deviceCode: string,
+    payload: {
+      location?: string;
+      address?: string;
+      longitude?: number;
+      latitude?: number;
+    },
+    actorUserId?: string
+  ) {
+    const device = this.getByCode(deviceCode);
+    if (payload.location !== undefined) {
+      device.location = payload.location;
+    }
+    if (payload.address !== undefined) {
+      device.address = payload.address;
+    }
+    if (payload.longitude !== undefined) {
+      device.longitude = payload.longitude;
+    }
+    if (payload.latitude !== undefined) {
+      device.latitude = payload.latitude;
+    }
+
+    this.store.logOperation({
+      category: "device",
+      type: "update-device-location",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: device.deviceCode,
+        label: device.name
+      },
+      description: `管理员更新了 ${device.name} 的地图位置。`,
+      detail: `${device.name} 已更新位置为 ${device.location}${device.longitude !== undefined && device.latitude !== undefined ? `（${device.longitude}, ${device.latitude}）` : ""}。`,
+      metadata: {
+        deviceCode: device.deviceCode,
+        longitude: device.longitude,
+        latitude: device.latitude
+      }
+    });
+
+    return {
+      ...device,
+      runtime: this.store.getDeviceRuntime(device.deviceCode)
+    };
+  }
+
   upsertMockDevice(payload: {
     deviceCode: string;
     name: string;
     location: string;
+    address?: string;
+    longitude?: number;
+    latitude?: number;
     status?: DeviceStatus;
     doorNum?: string;
     goods: Array<{
@@ -342,6 +451,9 @@ export class DevicesService {
     if (existing) {
       existing.name = payload.name;
       existing.location = payload.location;
+      existing.address = payload.address;
+      existing.longitude = payload.longitude;
+      existing.latitude = payload.latitude;
       existing.status = payload.status ?? "online";
       existing.lastSeenAt = now;
 
@@ -408,6 +520,9 @@ export class DevicesService {
       deviceCode: payload.deviceCode,
       name: payload.name,
       location: payload.location,
+      address: payload.address,
+      longitude: payload.longitude,
+      latitude: payload.latitude,
       status: payload.status ?? "online",
       lastSeenAt: now,
       doors: [
@@ -479,5 +594,25 @@ export class DevicesService {
       type: "system" as const,
       name: "系统"
     };
+  }
+
+  private calculateDistanceMeters(
+    startLatitude: number,
+    startLongitude: number,
+    endLatitude: number,
+    endLongitude: number
+  ) {
+    const toRadians = (value: number) => (value * Math.PI) / 180;
+    const earthRadius = 6_371_000;
+    const deltaLatitude = toRadians(endLatitude - startLatitude);
+    const deltaLongitude = toRadians(endLongitude - startLongitude);
+    const a =
+      Math.sin(deltaLatitude / 2) * Math.sin(deltaLatitude / 2) +
+      Math.cos(toRadians(startLatitude)) *
+        Math.cos(toRadians(endLatitude)) *
+        Math.sin(deltaLongitude / 2) *
+        Math.sin(deltaLongitude / 2);
+
+    return Math.round(2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
   }
 }

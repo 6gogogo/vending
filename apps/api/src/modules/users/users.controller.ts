@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type { UserRole } from "@vm/shared-types";
 
@@ -22,6 +22,8 @@ export class UsersController {
       name: string;
       status?: "active" | "inactive";
       neighborhood?: string;
+      regionId?: string;
+      regionName?: string;
       tags?: string[];
       quota?: {
         dailyLimit: number;
@@ -30,7 +32,7 @@ export class UsersController {
     },
     @Req() request: { authUser?: { id: string } }
   ) {
-    return ok(this.usersService.createUser(body, request.authUser?.id), "人员已新增。");
+    return ok(this.usersService.createUser(body, request.authUser?.id), "操作成功");
   }
 
   @Get()
@@ -39,8 +41,17 @@ export class UsersController {
   }
 
   @Get(":userId")
-  detail(@Param("userId") userId: string) {
-    return ok(this.usersService.detail(userId));
+  detail(
+    @Param("userId") userId: string,
+    @Query("month") month?: string,
+    @Query("date") date?: string
+  ) {
+    return ok(
+      this.usersService.detail(userId, {
+        monthKey: month,
+        dateKey: date
+      })
+    );
   }
 
   @Patch(":userId")
@@ -52,6 +63,8 @@ export class UsersController {
       name?: string;
       status?: "active" | "inactive";
       neighborhood?: string;
+      regionId?: string;
+      regionName?: string;
       tags?: string[];
       quota?: {
         dailyLimit: number;
@@ -60,7 +73,7 @@ export class UsersController {
     },
     @Req() request: { authUser?: { id: string } }
   ) {
-    return ok(this.usersService.updateUser(userId, body, request.authUser?.id), "人员信息已更新。");
+    return ok(this.usersService.updateUser(userId, body, request.authUser?.id), "操作成功");
   }
 
   @Post("import")
@@ -83,6 +96,8 @@ export class UsersController {
         status?: "active" | "inactive";
         tags?: string[];
         neighborhood?: string;
+        regionId?: string;
+        regionName?: string;
         quota?: {
           dailyLimit: number;
           categoryLimit: Record<string, number>;
@@ -91,7 +106,7 @@ export class UsersController {
     },
     @Req() request: { authUser?: { id: string } }
   ) {
-    return ok(this.usersService.batchUpdate(body, request.authUser?.id), "批量人员属性已更新。");
+    return ok(this.usersService.batchUpdate(body, request.authUser?.id), "操作成功");
   }
 
   @Post(":userId/manual-adjustment")
@@ -110,6 +125,37 @@ export class UsersController {
     },
     @Req() request: { authUser?: { id: string } }
   ) {
-    return ok(this.usersService.manualAdjustment(userId, body, request.authUser?.id), "手工库存调整已记录。");
+    return ok(this.usersService.manualAdjustment(userId, body, request.authUser?.id), "操作成功");
+  }
+
+  @Post(":userId/access-policies")
+  saveAccessPolicy(
+    @Param("userId") userId: string,
+    @Body()
+    body: {
+      id?: string;
+      name: string;
+      weekdays: number[];
+      startHour: number;
+      endHour: number;
+      goodsLimits: Array<{
+        goodsId: string;
+        quantity: number;
+      }>;
+      status: "active" | "inactive";
+      sourcePolicyId?: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.usersService.saveAccessPolicy(userId, body, request.authUser?.id), "操作成功");
+  }
+
+  @Delete(":userId/access-policies/:policyId")
+  deleteAccessPolicy(
+    @Param("userId") userId: string,
+    @Param("policyId") policyId: string,
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.usersService.deleteAccessPolicy(userId, policyId, request.authUser?.id), "操作成功");
   }
 }

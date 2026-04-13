@@ -52,6 +52,27 @@ const formatDoorState = (doorState?: "open" | "closed" | "unknown") => {
   return "门状态未知";
 };
 
+const formatGoodsStock = (goods: DeviceRecord["doors"][number]["goods"][number]) => {
+  const base =
+    goods.thresholdEnabled && goods.lowStockThreshold !== undefined
+      ? `${goods.stock}/${goods.lowStockThreshold}`
+      : `${goods.stock}`;
+  const tags: string[] = [];
+
+  if (
+    (goods.thresholdEnabled && goods.lowStockThreshold !== undefined && goods.stock <= goods.lowStockThreshold) ||
+    goods.stock <= 0
+  ) {
+    tags.push("缺货");
+  }
+
+  if (goods.expiringSoon) {
+    tags.push("临期");
+  }
+
+  return tags.length ? `${base}（${tags.join("，")}）` : base;
+};
+
 const hasDoorWarning = (device: DeviceRecord) =>
   device.runtime?.doorState === "closed" &&
   Boolean(device.runtime.lastCommandAt) &&
@@ -155,7 +176,7 @@ onUnmounted(() => {
                 <span class="admin-table__strong">{{ goods.name }}</span>
                 <span class="admin-table__subtext">{{ goods.goodsId }}</span>
               </td>
-              <td class="admin-code">{{ goods.stock }}</td>
+              <td class="admin-code">{{ formatGoodsStock(goods) }}</td>
             </tr>
             <tr v-if="remainingGoodsCount(device)">
               <td colspan="2" class="admin-code">其余 {{ remainingGoodsCount(device) }} 个货品请进入详情页查看</td>

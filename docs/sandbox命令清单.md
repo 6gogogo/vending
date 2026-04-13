@@ -2,6 +2,8 @@
 
 `sandbox` 目录里的脚本是为了单独调试接口，不让这些调试逻辑混进正式业务代码。
 
+这些脚本现在会先读取 `apps/api/.env*`，再读取 `sandbox/.env*`。如果你已经把第三方地址和密钥统一写在 `apps/api/.env`，`sandbox` 可以直接复用，不需要再填第二份。
+
 ## 根目录可直接执行的命令
 
 ### 1. 查询本地柜机详情
@@ -338,6 +340,73 @@ node sandbox/scripts/simulate-latest-event.mjs
 - `SIM_GOODS_ID`
 - `SIM_QUANTITY`
 
+---
+
+### 11. 发送短信验证码
+
+命令：
+
+```bash
+npm run sandbox:sms:send -- 13800138000
+```
+
+实际执行内容：
+
+```bash
+node sandbox/scripts/send-sms-code.mjs 13800138000
+```
+
+作用：
+
+- 通过阿里云短信验证码服务向指定手机号发送真实验证码
+- 适合先在 `sandbox` 单独验证短信能力，再决定是否接入正式登录/注册流程
+
+依赖环境变量：
+
+- `ALIYUN_SMS_ACCESS_KEY_ID`
+- `ALIYUN_SMS_ACCESS_KEY_SECRET`
+- `ALIYUN_SMS_REGION_ID`
+- `ALIYUN_SMS_ENDPOINT`
+
+补充说明：
+
+- 当前脚本调用的是阿里云官方 SDK 提供的手机验证码接口，不需要你再手动拼接短信模板参数
+- 如果没有配置阿里云密钥，脚本会直接报明确提示，不会继续请求外部服务
+- 当前脚本只放在 `sandbox`，还没有接进正式业务后端
+
+---
+
+### 12. 校验短信验证码
+
+命令：
+
+```bash
+npm run sandbox:sms:verify -- 13800138000 123456
+```
+
+实际执行内容：
+
+```bash
+node sandbox/scripts/verify-sms-code.mjs 13800138000 123456
+```
+
+作用：
+
+- 通过阿里云短信验证码服务校验手机号和验证码是否匹配
+- 适合验证真实短信验证码闭环是否可用
+
+依赖环境变量：
+
+- `ALIYUN_SMS_ACCESS_KEY_ID`
+- `ALIYUN_SMS_ACCESS_KEY_SECRET`
+- `ALIYUN_SMS_REGION_ID`
+- `ALIYUN_SMS_ENDPOINT`
+
+补充说明：
+
+- 如果验证码不正确，命令会输出结果并以非 0 退出码结束
+- 目前脚本只验证中国大陆手机号格式，即 11 位手机号
+
 ## 对应脚本文件
 
 - `sandbox/scripts/generate-signature.mjs`
@@ -351,6 +420,9 @@ node sandbox/scripts/simulate-latest-event.mjs
 - `sandbox/scripts/simulate-settlement.mjs`
 - `sandbox/scripts/upsert-mock-device.mjs`
 - `sandbox/scripts/helpers.mjs`
+- `sandbox/scripts/aliyun-phone-code.mjs`
+- `sandbox/scripts/send-sms-code.mjs`
+- `sandbox/scripts/verify-sms-code.mjs`
 
 ## 对应示例载荷
 

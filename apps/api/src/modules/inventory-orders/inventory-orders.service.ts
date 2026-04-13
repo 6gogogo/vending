@@ -64,7 +64,35 @@ export class InventoryOrdersService {
       this.store.inventory.unshift(movement);
 
       if (movement.type === "pickup") {
-        this.store.consumeGoodsBatches(movement.deviceCode, movement.goodsId, movement.quantity);
+        const sourceBatches = new Map(
+          this.store.getGoodsBatches(movement.deviceCode, movement.goodsId).map((entry) => [entry.batchId, entry])
+        );
+        const consumed = this.store.consumeGoodsBatches(movement.deviceCode, movement.goodsId, movement.quantity);
+        const consumer = this.store.users.find((entry) => entry.id === movement.userId);
+
+        for (const item of consumed.consumed) {
+          const batch = sourceBatches.get(item.batchId);
+
+          if (!batch) {
+            continue;
+          }
+
+          this.store.recordBatchConsumption({
+            id: this.store.createId("consumption-trace"),
+            batchId: batch.batchId,
+            goodsId: movement.goodsId,
+            goodsName: movement.goodsName,
+            deviceCode: movement.deviceCode,
+            sourceUserId: batch.sourceUserId,
+            sourceUserName: batch.sourceUserName,
+            consumerUserId: movement.userId,
+            consumerUserName: consumer?.name,
+            quantity: item.quantity,
+            happenedAt: movement.happenedAt,
+            orderNo: movement.orderNo,
+            eventId: event.eventId
+          });
+        }
       } else if (movement.type === "donation") {
         const catalogItem = this.store.ensureGoodsCatalogItem({
           goodsCode: movement.goodsId,

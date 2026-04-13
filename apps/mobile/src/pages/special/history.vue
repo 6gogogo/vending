@@ -10,7 +10,7 @@ import { appCopy } from "../../constants/copy";
 import { categoryLabelMap } from "../../constants/labels";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
-import { getErrorMessage } from "../../utils/error-message";
+import { showOperationFailure } from "../../utils/operation-feedback";
 
 const sessionStore = useSessionStore();
 const records = ref<InventoryMovement[]>([]);
@@ -33,7 +33,12 @@ const groupedRecords = computed(() => {
 });
 
 const load = async () => {
+  await sessionStore.bootstrap();
+
   if (!sessionStore.user) {
+    uni.reLaunch({
+      url: "/pages/common/login"
+    });
     return;
   }
 
@@ -41,10 +46,7 @@ const load = async () => {
   try {
     records.value = await mobileApi.listRecords(sessionStore.user.id, sessionStore.user.role);
   } catch (error) {
-    uni.showToast({
-      title: getErrorMessage(error),
-      icon: "none"
-    });
+    showOperationFailure(error);
   } finally {
     loading.value = false;
   }
@@ -56,7 +58,7 @@ onShow(load);
 </script>
 
 <template>
-  <MobileShell eyebrow="领取记录" title="历史领取记录" :subtitle="appCopy.historyIntro">
+  <MobileShell eyebrow="服务记录" title="我的服务记录" :subtitle="appCopy.historyIntro">
     <GlassCard tone="quiet">
       <view class="history-tip">
         <text class="history-tip__title">记录说明</text>
@@ -81,7 +83,8 @@ onShow(load);
                   <text class="timeline__time">{{ formatDateTime(record.happenedAt) }}</text>
                 </view>
                 <text class="timeline__meta">
-                  {{ categoryLabelMap[record.category] }} · {{ record.deviceCode }} · 领取 {{ record.quantity }} 件
+                  {{ categoryLabelMap[record.category] }} · {{ record.deviceCode }} ·
+                  {{ record.type === "manual-deduction" ? `补扣 ${record.quantity} 件` : `领取 ${record.quantity} 件` }}
                 </text>
               </view>
             </view>
@@ -92,8 +95,8 @@ onShow(load);
 
     <GlassCard v-else tone="quiet">
       <EmptyState
-        :title="loading ? '正在加载领取记录' : '还没有历史领取记录'"
-        :description="loading ? '请稍候，系统正在同步记录。' : '完成首次领取后，历史记录会自动显示在这里。'"
+        :title="loading ? '正在加载服务记录' : '还没有服务记录'"
+        :description="loading ? '请稍候，系统正在同步记录。' : '完成首次领取后，服务记录会自动显示在这里。'"
       />
     </GlassCard>
   </MobileShell>

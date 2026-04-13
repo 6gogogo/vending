@@ -120,15 +120,35 @@ export class AlertsService {
   }
 
   createFeedbackTask(payload: {
-    title: string;
+    title?: string;
     detail: string;
     deviceCode?: string;
     targetUserId?: string;
+    feedbackType?: "机器故障" | "服务问题" | "其他";
   }) {
+    const targetUser = payload.targetUserId
+      ? this.store.users.find((entry) => entry.id === payload.targetUserId)
+      : undefined;
+    const actorLabel = targetUser
+      ? `${targetUser.role === "special" ? "普通用户" : targetUser.role === "merchant" ? "爱心商户" : "管理员"}${targetUser.name}`
+      : "访客";
+    const trimmedDetail = payload.detail.trim();
+    const previewDetail =
+      trimmedDetail.length > 24 ? `${trimmedDetail.slice(0, 24)}...` : trimmedDetail;
+    const titleBase = `${actorLabel}反馈${payload.feedbackType ?? "其他"}问题`;
+
     return this.create({
       type: "user_feedback",
-      title: payload.title,
-      detail: payload.detail,
+      title: payload.title ?? (previewDetail ? `${titleBase}，备注为${previewDetail}` : titleBase),
+      detail: [
+        `反馈人：${actorLabel}`,
+        payload.feedbackType ? `反馈类型：${payload.feedbackType}` : undefined,
+        payload.deviceCode ? `关联柜机：${payload.deviceCode}` : undefined,
+        trimmedDetail ? `备注：${trimmedDetail}` : undefined
+      ]
+        .filter(Boolean)
+        .join("。"),
+      previewDetail,
       deviceCode: payload.deviceCode,
       targetUserId: payload.targetUserId,
       dueAt: new Date(Date.now() + 30 * 60_000).toISOString()
@@ -212,6 +232,7 @@ export class AlertsService {
     for (const event of this.store.events) {
       const pendingDuration = Date.now() - new Date(event.updatedAt).getTime();
       const sourceLog = this.store.logs.find((entry) => entry.relatedEventId === event.eventId);
+      const deviceLabel = this.getDeviceLabel(event.deviceCode);
 
       if (["created", "opening"].includes(event.status) && pendingDuration > 90 * 1000) {
         if (event.status !== "timeout_unopened") {
@@ -221,7 +242,7 @@ export class AlertsService {
 
         this.create({
           type: "device_fault",
-          title: "超时未开门",
+          title: `${deviceLabel}超时未开门`,
           deviceCode: event.deviceCode,
           targetUserId: event.userId,
           dueAt: event.updatedAt,
@@ -236,7 +257,7 @@ export class AlertsService {
         event.updatedAt = new Date().toISOString();
         this.create({
           type: "device_fault",
-          title: "柜门持续敞开",
+          title: `${deviceLabel}柜门持续敞开`,
           deviceCode: event.deviceCode,
           targetUserId: event.userId,
           dueAt: event.updatedAt,
@@ -249,7 +270,7 @@ export class AlertsService {
       if (event.status === "failed") {
         this.create({
           type: "device_fault",
-          title: "开门失败",
+          title: `${deviceLabel}开门失败`,
           deviceCode: event.deviceCode,
           targetUserId: event.userId,
           dueAt: event.updatedAt,
@@ -265,19 +286,20 @@ export class AlertsService {
     for (const log of this.store.logs) {
       if (log.status === "pending" && ["remote-open-device", "open-cabinet"].includes(log.type)) {
         const pendingDuration = Date.now() - new Date(log.occurredAt).getTime();
+        const deviceCode =
+          log.primarySubject?.type === "device"
+            ? log.primarySubject.id
+            : log.secondarySubject?.type === "device"
+              ? log.secondarySubject.id
+              : typeof log.metadata?.deviceCode === "string"
+                ? log.metadata.deviceCode
+                : undefined;
 
         if (pendingDuration > 90 * 1000 && !log.relatedEventId) {
           this.create({
             type: "device_fault",
-            title: "开门无响应",
-            deviceCode:
-              log.primarySubject?.type === "device"
-                ? log.primarySubject.id
-                : log.secondarySubject?.type === "device"
-                  ? log.secondarySubject.id
-                  : typeof log.metadata?.deviceCode === "string"
-                    ? log.metadata.deviceCode
-                    : undefined,
+            title: `${this.getDeviceLabel(deviceCode)}开门无响应`,
+            deviceCode,
             dueAt: log.occurredAt,
             detail: `${log.description} 超过 90 秒仍未完成，请人工确认设备状态。`,
             sourceLogId: log.id
@@ -286,15 +308,16 @@ export class AlertsService {
       }
 
       if (log.status === "failed" && log.type === "door-status-callback" && !log.relatedEventId) {
+        const deviceCode =
+          log.primarySubject?.type === "device"
+            ? log.primarySubject.id
+            : typeof log.metadata?.deviceCode === "string"
+              ? log.metadata.deviceCode
+              : undefined;
         this.create({
           type: "device_fault",
-          title: "开门失败",
-          deviceCode:
-            log.primarySubject?.type === "device"
-              ? log.primarySubject.id
-              : typeof log.metadata?.deviceCode === "string"
-                ? log.metadata.deviceCode
-                : undefined,
+          title: `${this.getDeviceLabel(deviceCode)}开门失败`,
+          deviceCode,
           dueAt: log.occurredAt,
           detail: `${log.description}，需要人工检查柜门、电机或通信链路。`,
           sourceLogId: log.id

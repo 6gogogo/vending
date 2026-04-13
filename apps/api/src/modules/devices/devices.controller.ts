@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type { DeviceStatus, GoodsCategory } from "@vm/shared-types";
 
@@ -12,8 +12,16 @@ export class DevicesController {
   constructor(@Inject(DevicesService) private readonly devicesService: DevicesService) {}
 
   @Get()
-  list() {
-    return ok(this.devicesService.list());
+  list(
+    @Query("longitude") longitude?: string,
+    @Query("latitude") latitude?: string
+  ) {
+    return ok(
+      this.devicesService.list({
+        longitude: longitude ? Number(longitude) : undefined,
+        latitude: latitude ? Number(latitude) : undefined
+      })
+    );
   }
 
   @Get(":deviceCode")
@@ -40,7 +48,7 @@ export class DevicesController {
     @Param("deviceCode") deviceCode: string,
     @Req() request: { authUser?: { id: string } }
   ) {
-    return ok(await this.devicesService.refreshDevice(deviceCode, request.authUser?.id), "柜机状态已刷新。");
+    return ok(await this.devicesService.refreshDevice(deviceCode, request.authUser?.id), "操作成功");
   }
 
   @Post(":deviceCode/remote-open")
@@ -54,7 +62,24 @@ export class DevicesController {
       doorNum?: string;
     } = {}
   ) {
-    return ok(await this.devicesService.remoteOpen(deviceCode, body, request.authUser?.id), "远程开门指令已下发。");
+    return ok(await this.devicesService.remoteOpen(deviceCode, body, request.authUser?.id), "操作成功");
+  }
+
+  @Patch(":deviceCode/location")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  updateLocation(
+    @Param("deviceCode") deviceCode: string,
+    @Body()
+    body: {
+      location?: string;
+      address?: string;
+      longitude?: number;
+      latitude?: number;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.devicesService.updateLocation(deviceCode, body, request.authUser?.id), "操作成功");
   }
 
   @Post("mock/upsert")
@@ -66,6 +91,9 @@ export class DevicesController {
       deviceCode: string;
       name: string;
       location: string;
+      address?: string;
+      longitude?: number;
+      latitude?: number;
       status?: DeviceStatus;
       doorNum?: string;
       goods: Array<{
@@ -81,6 +109,6 @@ export class DevicesController {
     },
     @Req() request: { authUser?: { id: string } }
   ) {
-    return ok(this.devicesService.upsertMockDevice(body, request.authUser?.id), "模拟柜机已保存。");
+    return ok(this.devicesService.upsertMockDevice(body, request.authUser?.id), "操作成功");
   }
 }

@@ -27,6 +27,12 @@ interface PolicyWindow {
   goodsLimits: SpecialAccessPolicy["goodsLimits"];
 }
 
+type EffectivePolicy = Omit<SpecialAccessPolicy, "applicableUserIds"> & {
+  applicableUserIds?: string[];
+  effectiveFromDateKey?: string;
+  effectiveToDateKey?: string;
+};
+
 const buildCatalogMap = (catalog: GoodsCatalogItem[]) =>
   new Map(catalog.map((item) => [item.goodsId, item]));
 
@@ -40,8 +46,38 @@ export const getApplicablePoliciesForUser = (
       policy.status === status && policy.applicableUserIds.includes(userId)
   );
 
+export const getEffectivePoliciesForUser = (
+  user: UserRecord,
+  templates: SpecialAccessPolicy[],
+  status: SpecialAccessPolicy["status"] = "active",
+  businessDateKey: string = getBusinessDayKey(new Date())
+): EffectivePolicy[] => {
+  const directPolicies =
+    user.accessPolicies
+      ?.filter((policy) => {
+        if (policy.status !== status) {
+          return false;
+        }
+
+        const effectiveFromDateKey = policy.effectiveFromDateKey ?? "0000-01-01";
+        const effectiveToDateKey = policy.effectiveToDateKey ?? "9999-12-31";
+
+        return effectiveFromDateKey <= businessDateKey && effectiveToDateKey >= businessDateKey;
+      })
+      .map((policy) => ({
+        ...policy,
+        applicableUserIds: [user.id]
+      })) ?? [];
+
+  if (directPolicies.length) {
+    return directPolicies;
+  }
+
+  return getApplicablePoliciesForUser(templates, user.id, status);
+};
+
 export const getBusinessDayWindowsForPolicy = (
-  policy: SpecialAccessPolicy,
+  policy: EffectivePolicy,
   businessDateKey: string
 ): PolicyWindow[] => {
   const windows: PolicyWindow[] = [];
@@ -77,23 +113,23 @@ export const getBusinessDayWindowsForPolicy = (
 };
 
 export const getBusinessDayWindowsForUser = (
+  user: UserRecord,
   policies: SpecialAccessPolicy[],
-  userId: string,
   businessDateKey: string = getBusinessDayKey(new Date())
 ) =>
-  getApplicablePoliciesForUser(policies, userId).flatMap((policy) =>
+  getEffectivePoliciesForUser(user, policies, "active", businessDateKey).flatMap((policy) =>
     getBusinessDayWindowsForPolicy(policy, businessDateKey)
   );
 
 export const getActiveWindowsForUser = (
+  user: UserRecord,
   policies: SpecialAccessPolicy[],
-  userId: string,
   value: string | Date = new Date()
 ) => {
   const currentDateKey = toDateKey(value);
   const { hour, weekday } = getLocalDateParts(value);
 
-  return getApplicablePoliciesForUser(policies, userId).flatMap((policy) => {
+  return getEffectivePoliciesForUser(user, policies, "active", getBusinessDayKey(value)).flatMap((policy) => {
     if (!policy.weekdays.includes(weekday)) {
       return [];
     }
@@ -123,7 +159,7 @@ export const summarizeBusinessDayForUser = (
   goodsCatalog: GoodsCatalogItem[],
   businessDateKey: string = getBusinessDayKey(new Date())
 ) => {
-  const windows = getBusinessDayWindowsForUser(policies, user.id, businessDateKey);
+  const windows = getBusinessDayWindowsForUser(user, policies, businessDateKey);
   const relevantPickups = inventory.filter(
     (entry) => entry.userId === user.id && entry.type === "pickup" && getBusinessDayKey(entry.happenedAt) === businessDateKey
   );
@@ -133,6 +169,7 @@ export const summarizeBusinessDayForUser = (
     policyId: window.policyId,
     policyName: window.policyName,
     weekdays: window.weekdays,
+    dateKey: window.dateKey,
     startHour: window.startHour,
     endHour: window.endHour,
     goodsUsage: window.goodsLimits.map((limit) => {
@@ -185,16 +222,16 @@ export const summarizeBusinessDayForUser = (
 };
 
 export const getActiveWindowCategoryQuota = (
+  user: UserRecord,
   policies: SpecialAccessPolicy[],
-  userId: string,
   inventory: InventoryMovement[],
   goodsCatalog: GoodsCatalogItem[],
   value: string | Date = new Date()
 ) => {
-  const activeWindows = getActiveWindowsForUser(policies, userId, value);
+  const activeWindows = getActiveWindowsForUser(user, policies, value);
   const businessDateKey = getBusinessDayKey(value);
   const relevantPickups = inventory.filter(
-    (entry) => entry.userId === userId && entry.type === "pickup" && getBusinessDayKey(entry.happenedAt) === businessDateKey
+    (entry) => entry.userId === user.id && entry.type === "pickup" && getBusinessDayKey(entry.happenedAt) === businessDateKey
   );
   const catalogMap = buildCatalogMap(goodsCatalog);
   const remainingByCategory: Record<string, number> = {};
@@ -226,6 +263,25 @@ export const getActiveWindowCategoryQuota = (
     remainingByCategory,
     remainingByGoods
   };
+};
+
+export const buildCalendarMonthDays = (monthKey: string) => {
+  const [year, month] = monthKey.split("-").map(Number);
+  const firstDay = new Date(Date.UTC(year, month - 1, 1));
+  const firstWeekday = firstDay.getUTCDay();
+  const gridStart = new Date(Date.UTC(year, month - 1, 1 - ((firstWeekday + 6) % 7)));
+
+  return Array.from({ length: 35 }, (_, index) => {
+    const current = new Date(gridStart);
+    current.setUTCDate(gridStart.getUTCDate() + index);
+    const dateKey = current.toISOString().slice(0, 10);
+
+    return {
+      dateKey,
+      day: current.getUTCDate(),
+      inCurrentMonth: current.getUTCMonth() + 1 === month
+    };
+  });
 };
 
 export const getPolicyGoodsCategory = (

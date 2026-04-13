@@ -13,6 +13,7 @@ const dashboard = ref<DashboardSnapshot>();
 const loading = ref(false);
 const activeBucket = ref<BucketKey>();
 const resolvingTaskId = ref<string>();
+const activeTask = ref<NonNullable<typeof pendingTasks.value>[number]>();
 
 const summaryLogs = computed(() => dashboard.value?.summaryLogs ?? []);
 const pendingTasks = computed(() => dashboard.value?.pendingTasks ?? []);
@@ -71,8 +72,27 @@ const closeBucket = () => {
   activeBucket.value = undefined;
 };
 
+const openTaskDetail = (task: NonNullable<typeof pendingTasks.value>[number]) => {
+  activeTask.value = task;
+};
+
+const closeTaskDetail = () => {
+  activeTask.value = undefined;
+};
+
 const resolveTask = async (id: string) => {
   const task = pendingTasks.value.find((entry) => entry.id === id);
+
+  if (!task) {
+    return;
+  }
+
+  const confirmed = window.confirm(task.grade === "fault" ? "确认标记为已知晓？" : "确认手动完成这条待办？");
+
+  if (!confirmed) {
+    return;
+  }
+
   resolvingTaskId.value = id;
   try {
     await adminApi.resolveAlert(
@@ -168,7 +188,7 @@ onMounted(load);
               <td>
                 <span class="admin-table__strong">{{ task.title }}</span>
                 <span class="admin-table__subtext">分级：{{ taskGradeLabel(task.grade) }} · 状态：{{ task.status === "acknowledged" ? "已知晓" : "待处理" }}</span>
-                <span class="admin-table__subtext">{{ task.detail }}</span>
+                <span class="admin-table__subtext">{{ task.previewDetail || task.detail }}</span>
               </td>
               <td>
                 <RouterLink v-if="task.deviceCode" class="admin-link" :to="`/operations/${task.deviceCode}`">
@@ -183,13 +203,16 @@ onMounted(load);
                 <span v-else>-</span>
               </td>
               <td class="dashboard-task-cell">
-                <button
-                  class="admin-button admin-button--ghost"
-                  :disabled="resolvingTaskId === task.id"
-                  @click="resolveTask(task.id)"
-                >
-                  {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
-                </button>
+                <div class="dashboard-task-actions">
+                  <button class="admin-button admin-button--ghost" @click="openTaskDetail(task)">详情</button>
+                  <button
+                    class="admin-button admin-button--ghost"
+                    :disabled="resolvingTaskId === task.id"
+                    @click="resolveTask(task.id)"
+                  >
+                    {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -345,6 +368,32 @@ onMounted(load);
         </table>
       </article>
     </div>
+
+    <div v-if="activeTask" class="dashboard-drawer-backdrop" @click.self="closeTaskDetail">
+      <article class="dashboard-drawer admin-panel">
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">任务详情</span>
+            <h3 class="admin-panel__title">{{ activeTask.title }}</h3>
+          </div>
+          <button class="admin-button admin-button--ghost" @click="closeTaskDetail">关闭</button>
+        </div>
+        <div class="admin-kv">
+          <div class="admin-kv__row">
+            <span class="admin-kv__label">分级</span>
+            <span class="admin-kv__value">{{ taskGradeLabel(activeTask.grade) }}</span>
+          </div>
+          <div class="admin-kv__row">
+            <span class="admin-kv__label">截止时间</span>
+            <span class="admin-kv__value admin-code">{{ activeTask.dueAt.slice(0, 16).replace("T", " ") }}</span>
+          </div>
+          <div class="admin-kv__row">
+            <span class="admin-kv__label">完整备注</span>
+            <span class="admin-kv__value">{{ activeTask.detail }}</span>
+          </div>
+        </div>
+      </article>
+    </div>
   </section>
 </template>
 
@@ -360,6 +409,11 @@ onMounted(load);
 .dashboard-task-cell {
   width: 112px;
   white-space: nowrap;
+}
+
+.dashboard-task-actions {
+  display: grid;
+  gap: 8px;
 }
 
 .dashboard-drawer-backdrop {

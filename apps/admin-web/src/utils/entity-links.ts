@@ -17,6 +17,10 @@ export const resolveSubjectLink = (subject?: Pick<OperationLogSubject, "type" | 
     return `/goods/${subject.id}`;
   }
 
+  if (subject.type === "warehouse") {
+    return "/warehouse";
+  }
+
   return `/logs?subjectType=${subject.type}&subjectId=${subject.id}`;
 };
 

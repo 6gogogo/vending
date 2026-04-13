@@ -4,14 +4,17 @@ import { RouterLink, useRoute, useRouter } from "vue-router";
 import type { OperationLogCategory, OperationLogRecord, OperationLogStatus, OperationLogSubject } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 
 const route = useRoute();
 const router = useRouter();
+const sessionStore = useAdminSessionStore();
 
 const logs = ref<OperationLogRecord[]>([]);
 const loading = ref(false);
 const undoingLogId = ref("");
+const exporting = ref(false);
 const category = ref<"" | OperationLogCategory>("");
 const status = ref<"" | OperationLogStatus>("");
 const subjectType = ref<"" | OperationLogSubject["type"]>("");
@@ -69,7 +72,37 @@ const applyFilters = async () => {
   });
 };
 
+const exportLogs = async () => {
+  if (!sessionStore.token) {
+    window.alert("操作失败：登录状态已失效");
+    return;
+  }
+
+  exporting.value = true;
+  try {
+    const exported = await adminApi.exportLogs(sessionStore.token, {
+      category: category.value || undefined,
+      status: status.value || undefined,
+      subjectType: subjectType.value || undefined,
+      subjectId: subjectId.value || undefined
+    });
+    const url = window.URL.createObjectURL(exported.blob);
+    const link = window.document.createElement("a");
+    link.href = url;
+    link.download = exported.filename;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    exporting.value = false;
+  }
+};
+
 const undoLog = async (logId: string) => {
+  if (!window.confirm("确认撤销这条操作记录？")) {
+    return;
+  }
   undoingLogId.value = logId;
   try {
     await adminApi.undoLog(logId);
@@ -138,13 +171,20 @@ onMounted(async () => {
             <option value="event">事件</option>
             <option value="alert">预警</option>
             <option value="goods">货品</option>
+            <option value="warehouse">仓库</option>
+            <option value="stocktake">盘点</option>
           </select>
         </label>
         <label class="admin-field">
           <span class="admin-field__label">主体编号</span>
           <input v-model="subjectId" class="admin-input" placeholder="例如 CAB-1001 / special-001 / evt-001" />
         </label>
-        <button class="admin-button" @click="applyFilters">应用筛选</button>
+        <div class="logs-filters__actions">
+          <button class="admin-button" @click="applyFilters">应用筛选</button>
+          <button class="admin-button admin-button--ghost" :disabled="exporting" @click="exportLogs">
+            {{ exporting ? "导出中" : "导出 Excel" }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -232,6 +272,12 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
+}
+
+.logs-filters__actions {
+  display: grid;
+  gap: 8px;
+  align-self: end;
 }
 
 @media (max-width: 1024px) {

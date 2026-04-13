@@ -11,27 +11,45 @@ import { CabinetEventsModule } from "./modules/cabinet-events/cabinet-events.mod
 import { DevicesModule } from "./modules/devices/devices.module";
 import { GoodsModule } from "./modules/goods/goods.module";
 import { InventoryOrdersModule } from "./modules/inventory-orders/inventory-orders.module";
+import { MerchantGoodsTemplatesModule } from "./modules/merchant-goods-templates/merchant-goods-templates.module";
 import { OperationLogsModule } from "./modules/operation-logs/operation-logs.module";
+import { RegistrationApplicationsModule } from "./modules/registration-applications/registration-applications.module";
+import { RegionsModule } from "./modules/regions/regions.module";
 import { SpecialAccessPoliciesModule } from "./modules/special-access-policies/special-access-policies.module";
+import { UploadsModule } from "./modules/uploads/uploads.module";
 import { UsersModule } from "./modules/users/users.module";
+import { WarehousesModule } from "./modules/warehouses/warehouses.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true
+      isGlobal: true,
+      envFilePath: [
+        ".env.local",
+        ".env",
+        ".env.example",
+        "apps/api/.env.local",
+        "apps/api/.env",
+        "apps/api/.env.example"
+      ]
     }),
     StoreModule,
     UsersModule,
     AccessRulesModule,
     DevicesModule,
     GoodsModule,
+    MerchantGoodsTemplatesModule,
     AlertsModule,
     OperationLogsModule,
     InventoryOrdersModule,
     CabinetEventsModule,
     AnalyticsModule,
     AuthModule,
-    SpecialAccessPoliciesModule
+    SpecialAccessPoliciesModule,
+    RegistrationApplicationsModule,
+    RegionsModule,
+    UploadsModule,
+    WarehousesModule
   ],
   controllers: [AppController]
 })

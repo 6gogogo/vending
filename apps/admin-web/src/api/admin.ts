@@ -5,17 +5,24 @@ import type {
   DeviceRecord,
   GoodsAlertPolicy,
   GoodsCatalogItem,
+  GoodsCategoryRecord,
   GoodsDetailSnapshot,
   GoodsOverviewSnapshot,
   OperationLogCategory,
   OperationLogRecord,
   OperationLogStatus,
+  RegionRecord,
+  RegistrationApplication,
   SpecialAccessPolicy,
+  UserAccessPolicy,
   UserManagementDetail,
-  UserRecord
+  UserRecord,
+  WarehouseInventorySnapshot,
+  WarehouseRecord
 } from "@vm/shared-types";
 
 import { adminClient } from "./client";
+import { useAdminSessionStore } from "../stores/session";
 
 interface AdminLoginResponse {
   token: string;
@@ -44,10 +51,34 @@ export const adminApi = {
   dashboard() {
     return adminClient.get<DashboardSnapshot>("/analytics/dashboard");
   },
+  registrationApplications(status?: RegistrationApplication["status"]) {
+    return adminClient.get<RegistrationApplication[]>("/registration-applications", {
+      query: { status }
+    });
+  },
+  reviewRegistration(id: string, payload: { decision: "approved" | "rejected"; reason?: string }) {
+    return adminClient.patch<RegistrationApplication>(`/registration-applications/${id}/review`, payload);
+  },
   users(role?: UserRecord["role"]) {
     return adminClient.get<UserRecord[]>("/users", {
       query: { role }
     });
+  },
+  regions() {
+    return adminClient.get<RegionRecord[]>("/regions");
+  },
+  createRegion(payload: { name: string; sortOrder?: number }) {
+    return adminClient.post<RegionRecord>("/regions", payload);
+  },
+  updateRegion(
+    id: string,
+    payload: Partial<{
+      name: string;
+      status: "active" | "inactive";
+      sortOrder: number;
+    }>
+  ) {
+    return adminClient.patch<RegionRecord>(`/regions/${id}`, payload);
   },
   createUser(payload: {
     role: UserRecord["role"];
@@ -55,6 +86,8 @@ export const adminApi = {
     name: string;
     status?: "active" | "inactive";
     neighborhood?: string;
+    regionId?: string;
+    regionName?: string;
     tags?: string[];
   }) {
     return adminClient.post<UserRecord>("/users", payload);
@@ -66,13 +99,17 @@ export const adminApi = {
       name?: string;
       status?: "active" | "inactive";
       neighborhood?: string;
+      regionId?: string;
+      regionName?: string;
       tags?: string[];
     }
   ) {
     return adminClient.patch<UserRecord>(`/users/${userId}`, payload);
   },
-  userDetail(userId: string) {
-    return adminClient.get<UserManagementDetail>(`/users/${userId}`);
+  userDetail(userId: string, query?: { month?: string; date?: string }) {
+    return adminClient.get<UserManagementDetail>(`/users/${userId}`, {
+      query
+    });
   },
   batchUpdateUsers(payload: {
     userIds: string[];
@@ -80,6 +117,8 @@ export const adminApi = {
       status?: "active" | "inactive";
       tags?: string[];
       neighborhood?: string;
+      regionId?: string;
+      regionName?: string;
     };
   }) {
     return adminClient.patch<{ count: number; updated: UserRecord[] }>("/users/batch", payload);
@@ -98,6 +137,27 @@ export const adminApi = {
     }
   ) {
     return adminClient.post(`/users/${userId}/manual-adjustment`, payload);
+  },
+  saveUserAccessPolicy(
+    userId: string,
+    payload: {
+      id?: string;
+      name: string;
+      weekdays: number[];
+      startHour: number;
+      endHour: number;
+      goodsLimits: Array<{
+        goodsId: string;
+        quantity: number;
+      }>;
+      status: UserAccessPolicy["status"];
+      sourcePolicyId?: string;
+    }
+  ) {
+    return adminClient.post<UserAccessPolicy>(`/users/${userId}/access-policies`, payload);
+  },
+  deleteUserAccessPolicy(userId: string, policyId: string) {
+    return adminClient.delete<UserAccessPolicy>(`/users/${userId}/access-policies/${policyId}`);
   },
   policies() {
     return adminClient.get<SpecialAccessPolicy[]>("/special-access-policies");
@@ -121,8 +181,49 @@ export const adminApi = {
   devices() {
     return adminClient.get<DeviceRecord[]>("/devices");
   },
+  async uploadImage(file: File) {
+    const sessionStore = useAdminSessionStore();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(
+      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/uploads/images`,
+      {
+        method: "POST",
+        headers: sessionStore.token
+          ? {
+              Authorization: `Bearer ${sessionStore.token}`
+            }
+          : undefined,
+        body: formData
+      }
+    );
+
+    const parsed = (await response.json()) as {
+      code: number;
+      message: string;
+      data?: { url: string; filename: string; relativePath: string };
+    };
+
+    if (!response.ok || parsed.code !== 200 || !parsed.data) {
+      throw new Error(parsed.message || "上传失败");
+    }
+
+    return parsed.data;
+  },
   deviceDetail(deviceCode: string) {
     return adminClient.get<DeviceMonitoringDetail>(`/devices/${deviceCode}/monitoring`);
+  },
+  updateDeviceLocation(
+    deviceCode: string,
+    payload: {
+      location?: string;
+      address?: string;
+      longitude?: number;
+      latitude?: number;
+    }
+  ) {
+    return adminClient.patch<DeviceRecord>(`/devices/${deviceCode}/location`, payload);
   },
   refreshDevice(deviceCode: string) {
     return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/refresh`);
@@ -136,19 +237,66 @@ export const adminApi = {
   goodsOverview() {
     return adminClient.get<GoodsOverviewSnapshot>("/goods-overview");
   },
+  async exportGoodsOverview(token: string) {
+    const response = await fetch(
+      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/goods-overview/export/file`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("导出失败");
+    }
+
+    return {
+      blob: await response.blob(),
+      filename:
+        response.headers.get("content-disposition")?.match(/filename=\"?([^\";]+)\"?/)?.[1] ??
+        "goods-overview.xls"
+    };
+  },
   goodsCatalog() {
     return adminClient.get<GoodsCatalogItem[]>("/goods-catalog");
+  },
+  goodsCategories() {
+    return adminClient.get<GoodsCategoryRecord[]>("/goods-categories");
+  },
+  createGoodsCategory(payload: {
+    name: string;
+    category: "food" | "drink" | "daily";
+    sortOrder?: number;
+  }) {
+    return adminClient.post<GoodsCategoryRecord>("/goods-categories", payload);
+  },
+  updateGoodsCategory(
+    id: string,
+    payload: Partial<{
+      name: string;
+      category: "food" | "drink" | "daily";
+      status: "active" | "inactive";
+      sortOrder: number;
+    }>
+  ) {
+    return adminClient.patch<GoodsCategoryRecord>(`/goods-categories/${id}`, payload);
   },
   goodsDetail(goodsId: string) {
     return adminClient.get<GoodsDetailSnapshot>(`/goods/${goodsId}`);
   },
   createGoods(payload: {
     goodsCode: string;
-    goodsId: string;
+    goodsId?: string;
     name: string;
+    fullName?: string;
     category: "food" | "drink" | "daily";
+    categoryName?: string;
     price: number;
     imageUrl: string;
+    packageForm?: string;
+    specification?: string;
+    manufacturer?: string;
   }) {
     return adminClient.post<GoodsCatalogItem>("/goods", payload);
   },
@@ -157,9 +305,14 @@ export const adminApi = {
     payload: Partial<{
       goodsCode: string;
       name: string;
+      fullName: string;
       category: "food" | "drink" | "daily";
+      categoryName: string;
       price: number;
       imageUrl: string;
+      packageForm: string;
+      specification: string;
+      manufacturer: string;
       status: "active" | "inactive";
     }>
   ) {
@@ -216,10 +369,56 @@ export const adminApi = {
   alerts() {
     return adminClient.get<AlertTask[]>("/alerts");
   },
+  warehouses() {
+    return adminClient.get<WarehouseRecord[]>("/warehouses");
+  },
+  warehouseInventory() {
+    return adminClient.get<WarehouseInventorySnapshot>("/warehouse-inventory");
+  },
+  createInventoryTransfer(payload: {
+    fromCode: string;
+    toCode: string;
+    goodsId: string;
+    quantity: number;
+    note?: string;
+  }) {
+    return adminClient.post("/inventory-transfers", payload);
+  },
+  createStocktake(payload: {
+    deviceCode: string;
+    note?: string;
+    items: Array<{
+      goodsId: string;
+      actualQuantity: number;
+    }>;
+  }) {
+    return adminClient.post("/stocktakes", payload);
+  },
+  async exportStocktake(id: string, token: string) {
+    const response = await fetch(
+      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/stocktakes/${id}/export`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("导出失败");
+    }
+
+    return {
+      blob: await response.blob(),
+      filename:
+        response.headers.get("content-disposition")?.match(/filename=\"?([^\";]+)\"?/)?.[1] ??
+        `stocktake-${id}.xls`
+    };
+  },
   logs(filters?: {
     category?: OperationLogCategory;
     status?: OperationLogStatus;
-    subjectType?: "user" | "device" | "event" | "alert" | "goods";
+    subjectType?: "user" | "device" | "event" | "alert" | "goods" | "warehouse" | "stocktake";
     subjectId?: string;
   }) {
     return adminClient.get<OperationLogRecord[]>("/operation-logs", {
@@ -228,6 +427,53 @@ export const adminApi = {
   },
   logDetail(id: string) {
     return adminClient.get<OperationLogRecord>(`/operation-logs/${id}`);
+  },
+  async exportLogs(
+    token: string,
+    filters?: {
+      category?: OperationLogCategory;
+      status?: OperationLogStatus;
+      subjectType?: "user" | "device" | "event" | "alert" | "goods" | "warehouse" | "stocktake";
+      subjectId?: string;
+    }
+  ) {
+    const query = new URLSearchParams();
+
+    if (filters?.category) {
+      query.set("category", filters.category);
+    }
+
+    if (filters?.status) {
+      query.set("status", filters.status);
+    }
+
+    if (filters?.subjectType) {
+      query.set("subjectType", filters.subjectType);
+    }
+
+    if (filters?.subjectId) {
+      query.set("subjectId", filters.subjectId);
+    }
+
+    const response = await fetch(
+      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/operation-logs/export/file${query.size ? `?${query.toString()}` : ""}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("导出失败");
+    }
+
+    return {
+      blob: await response.blob(),
+      filename:
+        response.headers.get("content-disposition")?.match(/filename=\"?([^\";]+)\"?/)?.[1] ??
+        "operation-logs.xls"
+    };
   },
   undoLog(id: string) {
     return adminClient.post<OperationLogRecord>(`/operation-logs/${id}/undo`);

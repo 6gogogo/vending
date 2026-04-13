@@ -1,17 +1,35 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import type { DeviceRecord, UserManagementDetail } from "@vm/shared-types";
+import type { DeviceRecord, UserAccessPolicy, UserManagementDetail } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 import { resolveActorLink } from "../utils/entity-links";
 
 const route = useRoute();
+
+const weekdayOptions = [
+  { label: "周一", value: 1 },
+  { label: "周二", value: 2 },
+  { label: "周三", value: 3 },
+  { label: "周四", value: 4 },
+  { label: "周五", value: 5 },
+  { label: "周六", value: 6 },
+  { label: "周日", value: 0 }
+];
+const calendarWeekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+const hourOptions = Array.from({ length: 24 }, (_, index) => index);
+const hourEndOptions = Array.from({ length: 24 }, (_, index) => index + 1);
+
 const detail = ref<UserManagementDetail>();
 const devices = ref<DeviceRecord[]>([]);
+const goodsCatalog = ref<Array<{ goodsId: string; name: string; category: "food" | "drink" | "daily" }>>([]);
 const loading = ref(false);
 const saving = ref(false);
+const calendarMonth = ref("");
+const selectedDateKey = ref("");
+const editingAccessPolicyId = ref("");
 
 const form = ref({
   deviceCode: "",
@@ -19,6 +37,22 @@ const form = ref({
   quantity: 1,
   direction: "deduct" as "restock" | "deduct",
   note: ""
+});
+
+const accessPolicyForm = ref<{
+  name: string;
+  weekdays: number[];
+  startHour: number;
+  endHour: number;
+  status: UserAccessPolicy["status"];
+  goodsLimits: Array<{ goodsId: string; quantity: number }>;
+}>({
+  name: "",
+  weekdays: [1, 2, 3, 4, 5],
+  startHour: 8,
+  endHour: 12,
+  status: "active",
+  goodsLimits: [{ goodsId: "", quantity: 1 }]
 });
 
 const selectedDeviceGoods = computed(() => {
@@ -33,8 +67,21 @@ const selectedGoods = computed(() =>
 const resolveLogActorRoute = (actor: UserManagementDetail["recentLogs"][number]["actor"]) =>
   resolveActorLink(actor);
 
+const currentMonthTitle = computed(() => {
+  const source = detail.value?.policyCalendar?.monthKey || calendarMonth.value;
+  if (!source) {
+    return "";
+  }
+
+  const [year, month] = source.split("-");
+  return `${year}年 ${month}月`;
+});
+
+const accessPolicies = computed(() => detail.value?.accessPolicies ?? []);
+const selectedDateSummary = computed(() => detail.value?.policyCalendar?.selectedDateSummary);
+
 const formatRole = (role: UserManagementDetail["user"]["role"]) =>
-  role === "special" ? "特殊群体" : role === "merchant" ? "商户" : "管理员";
+  role === "special" ? "普通用户" : role === "merchant" ? "爱心商户" : "管理员";
 
 const formatLogStatus = (status: UserManagementDetail["recentLogs"][number]["status"]) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
@@ -50,22 +97,86 @@ const formatRecordType = (type: UserManagementDetail["recentRecords"][number]["t
           ? "退款"
           : type;
 
+const formatCalendarState = (status?: "complete" | "partial" | "unserved" | "not_applicable") =>
+  status === "complete" ? "calendar-day--complete" : status === "partial" ? "calendar-day--partial" : "";
+
+const formatBusinessStatus = (status?: "complete" | "partial" | "unserved" | "not_applicable") =>
+  status === "complete" ? "全部领取" : status === "partial" ? "部分领取" : status === "unserved" ? "物资未领取" : "未配置";
+
+const resetAccessPolicyForm = () => {
+  editingAccessPolicyId.value = "";
+  accessPolicyForm.value = {
+    name: "",
+    weekdays: [1, 2, 3, 4, 5],
+    startHour: 8,
+    endHour: 12,
+    status: "active",
+    goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }]
+  };
+};
+
+const fillAccessPolicyForm = (policy: UserAccessPolicy) => {
+  editingAccessPolicyId.value = policy.id;
+  accessPolicyForm.value = {
+    name: policy.name,
+    weekdays: [...policy.weekdays],
+    startHour: policy.startHour,
+    endHour: policy.endHour,
+    status: policy.status,
+    goodsLimits: policy.goodsLimits.map((limit) => ({
+      goodsId: limit.goodsId,
+      quantity: limit.quantity
+    }))
+  };
+};
+
+const ensureCalendarState = () => {
+  const currentMonth =
+    detail.value?.policyCalendar?.monthKey ??
+    new Date().toISOString().slice(0, 7);
+  const currentDate =
+    detail.value?.policyCalendar?.selectedDateKey ??
+    `${currentMonth}-01`;
+
+  if (!calendarMonth.value) {
+    calendarMonth.value = currentMonth;
+  }
+
+  if (!selectedDateKey.value) {
+    selectedDateKey.value = currentDate;
+  }
+};
+
 const load = async () => {
   loading.value = true;
   try {
-    const [detailResponse, devicesResponse] = await Promise.all([
-      adminApi.userDetail(String(route.params.userId)),
-      adminApi.devices()
+    const month = calendarMonth.value || new Date().toISOString().slice(0, 7);
+    const date = selectedDateKey.value || `${month}-01`;
+    const [detailResponse, devicesResponse, goodsCatalogResponse] = await Promise.all([
+      adminApi.userDetail(String(route.params.userId), { month, date }),
+      adminApi.devices(),
+      adminApi.goodsCatalog()
     ]);
 
     detail.value = detailResponse;
     devices.value = devicesResponse;
+    goodsCatalog.value = goodsCatalogResponse.map((item) => ({
+      goodsId: item.goodsId,
+      name: item.name,
+      category: item.category
+    }));
+
+    calendarMonth.value = detailResponse.policyCalendar?.monthKey ?? month;
+    selectedDateKey.value = detailResponse.policyCalendar?.selectedDateKey ?? date;
+
     if (!form.value.deviceCode) {
       form.value.deviceCode = devicesResponse[0]?.deviceCode ?? "";
     }
     if (!form.value.goodsId) {
-      form.value.goodsId =
-        devicesResponse[0]?.doors.flatMap((door) => door.goods)[0]?.goodsId ?? "";
+      form.value.goodsId = devicesResponse[0]?.doors.flatMap((door) => door.goods)[0]?.goodsId ?? "";
+    }
+    if (!accessPolicyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) {
+      accessPolicyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
     }
   } finally {
     loading.value = false;
@@ -96,13 +207,100 @@ const submitAdjustment = async () => {
   }
 };
 
+const addPolicyGoodsLimit = () => {
+  accessPolicyForm.value.goodsLimits.push({
+    goodsId: goodsCatalog.value[0]?.goodsId ?? "",
+    quantity: 1
+  });
+};
+
+const removePolicyGoodsLimit = (index: number) => {
+  accessPolicyForm.value.goodsLimits.splice(index, 1);
+  if (!accessPolicyForm.value.goodsLimits.length) {
+    addPolicyGoodsLimit();
+  }
+};
+
+const submitAccessPolicy = async () => {
+  if (!detail.value || detail.value.user.role !== "special") {
+    return;
+  }
+
+  saving.value = true;
+  try {
+    await adminApi.saveUserAccessPolicy(detail.value.user.id, {
+      id: editingAccessPolicyId.value || undefined,
+      name: accessPolicyForm.value.name.trim(),
+      weekdays: Array.from(new Set(accessPolicyForm.value.weekdays)).sort((left, right) => left - right),
+      startHour: accessPolicyForm.value.startHour,
+      endHour: accessPolicyForm.value.endHour,
+      status: accessPolicyForm.value.status,
+      goodsLimits: accessPolicyForm.value.goodsLimits
+        .filter((item) => item.goodsId && item.quantity > 0)
+        .map((item) => ({
+          goodsId: item.goodsId,
+          quantity: item.quantity
+        }))
+    });
+    resetAccessPolicyForm();
+    await load();
+  } finally {
+    saving.value = false;
+  }
+};
+
+const deleteAccessPolicy = async (policy: UserAccessPolicy) => {
+  if (!detail.value || !window.confirm(`确认删除个人取货设定“${policy.name}”吗？`)) {
+    return;
+  }
+
+  saving.value = true;
+  try {
+    await adminApi.deleteUserAccessPolicy(detail.value.user.id, policy.id);
+    if (editingAccessPolicyId.value === policy.id) {
+      resetAccessPolicyForm();
+    }
+    await load();
+  } finally {
+    saving.value = false;
+  }
+};
+
+const changeMonth = async (offset: number) => {
+  const [year, month] = (calendarMonth.value || new Date().toISOString().slice(0, 7))
+    .split("-")
+    .map(Number);
+  const next = new Date(year, month - 1 + offset, 1);
+  calendarMonth.value = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+  selectedDateKey.value = `${calendarMonth.value}-01`;
+  await load();
+};
+
+const selectDate = async (dateKey: string) => {
+  selectedDateKey.value = dateKey;
+  await load();
+};
+
 watch(selectedDeviceGoods, (goodsList) => {
   if (!goodsList.some((entry) => entry.goodsId === form.value.goodsId)) {
     form.value.goodsId = goodsList[0]?.goodsId ?? "";
   }
 });
 
-onMounted(load);
+watch(
+  () => route.params.userId,
+  async () => {
+    calendarMonth.value = "";
+    selectedDateKey.value = "";
+    resetAccessPolicyForm();
+    await load();
+  }
+);
+
+onMounted(async () => {
+  ensureCalendarState();
+  await load();
+});
 </script>
 
 <template>
@@ -132,23 +330,21 @@ onMounted(load);
             </div>
             <div class="admin-kv__row">
               <span class="admin-kv__label">手机号</span>
-              <span class="admin-kv__value admin-code">{{ detail.user.phone }}</span>
+              <span class="admin-kv__value">
+                <span class="admin-code">{{ detail.user.phone }}</span>
+                <span class="admin-table__subtext">{{ detail.user.ledgerStatus === "unregistered" ? "未注册" : "已注册" }}</span>
+              </span>
             </div>
             <div class="admin-kv__row">
               <span class="admin-kv__label">角色</span>
-              <span class="admin-kv__value">{{ formatRole(detail.user.role) }}</span>
-            </div>
-            <div class="admin-kv__row">
-              <span class="admin-kv__label">片区</span>
-              <span class="admin-kv__value">{{ detail.user.neighborhood ?? "未设置片区" }}</span>
-            </div>
-            <div class="admin-kv__row">
-              <span class="admin-kv__label">状态</span>
               <span class="admin-kv__value">
-                <span class="admin-pill" :class="detail.user.status === 'active' ? 'admin-pill--success' : 'admin-pill--warning'">
-                  {{ detail.user.status === "active" ? "可继续操作" : "已暂停" }}
-                </span>
+                <span>{{ formatRole(detail.user.role) }}</span>
+                <span class="admin-table__subtext">{{ detail.user.status === "active" ? "账号已启用" : "账号已停用" }}</span>
               </span>
+            </div>
+            <div class="admin-kv__row">
+              <span class="admin-kv__label">区域</span>
+              <span class="admin-kv__value">{{ detail.user.regionName || detail.user.neighborhood || "未设置区域" }}</span>
             </div>
             <div class="admin-kv__row">
               <span class="admin-kv__label">标签</span>
@@ -172,28 +368,59 @@ onMounted(load);
           <div class="admin-note">最近活跃时间：{{ detail.stats.lastActiveAt ? detail.stats.lastActiveAt.slice(0, 16).replace("T", " ") : "暂无" }}</div>
         </article>
 
-        <article v-if="detail.user.role === 'special' && detail.businessDaySummary" class="admin-panel admin-panel-block">
+        <article v-if="detail.user.role === 'special' && detail.policyCalendar" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
-              <span class="admin-kicker">今日时段配额</span>
-              <h3 class="admin-panel__title">业务日 {{ detail.businessDaySummary.businessDateKey }}</h3>
+              <span class="admin-kicker">领取情况日历</span>
+              <h3 class="admin-panel__title">按日期查看各时间段领取完成情况</h3>
             </div>
-            <span class="admin-pill" :class="detail.businessDaySummary.completionStatus === 'complete' ? 'admin-pill--success' : detail.businessDaySummary.completionStatus === 'partial' ? 'admin-pill--warning' : 'admin-pill--neutral'">
-              {{ detail.businessDaySummary.completionStatus === "complete" ? "完全服务" : detail.businessDaySummary.completionStatus === "partial" ? "部分服务" : detail.businessDaySummary.completionStatus === "unserved" ? "未服务" : "未配置" }}
-            </span>
+            <div class="admin-toolbar">
+              <button class="admin-button admin-button--ghost" @click="changeMonth(-1)">上月</button>
+              <span class="admin-code">{{ currentMonthTitle }}</span>
+              <button class="admin-button admin-button--ghost" @click="changeMonth(1)">下月</button>
+            </div>
           </div>
 
-          <table class="admin-table">
+          <div class="user-calendar">
+            <div v-for="weekday in calendarWeekdays" :key="weekday" class="user-calendar__weekday">
+              {{ weekday }}
+            </div>
+            <button
+              v-for="day in detail.policyCalendar.days"
+              :key="day.dateKey"
+              class="user-calendar__day"
+              :class="[
+                day.inCurrentMonth ? '' : 'user-calendar__day--muted',
+                day.dateKey === detail.policyCalendar.selectedDateKey ? 'user-calendar__day--selected' : '',
+                formatCalendarState(day.completionStatus)
+              ]"
+              @click="selectDate(day.dateKey)"
+            >
+              <span>{{ day.day }}</span>
+              <span v-if="day.hasPickup || day.hasAdjustment" class="user-calendar__markers">
+                <span v-if="day.hasPickup" class="user-calendar__marker"></span>
+                <span v-if="day.hasAdjustment" class="user-calendar__adjustment">×</span>
+              </span>
+            </button>
+          </div>
+
+          <div v-if="selectedDateSummary" class="admin-note">
+            已选日期 {{ selectedDateSummary.businessDateKey }}：{{ formatBusinessStatus(selectedDateSummary.completionStatus) }}，已领取 {{ selectedDateSummary.fulfilledGoods }}/{{ selectedDateSummary.totalGoods }}。
+          </div>
+
+          <table v-if="selectedDateSummary" class="admin-table">
             <thead>
               <tr>
                 <th>时段</th>
-                <th>策略</th>
+                <th>设定</th>
                 <th>领取情况</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="window in detail.businessDaySummary.windows" :key="`${window.policyId}-${window.startHour}`">
-                <td class="admin-code">{{ String(window.startHour).padStart(2, "0") }}:00-{{ String(window.endHour).padStart(2, "0") }}:00</td>
+              <tr v-for="window in selectedDateSummary.windows" :key="`${window.policyId}-${window.startHour}-${window.dateKey}`">
+                <td class="admin-code">
+                  {{ String(window.startHour).padStart(2, "0") }}:00-{{ String(window.endHour).padStart(2, "0") }}:00
+                </td>
                 <td>{{ window.policyName }}</td>
                 <td>
                   <div class="user-detail__usage-list">
@@ -332,6 +559,106 @@ onMounted(load);
         <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
+              <span class="admin-kicker">个人取货设定</span>
+              <h3 class="admin-panel__title">模板只作为起点，最终以个人设定为准</h3>
+            </div>
+            <button class="admin-button admin-button--ghost" @click="resetAccessPolicyForm">新增设定</button>
+          </div>
+
+          <div v-if="accessPolicies.length" class="admin-list user-policy-list">
+            <div v-for="policy in accessPolicies" :key="policy.id" class="admin-list__row user-policy-list__row">
+              <div class="admin-list__main">
+                <span class="admin-list__title">{{ policy.name }}</span>
+                <span class="admin-list__meta">
+                  {{ weekdayOptions.filter((item) => policy.weekdays.includes(item.value)).map((item) => item.label).join("、") }}
+                  · {{ String(policy.startHour).padStart(2, "0") }}:00-{{ String(policy.endHour).padStart(2, "0") }}:00
+                </span>
+                <span class="admin-table__subtext">
+                  {{ policy.goodsLimits.map((limit) => `${limit.goodsName} ${limit.quantity}`).join("，") }}
+                </span>
+              </div>
+              <div class="admin-inline-links">
+                <button class="admin-text-button" @click="fillAccessPolicyForm(policy)">编辑</button>
+                <button class="admin-text-button user-policy-delete" @click="deleteAccessPolicy(policy)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="admin-empty">
+            <div class="admin-empty__title">当前还没有个人取货设定</div>
+            <div class="admin-empty__body">可先从模板批量套用，再按个人情况逐项修改。</div>
+          </div>
+
+          <div class="user-detail-form">
+            <label class="admin-field">
+              <span class="admin-field__label">设定名称</span>
+              <input v-model="accessPolicyForm.name" class="admin-input" placeholder="例如 早餐关怀" />
+            </label>
+            <div class="admin-field">
+              <span class="admin-field__label">生效星期</span>
+              <div class="user-policy-weekdays">
+                <label v-for="weekday in weekdayOptions" :key="weekday.value" class="user-policy-weekdays__item">
+                  <input v-model="accessPolicyForm.weekdays" type="checkbox" :value="weekday.value" />
+                  <span>{{ weekday.label }}</span>
+                </label>
+              </div>
+            </div>
+            <div class="user-policy-hours">
+              <label class="admin-field">
+                <span class="admin-field__label">开始时间</span>
+                <select v-model="accessPolicyForm.startHour" class="admin-select">
+                  <option v-for="hour in hourOptions" :key="hour" :value="hour">
+                    {{ String(hour).padStart(2, "0") }}:00
+                  </option>
+                </select>
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">结束时间</span>
+                <select v-model="accessPolicyForm.endHour" class="admin-select">
+                  <option v-for="hour in hourEndOptions" :key="hour" :value="hour">
+                    {{ String(hour).padStart(2, "0") }}:00
+                  </option>
+                </select>
+              </label>
+            </div>
+            <label class="admin-field">
+              <span class="admin-field__label">状态</span>
+              <select v-model="accessPolicyForm.status" class="admin-select">
+                <option value="active">启用</option>
+                <option value="inactive">停用</option>
+              </select>
+            </label>
+            <div class="admin-field">
+              <span class="admin-field__label">货品、时间段与数量</span>
+              <div class="user-policy-limits">
+                <div
+                  v-for="(limit, index) in accessPolicyForm.goodsLimits"
+                  :key="`${index}-${limit.goodsId}`"
+                  class="user-policy-limits__row"
+                >
+                  <select v-model="limit.goodsId" class="admin-select">
+                    <option v-for="goods in goodsCatalog" :key="goods.goodsId" :value="goods.goodsId">
+                      {{ goods.name }} / {{ goods.goodsId }}
+                    </option>
+                  </select>
+                  <input v-model.number="limit.quantity" class="admin-input" type="number" min="1" />
+                  <button class="admin-button admin-button--ghost" @click="removePolicyGoodsLimit(index)">删除</button>
+                </div>
+              </div>
+              <button class="admin-text-button" @click="addPolicyGoodsLimit">继续添加商品</button>
+            </div>
+            <button
+              class="admin-button"
+              :disabled="saving || !accessPolicyForm.name.trim() || accessPolicyForm.endHour <= accessPolicyForm.startHour"
+              @click="submitAccessPolicy"
+            >
+              {{ saving ? "保存中" : editingAccessPolicyId ? "保存个人设定" : "新增个人设定" }}
+            </button>
+          </div>
+        </article>
+
+        <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
+            <div>
               <span class="admin-kicker">手工补扣</span>
               <h3 class="admin-panel__title">从货物库中选择商品</h3>
             </div>
@@ -401,13 +728,123 @@ onMounted(load);
 </template>
 
 <style scoped>
-.user-detail-form {
+.user-detail-form,
+.user-policy-weekdays,
+.user-policy-limits,
+.user-policy-list {
   display: grid;
   gap: 10px;
+}
+
+.user-policy-list__row {
+  align-items: flex-start;
+}
+
+.user-policy-weekdays {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.user-policy-weekdays__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-policy-hours {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.user-policy-limits__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px 84px;
+  gap: 8px;
+}
+
+.user-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.user-calendar__weekday {
+  padding: 6px 4px;
+  text-align: center;
+  color: var(--admin-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.user-calendar__day {
+  min-height: 68px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-panel);
+  cursor: pointer;
+}
+
+.user-calendar__day--muted {
+  color: #98a4b3;
+  background: var(--admin-panel-muted);
+}
+
+.user-calendar__day--selected {
+  border-color: var(--admin-accent);
+  background: var(--admin-accent-soft);
+}
+
+.user-calendar__marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid var(--admin-accent);
+}
+
+.user-calendar__markers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-calendar__adjustment {
+  color: var(--admin-danger);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.calendar-day--complete .user-calendar__marker {
+  background: var(--admin-accent);
 }
 
 .user-detail__usage-list {
   display: grid;
   gap: 4px;
+}
+
+.admin-text-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--admin-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.user-policy-delete {
+  color: var(--admin-danger);
+}
+
+@media (max-width: 720px) {
+  .user-policy-hours,
+  .user-policy-limits__row,
+  .user-policy-weekdays {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
