@@ -21,6 +21,11 @@ const goodsCatalog = ref<Awaited<ReturnType<typeof adminApi.goodsCatalog>>>([]);
 const addingGoods = ref(false);
 const removingGoodsId = ref("");
 const selectedGoodsToAdd = ref("");
+const debugPanelVisible = ref(false);
+const debugLoading = ref(false);
+const debugLoaded = ref(false);
+const debugCallbackLogs = ref<Awaited<ReturnType<typeof adminApi.deviceCallbackLogs>>>([]);
+const debugSystemAuditLogs = ref<Awaited<ReturnType<typeof adminApi.systemAuditLogs>>>([]);
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -51,6 +56,14 @@ const addableGoodsOptions = computed(() => {
     (item) => item.status !== "inactive" && !existingGoodsIds.has(item.goodsId)
   );
 });
+const debugSystemAuditRows = computed(() =>
+  debugSystemAuditLogs.value.filter(
+    (entry) =>
+      entry.path.includes("/external/smartvm") ||
+      entry.path.includes("/api/cabinet-events/callbacks") ||
+      entry.path.includes("/api/inventory-orders/callbacks/refund")
+  )
+);
 
 const formatDeviceStatus = (status?: "online" | "offline" | "maintenance") =>
   status === "online" ? "在线" : status === "maintenance" ? "维护中" : "离线";
@@ -76,6 +89,22 @@ const formatLogStatus = (status: string) =>
 
 const formatUserRole = (role: "admin" | "merchant" | "special") =>
   role === "admin" ? "管理员" : role === "merchant" ? "商户" : "特殊群体";
+
+const formatDebugPayload = (value: unknown) => {
+  if (value === undefined || value === null) {
+    return "-";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
 
 const formatGoodsStock = (goods: NonNullable<typeof selectedDoorGoods.value>[number]) => {
   const base =
@@ -128,6 +157,24 @@ const load = async () => {
   }
 };
 
+const loadDebugPanel = async () => {
+  debugLoading.value = true;
+  try {
+    const [callbackLogs, systemAuditLogs] = await Promise.all([
+      adminApi.deviceCallbackLogs(String(route.params.deviceCode), 30),
+      adminApi.systemAuditLogs({
+        deviceCode: String(route.params.deviceCode),
+        limit: 40
+      })
+    ]);
+    debugCallbackLogs.value = callbackLogs;
+    debugSystemAuditLogs.value = systemAuditLogs;
+    debugLoaded.value = true;
+  } finally {
+    debugLoading.value = false;
+  }
+};
+
 const refreshDevice = async () => {
   refreshing.value = true;
   try {
@@ -135,6 +182,10 @@ const refreshDevice = async () => {
     lastUpdatedAt.value = new Date().toLocaleString("zh-CN", { hour12: false });
   } finally {
     refreshing.value = false;
+  }
+
+  if (debugPanelVisible.value) {
+    await loadDebugPanel();
   }
 };
 
@@ -146,6 +197,10 @@ const syncGoods = async () => {
   } finally {
     syncing.value = false;
   }
+
+  if (debugPanelVisible.value) {
+    await loadDebugPanel();
+  }
 };
 
 const remoteOpen = async () => {
@@ -155,6 +210,10 @@ const remoteOpen = async () => {
     await load();
   } finally {
     remoteOpening.value = false;
+  }
+
+  if (debugPanelVisible.value) {
+    await loadDebugPanel();
   }
 };
 
@@ -188,6 +247,14 @@ const saveLocation = async (payload: { longitude: number; latitude: number; loca
     await load();
   } finally {
     updatingLocation.value = false;
+  }
+};
+
+const toggleDebugPanel = async () => {
+  debugPanelVisible.value = !debugPanelVisible.value;
+
+  if (debugPanelVisible.value && !debugLoaded.value) {
+    await loadDebugPanel();
   }
 };
 
@@ -539,6 +606,77 @@ onUnmounted(() => {
       <section class="admin-page__section">
         <div class="admin-page__section-head">
           <div>
+            <p class="admin-kicker">底层调试</p>
+            <h3 class="admin-page__section-title">默认忽略柜机底层操作，只有排查平台联调问题时再展开</h3>
+          </div>
+          <div class="admin-toolbar">
+            <button class="admin-button admin-button--ghost" @click="toggleDebugPanel">
+              {{ debugPanelVisible ? "收起底层调试" : "查看底层调试" }}
+            </button>
+            <button
+              v-if="debugPanelVisible"
+              class="admin-button admin-button--ghost"
+              :disabled="debugLoading"
+              @click="loadDebugPanel"
+            >
+              {{ debugLoading ? "刷新中" : "刷新调试信息" }}
+            </button>
+          </div>
+        </div>
+
+        <article v-if="debugPanelVisible" class="admin-panel admin-panel-block">
+          <div class="debug-grid">
+            <section class="debug-panel">
+              <h4 class="debug-panel__title">平台外呼与系统审计</h4>
+              <div v-if="debugSystemAuditRows.length" class="debug-list">
+                <article v-for="entry in debugSystemAuditRows" :key="`${entry.occurredAt}-${entry.path}`" class="debug-card">
+                  <div class="debug-card__meta">
+                    <span class="admin-code">{{ entry.occurredAt.slice(0, 19).replace("T", " ") }}</span>
+                    <span class="admin-pill" :class="entry.statusCode >= 500 ? 'admin-pill--danger' : entry.statusCode >= 400 ? 'admin-pill--warning' : 'admin-pill--success'">
+                      {{ entry.statusCode }}
+                    </span>
+                    <span class="admin-code">{{ entry.path }}</span>
+                  </div>
+                  <p v-if="entry.error?.message" class="debug-card__error">错误：{{ entry.error.message }}</p>
+                  <details>
+                    <summary>查看请求与响应</summary>
+                    <pre class="debug-card__pre">请求：
+{{ formatDebugPayload(entry.body) }}
+
+响应：
+{{ formatDebugPayload(entry.response) }}</pre>
+                  </details>
+                </article>
+              </div>
+              <div v-else class="admin-empty">
+                <div class="admin-empty__title">{{ debugLoading ? "正在加载系统审计" : "暂无底层系统审计" }}</div>
+                <div class="admin-empty__body">这里会显示 SmartVM 外呼请求、返回状态和错误原文。</div>
+              </div>
+            </section>
+
+            <section class="debug-panel">
+              <h4 class="debug-panel__title">平台回调原始记录</h4>
+              <div v-if="debugCallbackLogs.length" class="debug-list">
+                <article v-for="entry in debugCallbackLogs" :key="entry.id" class="debug-card">
+                  <div class="debug-card__meta">
+                    <span class="admin-code">{{ entry.receivedAt.slice(0, 19).replace("T", " ") }}</span>
+                    <span class="admin-pill admin-pill--neutral">{{ entry.type }}</span>
+                  </div>
+                  <pre class="debug-card__pre">{{ formatDebugPayload(entry.payload) }}</pre>
+                </article>
+              </div>
+              <div v-else class="admin-empty">
+                <div class="admin-empty__title">{{ debugLoading ? "正在加载回调记录" : "暂无相关回调" }}</div>
+                <div class="admin-empty__body">这里会保留门状态、结算、补扣、退款等平台回推的原始报文。</div>
+              </div>
+            </section>
+          </div>
+        </article>
+      </section>
+
+      <section class="admin-page__section">
+        <div class="admin-page__section-head">
+          <div>
             <p class="admin-kicker">柜机日志</p>
             <h3 class="admin-page__section-title">查看该柜机的全部关键操作和异常</h3>
           </div>
@@ -629,6 +767,63 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.debug-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.debug-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--admin-text);
+}
+
+.debug-list {
+  display: grid;
+  gap: 10px;
+}
+
+.debug-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel-muted);
+}
+
+.debug-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.debug-card__error {
+  margin: 0;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.debug-card__pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid var(--admin-line);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .device-task-actions {
   display: grid;
   justify-items: end;
@@ -660,6 +855,10 @@ onUnmounted(() => {
   }
 
   .device-goods-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-grid {
     grid-template-columns: 1fr;
   }
 }

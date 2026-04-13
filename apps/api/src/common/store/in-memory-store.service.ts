@@ -6,6 +6,7 @@ import {
   type AlertTask,
   type CabinetAccessRule,
   type CabinetEventRecord,
+  type CallbackLogRecord,
   type DeviceGoods,
   type DeviceGoodsSetting,
   type DeviceRuntimeState,
@@ -30,7 +31,7 @@ import {
 } from "@vm/shared-types";
 
 import { formatOperationLog } from "../logging/operation-log-template";
-import { createSeededPersistedState, readPersistedState, type CallbackLog, type DraftSessionRecord, type PersistedStoreState, type SessionRecord, type VerificationRecord, writePersistedState } from "./persistence";
+import { createSeededPersistedState, readPersistedState, type DraftSessionRecord, type PersistedStoreState, type SessionRecord, type VerificationRecord, writePersistedState } from "./persistence";
 
 interface BatchConsumptionEntry {
   batchId: string;
@@ -71,7 +72,7 @@ export class InMemoryStoreService {
   readonly verificationCodes = new Map<string, VerificationRecord>();
   readonly sessions = new Map<string, SessionRecord>();
   readonly draftSessions = new Map<string, DraftSessionRecord>();
-  readonly callbackLog: CallbackLog[] = [];
+  readonly callbackLog: CallbackLogRecord[] = [];
   readonly deviceRuntime = new Map<string, DeviceRuntimeState>(
     this.seed.devices.map((device) => [
       device.deviceCode,

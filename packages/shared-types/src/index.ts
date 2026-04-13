@@ -48,6 +48,34 @@ export interface ApiEnvelope<T> {
   data: T;
 }
 
+export interface CallbackLogRecord {
+  id: string;
+  type: string;
+  receivedAt: string;
+  payload: unknown;
+}
+
+export interface SystemAuditLogEntry {
+  occurredAt: string;
+  method: string;
+  path: string;
+  query?: unknown;
+  params?: unknown;
+  body?: unknown;
+  statusCode: number;
+  durationMs: number;
+  actorUserId?: string;
+  actorRole?: UserRole;
+  ip?: string;
+  userAgent?: string;
+  response?: unknown;
+  error?: {
+    name?: string;
+    message?: string;
+  };
+  metadata?: Record<string, unknown>;
+}
+
 export interface AccessQuota {
   dailyLimit: number;
   categoryLimit: Partial<Record<GoodsCategory, number>>;
@@ -726,6 +754,10 @@ export interface DeviceMonitoringDetail {
     lowStockThreshold?: number;
     nearestExpiryAt?: string;
   }>;
+  debug?: {
+    callbackLogs: CallbackLogRecord[];
+    systemAuditLogs: SystemAuditLogEntry[];
+  };
 }
 
 export interface SpecialAccessWindowUsage {

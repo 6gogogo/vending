@@ -12,53 +12,108 @@ interface SmartVmClientOptions {
   baseUrl: string;
   credentials: SmartVmCredentials;
   fetchImpl?: typeof fetch;
+  onExchange?: (payload: {
+    path: string;
+    requestBody: SmartVmPayload;
+    statusCode: number;
+    responseBody: unknown;
+    ok: boolean;
+  }) => void;
+}
+
+export class SmartVmRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+    public readonly path: string,
+    public readonly requestBody: SmartVmPayload,
+    public readonly responseBody: unknown
+  ) {
+    super(message);
+  }
 }
 
 export class SmartVmClient {
   private readonly baseUrl: string;
   private readonly credentials: SmartVmCredentials;
   private readonly fetchImpl: typeof fetch;
+  private readonly onExchange?: SmartVmClientOptions["onExchange"];
 
-  constructor({ baseUrl, credentials, fetchImpl = fetch }: SmartVmClientOptions) {
+  constructor({ baseUrl, credentials, fetchImpl = fetch, onExchange }: SmartVmClientOptions) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.credentials = credentials;
     this.fetchImpl = fetchImpl;
+    this.onExchange = onExchange;
   }
 
   private async signedPost<T>(path: string, payload: SmartVmPayload): Promise<T> {
+    const signedPayload = withSmartVmSignature(payload, this.credentials);
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(withSmartVmSignature(payload, this.credentials))
+      body: JSON.stringify(signedPayload)
     });
+    const raw = await response.text();
+    let parsed: unknown = raw;
+
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw) as unknown;
+      } catch {
+        parsed = raw;
+      }
+    }
 
     if (!response.ok) {
-      let detail = `SmartVM request failed with status ${response.status}`;
+      const detail =
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "message" in parsed &&
+        typeof (parsed as { message?: unknown }).message === "string"
+          ? (parsed as { message: string }).message
+          : typeof parsed === "string" && parsed
+            ? parsed
+            : `SmartVM request failed with status ${response.status}`;
 
-      try {
-        const raw = await response.text();
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw) as { message?: string; error?: string };
-            detail = parsed.message ?? parsed.error ?? raw;
-          } catch {
-            detail = raw;
-          }
-        }
-      } catch {
-        // 忽略响应体解析失败，保留状态码信息。
-      }
+      this.onExchange?.({
+        path,
+        requestBody: signedPayload,
+        statusCode: response.status,
+        responseBody: parsed,
+        ok: false
+      });
 
-      throw new Error(detail);
+      throw new SmartVmRequestError(detail, response.status, path, signedPayload, parsed);
     }
 
-    const json = (await response.json()) as { code: number; message: string; data?: T };
+    const json = parsed as { code: number; message: string; data?: T };
 
     if (json.code !== 200) {
-      throw new Error(json.message);
+      this.onExchange?.({
+        path,
+        requestBody: signedPayload,
+        statusCode: response.status,
+        responseBody: json,
+        ok: false
+      });
+      throw new SmartVmRequestError(
+        json.message,
+        response.status,
+        path,
+        signedPayload,
+        json
+      );
     }
+
+    this.onExchange?.({
+      path,
+      requestBody: signedPayload,
+      statusCode: response.status,
+      responseBody: json,
+      ok: true
+    });
 
     return json.data as T;
   }

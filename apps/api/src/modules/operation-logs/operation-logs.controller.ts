@@ -67,6 +67,22 @@ export class OperationLogsController {
     response.send(file.body);
   }
 
+  @Get("system-audit")
+  systemAudit(
+    @Query("pathContains") pathContains?: string,
+    @Query("deviceCode") deviceCode?: string,
+    @Query("limit") limit?: string
+  ) {
+    const resolvedLimit = Number(limit ?? 50);
+    return ok(
+      this.operationLogsService.listSystemAudit({
+        pathContains,
+        deviceCode,
+        limit: Number.isNaN(resolvedLimit) ? 50 : resolvedLimit
+      })
+    );
+  }
+
   @Get(":id")
   detail(@Param("id") id: string) {
     return ok(this.operationLogsService.detail(id));

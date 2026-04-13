@@ -318,7 +318,30 @@ export class DevicesService {
         phone: admin?.phone ?? "13800000001"
       });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "柜机平台未返回可用结果。";
+      const detail = this.smartVmGateway.extractErrorMessage(error);
+      this.store.logOperation({
+        category: "admin",
+        type: "remote-open-device",
+        status: "failed",
+        actor: this.getAdminActor(actorUserId),
+        primarySubject: {
+          type: "device",
+          id: device.deviceCode,
+          label: device.name
+        },
+        secondarySubject: {
+          type: "event",
+          id: eventId,
+          label: eventId
+        },
+        description: `管理员向 ${device.name} 下发的远程开门指令失败。`,
+        detail: `柜机平台返回：${detail}`,
+        metadata: {
+          deviceCode,
+          doorNum: payload?.doorNum ?? "1",
+          undoState: "not_undoable"
+        }
+      });
       throw new BadGatewayException(`柜机平台开柜失败：${detail}`);
     }
 

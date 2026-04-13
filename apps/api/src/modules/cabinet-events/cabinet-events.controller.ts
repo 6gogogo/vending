@@ -25,9 +25,17 @@ export class CabinetEventsController {
   @Get("callback-logs")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  callbackLogs(@Query("limit") limit?: string) {
+  callbackLogs(
+    @Query("limit") limit?: string,
+    @Query("deviceCode") deviceCode?: string
+  ) {
     const resolvedLimit = Number(limit ?? 20);
-    return ok(this.cabinetEventsService.listCallbackLogs(Number.isNaN(resolvedLimit) ? 20 : resolvedLimit));
+    return ok(
+      this.cabinetEventsService.listCallbackLogs(
+        Number.isNaN(resolvedLimit) ? 20 : resolvedLimit,
+        deviceCode
+      )
+    );
   }
 
   @Post("open")

@@ -2,11 +2,13 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { existsSync, readFileSync } from "node:fs";
 
 import type {
+  CallbackLogRecord,
   InventoryMovement,
   OperationLogCategory,
   OperationLogRecord,
   OperationLogStatus,
   OperationLogSubject,
+  SystemAuditLogEntry,
   UserRecord
 } from "@vm/shared-types";
 
@@ -125,6 +127,69 @@ export class OperationLogsService {
       contentType: "application/x-ndjson; charset=utf-8",
       body
     };
+  }
+
+  listSystemAudit(filters?: {
+    pathContains?: string;
+    deviceCode?: string;
+    limit?: number;
+  }) {
+    const filePath = resolveSystemLogFile();
+
+    if (!existsSync(filePath)) {
+      return [] as SystemAuditLogEntry[];
+    }
+
+    const pathContains = filters?.pathContains?.trim();
+    const deviceCode = filters?.deviceCode?.trim();
+    const limit = Math.max(1, filters?.limit ?? 50);
+
+    return readFileSync(filePath, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as SystemAuditLogEntry;
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((entry): entry is SystemAuditLogEntry => Boolean(entry))
+      .filter((entry) => {
+        if (pathContains && !entry.path.includes(pathContains)) {
+          return false;
+        }
+
+        if (deviceCode && !this.auditContainsDeviceCode(entry, deviceCode)) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+      .slice(0, limit);
+  }
+
+  private auditContainsDeviceCode(entry: SystemAuditLogEntry, deviceCode: string) {
+    return [entry.path, entry.body, entry.query, entry.params, entry.response, entry.error, entry.metadata]
+      .some((value) => this.stringifyForSearch(value).includes(deviceCode));
+  }
+
+  private stringifyForSearch(value: unknown) {
+    if (value === undefined || value === null) {
+      return "";
+    }
+
+    if (typeof value === "string") {
+      return value;
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
   }
 
   undo(id: string, actorUserId?: string) {

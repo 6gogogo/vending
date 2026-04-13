@@ -74,7 +74,37 @@ export class CabinetEventsService {
         phone: payload.phone
       });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "柜机平台未返回可用结果。";
+      const detail = this.smartVmGateway.extractErrorMessage(error);
+      this.store.logOperation({
+        category: user.role === "merchant" ? "restock" : "pickup",
+        type: "open-cabinet",
+        status: "failed",
+        actor: {
+          type: user.role,
+          id: user.id,
+          name: user.name,
+          role: user.role
+        },
+        primarySubject: {
+          type: "device",
+          id: payload.deviceCode,
+          label: payload.deviceCode
+        },
+        secondarySubject: {
+          type: "user",
+          id: user.id,
+          label: user.name
+        },
+        description: `${user.name} 发起的 ${payload.deviceCode} 开柜请求失败。`,
+        detail: `柜机平台返回：${detail}`,
+        relatedEventId: eventId,
+        metadata: {
+          deviceCode: payload.deviceCode,
+          doorNum,
+          payStyle: payload.payStyle,
+          undoState: "not_undoable"
+        }
+      });
       throw new BadGatewayException(`柜机平台开柜失败：${detail}`);
     }
 
@@ -147,8 +177,16 @@ export class CabinetEventsService {
     return this.store.events.filter((entry) => entry.userId === userId);
   }
 
-  listCallbackLogs(limit = 20) {
-    return this.store.callbackLog.slice(0, Math.max(1, limit));
+  listCallbackLogs(limit = 20, deviceCode?: string) {
+    const resolvedLimit = Math.max(1, limit);
+    const normalizedDeviceCode = deviceCode?.trim();
+    const logs = normalizedDeviceCode
+      ? this.store.callbackLog.filter((entry) =>
+          JSON.stringify(entry.payload ?? {}).includes(normalizedDeviceCode)
+        )
+      : this.store.callbackLog;
+
+    return logs.slice(0, resolvedLimit);
   }
 
   handleDoorStatus(payload: SmartVmDoorStatusPayload & Record<string, unknown>) {

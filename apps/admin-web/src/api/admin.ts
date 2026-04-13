@@ -1,5 +1,6 @@
 import type {
   AlertTask,
+  CallbackLogRecord,
   DataMonitorSnapshot,
   DashboardSnapshot,
   DeviceMonitoringDetail,
@@ -14,6 +15,7 @@ import type {
   OperationLogStatus,
   RegionRecord,
   RegistrationApplication,
+  SystemAuditLogEntry,
   SpecialAccessPolicy,
   UserAccessPolicy,
   UserManagementDetail,
@@ -224,6 +226,16 @@ export const adminApi = {
   },
   deviceDetail(deviceCode: string) {
     return adminClient.get<DeviceMonitoringDetail>(`/devices/${deviceCode}/monitoring`);
+  },
+  deviceCallbackLogs(deviceCode: string, limit = 20) {
+    return adminClient.get<CallbackLogRecord[]>("/cabinet-events/callback-logs", {
+      query: { deviceCode, limit }
+    });
+  },
+  systemAuditLogs(filters?: { pathContains?: string; deviceCode?: string; limit?: number }) {
+    return adminClient.get<SystemAuditLogEntry[]>("/operation-logs/system-audit", {
+      query: filters
+    });
   },
   addDeviceGoods(deviceCode: string, payload: { goodsId: string; doorNum?: string }) {
     return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/goods`, payload);

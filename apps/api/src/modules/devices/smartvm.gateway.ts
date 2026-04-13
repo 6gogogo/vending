@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { SmartVmClient, verifySmartVmSignature } from "@vm/shared-client/smartvm";
+import { SmartVmClient, SmartVmRequestError, verifySmartVmSignature } from "@vm/shared-client/smartvm";
 import type {
   SmartVmCredentials,
   SmartVmDoorStatusPayload,
@@ -8,6 +8,8 @@ import type {
   SmartVmRefundPayload,
   SmartVmSettlementPayload
 } from "@vm/shared-types";
+
+import { appendSystemAuditLog } from "../../common/store/persistence";
 
 @Injectable()
 export class SmartVmGateway {
@@ -37,7 +39,33 @@ export class SmartVmGateway {
 
     return new SmartVmClient({
       baseUrl,
-      credentials
+      credentials,
+      onExchange: ({ path, requestBody, responseBody, statusCode, ok }) => {
+        appendSystemAuditLog({
+          occurredAt: new Date().toISOString(),
+          method: "POST",
+          path: `/external/smartvm${path}`,
+          body: requestBody,
+          statusCode,
+          durationMs: 0,
+          response: responseBody,
+          error: ok
+            ? undefined
+            : {
+                name: "SmartVmRequestError",
+                message:
+                  typeof responseBody === "object" &&
+                  responseBody !== null &&
+                  "message" in responseBody &&
+                  typeof (responseBody as { message?: unknown }).message === "string"
+                    ? (responseBody as { message: string }).message
+                    : undefined
+              },
+          metadata: {
+            upstreamBaseUrl: baseUrl
+          }
+        });
+      }
     });
   }
 
@@ -109,6 +137,18 @@ export class SmartVmGateway {
     }
 
     return verifySmartVmSignature(payload, this.credentials);
+  }
+
+  extractErrorMessage(error: unknown) {
+    if (error instanceof SmartVmRequestError) {
+      return error.message;
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return "柜机平台未返回可用结果。";
   }
 
   private getDefaultOpenDoorPayStyle(preferred?: string) {

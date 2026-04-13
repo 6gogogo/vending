@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { cloneSeedState, type AlertTask, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type RegionRecord, type RegistrationApplication, type SpecialAccessPolicy, type StocktakeRecord, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
+import { cloneSeedState, type AlertTask, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type RegionRecord, type RegistrationApplication, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
 
 export interface VerificationRecord {
   code: string;
@@ -23,33 +23,6 @@ export interface DraftSessionRecord {
   linkedUserId?: string;
   applicationId?: string;
   createdAt: string;
-}
-
-export interface CallbackLog {
-  id: string;
-  type: string;
-  receivedAt: string;
-  payload: unknown;
-}
-
-export interface SystemAuditLogEntry {
-  occurredAt: string;
-  method: string;
-  path: string;
-  query?: unknown;
-  params?: unknown;
-  body?: unknown;
-  statusCode: number;
-  durationMs: number;
-  actorUserId?: string;
-  actorRole?: UserRole;
-  ip?: string;
-  userAgent?: string;
-  response?: unknown;
-  error?: {
-    name?: string;
-    message?: string;
-  };
 }
 
 export interface PersistedStoreState {
@@ -76,7 +49,7 @@ export interface PersistedStoreState {
   verificationCodes: Array<[string, VerificationRecord]>;
   sessions: Array<[string, SessionRecord]>;
   draftSessions: Array<[string, DraftSessionRecord]>;
-  callbackLog: CallbackLog[];
+  callbackLog: CallbackLogRecord[];
   deviceRuntime: Array<[string, DeviceRuntimeState]>;
 }
 
