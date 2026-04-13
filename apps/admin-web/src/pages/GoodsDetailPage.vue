@@ -45,6 +45,7 @@ const goods = computed(() => detail.value?.goods);
 const batches = computed(() => detail.value?.batches ?? []);
 const deviceSettings = computed(() => detail.value?.deviceSettings ?? []);
 const recentLogs = computed(() => detail.value?.recentLogs ?? []);
+const formatDate = (value?: string) => (value ? value.slice(0, 10) : "-");
 const filteredGoodsCategories = computed(() =>
   goodsCategories.value.filter(
     (item) => item.status === "active" && item.category === goodsForm.value.category
@@ -207,7 +208,7 @@ const addBatch = async () => {
     await adminApi.addGoodsBatch(goods.value.goodsId, {
       deviceCode: batchForm.value.deviceCode,
       quantity: batchForm.value.quantity,
-      expiresAt: batchForm.value.expiresAt ? new Date(batchForm.value.expiresAt).toISOString() : undefined,
+      expiresAt: batchForm.value.expiresAt ? new Date(`${batchForm.value.expiresAt}T23:59:59`).toISOString() : undefined,
       sourceType: batchForm.value.sourceType,
       sourceUserName: batchForm.value.sourceUserName || undefined,
       note: batchForm.value.note || undefined
@@ -319,7 +320,7 @@ onMounted(load);
           </div>
           <div class="device-detail-status__item">
             <span class="admin-kicker">最短保质期</span>
-            <strong class="admin-code">{{ detail.nearestExpiryAt ? detail.nearestExpiryAt.slice(0, 16).replace("T", " ") : "-" }}</strong>
+            <strong class="admin-code">{{ formatDate(detail.nearestExpiryAt) }}</strong>
             <span class="admin-table__subtext">取当前剩余批次中最早到期的一批</span>
           </div>
           <div class="device-detail-status__item">
@@ -437,7 +438,7 @@ onMounted(load);
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">保质期</span>
-                <input v-model="batchForm.expiresAt" type="datetime-local" class="admin-input" />
+                <input v-model="batchForm.expiresAt" type="date" class="admin-input" />
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">来源类型</span>
@@ -523,7 +524,7 @@ onMounted(load);
                   <span class="admin-table__subtext">{{ batch.deviceCode }}</span>
                 </td>
                 <td class="admin-code">{{ batch.remainingQuantity }} / {{ batch.quantity }}</td>
-                <td class="admin-code">{{ batch.expiresAt ? batch.expiresAt.slice(0, 16).replace("T", " ") : "-" }}</td>
+                <td class="admin-code">{{ formatDate(batch.expiresAt) }}</td>
                 <td>
                   <div class="goods-batch-actions">
                     <input
@@ -584,7 +585,7 @@ onMounted(load);
                   <span class="admin-table__subtext">{{ item.deviceCode }}</span>
                 </td>
                 <td class="admin-code">{{ item.currentStock }}</td>
-                <td class="admin-code">{{ item.nearestExpiryAt ? item.nearestExpiryAt.slice(0, 16).replace("T", " ") : "-" }}</td>
+                <td class="admin-code">{{ formatDate(item.nearestExpiryAt) }}</td>
                 <td>
                   <label class="goods-threshold-toggle">
                     <input v-model="thresholdForm[item.deviceCode].enabled" type="checkbox" />

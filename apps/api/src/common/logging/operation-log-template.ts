@@ -139,6 +139,17 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         description: `${actor}对${device}执行了退款操作。`,
         detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `关联事件 ${secondary}`, `退款金额 ${String(entry.metadata?.amount ?? 0)}`, `状态 ${result}`])
       };
+    case "refund-callback":
+      return {
+        description: `系统确认了${device}的退款回调。`,
+        detail: baseDetail([
+          `柜机 ${device}`,
+          `关联事件 ${secondary}`,
+          typeof entry.metadata?.refundNo === "string" ? `退款单号 ${entry.metadata.refundNo}` : undefined,
+          `退款金额 ${String(entry.metadata?.amount ?? 0)}`,
+          `状态 ${result}`
+        ])
+      };
     case "create-alert":
       return {
         description: `系统为${device}创建了${primary}。`,
@@ -207,6 +218,28 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           typeof entry.metadata?.lowStockThreshold === "number"
             ? `阈值 ${entry.metadata.lowStockThreshold}`
             : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "add-device-goods":
+      return {
+        description: `${actor}向${device}加入了货品${goods}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          typeof entry.metadata?.doorNum === "string" ? `货门 ${entry.metadata.doorNum}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "remove-device-goods":
+      return {
+        description: `${actor}从${device}移除了货品${goods}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          typeof entry.metadata?.doorNum === "string" ? `货门 ${entry.metadata.doorNum}` : undefined,
           `状态 ${result}`
         ])
       };

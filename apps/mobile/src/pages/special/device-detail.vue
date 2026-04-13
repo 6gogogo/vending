@@ -16,6 +16,7 @@ const sessionStore = useSessionStore();
 const loading = ref(false);
 const submitting = ref(false);
 const deviceCode = ref("");
+const scanMode = ref(false);
 const deviceName = ref("柜机详情");
 const location = ref("");
 const goodsList = ref<Array<{
@@ -122,6 +123,35 @@ const submit = async () => {
   }
 };
 
+const submitScanOpen = async () => {
+  if (!sessionStore.user) {
+    uni.showToast({
+      title: "请先登录",
+      icon: "none"
+    });
+    return;
+  }
+
+  submitting.value = true;
+  try {
+    await mobileApi.openCabinet({
+      phone: sessionStore.user.phone,
+      deviceCode: deviceCode.value,
+      doorNum: "1"
+    });
+
+    uni.reLaunch({
+      url: `/pages/common/result?status=success&title=${encodeURIComponent("开柜申请已提交")}&detail=${encodeURIComponent("扫码柜机已收到开门请求，本次将以柜机识别到的实际取货结果结算。")}`
+    });
+  } catch (error) {
+    uni.reLaunch({
+      url: `/pages/common/result?status=danger&title=${encodeURIComponent("开柜申请失败")}&detail=${encodeURIComponent(getErrorMessage(error))}&actionText=${encodeURIComponent("重新尝试")}&backUrl=${encodeURIComponent(`/pages/special/device-detail?deviceCode=${deviceCode.value}&scan=1`)}`
+    });
+  } finally {
+    submitting.value = false;
+  }
+};
+
 const goFeedback = () => {
   uni.navigateTo({
     url: `/pages/common/feedback?deviceCode=${deviceCode.value}`
@@ -130,6 +160,7 @@ const goFeedback = () => {
 
 onLoad((query) => {
   deviceCode.value = typeof query.deviceCode === "string" ? query.deviceCode : "";
+  scanMode.value = query.scan === "1";
   load();
 });
 </script>
@@ -140,7 +171,12 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">意向货品</text>
-          <text class="vm-subtitle">先选择意向领取货品，系统会按你的当前权限和实际结算结果处理。</text>
+          <text class="vm-subtitle">{{ scanMode ? "当前来自扫码开门，可直接申请开柜；如果需要，也可以继续选择意向货品作为参考。" : "先选择意向领取货品，系统会按你的当前权限和实际结算结果处理。" }}</text>
+        </view>
+
+        <view v-if="scanMode" class="scan-mode-banner">
+          <text class="scan-mode-banner__title">已识别柜机编号 {{ deviceCode }}</text>
+          <text class="scan-mode-banner__body">扫码模式下可直接开柜，最终以柜机识别到的商品种类和数量为准。</text>
         </view>
 
         <view v-if="goodsList.length" class="goods-list">
@@ -168,6 +204,7 @@ onLoad((query) => {
         />
 
         <view class="action-stack">
+          <button v-if="scanMode" class="vm-button" :loading="submitting" @tap="submitScanOpen">扫码后直接开柜</button>
           <button class="vm-button" :loading="submitting" @tap="submit">确认并申请开柜</button>
           <button class="vm-button vm-button--ghost" @tap="goFeedback">反馈问题</button>
         </view>
@@ -238,5 +275,25 @@ onLoad((query) => {
 .action-stack {
   display: grid;
   gap: 16rpx;
+}
+
+.scan-mode-banner {
+  display: grid;
+  gap: 8rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 20rpx;
+  background: rgba(255, 250, 240, 0.85);
+  border: 1rpx solid rgba(159, 127, 94, 0.18);
+}
+
+.scan-mode-banner__title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.scan-mode-banner__body {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
 }
 </style>

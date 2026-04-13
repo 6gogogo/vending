@@ -101,11 +101,15 @@ const parseTags = (value: string) => value.split(/[，,]/).map((item) => item.tr
 const formatWeekdays = (weekdays: number[]) => weekdays.slice().sort((left, right) => (left === 0 ? 7 : left) - (right === 0 ? 7 : right)).map((value) => weekdayOptions.find((item) => item.value === value)?.label ?? String(value)).join("、");
 const policySummary = (userId: string) => {
   const user = users.value.find((item) => item.id === userId);
-  const directNames = user?.accessPolicies?.filter((policy) => policy.status === "active").map((policy) => policy.name) ?? [];
-  const names = directNames.length
-    ? directNames
-    : policies.value.filter((policy) => policy.applicableUserIds.includes(userId) && policy.status === "active").map((policy) => policy.name);
-  return names.length ? names.join("、") : "未绑定策略";
+  const directCount = user?.accessPolicies?.filter((policy) => policy.status === "active").length ?? 0;
+  if (directCount > 0) {
+    return `个人设定 ${directCount} 条`;
+  }
+
+  const inheritedNames = policies.value
+    .filter((policy) => policy.applicableUserIds.includes(userId) && policy.status === "active")
+    .map((policy) => policy.name);
+  return inheritedNames.length ? `模板：${inheritedNames.join("、")}` : "未设置";
 };
 
 const resetUserForm = () => {
@@ -242,6 +246,12 @@ const submitPolicyForm = async () => {
 };
 const applyBatchPolicies = async () => {
   if (!selectedSpecialUsers.value.length || !batchPolicyIds.value.length) return;
+  if (
+    batchMode.value === "replace" &&
+    !window.confirm("覆盖会在下一个业务日替换所选普通用户的个人取货设定，确认继续吗？")
+  ) {
+    return;
+  }
   saving.value = true;
   try {
     await adminApi.batchAssignPolicies({ userIds: selectedSpecialUsers.value.map((user) => user.id), policyIds: batchPolicyIds.value, mode: batchMode.value });
@@ -419,8 +429,8 @@ onMounted(load);
             <label class="admin-field">
               <span class="admin-field__label">操作方式</span>
               <select v-model="batchMode" class="admin-select">
-                <option value="bind">追加绑定</option>
-                <option value="replace">替换为以下模板</option>
+                <option value="bind">新增为个人设定</option>
+                <option value="replace">覆盖个人设定</option>
                 <option value="unbind">解绑以下模板</option>
               </select>
             </label>
@@ -434,7 +444,14 @@ onMounted(load);
                 </label>
               </div>
             </div>
-            <button class="admin-button" :disabled="saving || !selectedSpecialUsers.length || !batchPolicyIds.length" @click="applyBatchPolicies">{{ saving ? "保存中" : "应用批量策略设置" }}</button>
+            <div class="admin-note">
+              {{
+                batchMode === "replace"
+                  ? "覆盖会把模板拆成按货品的个人设定，并在下一个业务日替换当前个人设置。"
+                  : "新增会把模板中的每个货品最小单元追加到所选普通用户的个人设定中。"
+              }}
+            </div>
+            <button class="admin-button" :disabled="saving || !selectedSpecialUsers.length || !batchPolicyIds.length" @click="applyBatchPolicies">{{ saving ? "保存中" : batchMode === "replace" ? "覆盖个人设定" : "新增到个人设定" }}</button>
           </div>
         </article>
 

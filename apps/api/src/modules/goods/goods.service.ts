@@ -657,8 +657,12 @@ export class GoodsService {
 
     return {
       totalKinds: this.store.goodsCatalog.filter((entry) => entry.status !== "inactive").length,
-      lowStockKinds: goodsByDevice.filter((item) => item.status === "low").length,
-      outOfStockKinds: goodsByDevice.filter((item) => item.status === "empty").length,
+      lowStockKinds: new Set(
+        goodsByDevice.filter((item) => item.status === "low").map((item) => item.goodsId)
+      ).size,
+      outOfStockKinds: new Set(
+        goodsByDevice.filter((item) => item.status === "empty").map((item) => item.goodsId)
+      ).size,
       policyCount: this.store.goodsAlertPolicies.filter((entry) => entry.status === "active").length,
       settingCount: this.store.deviceGoodsSettings.filter((entry) => entry.enabled).length,
       warehouseStockTotal: this.store.warehouses.reduce(
@@ -743,7 +747,7 @@ export class GoodsService {
             <td>${item.warehouseStock}</td>
             <td>${item.lowStockDevices}</td>
             <td>${item.outOfStockDevices}</td>
-            <td>${item.nearestExpiryAt ?? ""}</td>
+            <td>${item.nearestExpiryAt?.slice(0, 10) ?? ""}</td>
             <td>${this.findCatalogItem(item.goodsId).packageForm ?? ""}</td>
             <td>${this.findCatalogItem(item.goodsId).specification ?? ""}</td>
             <td>${this.findCatalogItem(item.goodsId).manufacturer ?? ""}</td>
@@ -893,9 +897,11 @@ export class GoodsService {
       thresholdEnabled: Boolean(setting?.enabled),
       lowStockThreshold,
       status:
-        stock <= 0
-          ? "empty"
-          : lowStockThreshold !== undefined && stock <= lowStockThreshold
+        lowStockThreshold === undefined
+          ? "ok"
+          : stock <= 0
+            ? "empty"
+            : stock < lowStockThreshold
             ? "low"
             : "ok",
       nearestExpiryAt: this.store.getNearestExpiryAt(deviceCode, goodsId)

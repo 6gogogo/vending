@@ -5,6 +5,7 @@ import type {
   GoodsCategory,
   InventoryMovement,
   SmartVmAdjustmentPayload,
+  SmartVmRefundPayload,
   SmartVmSettlementPayload
 } from "@vm/shared-types";
 
@@ -206,11 +207,42 @@ export class InventoryOrdersService {
     return movements;
   }
 
-  markRefund(orderNo: string, transactionId: string, amount: number) {
+  logRefundCallback(payload: unknown) {
+    this.store.logCallback("refund", payload);
+  }
+
+  handleRefundCallback(payload: SmartVmRefundPayload) {
+    return this.markRefund(payload.orderNo, payload.transactionId, payload.amount, {
+      source: "callback",
+      refundNo: payload.refundNo
+    });
+  }
+
+  markRefund(
+    orderNo: string,
+    transactionId: string,
+    amount: number,
+    options?: {
+      source?: "manual" | "callback";
+      refundNo?: string;
+    }
+  ) {
     const event = this.store.events.find((entry) => entry.orderNo === orderNo);
 
     if (!event) {
       throw new NotFoundException("未找到可退款的订单。");
+    }
+
+    const existingMovement = this.store.inventory.find(
+      (entry) => entry.orderNo === orderNo && entry.type === "refund"
+    );
+
+    if (event.status === "refunded" && existingMovement) {
+      return {
+        movement: existingMovement,
+        transactionId,
+        duplicated: true
+      };
     }
 
     const movement: InventoryMovement = {
@@ -230,16 +262,23 @@ export class InventoryOrdersService {
     event.status = "refunded";
     event.updatedAt = new Date().toISOString();
     this.store.inventory.unshift(movement);
+
+    const isCallback = options?.source === "callback";
     this.store.logOperation({
       category: "inventory",
-      type: "manual-refund",
+      type: isCallback ? "refund-callback" : "manual-refund",
       status: "success",
-      actor: {
-        type: "admin",
-        id: this.store.users.find((entry) => entry.role === "admin")?.id,
-        name: this.store.users.find((entry) => entry.role === "admin")?.name ?? "管理员",
-        role: "admin"
-      },
+      actor: isCallback
+        ? {
+            type: "system",
+            name: "退款回调"
+          }
+        : {
+            type: "admin",
+            id: this.store.users.find((entry) => entry.role === "admin")?.id,
+            name: this.store.users.find((entry) => entry.role === "admin")?.name ?? "管理员",
+            role: "admin"
+          },
       primarySubject: {
         type: "device",
         id: event.deviceCode,
@@ -250,13 +289,16 @@ export class InventoryOrdersService {
         id: event.eventId,
         label: event.orderNo
       },
-      description: `管理员对订单 ${orderNo} 执行了退款。`,
-      detail: `退款金额 ${amount}，交易号 ${transactionId}。`,
+      description: isCallback ? `订单 ${orderNo} 收到退款回调。` : `管理员对订单 ${orderNo} 执行了退款。`,
+      detail: isCallback
+        ? `退款单号 ${options?.refundNo ?? "-"}，退款金额 ${amount}，交易号 ${transactionId}。`
+        : `退款金额 ${amount}，交易号 ${transactionId}。`,
       relatedEventId: event.eventId,
       relatedOrderNo: orderNo,
       metadata: {
         amount,
         transactionId,
+        refundNo: options?.refundNo,
         undoState: "not_undoable"
       }
     });

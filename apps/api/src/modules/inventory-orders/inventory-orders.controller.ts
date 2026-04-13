@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Inject, Post, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Post, Query, UseGuards } from "@nestjs/common";
+
+import type { SmartVmRefundPayload } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
@@ -26,6 +28,17 @@ export class InventoryOrdersController {
   @AllowedRoles("merchant", "admin")
   merchantSummary(@Query("userId") userId: string) {
     return ok(this.inventoryOrdersService.getMerchantSummary(userId));
+  }
+
+  @Post("callbacks/refund")
+  refundCallback(@Body() body: SmartVmRefundPayload & Record<string, unknown>) {
+    this.inventoryOrdersService.logRefundCallback(body);
+
+    if (!this.smartVmGateway.verifySignedPayload(body)) {
+      throw new BadRequestException("签名校验失败。");
+    }
+
+    return ok(this.inventoryOrdersService.handleRefundCallback(body), "退款回调已处理。");
   }
 
   @Post("refund")

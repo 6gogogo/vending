@@ -53,7 +53,7 @@ export const loadAmap = () => {
     }
 
     const script = document.createElement("script");
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${amapWebKey}&plugin=AMap.PlaceSearch,AMap.AutoComplete`;
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${amapWebKey}&plugin=AMap.PlaceSearch,AMap.AutoComplete,AMap.Geocoder`;
     script.async = true;
     script.defer = true;
     script.dataset.vmAmap = "true";

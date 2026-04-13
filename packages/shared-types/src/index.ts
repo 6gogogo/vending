@@ -766,6 +766,60 @@ export interface UserPolicyCalendarSummary {
   };
 }
 
+export interface DataMonitorCalendarDay {
+  dateKey: string;
+  day: number;
+  inCurrentMonth: boolean;
+  hasData: boolean;
+  activityLevel: "none" | "light" | "medium" | "high";
+}
+
+export interface DataMonitorMetricBar {
+  key:
+    | "servedUsers"
+    | "pickupUnits"
+    | "restockUnits"
+    | "adjustmentUnits"
+    | "eventCount"
+    | "taskCount"
+    | "logCount";
+  label: string;
+  value: number;
+  unit: string;
+}
+
+export interface DataMonitorDailySummary {
+  businessDateKey: string;
+  servedUsers: number;
+  pickupUnits: number;
+  restockUnits: number;
+  adjustmentUnits: number;
+  eventCount: number;
+  taskCount: number;
+  logCount: number;
+  metricBars: DataMonitorMetricBar[];
+  topGoods: Array<{
+    goodsId: string;
+    goodsName: string;
+    quantity: number;
+  }>;
+  topDevices: Array<{
+    deviceCode: string;
+    deviceName: string;
+    pickupUnits: number;
+    restockUnits: number;
+    eventCount: number;
+  }>;
+  recentLogs: OperationLogRecord[];
+}
+
+export interface DataMonitorSnapshot {
+  monthKey: string;
+  selectedDateKey: string;
+  days: DataMonitorCalendarDay[];
+  selectedDateSummary?: DataMonitorDailySummary;
+}
+
 export interface UserManagementDetail {
   user: UserRecord;
   stats?: {

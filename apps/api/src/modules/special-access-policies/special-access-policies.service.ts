@@ -116,28 +116,31 @@ export class SpecialAccessPoliciesService {
       );
 
       for (const user of targetUsers) {
-        const copied = {
-          id: this.store.createId("user-policy"),
-          name: policy.name,
-          weekdays: [...policy.weekdays],
-          startHour: policy.startHour,
-          endHour: policy.endHour,
-          goodsLimits: policy.goodsLimits.map((limit) => ({ ...limit })),
-          status: policy.status,
-          sourcePolicyId: policy.id,
-          effectiveFromDateKey: nextBusinessDateKey,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
         const currentPolicies = user.accessPolicies ?? [];
+        const now = new Date().toISOString();
         for (const entry of currentPolicies) {
           if (entry.sourcePolicyId === policy.id && entry.status === "active") {
             entry.status = "inactive";
             entry.effectiveToDateKey = businessDateKey;
-            entry.updatedAt = new Date().toISOString();
+            entry.updatedAt = now;
           }
         }
-        currentPolicies.unshift(copied);
+
+        const copiedPolicies = policy.goodsLimits.map((limit) => ({
+          id: this.store.createId("user-policy"),
+          name: `${policy.name} · ${limit.goodsName}`,
+          weekdays: [...policy.weekdays],
+          startHour: policy.startHour,
+          endHour: policy.endHour,
+          goodsLimits: [{ ...limit }],
+          status: policy.status,
+          sourcePolicyId: policy.id,
+          effectiveFromDateKey: nextBusinessDateKey,
+          createdAt: now,
+          updatedAt: now
+        }));
+
+        currentPolicies.unshift(...copiedPolicies);
         user.accessPolicies = currentPolicies;
       }
     }

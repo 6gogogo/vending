@@ -195,12 +195,14 @@ export class DevicesService {
             new Date(nearestExpiryAt).getTime() - Date.now() < 24 * 60 * 60_000 &&
             new Date(nearestExpiryAt).getTime() > Date.now();
 
+          const thresholdEnabled = Boolean(setting?.enabled);
+
           return {
             ...goods,
             stock: this.store.getCurrentStock(device.deviceCode, goods.goodsId),
             expiresAt: nearestExpiryAt,
-            thresholdEnabled: Boolean(setting?.enabled),
-            lowStockThreshold: setting?.enabled ? setting.lowStockThreshold : undefined,
+            thresholdEnabled,
+            lowStockThreshold: thresholdEnabled ? setting?.lowStockThreshold : undefined,
             expiringSoon
           };
         })
@@ -218,6 +220,38 @@ export class DevicesService {
       });
 
       if (remoteGoods?.length) {
+        for (const remoteItem of remoteGoods) {
+          const localMatch = localDevice.doors
+            .flatMap((door) => door.goods)
+            .find((goods) => goods.goodsId === remoteItem.goodsId);
+          const category = localMatch?.category ?? "daily";
+
+          const catalogItem = this.store.ensureGoodsCatalogItem({
+            goodsCode: remoteItem.goodsCode,
+            goodsId: remoteItem.goodsId,
+            name: remoteItem.name,
+            fullName: remoteItem.name,
+            category,
+            price: remoteItem.price,
+            imageUrl: remoteItem.imageUrl,
+            status: "active"
+          });
+
+          this.store.ensureDeviceGoodsEntry(deviceCode, {
+            goodsCode: catalogItem.goodsCode,
+            goodsId: catalogItem.goodsId,
+            name: catalogItem.name,
+            fullName: catalogItem.fullName,
+            category: catalogItem.category,
+            categoryName: catalogItem.categoryName,
+            price: catalogItem.price,
+            imageUrl: catalogItem.imageUrl,
+            packageForm: catalogItem.packageForm,
+            specification: catalogItem.specification,
+            manufacturer: catalogItem.manufacturer
+          });
+        }
+
         return remoteGoods.map((remoteItem) => {
           const localMatch = localDevice.doors
             .flatMap((door) => door.goods)
@@ -360,6 +394,121 @@ export class DevicesService {
 
   addOrUpdateGoods(deviceCode: string, goods: DeviceGoods) {
     return this.store.ensureDeviceGoodsEntry(deviceCode, goods);
+  }
+
+  addGoodsToDevice(
+    deviceCode: string,
+    payload: {
+      goodsId: string;
+      doorNum?: string;
+    },
+    actorUserId?: string
+  ) {
+    const device = this.getByCode(deviceCode);
+    const goods = this.store.goodsCatalog.find(
+      (entry) => entry.goodsId === payload.goodsId && entry.status !== "inactive"
+    );
+
+    if (!goods) {
+      throw new NotFoundException("未找到对应货品。");
+    }
+
+    const targetDoor =
+      device.doors.find((door) => door.doorNum === (payload.doorNum ?? "1")) ??
+      device.doors[0];
+
+    this.store.ensureDeviceGoodsEntry(deviceCode, {
+      goodsId: goods.goodsId,
+      goodsCode: goods.goodsCode,
+      name: goods.name,
+      fullName: goods.fullName,
+      category: goods.category,
+      categoryName: goods.categoryName,
+      price: goods.price,
+      imageUrl: goods.imageUrl,
+      packageForm: goods.packageForm,
+      specification: goods.specification,
+      manufacturer: goods.manufacturer
+    });
+
+    this.store.logOperation({
+      category: "goods",
+      type: "add-device-goods",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: device.deviceCode,
+        label: device.name
+      },
+      secondarySubject: {
+        type: "goods",
+        id: goods.goodsId,
+        label: goods.name
+      },
+      metadata: {
+        deviceCode,
+        goodsId: goods.goodsId,
+        goodsName: goods.name,
+        doorNum: targetDoor?.doorNum ?? payload.doorNum ?? "1",
+        undoState: "not_undoable"
+      }
+    });
+
+    return this.monitoringDetail(deviceCode);
+  }
+
+  removeGoodsFromDevice(
+    deviceCode: string,
+    goodsId: string,
+    payload?: { doorNum?: string },
+    actorUserId?: string
+  ) {
+    const device = this.getByCode(deviceCode);
+    const currentStock = this.store.getCurrentStock(deviceCode, goodsId);
+
+    if (currentStock > 0) {
+      throw new NotFoundException("当前货品库存未清零，不能移除。");
+    }
+
+    const goods =
+      this.findGoods(deviceCode, goodsId) ?? this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
+
+    if (!goods) {
+      throw new NotFoundException("未找到对应货品。");
+    }
+
+    const removed = this.store.removeDeviceGoodsEntry(deviceCode, goodsId, payload?.doorNum);
+
+    if (!removed) {
+      throw new NotFoundException("未找到对应货品。");
+    }
+
+    this.store.logOperation({
+      category: "goods",
+      type: "remove-device-goods",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: device.deviceCode,
+        label: device.name
+      },
+      secondarySubject: {
+        type: "goods",
+        id: goodsId,
+        label: goods.name
+      },
+      metadata: {
+        deviceCode,
+        goodsId,
+        goodsName: goods.name,
+        doorNum: payload?.doorNum ?? "1",
+        undoState: "not_undoable"
+      }
+    });
+
+    return this.monitoringDetail(deviceCode);
   }
 
   updateLocation(

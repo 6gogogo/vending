@@ -17,6 +17,10 @@ const selectedDoorNum = ref("1");
 const lastUpdatedAt = ref("");
 const mapPickerVisible = ref(false);
 const updatingLocation = ref(false);
+const goodsCatalog = ref<Awaited<ReturnType<typeof adminApi.goodsCatalog>>>([]);
+const addingGoods = ref(false);
+const removingGoodsId = ref("");
+const selectedGoodsToAdd = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -40,6 +44,13 @@ const businessDayServedUsers = computed(() => detail.value?.businessDayServedUse
 const stockChangeMap = computed(
   () => new Map((detail.value?.stockChanges ?? []).map((item) => [item.goodsId, item]))
 );
+const addableGoodsOptions = computed(() => {
+  const existingGoodsIds = new Set(selectedDoorGoods.value.map((item) => item.goodsId));
+
+  return goodsCatalog.value.filter(
+    (item) => item.status !== "inactive" && !existingGoodsIds.has(item.goodsId)
+  );
+});
 
 const formatDeviceStatus = (status?: "online" | "offline" | "maintenance") =>
   status === "online" ? "在线" : status === "maintenance" ? "维护中" : "离线";
@@ -73,9 +84,12 @@ const formatGoodsStock = (goods: NonNullable<typeof selectedDoorGoods.value>[num
       : `${goods.stock}`;
   const tags: string[] = [];
 
-  if (
-    (goods.thresholdEnabled && goods.lowStockThreshold !== undefined && goods.stock <= goods.lowStockThreshold) ||
-    goods.stock <= 0
+  if (goods.thresholdEnabled && goods.lowStockThreshold !== undefined && goods.stock <= 0) {
+    tags.push("缺货");
+  } else if (
+    goods.thresholdEnabled &&
+    goods.lowStockThreshold !== undefined &&
+    goods.stock < goods.lowStockThreshold
   ) {
     tags.push("缺货");
   }
@@ -96,9 +110,17 @@ const taskGradeLabel = (grade: "fault" | "feedback" | "warning") =>
 const load = async () => {
   loading.value = true;
   try {
-    detail.value = await adminApi.deviceDetail(String(route.params.deviceCode));
+    const [deviceDetail, catalogResponse] = await Promise.all([
+      adminApi.deviceDetail(String(route.params.deviceCode)),
+      adminApi.goodsCatalog()
+    ]);
+    detail.value = deviceDetail;
+    goodsCatalog.value = catalogResponse;
     if (!detail.value.device.doors.some((door) => door.doorNum === selectedDoorNum.value)) {
       selectedDoorNum.value = detail.value.device.doors[0]?.doorNum ?? "1";
+    }
+    if (!selectedGoodsToAdd.value || !addableGoodsOptions.value.some((item) => item.goodsId === selectedGoodsToAdd.value)) {
+      selectedGoodsToAdd.value = addableGoodsOptions.value[0]?.goodsId ?? "";
     }
     lastUpdatedAt.value = new Date().toLocaleString("zh-CN", { hour12: false });
   } finally {
@@ -166,6 +188,44 @@ const saveLocation = async (payload: { longitude: number; latitude: number; loca
     await load();
   } finally {
     updatingLocation.value = false;
+  }
+};
+
+const addGoods = async () => {
+  if (!selectedGoodsToAdd.value) {
+    window.alert("操作失败：请先选择要加入的货品");
+    return;
+  }
+
+  addingGoods.value = true;
+  try {
+    detail.value = await adminApi.addDeviceGoods(String(route.params.deviceCode), {
+      goodsId: selectedGoodsToAdd.value,
+      doorNum: selectedDoorNum.value
+    });
+    selectedGoodsToAdd.value = addableGoodsOptions.value[0]?.goodsId ?? "";
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    addingGoods.value = false;
+  }
+};
+
+const removeGoods = async (goodsId: string) => {
+  if (!window.confirm("确认移除这条零库存货品？")) {
+    return;
+  }
+
+  removingGoodsId.value = goodsId;
+  try {
+    detail.value = await adminApi.removeDeviceGoods(String(route.params.deviceCode), goodsId, selectedDoorNum.value);
+    if (selectedGoodsToAdd.value === goodsId) {
+      selectedGoodsToAdd.value = "";
+    }
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    removingGoodsId.value = "";
   }
 };
 
@@ -256,6 +316,22 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <div class="device-goods-toolbar">
+            <label class="admin-field admin-field--inline device-goods-toolbar__field">
+              <span class="admin-field__label">新增货品</span>
+              <select v-model="selectedGoodsToAdd" class="admin-select">
+                <option value="">请选择货品</option>
+                <option v-for="item in addableGoodsOptions" :key="item.goodsId" :value="item.goodsId">
+                  {{ item.name }} / {{ item.goodsCode }}
+                </option>
+              </select>
+            </label>
+            <button class="admin-button" :disabled="addingGoods || !selectedGoodsToAdd" @click="addGoods">
+              {{ addingGoods ? "加入中" : "加入柜机" }}
+            </button>
+            <span class="admin-copy">零库存且已移除的货品将不再显示；未开启阈值时即使库存为 0 也不会触发缺货提醒。</span>
+          </div>
+
           <table class="admin-table">
             <thead>
               <tr>
@@ -264,6 +340,7 @@ onUnmounted(() => {
                 <th>库存</th>
                 <th>今日变化</th>
                 <th>临期</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -284,6 +361,17 @@ onUnmounted(() => {
                 </td>
                 <td class="admin-code">
                   {{ goods.expiresAt ? goods.expiresAt.slice(0, 16).replace("T", " ") : "-" }}
+                </td>
+                <td>
+                  <button
+                    v-if="goods.stock <= 0"
+                    class="admin-button admin-button--ghost"
+                    :disabled="removingGoodsId === goods.goodsId"
+                    @click="removeGoods(goods.goodsId)"
+                  >
+                    {{ removingGoodsId === goods.goodsId ? "移除中" : "移除" }}
+                  </button>
+                  <span v-else class="admin-table__subtext">库存未清零</span>
                 </td>
               </tr>
             </tbody>
@@ -529,6 +617,18 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.device-goods-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.device-goods-toolbar__field {
+  min-width: 0;
+}
+
 .device-task-actions {
   display: grid;
   justify-items: end;
@@ -557,6 +657,10 @@ onUnmounted(() => {
 @media (max-width: 1280px) {
   .device-detail-status {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .device-goods-toolbar {
+    grid-template-columns: 1fr;
   }
 }
 

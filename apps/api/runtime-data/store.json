@@ -68,6 +68,109 @@
       },
       "accessPolicies": [
         {
+          "id": "user-policy-1776048687351-1061",
+          "name": "牛奶 周一、周二、周三、周四、周五 08:00-12:00",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "startHour": 8,
+          "endHour": 12,
+          "goodsLimits": [
+            {
+              "goodsId": "goods-1002",
+              "goodsName": "牛奶",
+              "category": "drink",
+              "quantity": 1
+            }
+          ],
+          "status": "active",
+          "effectiveFromDateKey": "2026-04-14",
+          "createdAt": "2026-04-13T02:51:27.351Z",
+          "updatedAt": "2026-04-13T02:51:27.351Z"
+        },
+        {
+          "id": "user-policy-1776048632503-9745",
+          "name": "早餐关怀 · 三明治",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "startHour": 8,
+          "endHour": 12,
+          "goodsLimits": [
+            {
+              "goodsId": "goods-1001",
+              "goodsName": "三明治",
+              "category": "food",
+              "quantity": 1
+            }
+          ],
+          "status": "inactive",
+          "sourcePolicyId": "policy-001",
+          "effectiveFromDateKey": "2026-04-14",
+          "createdAt": "2026-04-13T02:50:32.503Z",
+          "updatedAt": "2026-04-13T02:51:27.351Z",
+          "effectiveToDateKey": "2026-04-13"
+        },
+        {
+          "id": "user-policy-1776048632503-2187",
+          "name": "早餐关怀 · 牛奶",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "startHour": 8,
+          "endHour": 12,
+          "goodsLimits": [
+            {
+              "goodsId": "goods-1002",
+              "goodsName": "牛奶",
+              "category": "drink",
+              "quantity": 1
+            }
+          ],
+          "status": "active",
+          "sourcePolicyId": "policy-001",
+          "effectiveFromDateKey": "2026-04-14",
+          "createdAt": "2026-04-13T02:50:32.503Z",
+          "updatedAt": "2026-04-13T02:50:32.503Z"
+        },
+        {
+          "id": "user-policy-1776043275862-951",
+          "name": "123",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "startHour": 8,
+          "endHour": 12,
+          "goodsLimits": [
+            {
+              "goodsId": "goods-1001",
+              "goodsName": "三明治",
+              "category": "food",
+              "quantity": 1
+            }
+          ],
+          "status": "active",
+          "effectiveFromDateKey": "2026-04-14",
+          "createdAt": "2026-04-13T01:21:15.862Z",
+          "updatedAt": "2026-04-13T01:21:15.862Z"
+        },
+        {
           "id": "user-policy-1776012956707-2159",
           "name": "123",
           "weekdays": [
@@ -87,7 +190,9 @@
               "quantity": 1
             }
           ],
-          "status": "active"
+          "status": "inactive",
+          "effectiveToDateKey": "2026-04-13",
+          "updatedAt": "2026-04-13T01:21:15.862Z"
         },
         {
           "id": "user-policy-1776012950239-866",
@@ -212,6 +317,106 @@
   ],
   "devices": [
     {
+      "deviceCode": "91120149",
+      "name": "测试平台柜机 91120149",
+      "location": "比赛测试平台指定柜机",
+      "address": "测试平台设备编号 91120149",
+      "longitude": 120.28921,
+      "latitude": 31.55224,
+      "status": "online",
+      "lastSeenAt": "2026-04-13T07:03:57.881Z",
+      "doors": [
+        {
+          "doorNum": "1",
+          "label": "右门",
+          "goods": [
+            {
+              "goodsCode": "690000000002",
+              "goodsId": "goods-1002",
+              "name": "牛奶",
+              "category": "drink",
+              "price": 0,
+              "imageUrl": "https://dummyimage.com/160x160/c8f7e7/0b1220.png",
+              "stock": 1,
+              "expiresAt": "2026-04-09T08:00:00.000Z"
+            },
+            {
+              "goodsId": "9110012",
+              "goodsCode": "6920459908501",
+              "name": "每日C阳光甜橙味_500ml",
+              "price": 300,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902924486_420179.jpeg",
+              "category": "daily",
+              "stock": 0
+            },
+            {
+              "goodsId": "9110011",
+              "goodsCode": "6920584472021",
+              "name": "旺仔牛奶原味245ml",
+              "price": 500,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902670174_801549.png",
+              "category": "daily",
+              "stock": 0
+            },
+            {
+              "goodsId": "9120003",
+              "goodsCode": "4897036691175",
+              "name": "魔爪黑罐原味_330ml",
+              "price": 500,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1692078757802_c3f2bc.jpeg",
+              "category": "daily",
+              "stock": 0
+            },
+            {
+              "goodsId": "9120002",
+              "goodsCode": "6928804010145",
+              "name": "雪碧罐装_330ml",
+              "price": 300,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1740712544515_2b0e9f.jpg",
+              "category": "daily",
+              "stock": 0
+            },
+            {
+              "goodsId": "9110007",
+              "goodsCode": "6922456851927",
+              "name": "康师傅青梅绿茶_500ml",
+              "price": 300,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902210535_620415.jpeg",
+              "category": "daily",
+              "stock": 0
+            },
+            {
+              "goodsId": "9110005",
+              "goodsCode": "6954767460116",
+              "name": "怡泉+C柠檬瓶装_400ml",
+              "price": 500,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653901881544_ffad8f.jpeg",
+              "category": "daily",
+              "stock": 0
+            },
+            {
+              "goodsId": "9120001",
+              "goodsCode": "6901939621240",
+              "name": "芬达橙味汽水罐装_330ml",
+              "price": 300,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653900598418_c2664b.jpeg",
+              "category": "daily",
+              "stock": 0
+            },
+            {
+              "goodsId": "9110016",
+              "goodsCode": "6921581596048",
+              "name": "三得利乌龙茶_500ml",
+              "price": 500,
+              "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653903367695_e2b0a1.jpeg",
+              "category": "daily",
+              "stock": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
       "deviceCode": "CAB-1001",
       "name": "扬名西点位",
       "location": "扬名街道西侧公益柜",
@@ -286,6 +491,102 @@
     }
   ],
   "goodsCatalog": [
+    {
+      "goodsCode": "6921581596048",
+      "goodsId": "9110016",
+      "name": "三得利乌龙茶_500ml",
+      "price": 500,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653903367695_e2b0a1.jpeg",
+      "category": "daily",
+      "status": "active",
+      "fullName": "三得利乌龙茶_500ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
+    {
+      "goodsCode": "6901939621240",
+      "goodsId": "9120001",
+      "name": "芬达橙味汽水罐装_330ml",
+      "price": 300,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653900598418_c2664b.jpeg",
+      "category": "daily",
+      "status": "active",
+      "fullName": "芬达橙味汽水罐装_330ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
+    {
+      "goodsCode": "6954767460116",
+      "goodsId": "9110005",
+      "name": "怡泉+C柠檬瓶装_400ml",
+      "price": 500,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653901881544_ffad8f.jpeg",
+      "category": "daily",
+      "status": "active",
+      "fullName": "怡泉+C柠檬瓶装_400ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
+    {
+      "goodsCode": "6922456851927",
+      "goodsId": "9110007",
+      "name": "康师傅青梅绿茶_500ml",
+      "price": 300,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902210535_620415.jpeg",
+      "category": "daily",
+      "status": "active",
+      "fullName": "康师傅青梅绿茶_500ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
+    {
+      "goodsCode": "6928804010145",
+      "goodsId": "9120002",
+      "name": "雪碧罐装_330ml",
+      "price": 300,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1740712544515_2b0e9f.jpg",
+      "category": "daily",
+      "status": "active",
+      "fullName": "雪碧罐装_330ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
+    {
+      "goodsCode": "4897036691175",
+      "goodsId": "9120003",
+      "name": "魔爪黑罐原味_330ml",
+      "price": 500,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1692078757802_c3f2bc.jpeg",
+      "category": "daily",
+      "status": "active",
+      "fullName": "魔爪黑罐原味_330ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
+    {
+      "goodsCode": "6920584472021",
+      "goodsId": "9110011",
+      "name": "旺仔牛奶原味245ml",
+      "price": 500,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902670174_801549.png",
+      "category": "daily",
+      "status": "active",
+      "fullName": "旺仔牛奶原味245ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
+    {
+      "goodsCode": "6920459908501",
+      "goodsId": "9110012",
+      "name": "每日C阳光甜橙味_500ml",
+      "price": 300,
+      "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902924486_420179.jpeg",
+      "category": "daily",
+      "status": "active",
+      "fullName": "每日C阳光甜橙味_500ml",
+      "createdAt": "2026-04-13T06:11:45.960Z",
+      "updatedAt": "2026-04-13T06:11:45.960Z"
+    },
     {
       "goodsCode": "690000000001",
       "goodsId": "goods-1001",
@@ -611,6 +912,20 @@
   ],
   "goodsBatches": [
     {
+      "batchId": "batch-1776057183627-7974",
+      "goodsId": "goods-1002",
+      "deviceCode": "91120149",
+      "locationType": "device",
+      "locationName": "测试平台柜机 91120149",
+      "quantity": 1,
+      "remainingQuantity": 1,
+      "expiresAt": "2026-04-09T08:00:00.000Z",
+      "createdAt": "2026-04-13T05:13:03.627Z",
+      "sourceType": "system",
+      "sourceUserName": "测试平台预置",
+      "note": "比赛测试柜机默认库存"
+    },
+    {
       "batchId": "batch-001",
       "goodsId": "goods-1001",
       "deviceCode": "CAB-1001",
@@ -715,6 +1030,20 @@
   "inventoryTransfers": [],
   "stocktakes": [],
   "events": [
+    {
+      "eventId": "event-1776060895531-2276",
+      "orderNo": "91120149H260413141457H794746H103",
+      "userId": "admin-001",
+      "phone": "13800000001",
+      "role": "admin",
+      "deviceCode": "91120149",
+      "doorNum": "1",
+      "status": "timeout_unopened",
+      "createdAt": "2026-04-13T06:14:55.531Z",
+      "updatedAt": "2026-04-13T07:04:18.584Z",
+      "amount": 0,
+      "goods": []
+    },
     {
       "eventId": "evt-001",
       "orderNo": "ord-001",
@@ -892,6 +1221,20 @@
     }
   ],
   "alerts": [
+    {
+      "id": "alert-1776063858584-812",
+      "createdAt": "2026-04-13T07:04:18.584Z",
+      "status": "open",
+      "grade": "fault",
+      "type": "device_fault",
+      "title": "测试平台柜机 91120149超时未开门",
+      "deviceCode": "91120149",
+      "targetUserId": "admin-001",
+      "dueAt": "2026-04-13T07:04:18.584Z",
+      "detail": "事件 91120149H260413141457H794746H103 超过 90 秒未收到成功开门确认。",
+      "sourceLogId": "log-1776060895712-665",
+      "relatedEventId": "event-1776060895531-2276"
+    },
     {
       "id": "alert-1776014578951-4567",
       "createdAt": "2026-04-12T17:22:58.951Z",
@@ -1075,6 +1418,248 @@
     }
   ],
   "logs": [
+    {
+      "id": "log-1776063858584-7874",
+      "occurredAt": "2026-04-13T07:04:18.584Z",
+      "category": "alert",
+      "type": "create-alert",
+      "status": "warning",
+      "actor": {
+        "type": "system",
+        "name": "系统巡检"
+      },
+      "primarySubject": {
+        "type": "alert",
+        "id": "alert-1776063858584-812",
+        "label": "测试平台柜机 91120149超时未开门"
+      },
+      "secondarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "metadata": {
+        "undoState": "not_undoable",
+        "dueAt": "2026-04-13T07:04:18.584Z",
+        "deviceCode": "91120149",
+        "grade": "fault",
+        "relatedEventId": "event-1776060895531-2276"
+      },
+      "description": "系统为测试平台柜机 91120149创建了测试平台柜机 91120149超时未开门。",
+      "detail": "柜机 测试平台柜机 91120149；预警 测试平台柜机 91120149超时未开门；状态 需关注"
+    },
+    {
+      "id": "log-1776063844259-315",
+      "occurredAt": "2026-04-13T07:04:04.259Z",
+      "category": "goods",
+      "type": "remove-device-goods",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "secondarySubject": {
+        "type": "goods",
+        "id": "goods-1001",
+        "label": "三明治"
+      },
+      "metadata": {
+        "undoState": "not_undoable",
+        "deviceCode": "91120149",
+        "goodsId": "goods-1001",
+        "goodsName": "三明治",
+        "doorNum": "1"
+      },
+      "description": "管理员街道管理员从测试平台柜机 91120149移除了货品三明治。",
+      "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；货品 三明治；货门 1；状态 已完成"
+    },
+    {
+      "id": "log-1776063837881-6522",
+      "occurredAt": "2026-04-13T07:03:57.881Z",
+      "category": "device",
+      "type": "manual-refresh-device",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "description": "管理员街道管理员刷新了测试平台柜机 91120149的状态。",
+      "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；状态 已完成",
+      "metadata": {
+        "undoState": "not_undoable",
+        "deviceCode": "91120149"
+      }
+    },
+    {
+      "id": "log-1776060895712-665",
+      "occurredAt": "2026-04-13T06:14:55.712Z",
+      "category": "admin",
+      "type": "remote-open-device",
+      "status": "pending",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "secondarySubject": {
+        "type": "event",
+        "id": "event-1776060895531-2276",
+        "label": "91120149H260413141457H794746H103"
+      },
+      "description": "管理员街道管理员向测试平台柜机 91120149下发了远程开门指令。",
+      "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；关联事件 91120149H260413141457H794746H103；状态 待处理",
+      "relatedEventId": "event-1776060895531-2276",
+      "relatedOrderNo": "91120149H260413141457H794746H103",
+      "metadata": {
+        "undoState": "not_undoable",
+        "deviceCode": "91120149",
+        "doorNum": "1"
+      }
+    },
+    {
+      "id": "log-1776060892386-5613",
+      "occurredAt": "2026-04-13T06:14:52.386Z",
+      "category": "device",
+      "type": "manual-refresh-device",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "description": "管理员街道管理员刷新了测试平台柜机 91120149的状态。",
+      "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；状态 已完成",
+      "metadata": {
+        "undoState": "not_undoable",
+        "deviceCode": "91120149"
+      }
+    },
+    {
+      "id": "log-1776060705960-2444",
+      "occurredAt": "2026-04-13T06:11:45.960Z",
+      "category": "goods",
+      "type": "sync-device-goods",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "metadata": {
+        "undoState": "not_undoable",
+        "deviceCode": "91120149",
+        "count": 8
+      },
+      "description": "管理员街道管理员同步了测试平台柜机 91120149的货品种类。",
+      "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；同步种类 8；状态 已完成"
+    },
+    {
+      "id": "log-1776048687351-4739",
+      "occurredAt": "2026-04-13T02:51:27.351Z",
+      "category": "policy",
+      "type": "update-user-access-policy",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "user",
+        "id": "special-001",
+        "label": "林阿姨"
+      },
+      "metadata": {
+        "undoState": "not_undoable",
+        "policyId": "user-policy-1776048687351-1061",
+        "policyName": "牛奶 周一、周二、周三、周四、周五 08:00-12:00"
+      },
+      "description": "管理员街道管理员修改了林阿姨的个人取货设定 牛奶 周一、周二、周三、周四、周五 08:00-12:00。",
+      "detail": "动作人 管理员街道管理员；人员 林阿姨；设定 牛奶 周一、周二、周三、周四、周五 08:00-12:00；状态 已完成"
+    },
+    {
+      "id": "log-1776048632503-6715",
+      "occurredAt": "2026-04-13T02:50:32.503Z",
+      "category": "policy",
+      "type": "batch-assign-special-policy",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "metadata": {
+        "undoState": "not_undoable",
+        "userIds": [
+          "special-001"
+        ],
+        "policyIds": [
+          "policy-001"
+        ],
+        "mode": "bind"
+      },
+      "description": "管理员街道管理员批量套用了普通用户取货模板。",
+      "detail": "动作人 管理员街道管理员；涉及人员 1 人；涉及模板 1 个；操作方式 bind；状态 已完成"
+    },
+    {
+      "id": "log-1776043275862-9205",
+      "occurredAt": "2026-04-13T01:21:15.862Z",
+      "category": "policy",
+      "type": "update-user-access-policy",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "user",
+        "id": "special-001",
+        "label": "林阿姨"
+      },
+      "metadata": {
+        "undoState": "not_undoable",
+        "policyId": "user-policy-1776043275862-951",
+        "policyName": "123"
+      },
+      "description": "管理员街道管理员修改了林阿姨的个人取货设定 123。",
+      "detail": "动作人 管理员街道管理员；人员 林阿姨；设定 123；状态 已完成"
+    },
     {
       "id": "log-1776014633050-7788",
       "occurredAt": "2026-04-12T17:23:53.050Z",
@@ -2074,14 +2659,14 @@
       "13800000001",
       {
         "code": "123456",
-        "expiresAt": "2026-04-12T15:53:07.596Z"
+        "expiresAt": "2026-04-13T05:33:19.901Z"
       }
     ],
     [
       "13800000002",
       {
         "code": "123456",
-        "expiresAt": "2026-04-12T15:56:50.661Z"
+        "expiresAt": "2026-04-13T05:33:26.573Z"
       }
     ],
     [
@@ -2095,7 +2680,14 @@
       "13800000004",
       {
         "code": "123456",
-        "expiresAt": "2026-04-12T17:29:04.340Z"
+        "expiresAt": "2026-04-13T05:33:12.575Z"
+      }
+    ],
+    [
+      "13800000003",
+      {
+        "code": "123456",
+        "expiresAt": "2026-04-13T05:33:03.195Z"
       }
     ]
   ],
@@ -2162,6 +2754,51 @@
         "role": "merchant",
         "createdAt": "2026-04-12T17:24:04.718Z"
       }
+    ],
+    [
+      "session-1776057186653-8181",
+      {
+        "token": "session-1776057186653-8181",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-04-13T05:13:06.653Z"
+      }
+    ],
+    [
+      "session-1776058045745-2228",
+      {
+        "token": "session-1776058045745-2228",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-04-13T05:27:25.745Z"
+      }
+    ],
+    [
+      "session-1776058093205-8720",
+      {
+        "token": "session-1776058093205-8720",
+        "userId": "merchant-001",
+        "role": "merchant",
+        "createdAt": "2026-04-13T05:28:13.205Z"
+      }
+    ],
+    [
+      "session-1776058100170-4078",
+      {
+        "token": "session-1776058100170-4078",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-04-13T05:28:20.170Z"
+      }
+    ],
+    [
+      "session-1776058106806-2405",
+      {
+        "token": "session-1776058106806-2405",
+        "userId": "special-001",
+        "role": "special",
+        "createdAt": "2026-04-13T05:28:26.806Z"
+      }
     ]
   ],
   "draftSessions": [],
@@ -2187,6 +2824,16 @@
         "lastClosedAt": "2026-04-08T02:00:30.000Z",
         "lastRefreshAt": "2026-04-08T02:35:00.000Z",
         "openedAfterLastCommand": true
+      }
+    ],
+    [
+      "91120149",
+      {
+        "deviceCode": "91120149",
+        "doorState": "closed",
+        "lastRefreshAt": "2026-04-13T07:03:57.881Z",
+        "openedAfterLastCommand": false,
+        "lastCommandAt": "2026-04-13T06:14:55.531Z"
       }
     ]
   ]

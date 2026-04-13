@@ -11,6 +11,7 @@ import { categoryLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
 import { syncRoleTabBar } from "../../utils/role-routing";
+import { scanDeviceCode } from "../../utils/scan-device";
 
 const DEFAULT_MARKER_ICON = "https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-default.png";
 const ACTIVE_MARKER_ICON = "https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-red.png";
@@ -23,6 +24,7 @@ const mapExpanded = ref(false);
 const selectedGoodsId = ref("");
 const highlightedDeviceCode = ref("");
 const currentLocation = ref<{ longitude: number; latitude: number }>();
+const locationMessage = ref("正在读取当前位置");
 
 const statusLabelMap: Record<DeviceStatus, string> = {
   online: "在线可用",
@@ -185,6 +187,7 @@ const load = async () => {
         longitude: location.longitude,
         latitude: location.latitude
       };
+      locationMessage.value = `当前位置 ${location.longitude.toFixed(5)}, ${location.latitude.toFixed(5)}`;
       query = {
         longitude: location.longitude,
         latitude: location.latitude
@@ -193,6 +196,7 @@ const load = async () => {
     } catch {
       currentLocation.value = undefined;
       distanceEnabled.value = false;
+      locationMessage.value = "未获得定位权限，已按默认顺序展示柜机";
     }
 
     devices.value = await mobileApi.listDevices(query);
@@ -304,6 +308,30 @@ const goFeedback = (deviceCode: string) => {
   });
 };
 
+const scanAndOpen = async () => {
+  try {
+    const deviceCode = await scanDeviceCode();
+
+    if (!deviceCode) {
+      uni.showToast({
+        title: "未识别到柜机编号",
+        icon: "none"
+      });
+      return;
+    }
+
+    await mobileApi.getDevice(deviceCode);
+    uni.navigateTo({
+      url: `/pages/special/device-detail?deviceCode=${encodeURIComponent(deviceCode)}&scan=1`
+    });
+  } catch (error) {
+    uni.showToast({
+      title: getErrorMessage(error),
+      icon: "none"
+    });
+  }
+};
+
 const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters === undefined) {
     return "未开启定位";
@@ -330,6 +358,18 @@ onShow(() => {
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view v-if="mappableDevices.length" class="nearby-map-card">
+          <view class="nearby-location-banner">
+            <text class="nearby-map-card__title">我的位置</text>
+            <text class="nearby-location-banner__value">{{ locationMessage }}</text>
+            <text class="nearby-map-card__hint">
+              {{
+                distanceEnabled
+                  ? "已使用当前位置计算距离并排序。"
+                  : "若要按距离排序并查找最近柜机，请在小程序和系统设置中允许定位权限。"
+              }}
+            </text>
+          </view>
+
           <view class="nearby-map-card__head">
             <view>
               <text class="nearby-map-card__title">附近柜机地图</text>
@@ -354,6 +394,7 @@ onShow(() => {
           />
 
           <view class="nearby-map-card__tools">
+            <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--ghost" @tap="scanAndOpen">扫码开门</button>
             <button class="vm-button vm-button--ghost" @tap="focusNearestDevice">找寻最近柜机</button>
             <view class="nearby-map-card__search">
               <picker
@@ -458,6 +499,7 @@ onShow(() => {
         />
 
         <view class="nearby-map-card__tools">
+          <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--ghost" @tap="scanAndOpen">扫码开门</button>
           <button class="vm-button vm-button--ghost" @tap="focusNearestDevice">找寻最近柜机</button>
           <view class="nearby-map-card__search">
             <picker
@@ -483,7 +525,8 @@ onShow(() => {
 .device-list,
 .goods-list,
 .action-grid,
-.nearby-map-card__search {
+.nearby-map-card__search,
+.nearby-location-banner {
   display: grid;
   gap: 16rpx;
 }
@@ -506,9 +549,17 @@ onShow(() => {
 .nearby-map-card__hint,
 .device-card__meta,
 .goods-item__meta,
-.nearby-map-card__focus-value {
+.nearby-map-card__focus-value,
+.nearby-location-banner__value {
   font-size: 22rpx;
   color: var(--vm-text-soft);
+}
+
+.nearby-location-banner {
+  padding: 18rpx 20rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1rpx solid rgba(159, 127, 94, 0.14);
 }
 
 .nearby-map-card__expand {

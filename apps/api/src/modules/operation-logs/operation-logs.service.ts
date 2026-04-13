@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { existsSync, readFileSync } from "node:fs";
 
 import type {
   InventoryMovement,
@@ -10,6 +11,7 @@ import type {
 } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import { resolveSystemLogFile } from "../../common/store/persistence";
 
 @Injectable()
 export class OperationLogsService {
@@ -111,6 +113,17 @@ export class OperationLogsService {
 </table>
 </body>
 </html>`
+    };
+  }
+
+  buildSystemAuditExport() {
+    const filePath = resolveSystemLogFile();
+    const body = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+
+    return {
+      filename: `system-audit-${new Date().toISOString().slice(0, 10)}.ndjson`,
+      contentType: "application/x-ndjson; charset=utf-8",
+      body
     };
   }
 

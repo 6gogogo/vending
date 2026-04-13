@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, Query, UseGuards } from "@nestjs/common";
 
 import { ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
@@ -24,5 +24,10 @@ export class AnalyticsController {
   @Get("layout-suggestions")
   layoutSuggestions() {
     return ok(this.analyticsService.getLayoutSuggestions());
+  }
+
+  @Get("data-monitor")
+  dataMonitor(@Query("month") month?: string, @Query("date") date?: string) {
+    return ok(this.analyticsService.getDataMonitor({ month, date }));
   }
 }

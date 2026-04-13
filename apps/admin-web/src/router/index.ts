@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import { useAdminSessionStore } from "../stores/session";
 import AdminLayout from "../layouts/AdminLayout.vue";
 import AdminLoginPage from "../pages/AdminLoginPage.vue";
+import DataMonitorPage from "../pages/DataMonitorPage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
 import DeviceDetailPage from "../pages/DeviceDetailPage.vue";
 import GoodsDetailPage from "../pages/GoodsDetailPage.vue";
@@ -33,8 +34,8 @@ export const router = createRouter({
           path: "/dashboard",
           component: DashboardPage,
           meta: {
-            group: "运营总览",
-            eyebrow: "总览",
+            group: "总览",
+            eyebrow: "运营总览",
             title: "运营主控台",
             description: "查看服务覆盖、待办、柜机索引和汇总日志。"
           }
@@ -43,17 +44,27 @@ export const router = createRouter({
           path: "/goods",
           component: GoodsOverviewPage,
           meta: {
-            group: "运营总览",
+            group: "总览",
             eyebrow: "货物总览",
             title: "货物总览与预警模板",
             description: "查看各商品种类数量、柜机分布，并批量设置货品预警模板。"
           }
         },
         {
+          path: "/data-monitor",
+          component: DataMonitorPage,
+          meta: {
+            group: "总览",
+            eyebrow: "数据监控",
+            title: "按日数据监控",
+            description: "使用日历与柱状图查看每日服务、货品、事件和日志变化。"
+          }
+        },
+        {
           path: "/warehouse",
           component: WarehousePage,
           meta: {
-            group: "运营总览",
+            group: "总览",
             eyebrow: "本地仓库",
             title: "本地仓库与盘点",
             description: "处理本地仓库库存、调拨、盘点和 Excel 导出。"
@@ -63,7 +74,7 @@ export const router = createRouter({
           path: "/goods/:goodsId",
           component: GoodsDetailPage,
           meta: {
-            group: "运营总览",
+            group: "总览",
             eyebrow: "货物详情",
             title: "货物批次与阈值设置",
             description: "查看单个货品的批次、来源、保质期和柜机级阈值。"
@@ -73,7 +84,7 @@ export const router = createRouter({
           path: "/operations",
           component: OperationsPage,
           meta: {
-            group: "运营总览",
+            group: "总览",
             eyebrow: "柜机监控",
             title: "柜机监控矩阵",
             description: "按柜机巡检在线、门状态、库存和异常。"
@@ -83,7 +94,7 @@ export const router = createRouter({
           path: "/operations/:deviceCode",
           component: DeviceDetailPage,
           meta: {
-            group: "运营总览",
+            group: "总览",
             eyebrow: "柜机详情",
             title: "单柜机值守页",
             description: "查看门状态、库存、事件、日志并执行刷新或远程开门。"
@@ -93,7 +104,7 @@ export const router = createRouter({
           path: "/users",
           component: UsersPage,
           meta: {
-            group: "人员管理",
+            group: "人员与日志",
             eyebrow: "人员管理",
             title: "人员台账与批量设置",
             description: "按分类检索人员，新增编辑基础信息，并批量绑定特殊群体策略模板。"
@@ -103,7 +114,7 @@ export const router = createRouter({
           path: "/users/:userId",
           component: UserDetailPage,
           meta: {
-            group: "人员管理",
+            group: "人员与日志",
             eyebrow: "人员详情",
             title: "单人员详情与操作记录",
             description: "按角色查看人员信息、业务日时段完成情况、记录与手工补扣。"
@@ -113,7 +124,7 @@ export const router = createRouter({
           path: "/logs",
           component: LogsPage,
           meta: {
-            group: "日志总览",
+            group: "人员与日志",
             eyebrow: "日志总览",
             title: "系统操作日志",
             description: "按时间倒序查看动作句式日志，并按主体筛选。"
@@ -123,7 +134,7 @@ export const router = createRouter({
           path: "/logs/:logId",
           component: LogDetailPage,
           meta: {
-            group: "日志总览",
+            group: "人员与日志",
             eyebrow: "日志详情",
             title: "单条日志详情",
             description: "查看时间、动作人、主体对象、结果和详细说明。"

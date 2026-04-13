@@ -53,6 +53,20 @@ export class OperationLogsController {
     response.send(file.body);
   }
 
+  @Get("export/system-file")
+  exportSystemFile(
+    @Res()
+    response: {
+      setHeader: (name: string, value: string) => void;
+      send: (body: string) => void;
+    }
+  ) {
+    const file = this.operationLogsService.buildSystemAuditExport();
+    response.setHeader("Content-Type", file.contentType);
+    response.setHeader("Content-Disposition", `attachment; filename=\"${file.filename}\"`);
+    response.send(file.body);
+  }
+
   @Get(":id")
   detail(@Param("id") id: string) {
     return ok(this.operationLogsService.detail(id));

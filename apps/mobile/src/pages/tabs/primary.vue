@@ -13,6 +13,7 @@ import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import { syncRoleTabBar } from "../../utils/role-routing";
+import { scanDeviceCode } from "../../utils/scan-device";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
@@ -109,6 +110,27 @@ const goRecords = () => {
   });
 };
 
+const goScanPickup = async () => {
+  try {
+    const deviceCode = await scanDeviceCode();
+
+    if (!deviceCode) {
+      uni.showToast({
+        title: "未识别到柜机编号",
+        icon: "none"
+      });
+      return;
+    }
+
+    await mobileApi.getDevice(deviceCode);
+    uni.navigateTo({
+      url: `/pages/special/device-detail?deviceCode=${encodeURIComponent(deviceCode)}&scan=1`
+    });
+  } catch (error) {
+    showOperationFailure(error);
+  }
+};
+
 const navigate = (url: string) => {
   uni.navigateTo({ url });
 };
@@ -188,6 +210,7 @@ onShow(() => {
         </view>
         <EmptyState v-else title="当前没有可领取额度" description="请等待时段开始或联系工作人员核对资格。" />
         <view class="action-grid">
+          <button class="vm-button vm-button--ghost" @tap="goScanPickup">扫码开门</button>
           <button class="vm-button" @tap="goNearby">去附近柜机领取</button>
           <button class="vm-button vm-button--ghost" @tap="goRecords">查看领取详情</button>
         </view>

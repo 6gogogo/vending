@@ -287,7 +287,7 @@ export class WarehousesService {
             <td>${item.systemQuantity}</td>
             <td>${item.actualQuantity}</td>
             <td>${item.delta}</td>
-            <td>${item.nearestExpiryAt ?? ""}</td>
+            <td>${item.nearestExpiryAt?.slice(0, 10) ?? ""}</td>
             <td>${record.createdAt}</td>
             <td>${record.actorUserName ?? "管理员"}</td>
           </tr>`

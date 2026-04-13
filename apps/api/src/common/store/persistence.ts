@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, resolve } from "node:path";
 
@@ -30,6 +30,26 @@ export interface CallbackLog {
   type: string;
   receivedAt: string;
   payload: unknown;
+}
+
+export interface SystemAuditLogEntry {
+  occurredAt: string;
+  method: string;
+  path: string;
+  query?: unknown;
+  params?: unknown;
+  body?: unknown;
+  statusCode: number;
+  durationMs: number;
+  actorUserId?: string;
+  actorRole?: UserRole;
+  ip?: string;
+  userAgent?: string;
+  response?: unknown;
+  error?: {
+    name?: string;
+    message?: string;
+  };
 }
 
 export interface PersistedStoreState {
@@ -151,6 +171,11 @@ export const resolveUploadDir = () => {
   return resolveApiWorkspacePath(configuredPath, "runtime-uploads");
 };
 
+export const resolveSystemLogFile = () => {
+  const configuredPath = process.env.SYSTEM_LOG_FILE ?? "runtime-data/system-audit.ndjson";
+  return resolveApiWorkspacePath(configuredPath, "runtime-data/system-audit.ndjson");
+};
+
 export const createSeededPersistedState = (): PersistedStoreState => {
   const seed = cloneSeedState();
 
@@ -229,5 +254,12 @@ export const writePersistedState = (state: PersistedStoreState) => {
   const filePath = resolveApiDataFile();
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(state, null, 2), "utf8");
+  return filePath;
+};
+
+export const appendSystemAuditLog = (entry: SystemAuditLogEntry) => {
+  const filePath = resolveSystemLogFile();
+  mkdirSync(dirname(filePath), { recursive: true });
+  appendFileSync(filePath, `${JSON.stringify(entry)}\n`, "utf8");
   return filePath;
 };

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type { DeviceStatus, GoodsCategory } from "@vm/shared-types";
 
@@ -63,6 +63,36 @@ export class DevicesController {
     } = {}
   ) {
     return ok(await this.devicesService.remoteOpen(deviceCode, body, request.authUser?.id), "操作成功");
+  }
+
+  @Post(":deviceCode/goods")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  addGoods(
+    @Param("deviceCode") deviceCode: string,
+    @Body()
+    body: {
+      goodsId: string;
+      doorNum?: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.devicesService.addGoodsToDevice(deviceCode, body, request.authUser?.id), "操作成功");
+  }
+
+  @Delete(":deviceCode/goods/:goodsId")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  removeGoods(
+    @Param("deviceCode") deviceCode: string,
+    @Param("goodsId") goodsId: string,
+    @Query("doorNum") doorNum: string | undefined,
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(
+      this.devicesService.removeGoodsFromDevice(deviceCode, goodsId, { doorNum }, request.authUser?.id),
+      "操作成功"
+    );
   }
 
   @Patch(":deviceCode/location")

@@ -15,6 +15,7 @@ const logs = ref<OperationLogRecord[]>([]);
 const loading = ref(false);
 const undoingLogId = ref("");
 const exporting = ref(false);
+const exportingSystem = ref(false);
 const category = ref<"" | OperationLogCategory>("");
 const status = ref<"" | OperationLogStatus>("");
 const subjectType = ref<"" | OperationLogSubject["type"]>("");
@@ -96,6 +97,28 @@ const exportLogs = async () => {
     window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
   } finally {
     exporting.value = false;
+  }
+};
+
+const exportSystemLogs = async () => {
+  if (!sessionStore.token) {
+    window.alert("操作失败：登录状态已失效");
+    return;
+  }
+
+  exportingSystem.value = true;
+  try {
+    const exported = await adminApi.exportSystemAuditLog(sessionStore.token);
+    const url = window.URL.createObjectURL(exported.blob);
+    const link = window.document.createElement("a");
+    link.href = url;
+    link.download = exported.filename;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    exportingSystem.value = false;
   }
 };
 
@@ -183,6 +206,9 @@ onMounted(async () => {
           <button class="admin-button" @click="applyFilters">应用筛选</button>
           <button class="admin-button admin-button--ghost" :disabled="exporting" @click="exportLogs">
             {{ exporting ? "导出中" : "导出 Excel" }}
+          </button>
+          <button class="admin-button admin-button--ghost" :disabled="exportingSystem" @click="exportSystemLogs">
+            {{ exportingSystem ? "下载中" : "下载完整日志" }}
           </button>
         </div>
       </div>

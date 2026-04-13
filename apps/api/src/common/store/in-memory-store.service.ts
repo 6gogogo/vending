@@ -103,6 +103,7 @@ export class InMemoryStoreService {
       this.persist();
     }
 
+    this.ensureCompetitionTestDevice();
     this.syncDeviceStocksFromBatches();
   }
 
@@ -214,6 +215,74 @@ export class InMemoryStoreService {
       receivedAt: new Date().toISOString(),
       payload
     });
+  }
+
+  private ensureCompetitionTestDevice() {
+    const competitionDeviceCode = "91120149";
+
+    if (this.devices.some((entry) => entry.deviceCode === competitionDeviceCode)) {
+      if (!this.deviceRuntime.has(competitionDeviceCode)) {
+        this.deviceRuntime.set(competitionDeviceCode, {
+          deviceCode: competitionDeviceCode,
+          doorState: "closed",
+          openedAfterLastCommand: false
+        });
+      }
+      return;
+    }
+
+    const referenceDevice = this.devices.find((entry) => entry.deviceCode === "CAB-1001") ?? this.devices[0];
+    const now = new Date().toISOString();
+    const clonedGoods =
+      referenceDevice?.doors[0]?.goods.map((goods) => ({
+        ...goods
+      })) ?? [];
+
+    this.devices.unshift({
+      deviceCode: competitionDeviceCode,
+      name: "测试平台柜机 91120149",
+      location: "比赛测试平台指定柜机",
+      address: "测试平台设备编号 91120149",
+      longitude: referenceDevice?.longitude,
+      latitude: referenceDevice?.latitude,
+      status: "online",
+      lastSeenAt: now,
+      doors: [
+        {
+          doorNum: "1",
+          label: "右门",
+          goods: clonedGoods
+        }
+      ]
+    });
+
+    this.deviceRuntime.set(competitionDeviceCode, {
+      deviceCode: competitionDeviceCode,
+      doorState: "closed",
+      lastRefreshAt: now,
+      openedAfterLastCommand: false
+    });
+
+    if (!this.getGoodsBatches(competitionDeviceCode).length) {
+      for (const goods of clonedGoods) {
+        const quantity = Math.max(0, goods.stock ?? 0);
+
+        if (quantity <= 0) {
+          continue;
+        }
+
+        this.createGoodsBatch({
+          goodsId: goods.goodsId,
+          deviceCode: competitionDeviceCode,
+          quantity,
+          expiresAt: goods.expiresAt,
+          sourceType: "system",
+          sourceUserName: "测试平台预置",
+          note: "比赛测试柜机默认库存",
+          createdAt: now
+        });
+      }
+    }
   }
 
   getDeviceRuntime(deviceCode: string) {
@@ -419,6 +488,40 @@ export class InMemoryStoreService {
     };
     targetDoor.goods.push(created);
     return created;
+  }
+
+  removeDeviceGoodsEntry(deviceCode: string, goodsId: string, doorNum?: string) {
+    const device = this.devices.find((entry) => entry.deviceCode === deviceCode);
+
+    if (!device) {
+      return false;
+    }
+
+    const targetDoor =
+      (doorNum ? device.doors.find((door) => door.doorNum === doorNum) : undefined) ??
+      device.doors.find((door) => door.goods.some((goods) => goods.goodsId === goodsId));
+
+    if (!targetDoor) {
+      return false;
+    }
+
+    const targetIndex = targetDoor.goods.findIndex((goods) => goods.goodsId === goodsId);
+
+    if (targetIndex < 0) {
+      return false;
+    }
+
+    targetDoor.goods.splice(targetIndex, 1);
+
+    for (let index = this.deviceGoodsSettings.length - 1; index >= 0; index -= 1) {
+      const setting = this.deviceGoodsSettings[index];
+
+      if (setting.deviceCode === deviceCode && setting.goodsId === goodsId) {
+        this.deviceGoodsSettings.splice(index, 1);
+      }
+    }
+
+    return true;
   }
 
   createGoodsBatch(payload: {

@@ -15,11 +15,11 @@ const sessionStore = useAdminSessionStore();
 
 const navSections: Array<{ title: string; items: NavItem[] }> = [
   {
-    title: "运营总览",
+    title: "总览",
     items: [
       {
         to: "/dashboard",
-        label: "总览"
+        label: "运营总览"
       },
       {
         to: "/goods",
@@ -28,6 +28,10 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       {
         to: "/operations",
         label: "柜机监控"
+      },
+      {
+        to: "/data-monitor",
+        label: "数据监控"
       }
     ]
   },
@@ -56,7 +60,7 @@ const currentMeta = computed(() => ({
 }));
 
 const currentGroup = computed(() =>
-  typeof route.meta.group === "string" ? route.meta.group : "运营总览"
+  typeof route.meta.group === "string" ? route.meta.group : "总览"
 );
 
 const logout = async () => {
@@ -71,6 +75,10 @@ const isActive = (target: string) => {
 
   if (target === "/goods") {
     return route.path.startsWith("/goods");
+  }
+
+  if (target === "/data-monitor") {
+    return route.path.startsWith("/data-monitor");
   }
 
   if (target === "/users") {

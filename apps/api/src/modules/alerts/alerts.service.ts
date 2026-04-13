@@ -210,10 +210,7 @@ export class AlertsService {
           continue;
         }
 
-        if (
-          setting.lowStockThreshold !== undefined &&
-          currentStock <= setting.lowStockThreshold
-        ) {
+        if (setting.lowStockThreshold !== undefined && currentStock < setting.lowStockThreshold) {
           this.create({
             type: "inventory",
             title: "柜机低库存提醒",

@@ -1,5 +1,6 @@
 import type {
   AlertTask,
+  DataMonitorSnapshot,
   DashboardSnapshot,
   DeviceMonitoringDetail,
   DeviceRecord,
@@ -50,6 +51,11 @@ export const adminApi = {
   },
   dashboard() {
     return adminClient.get<DashboardSnapshot>("/analytics/dashboard");
+  },
+  dataMonitor(query?: { month?: string; date?: string }) {
+    return adminClient.get<DataMonitorSnapshot>("/analytics/data-monitor", {
+      query
+    });
   },
   registrationApplications(status?: RegistrationApplication["status"]) {
     return adminClient.get<RegistrationApplication[]>("/registration-applications", {
@@ -213,6 +219,14 @@ export const adminApi = {
   },
   deviceDetail(deviceCode: string) {
     return adminClient.get<DeviceMonitoringDetail>(`/devices/${deviceCode}/monitoring`);
+  },
+  addDeviceGoods(deviceCode: string, payload: { goodsId: string; doorNum?: string }) {
+    return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/goods`, payload);
+  },
+  removeDeviceGoods(deviceCode: string, goodsId: string, doorNum?: string) {
+    return adminClient.delete<DeviceMonitoringDetail>(`/devices/${deviceCode}/goods/${goodsId}`, {
+      query: { doorNum }
+    });
   },
   updateDeviceLocation(
     deviceCode: string,
@@ -473,6 +487,27 @@ export const adminApi = {
       filename:
         response.headers.get("content-disposition")?.match(/filename=\"?([^\";]+)\"?/)?.[1] ??
         "operation-logs.xls"
+    };
+  },
+  async exportSystemAuditLog(token: string) {
+    const response = await fetch(
+      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/operation-logs/export/system-file`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("导出失败");
+    }
+
+    return {
+      blob: await response.blob(),
+      filename:
+        response.headers.get("content-disposition")?.match(/filename=\"?([^\";]+)\"?/)?.[1] ??
+        "system-audit.ndjson"
     };
   },
   undoLog(id: string) {
