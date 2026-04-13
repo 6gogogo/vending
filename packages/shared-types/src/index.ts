@@ -311,7 +311,7 @@ export interface CabinetOpenRequest {
   phone: string;
   deviceCode: string;
   doorNum?: string;
-  payStyle?: "2" | "3";
+  payStyle?: string;
   category?: GoodsCategory;
   intentItems?: Array<{
     goodsId: string;

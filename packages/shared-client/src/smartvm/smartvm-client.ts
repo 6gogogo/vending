@@ -75,7 +75,7 @@ export class SmartVmClient {
     userId: string;
     eventId: string;
     deviceCode: string;
-    payStyle: "2" | "3";
+    payStyle: string;
     doorNum?: string;
     phone: string;
   }): Promise<Pick<CabinetOpenResult, "orderNo">> {
