@@ -13,6 +13,7 @@ import { InMemoryStoreService } from "../../common/store/in-memory-store.service
 import { AccessRulesService } from "../access-rules/access-rules.service";
 import { RegistrationApplicationsService } from "../registration-applications/registration-applications.service";
 import { UsersService } from "../users/users.service";
+import { VerificationCodeService } from "./verification-code.service";
 
 @Injectable()
 export class AuthService {
@@ -21,21 +22,17 @@ export class AuthService {
     @Inject(AccessRulesService) private readonly accessRulesService: AccessRulesService,
     @Inject(RegistrationApplicationsService)
     private readonly registrationApplicationsService: RegistrationApplicationsService,
-    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService
+    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(VerificationCodeService)
+    private readonly verificationCodeService: VerificationCodeService
   ) {}
 
-  requestCode(phone: string) {
-    const code = this.store.issueVerificationCode(phone);
-
-    return {
-      phone,
-      expiresInSeconds: 300,
-      previewCode: code
-    };
+  async requestCode(phone: string) {
+    return this.verificationCodeService.requestCode(phone);
   }
 
-  appLogin(phone: string, code: string): AppLoginResult {
-    if (!this.store.verifyCode(phone, code)) {
+  async appLogin(phone: string, code: string): Promise<AppLoginResult> {
+    if (!(await this.verificationCodeService.verifyCode(phone, code))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
@@ -75,8 +72,12 @@ export class AuthService {
     };
   }
 
-  mobileLogin(phone: string, code: string, requestedRole?: UserRole): MobileLoginResult {
-    if (!this.store.verifyCode(phone, code)) {
+  async mobileLogin(
+    phone: string,
+    code: string,
+    requestedRole?: UserRole
+  ): Promise<MobileLoginResult> {
+    if (!(await this.verificationCodeService.verifyCode(phone, code))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
@@ -208,10 +209,10 @@ export class AuthService {
     };
   }
 
-  login(phone: string, code: string) {
+  async login(phone: string, code: string) {
     const user = this.usersService.findByPhone(phone);
 
-    if (!user || !this.store.verifyCode(phone, code)) {
+    if (!user || !(await this.verificationCodeService.verifyCode(phone, code))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
@@ -230,8 +231,8 @@ export class AuthService {
     };
   }
 
-  adminLogin(phone: string, code: string) {
-    const response = this.login(phone, code);
+  async adminLogin(phone: string, code: string) {
+    const response = await this.login(phone, code);
 
     if (response.user.role !== "admin") {
       throw new UnauthorizedException("当前账号不是管理员，无法登录后台。");

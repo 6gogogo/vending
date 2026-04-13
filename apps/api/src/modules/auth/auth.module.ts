@@ -5,9 +5,10 @@ import { RegistrationApplicationsModule } from "../registration-applications/reg
 import { UsersModule } from "../users/users.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { VerificationCodeModule } from "./verification-code.module";
 
 @Module({
-  imports: [UsersModule, AccessRulesModule, RegistrationApplicationsModule],
+  imports: [UsersModule, AccessRulesModule, RegistrationApplicationsModule, VerificationCodeModule],
   controllers: [AuthController],
   providers: [AuthService]
 })

@@ -27,7 +27,12 @@ import { mobileClient } from "./client";
 
 export const mobileApi = {
   requestCode(phone: string) {
-    return mobileClient.post<{ phone: string; expiresInSeconds: number; previewCode: string }>(
+    return mobileClient.post<{
+      phone: string;
+      expiresInSeconds: number;
+      provider: "mock" | "aliyun";
+      previewCode?: string;
+    }>(
       "/auth/request-code",
       { phone }
     );

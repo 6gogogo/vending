@@ -10,18 +10,18 @@ export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
   @Post("request-code")
-  requestCode(@Body() body: { phone: string }) {
-    return ok(this.authService.requestCode(body.phone));
+  async requestCode(@Body() body: { phone: string }) {
+    return ok(await this.authService.requestCode(body.phone));
   }
 
   @Post("mobile-login")
-  mobileLogin(@Body() body: { phone: string; code: string; requestedRole?: UserRole }) {
-    return ok(this.authService.mobileLogin(body.phone, body.code, body.requestedRole));
+  async mobileLogin(@Body() body: { phone: string; code: string; requestedRole?: UserRole }) {
+    return ok(await this.authService.mobileLogin(body.phone, body.code, body.requestedRole));
   }
 
   @Post("app-login")
-  appLogin(@Body() body: { phone: string; code: string }) {
-    return ok(this.authService.appLogin(body.phone, body.code));
+  async appLogin(@Body() body: { phone: string; code: string }) {
+    return ok(await this.authService.appLogin(body.phone, body.code));
   }
 
   @Post("mobile-profile")
@@ -37,13 +37,13 @@ export class AuthController {
   }
 
   @Post("login")
-  login(@Body() body: { phone: string; code: string }) {
-    return ok(this.authService.login(body.phone, body.code));
+  async login(@Body() body: { phone: string; code: string }) {
+    return ok(await this.authService.login(body.phone, body.code));
   }
 
   @Post("admin-login")
-  adminLogin(@Body() body: { phone: string; code: string }) {
-    return ok(this.authService.adminLogin(body.phone, body.code));
+  async adminLogin(@Body() body: { phone: string; code: string }) {
+    return ok(await this.authService.adminLogin(body.phone, body.code));
   }
 
   @Get("session")

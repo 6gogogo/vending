@@ -9,10 +9,15 @@ import type {
 } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import { VerificationCodeService } from "../auth/verification-code.service";
 
 @Injectable()
 export class RegistrationApplicationsService {
-  constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
+  constructor(
+    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(VerificationCodeService)
+    private readonly verificationCodeService: VerificationCodeService
+  ) {}
 
   list(status?: RegistrationApplication["status"]) {
     return this.store.registrationApplications
@@ -104,14 +109,14 @@ export class RegistrationApplicationsService {
     };
   }
 
-  createOrUpdateByPhone(payload: {
+  async createOrUpdateByPhone(payload: {
     phone: string;
     code: string;
     requestedRole?: UserRole;
     profile: RegistrationApplicationProfile;
   }) {
     const phone = payload.phone.trim();
-    this.ensureVerifiedCode(phone, payload.code);
+    await this.ensureVerifiedCode(phone, payload.code);
 
     const existingUser = this.store.users.find((entry) => entry.phone === phone);
     const existingApplication = this.findLatestByPhone(phone);
@@ -131,7 +136,7 @@ export class RegistrationApplicationsService {
     });
   }
 
-  updatePendingApplication(
+  async updatePendingApplication(
     id: string,
     payload: {
       phone: string;
@@ -147,7 +152,7 @@ export class RegistrationApplicationsService {
     }
 
     const phone = payload.phone.trim();
-    this.ensureVerifiedCode(phone, payload.code);
+    await this.ensureVerifiedCode(phone, payload.code);
 
     const existingUser = this.store.users.find((entry) => entry.phone === phone);
 
@@ -263,8 +268,8 @@ export class RegistrationApplicationsService {
     return application;
   }
 
-  private ensureVerifiedCode(phone: string, code: string) {
-    if (!this.store.verifyCode(phone, code)) {
+  private async ensureVerifiedCode(phone: string, code: string) {
+    if (!(await this.verificationCodeService.verifyCode(phone, code))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
   }

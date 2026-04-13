@@ -165,7 +165,7 @@ const sendCode = async () => {
   busy.value = true;
   try {
     const response = await mobileApi.requestCode(phone.value.trim());
-    previewCode.value = response.previewCode;
+    previewCode.value = response.previewCode ?? "";
     showOperationSuccess();
   } catch (error) {
     showOperationFailure(error);
@@ -359,7 +359,7 @@ onLoad(async (query) => {
         </view>
 
         <view v-if="previewCode" class="debug-box">
-          <text class="debug-box__label">开发环境验证码</text>
+          <text class="debug-box__label">测试环境验证码</text>
           <text class="vm-number">{{ previewCode }}</text>
         </view>
 

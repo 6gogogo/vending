@@ -34,7 +34,7 @@ export class RegistrationApplicationsController {
   }
 
   @Post()
-  createOrUpdate(
+  async createOrUpdate(
     @Body()
     body: {
       phone: string;
@@ -55,13 +55,13 @@ export class RegistrationApplicationsController {
     }
   ) {
     return ok(
-      this.registrationApplicationsService.createOrUpdateByPhone(body),
+      await this.registrationApplicationsService.createOrUpdateByPhone(body),
       "操作成功"
     );
   }
 
   @Patch(":id")
-  updatePending(
+  async updatePending(
     @Param("id") id: string,
     @Body()
     body: {
@@ -83,7 +83,7 @@ export class RegistrationApplicationsController {
     }
   ) {
     return ok(
-      this.registrationApplicationsService.updatePendingApplication(id, body),
+      await this.registrationApplicationsService.updatePendingApplication(id, body),
       "操作成功"
     );
   }

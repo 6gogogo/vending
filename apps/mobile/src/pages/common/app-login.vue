@@ -13,7 +13,7 @@ import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const phone = ref("13800000002");
-const code = ref("123456");
+const code = ref("");
 const previewCode = ref("");
 const busy = ref(false);
 const loginState = ref<AppLoginResult | null>(null);
@@ -41,7 +41,7 @@ const sendCode = async () => {
   busy.value = true;
   try {
     const response = await mobileApi.requestCode(phone.value);
-    previewCode.value = response.previewCode;
+    previewCode.value = response.previewCode ?? "";
     uni.showToast({
       title: "验证码已发送",
       icon: "none"
@@ -161,7 +161,7 @@ onShow(() => {
         </view>
 
         <view v-if="previewCode" class="debug-box">
-          <text class="debug-box__label">开发环境验证码</text>
+          <text class="debug-box__label">测试环境验证码</text>
           <text class="vm-number">{{ previewCode }}</text>
         </view>
       </view>

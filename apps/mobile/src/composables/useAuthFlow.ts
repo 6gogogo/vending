@@ -9,7 +9,7 @@ import { resolveHomePath } from "../utils/role-routing";
 
 export const useAuthFlow = () => {
   const phone = ref("13800000002");
-  const code = ref("123456");
+  const code = ref("");
   const requestedRole = ref<UserRole>("special");
   const busy = ref(false);
   const previewCode = ref<string>();
@@ -19,7 +19,7 @@ export const useAuthFlow = () => {
     busy.value = true;
     try {
       const response = await mobileApi.requestCode(phone.value);
-      previewCode.value = response.previewCode;
+      previewCode.value = response.previewCode ?? "";
       uni.showToast({
         title: "验证码已生成",
         icon: "none"

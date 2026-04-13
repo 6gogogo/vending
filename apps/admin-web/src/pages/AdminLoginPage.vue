@@ -9,7 +9,7 @@ const router = useRouter();
 const sessionStore = useAdminSessionStore();
 
 const phone = ref("13800000001");
-const code = ref("123456");
+const code = ref("");
 const previewCode = ref("");
 const busy = ref(false);
 const errorMessage = ref("");
@@ -21,7 +21,7 @@ const sendCode = async () => {
   errorMessage.value = "";
   try {
     const response = await adminApi.requestCode(phone.value);
-    previewCode.value = response.previewCode;
+    previewCode.value = response.previewCode ?? "";
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "验证码发送失败。";
   } finally {
@@ -68,7 +68,7 @@ const submit = async () => {
         </button>
       </div>
 
-      <div v-if="previewCode" class="admin-note">开发环境验证码：{{ previewCode }}</div>
+      <div v-if="previewCode" class="admin-note">测试环境验证码：{{ previewCode }}</div>
       <div v-if="errorMessage" class="admin-note login-panel__error">{{ errorMessage }}</div>
 
       <button class="admin-button" :disabled="busy || !phone || !code" @click="submit">

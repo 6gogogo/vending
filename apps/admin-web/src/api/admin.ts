@@ -38,7 +38,12 @@ interface AdminLoginResponse {
 
 export const adminApi = {
   requestCode(phone: string) {
-    return adminClient.post<{ phone: string; expiresInSeconds: number; previewCode: string }>(
+    return adminClient.post<{
+      phone: string;
+      expiresInSeconds: number;
+      provider: "mock" | "aliyun";
+      previewCode?: string;
+    }>(
       "/auth/request-code",
       { phone }
     );
