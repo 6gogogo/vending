@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadGatewayException, BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 
 import type {
   CabinetOpenRequest,
@@ -62,14 +62,21 @@ export class CabinetEventsService {
 
     const eventId = this.store.createId("event");
     const doorNum = payload.doorNum ?? "1";
-    const openResult = await this.smartVmGateway.openDoor({
-      userId: user.id,
-      eventId,
-      deviceCode: payload.deviceCode,
-      payStyle: payload.payStyle ?? "2",
-      doorNum,
-      phone: payload.phone
-    });
+    let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
+
+    try {
+      openResult = await this.smartVmGateway.openDoor({
+        userId: user.id,
+        eventId,
+        deviceCode: payload.deviceCode,
+        payStyle: payload.payStyle,
+        doorNum,
+        phone: payload.phone
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "柜机平台未返回可用结果。";
+      throw new BadGatewayException(`柜机平台开柜失败：${detail}`);
+    }
 
     this.store.events.unshift({
       eventId,

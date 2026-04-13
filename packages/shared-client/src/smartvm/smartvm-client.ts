@@ -35,7 +35,23 @@ export class SmartVmClient {
     });
 
     if (!response.ok) {
-      throw new Error(`SmartVM request failed with status ${response.status}`);
+      let detail = `SmartVM request failed with status ${response.status}`;
+
+      try {
+        const raw = await response.text();
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as { message?: string; error?: string };
+            detail = parsed.message ?? parsed.error ?? raw;
+          } catch {
+            detail = raw;
+          }
+        }
+      } catch {
+        // 忽略响应体解析失败，保留状态码信息。
+      }
+
+      throw new Error(detail);
     }
 
     const json = (await response.json()) as { code: number; message: string; data?: T };

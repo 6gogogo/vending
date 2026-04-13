@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadGatewayException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type { DeviceGoods, DeviceMonitoringDetail, DeviceRecord, DeviceStatus, GoodsCategory } from "@vm/shared-types";
 
@@ -307,14 +307,20 @@ export class DevicesService {
       this.store.users.find((entry) => entry.role === "admin");
     const eventId = this.store.createId("event");
     const createdAt = new Date().toISOString();
-    const openResult = await this.smartVmGateway.openDoor({
-      userId: admin?.id ?? "admin-virtual",
-      eventId,
-      deviceCode,
-      payStyle: "2",
-      doorNum: payload?.doorNum ?? "1",
-      phone: admin?.phone ?? "13800000001"
-    });
+    let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
+
+    try {
+      openResult = await this.smartVmGateway.openDoor({
+        userId: admin?.id ?? "admin-virtual",
+        eventId,
+        deviceCode,
+        doorNum: payload?.doorNum ?? "1",
+        phone: admin?.phone ?? "13800000001"
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "柜机平台未返回可用结果。";
+      throw new BadGatewayException(`柜机平台开柜失败：${detail}`);
+    }
 
     this.store.events.unshift({
       eventId,

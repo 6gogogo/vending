@@ -65,7 +65,15 @@ export const createJsonClient = ({ baseUrl, getToken, fetchImpl = fetch }: JsonC
     const json = (await response.json()) as ApiEnvelope<T> | T;
 
     if (!response.ok) {
-      throw new ApiError(`HTTP ${response.status}`, response.status, json);
+      const responseMessage =
+        typeof json === "object" &&
+        json !== null &&
+        "message" in json &&
+        typeof (json as { message?: unknown }).message === "string"
+          ? (json as { message: string }).message
+          : `HTTP ${response.status}`;
+
+      throw new ApiError(responseMessage, response.status, json);
     }
 
     if (typeof json === "object" && json !== null && "code" in json && "data" in json) {

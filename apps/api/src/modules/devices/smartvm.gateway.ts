@@ -49,11 +49,12 @@ export class SmartVmGateway {
     userId: string;
     eventId: string;
     deviceCode: string;
-    payStyle: "2" | "3";
+    payStyle?: "2" | "3";
     doorNum?: string;
     phone: string;
   }) {
     const client = this.client;
+    const payStyle = this.getDefaultOpenDoorPayStyle(payload.payStyle);
 
     if (!client) {
       return {
@@ -61,7 +62,10 @@ export class SmartVmGateway {
       };
     }
 
-    return client.openDoor(payload);
+    return client.openDoor({
+      ...payload,
+      payStyle
+    });
   }
 
   async notifyPaymentSuccess(payload: SmartVmPaymentPayload) {
@@ -105,5 +109,14 @@ export class SmartVmGateway {
     }
 
     return verifySmartVmSignature(payload, this.credentials);
+  }
+
+  private getDefaultOpenDoorPayStyle(preferred?: "2" | "3") {
+    if (preferred === "2" || preferred === "3") {
+      return preferred;
+    }
+
+    const configured = this.configService.get<string>("SMARTVM_DEFAULT_PAY_STYLE")?.trim();
+    return configured === "3" ? "3" : "2";
   }
 }
