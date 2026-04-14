@@ -434,7 +434,10 @@ export class CabinetEventsService {
         name: "支付回调"
       },
       logType: "payment-success-callback",
-      targetUrl: undefined
+      targetUrl:
+        payload.targetUrl ||
+        payload.noticeUrl ||
+        payload.notifyUrl
     });
   }
 
@@ -447,7 +450,10 @@ export class CabinetEventsService {
     return this.forwardPaymentSuccessToPlatform(payload, {
       actor: this.getAdminActor(actorUserId),
       logType: "manual-payment-success",
-      targetUrl: undefined
+      targetUrl:
+        payload.targetUrl ||
+        payload.noticeUrl ||
+        payload.notifyUrl
     });
   }
 

@@ -32,7 +32,8 @@ const payload = {
     `sandbox-txn-${Date.now()}`,
   deviceCode: fixture?.deviceCode ?? event?.deviceCode,
   amount:
-    Number(useFixture ? thirdArg ?? fixture?.amount : thirdArg ?? event?.amount ?? 0)
+    Number(useFixture ? thirdArg ?? fixture?.amount : thirdArg ?? event?.amount ?? 0),
+  targetUrl: fixture?.targetUrl ?? fixture?.notifyUrl ?? fixture?.noticeUrl
 };
 
 if (!payload.orderNo || !payload.eventId || !payload.deviceCode) {

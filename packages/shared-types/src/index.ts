@@ -939,6 +939,9 @@ export interface SmartVmPaymentPayload {
   openId?: string;
   deviceCode: string;
   amount: number;
+  targetUrl?: string;
+  notifyUrl?: string;
+  noticeUrl?: string;
 }
 
 export interface SmartVmRefundPayload {

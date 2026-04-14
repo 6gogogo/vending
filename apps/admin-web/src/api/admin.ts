@@ -274,6 +274,9 @@ export const adminApi = {
     deviceCode: string;
     amount: number;
     openId?: string;
+    targetUrl?: string;
+    notifyUrl?: string;
+    noticeUrl?: string;
   }) {
     return adminClient.post("/cabinet-events/payment-success", payload);
   },
