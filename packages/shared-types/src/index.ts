@@ -372,6 +372,17 @@ export interface CabinetEventRecord {
   createdAt: string;
   updatedAt: string;
   amount: number;
+  paymentNotifyUrl?: string;
+  paymentNotifyStatus?: "pending" | "success" | "failed";
+  paymentNotifyMessage?: string;
+  paymentNotifiedAt?: string;
+  paymentTransactionId?: string;
+  adjustmentOrderNo?: string;
+  adjustmentNoticeUrl?: string;
+  adjustmentAmount?: number;
+  refundNo?: string;
+  refundTransactionId?: string;
+  refundedAt?: string;
   goods: Array<{
     goodsId: string;
     goodsName: string;
@@ -384,6 +395,8 @@ export interface CabinetEventRecord {
 export interface InventoryMovement {
   id: string;
   orderNo?: string;
+  sourceOrderNo?: string;
+  eventId?: string;
   userId: string;
   deviceCode: string;
   goodsId: string;
@@ -394,6 +407,8 @@ export interface InventoryMovement {
   type: InventoryMovementType;
   happenedAt: string;
   expiresAt?: string;
+  transactionId?: string;
+  refundNo?: string;
 }
 
 export interface AlertTask {

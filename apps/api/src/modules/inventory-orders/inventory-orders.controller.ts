@@ -55,6 +55,11 @@ export class InventoryOrdersController {
     }
   ) {
     await this.smartVmGateway.refund(body);
-    return ok(this.inventoryOrdersService.markRefund(body.orderNo, body.transactionId, body.amount));
+    return ok(
+      this.inventoryOrdersService.markRefund(body.orderNo, body.transactionId, body.amount, {
+        source: "manual",
+        refundNo: body.refundNo
+      })
+    );
   }
 }

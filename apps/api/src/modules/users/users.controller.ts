@@ -116,6 +116,8 @@ export class UsersController {
     body: {
       deviceCode: string;
       goodsId: string;
+      relatedEventId?: string;
+      relatedOrderNo?: string;
       goodsName?: string;
       category?: "food" | "drink" | "daily";
       quantity: number;

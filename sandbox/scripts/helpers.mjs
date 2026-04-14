@@ -18,6 +18,8 @@ const defaultSandboxConfig = {
   SMARTVM_DEVICE_CODE: "",
   SMARTVM_DOOR_NUM: "",
   LOCAL_API_BASE_URL: "http://127.0.0.1:4000/api",
+  SANDBOX_ADMIN_PHONE: "13800000001",
+  SANDBOX_ADMIN_CODE: "123456",
   TEST_PLATFORM_ACCOUNT: "0320@jinsaitest.com",
   TEST_PLATFORM_PASSWORD: "jinsaitest"
 };
@@ -164,6 +166,8 @@ export const getSandboxConfig = () => ({
   smartVmDeviceCode: process.env.SMARTVM_DEVICE_CODE ?? defaultSandboxConfig.SMARTVM_DEVICE_CODE,
   smartVmDoorNum: process.env.SMARTVM_DOOR_NUM ?? defaultSandboxConfig.SMARTVM_DOOR_NUM,
   localApiBaseUrl: process.env.LOCAL_API_BASE_URL ?? defaultSandboxConfig.LOCAL_API_BASE_URL,
+  sandboxAdminPhone: process.env.SANDBOX_ADMIN_PHONE ?? defaultSandboxConfig.SANDBOX_ADMIN_PHONE,
+  sandboxAdminCode: process.env.SANDBOX_ADMIN_CODE ?? defaultSandboxConfig.SANDBOX_ADMIN_CODE,
   testPlatformAccount: process.env.TEST_PLATFORM_ACCOUNT ?? defaultSandboxConfig.TEST_PLATFORM_ACCOUNT,
   testPlatformPassword:
     process.env.TEST_PLATFORM_PASSWORD ?? defaultSandboxConfig.TEST_PLATFORM_PASSWORD
@@ -189,6 +193,14 @@ export const getJson = async (baseUrl, path) => {
   return response.json();
 };
 
+export const unwrapEnvelope = (response) => {
+  if (response && typeof response === "object" && "data" in response) {
+    return response.data;
+  }
+
+  return response;
+};
+
 export const postJson = async (baseUrl, path, payload, headers = {}) => {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
@@ -204,4 +216,83 @@ export const postJson = async (baseUrl, path, payload, headers = {}) => {
     status: response.status,
     json
   };
+};
+
+export const authPostJson = async (baseUrl, path, payload, token) => {
+  if (!token) {
+    throw new Error("调用受保护的本地后端接口时必须提供管理员 token。");
+  }
+
+  return postJson(baseUrl, path, payload, {
+    Authorization: `Bearer ${token}`
+  });
+};
+
+export const ensureAdminToken = async (baseUrl) => {
+  const explicitToken = process.env.SANDBOX_ADMIN_TOKEN?.trim();
+
+  if (explicitToken) {
+    return explicitToken;
+  }
+
+  const sandboxConfig = getSandboxConfig();
+  const phone = sandboxConfig.sandboxAdminPhone?.trim();
+  const code = sandboxConfig.sandboxAdminCode?.trim();
+
+  if (!phone || !code) {
+    throw new Error("缺少 SANDBOX_ADMIN_TOKEN，且 SANDBOX_ADMIN_PHONE / SANDBOX_ADMIN_CODE 也未配置。");
+  }
+
+  const response = await postJson(baseUrl, "/auth/admin-login", {
+    phone,
+    code
+  });
+  const parsed = unwrapEnvelope(response.json);
+  const token = parsed?.token;
+
+  if (response.status !== 200 || !token) {
+    throw new Error(
+      [
+        `管理员登录失败：${typeof response.json?.message === "string" ? response.json.message : "未返回 token"}`,
+        "如果当前后端已经切到真实短信验证码，不要继续使用默认的 SANDBOX_ADMIN_CODE=123456。",
+        "请改为以下任一方式：",
+        "1. 在 sandbox/.env.local 里设置 SANDBOX_ADMIN_TOKEN=你的管理员 Bearer Token",
+        "2. 或者设置真实的 SANDBOX_ADMIN_PHONE / SANDBOX_ADMIN_CODE",
+        "3. 先运行不需要管理员权限的事件查询脚本，确认最新 orderNo / eventId，再决定是否需要退款或转发测试"
+      ].join("")
+    );
+  }
+
+  return token;
+};
+
+export const getCabinetEvents = async (baseUrl) => {
+  const response = await getJson(baseUrl, "/cabinet-events");
+  const events = unwrapEnvelope(response);
+
+  if (!Array.isArray(events)) {
+    throw new Error("本地后端未返回可用的开柜事件列表。");
+  }
+
+  return events;
+};
+
+export const findEvent = async (baseUrl, orderNo) => {
+  const events = await getCabinetEvents(baseUrl);
+
+  if (orderNo) {
+    const matched = events.find((entry) => entry.orderNo === orderNo);
+
+    if (!matched) {
+      throw new Error(`本地后端中未找到订单 ${orderNo}。`);
+    }
+
+    return matched;
+  }
+
+  if (!events.length) {
+    throw new Error("当前没有可用的开柜事件，请先发起一次开柜。");
+  }
+
+  return events[0];
 };

@@ -26,6 +26,8 @@ const debugLoading = ref(false);
 const debugLoaded = ref(false);
 const debugCallbackLogs = ref<Awaited<ReturnType<typeof adminApi.deviceCallbackLogs>>>([]);
 const debugSystemAuditLogs = ref<Awaited<ReturnType<typeof adminApi.systemAuditLogs>>>([]);
+const notifyingPaymentEventId = ref("");
+const refundingEventId = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -82,6 +84,34 @@ const formatEventStatus = (status: string) => {
   if (status === "stuck_open") return "久开未关";
   if (status === "refunded") return "已退款";
   return status;
+};
+
+const formatPlatformSyncStatus = (event: NonNullable<typeof recentEvents.value>[number]) => {
+  if (event.refundedAt) {
+    return `已退款${event.refundNo ? ` / ${event.refundNo}` : ""}`;
+  }
+
+  if (event.paymentNotifyStatus === "success") {
+    return `已回写付款成功${event.paymentTransactionId ? ` / ${event.paymentTransactionId}` : ""}`;
+  }
+
+  if (event.paymentNotifyStatus === "failed") {
+    return `回写失败${event.paymentNotifyMessage ? `：${event.paymentNotifyMessage}` : ""}`;
+  }
+
+  if (event.adjustmentOrderNo && event.adjustmentAmount && event.adjustmentAmount > 0) {
+    return `补扣待支付 / ${event.adjustmentOrderNo}`;
+  }
+
+  if (event.adjustmentOrderNo) {
+    return `补扣已产生 / ${event.adjustmentOrderNo}`;
+  }
+
+  if (event.paymentNotifyStatus === "pending") {
+    return event.paymentNotifyMessage || "待回写";
+  }
+
+  return "未关联平台动作";
 };
 
 const formatLogStatus = (status: string) =>
@@ -210,6 +240,112 @@ const remoteOpen = async () => {
     await load();
   } finally {
     remoteOpening.value = false;
+  }
+
+  if (debugPanelVisible.value) {
+    await loadDebugPanel();
+  }
+};
+
+const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value>[number]) => {
+  const defaultTransactionId =
+    event.paymentTransactionId ||
+    event.adjustmentOrderNo ||
+    `manual-pay-${event.orderNo}-${Date.now()}`;
+  const transactionId = window.prompt("请输入支付交易号 transactionId", defaultTransactionId)?.trim();
+
+  if (!transactionId) {
+    return;
+  }
+
+  const defaultAmount = String(event.adjustmentAmount ?? event.amount ?? 0);
+  const amountInput = window.prompt("请输入支付金额（单位：分）", defaultAmount)?.trim();
+
+  if (!amountInput) {
+    return;
+  }
+
+  const amount = Number(amountInput);
+
+  if (Number.isNaN(amount)) {
+    window.alert("操作失败：支付金额必须是数字");
+    return;
+  }
+
+  if (!window.confirm(`确认向平台回写订单 ${event.orderNo} 的付款成功结果吗？`)) {
+    return;
+  }
+
+  notifyingPaymentEventId.value = event.eventId;
+  try {
+    await adminApi.notifyPaymentSuccess({
+      orderNo: event.orderNo,
+      eventId: event.eventId,
+      transactionId,
+      deviceCode: event.deviceCode,
+      amount
+    });
+    window.alert("操作成功");
+    await load();
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    notifyingPaymentEventId.value = "";
+  }
+
+  if (debugPanelVisible.value) {
+    await loadDebugPanel();
+  }
+};
+
+const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]) => {
+  const defaultTransactionId = event.paymentTransactionId || `refund-txn-${event.orderNo}`;
+  const transactionId = window.prompt("请输入退款对应的交易号 transactionId", defaultTransactionId)?.trim();
+
+  if (!transactionId) {
+    return;
+  }
+
+  const defaultRefundNo = event.refundNo || `refund-${event.orderNo}-${Date.now()}`;
+  const refundNo = window.prompt("请输入退款单号 refundNo", defaultRefundNo)?.trim();
+
+  if (!refundNo) {
+    return;
+  }
+
+  const defaultAmount = String(event.amount ?? event.adjustmentAmount ?? 0);
+  const amountInput = window.prompt("请输入退款金额（单位：分）", defaultAmount)?.trim();
+
+  if (!amountInput) {
+    return;
+  }
+
+  const amount = Number(amountInput);
+
+  if (Number.isNaN(amount)) {
+    window.alert("操作失败：退款金额必须是数字");
+    return;
+  }
+
+  if (!window.confirm(`确认向平台发起订单 ${event.orderNo} 的退款吗？`)) {
+    return;
+  }
+
+  refundingEventId.value = event.eventId;
+  try {
+    await adminApi.refundOrder({
+      orderNo: event.orderNo,
+      transactionId,
+      deviceCode: event.deviceCode,
+      refundNo,
+      amount
+    });
+    window.alert("操作成功");
+    await load();
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    refundingEventId.value = "";
   }
 
   if (debugPanelVisible.value) {
@@ -576,7 +712,9 @@ onUnmounted(() => {
                 <tr>
                   <th>订单</th>
                   <th>状态</th>
+                  <th>平台联动</th>
                   <th>时间</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -587,10 +725,44 @@ onUnmounted(() => {
                   </td>
                   <td>{{ formatEventStatus(event.status) }}</td>
                   <td>
+                    <span class="admin-table__strong">{{ formatPlatformSyncStatus(event) }}</span>
+                    <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
+                    <span
+                      v-if="event.adjustmentOrderNo"
+                      class="admin-table__subtext"
+                    >
+                      补扣单 {{ event.adjustmentOrderNo }}{{ event.adjustmentAmount !== undefined ? ` / ${event.adjustmentAmount} 分` : "" }}
+                    </span>
+                    <span
+                      v-if="event.refundNo || event.refundTransactionId"
+                      class="admin-table__subtext"
+                    >
+                      {{ event.refundNo ? `退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `交易号 ${event.refundTransactionId}` : "" }}
+                    </span>
+                  </td>
+                  <td>
                     <span class="admin-code">{{ event.updatedAt.slice(0, 16).replace("T", " ") }}</span>
                     <RouterLink class="admin-table__subtext admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">
                       查看关联日志
                     </RouterLink>
+                  </td>
+                  <td>
+                    <div class="device-event-actions">
+                      <button
+                        class="admin-button admin-button--ghost"
+                        :disabled="notifyingPaymentEventId === event.eventId"
+                        @click="notifyPaymentSuccess(event)"
+                      >
+                        {{ notifyingPaymentEventId === event.eventId ? "回写中" : "付款成功" }}
+                      </button>
+                      <button
+                        class="admin-button admin-button--ghost"
+                        :disabled="refundingEventId === event.eventId || event.status === 'refunded'"
+                        @click="refundEvent(event)"
+                      >
+                        {{ refundingEventId === event.eventId ? "退款中" : event.status === "refunded" ? "已退款" : "退款" }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -753,6 +925,11 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.device-event-actions {
+  display: grid;
+  gap: 6px;
 }
 
 .device-goods-toolbar {

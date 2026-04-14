@@ -5,14 +5,18 @@
   "type": "module",
   "scripts": {
     "device": "node scripts/query-device-info.mjs",
+    "events": "node scripts/query-events.mjs",
     "sign": "node scripts/generate-signature.mjs fixtures/open-door.sample.json",
     "goods": "node scripts/query-goods.mjs",
     "door": "node scripts/open-door.mjs fixtures/open-door.sample.json",
+    "door:probe": "node scripts/probe-open-door.mjs",
     "door-status": "node scripts/simulate-door-status.mjs fixtures/door-status.sample.json",
     "latest-event": "node scripts/simulate-latest-event.mjs",
     "mock-device": "node scripts/upsert-mock-device.mjs fixtures/mock-device.sample.json",
     "payment-success": "node scripts/payment-success.mjs fixtures/payment-success.sample.json",
+    "payment-success:api": "node scripts/payment-success-via-api.mjs",
     "refund": "node scripts/refund.mjs fixtures/refund.sample.json",
+    "refund:api": "node scripts/refund-via-api.mjs",
     "settlement": "node scripts/simulate-settlement.mjs fixtures/settlement.sample.json",
     "sms:send": "node scripts/send-sms-code.mjs",
     "sms:verify": "node scripts/verify-sms-code.mjs"

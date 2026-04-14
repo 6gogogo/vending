@@ -41,6 +41,37 @@ node sandbox/scripts/query-device-info.mjs CAB-1001
 
 ---
 
+### 1.1 查询最近开柜事件
+
+命令：
+
+```bash
+npm run sandbox:events
+```
+
+查看某一条订单：
+
+```bash
+npm run sandbox:events -- 订单号
+```
+
+作用：
+
+- 直接查询当前后端里的开柜事件
+- 会返回 `orderNo / eventId / deviceCode / phone / status`
+- 适合先确认“退款”“付款成功通知”这些脚本到底该拿哪一个订单号
+
+目标地址：
+
+- `LOCAL_API_BASE_URL + /cabinet-events`
+
+补充说明：
+
+- 这个命令不需要管理员登录
+- 如果你把 `LOCAL_API_BASE_URL` 改成云端后端地址，它就会直接查云端后端事件
+
+---
+
 ### 2. 生成签名
 
 命令：
@@ -210,6 +241,39 @@ node sandbox/scripts/payment-success.mjs sandbox/fixtures/payment-success.sample
 
 - 如果你还没有真实的 SmartVM 签名参数，这个命令不会继续请求测试平台
 
+补充命令：
+
+```bash
+npm run sandbox:payment-success:api -- 订单号 交易号 金额
+```
+
+也可以直接把平台返回的结算 / 待支付订单信息保存成一个 JSON 文件后传入：
+
+```bash
+npm run sandbox:payment-success:api -- 路径\\to\\settlement.json 交易号 金额
+```
+
+仓库里已提供一个示例文件：
+
+```bash
+npm run sandbox:payment-success:api -- sandbox/fixtures/payment-success-from-settlement.sample.json sandbox-txn-001 500
+```
+
+作用：
+
+- 不是直连平台，而是先把付款成功通知发给本地后端
+- 再由本地后端转发到 SmartVM 平台
+- 用于核对“PC 后端 / 正式业务后端”这条转发链是否正常
+- 如果第一参数是 JSON 文件路径，脚本会直接从文件里读取 `orderNo / eventId / deviceCode / amount`
+
+补充说明：
+
+- 如果不传订单号，脚本会默认取本地后端最新的一条开柜事件
+- `transactionId` 和 `amount` 也支持手工传入，便于和平台实际补扣单对齐
+- 如果第一参数是文件路径，第二参数仍然是 `transactionId`，第三参数可选覆盖金额
+- 这个命令调用的是 `/api/cabinet-events/callbacks/payment-success`
+- 如果 PC 后台还提示 `Cannot POST /api/cabinet-events/payment-success`，说明你云端后端还没更新到当前代码；当前源码里管理员入口和回调入口都已经存在
+
 ---
 
 ### 7. 调试退款接口
@@ -245,6 +309,65 @@ node sandbox/scripts/refund.mjs sandbox/fixtures/refund.sample.json
 
 - 退款接口同样依赖真实 `clientId/key`
 - `sandbox/.env.example` 里的默认值只用于本地演示签名格式
+
+补充命令：
+
+```bash
+npm run sandbox:refund:api -- 订单号 交易号 退款单号 金额
+```
+
+作用：
+
+- 先以管理员身份调用本地后端的退款接口
+- 再由本地后端调用平台退款接口
+- 用于核对“后台点击退款”这一条真实链路
+
+依赖环境变量：
+
+- `LOCAL_API_BASE_URL`
+- `SANDBOX_ADMIN_TOKEN`
+
+可选替代：
+
+- `SANDBOX_ADMIN_PHONE`
+- `SANDBOX_ADMIN_CODE`
+
+补充说明：
+
+- 如果没提供 `SANDBOX_ADMIN_TOKEN`，脚本会尝试用 `SANDBOX_ADMIN_PHONE / SANDBOX_ADMIN_CODE` 自动登录本地后端后台
+- 如果当前云端后端已经启用真实短信验证码，默认的 `SANDBOX_ADMIN_CODE=123456` 会失效；这时应直接提供 `SANDBOX_ADMIN_TOKEN`
+- 如果不传订单号，脚本会默认取本地后端最新的一条开柜事件
+
+---
+
+### 7.1 探测开门参数组合
+
+命令：
+
+```bash
+npm run sandbox:door:probe -- 91120149 13800000002 00000001
+```
+
+作用：
+
+- 用同一组 `deviceCode / phone / userId` 批量测试不同 `payStyle`
+- 同时覆盖“传 `doorNum=1`”和“不传 `doorNum`”
+- 适合快速判断是签名、支付方式，还是平台业务配置问题
+
+依赖环境变量：
+
+- `SMARTVM_BASE_URL`
+- `SMARTVM_CLIENT_ID`
+- `SMARTVM_KEY`
+
+可选环境变量：
+
+- `SMARTVM_EXTRA_PAY_STYLES`
+
+补充说明：
+
+- 默认除了 `2 / 3 / 7`，还会把 `SMARTVM_EXTRA_PAY_STYLES` 里的自定义支付方式名一起测
+- 多个自定义支付方式可用英文逗号分隔，例如 `SMARTVM_EXTRA_PAY_STYLES=duan3,duan4`
 
 ---
 

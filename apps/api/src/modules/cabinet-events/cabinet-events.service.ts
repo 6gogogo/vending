@@ -1,6 +1,7 @@
 import { BadGatewayException, BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 
 import type {
+  CabinetEventRecord,
   CabinetOpenRequest,
   SmartVmAdjustmentPayload,
   SmartVmDoorStatusPayload,
@@ -296,6 +297,9 @@ export class CabinetEventsService {
     event.status = "settled";
     event.amount = payload.amount;
     event.updatedAt = new Date().toISOString();
+    event.paymentNotifyUrl = payload.notifyUrl;
+    event.paymentNotifyStatus = "pending";
+    event.paymentNotifyMessage = "等待向平台回写付款成功。";
     event.goods =
       payload.detail?.map((item) => ({
         goodsId: item.goodsId,
@@ -338,7 +342,24 @@ export class CabinetEventsService {
       }
     });
 
-    return this.inventoryOrdersService.recordSettlement(event, payload);
+    const movements = this.inventoryOrdersService.recordSettlement(event, payload);
+    void this.tryAutoForwardPaymentSuccess(
+      event,
+      {
+        orderNo: event.orderNo,
+        eventId: event.eventId,
+        transactionId: `auto-settlement-${event.orderNo}`,
+        deviceCode: payload.deviceCode,
+        amount: payload.amount
+      },
+      payload.notifyUrl
+    );
+
+    return {
+      movements,
+      paymentNotifyStatus: event.paymentNotifyStatus,
+      paymentNotifyMessage: event.paymentNotifyMessage
+    };
   }
 
   handleAdjustment(payload: SmartVmAdjustmentPayload & Record<string, unknown>) {
@@ -347,6 +368,9 @@ export class CabinetEventsService {
 
     const event = this.getEventByOrderNo(payload.orgOrderNo);
     event.updatedAt = new Date().toISOString();
+    event.adjustmentOrderNo = payload.orderNo;
+    event.adjustmentNoticeUrl = payload.noticeUrl;
+    event.adjustmentAmount = payload.amount;
 
     this.inventoryOrdersService.recordAdjustment(event, payload);
 
@@ -378,11 +402,23 @@ export class CabinetEventsService {
     });
 
     if (payload.amount > 0) {
+      event.paymentNotifyStatus = "pending";
+      event.paymentNotifyMessage = "等待补扣订单支付成功后，再向平台回写付款成功。";
       return {
         code: 500,
         message: "等待用户完成支付"
       };
     }
+
+    event.paymentNotifyStatus = "pending";
+    event.paymentNotifyMessage = "补扣金额为 0，准备自动回写平台。";
+    void this.tryAutoForwardPaymentSuccess(event, {
+      orderNo: event.orderNo,
+      eventId: event.eventId,
+      transactionId: `auto-adjustment-${payload.orderNo}`,
+      deviceCode: payload.deviceCode,
+      amount: payload.amount
+    }, payload.noticeUrl);
 
     return {
       code: 200,
@@ -392,44 +428,27 @@ export class CabinetEventsService {
 
   async handlePaymentSuccess(payload: SmartVmPaymentPayload & Record<string, unknown>) {
     this.store.logCallback("payment-success", payload);
-    const event = this.getEventByOrderNo(payload.orderNo);
-    event.amount = payload.amount;
-    event.updatedAt = new Date().toISOString();
-
-    await this.smartVmGateway.notifyPaymentSuccess(payload);
-
-    this.store.logOperation({
-      category: "inventory",
-      type: "payment-success-callback",
-      status: "success",
+    return this.forwardPaymentSuccessToPlatform(payload, {
       actor: {
         type: "system",
         name: "支付回调"
       },
-      primarySubject: {
-        type: "device",
-        id: payload.deviceCode,
-        label: payload.deviceCode
-      },
-      secondarySubject: {
-        type: "event",
-        id: event.eventId,
-        label: event.orderNo
-      },
-      description: `订单 ${payload.orderNo} 收到支付成功通知。`,
-      detail: `支付结果已转发给设备侧，交易号 ${payload.transactionId}。`,
-      relatedEventId: event.eventId,
-      relatedOrderNo: payload.orderNo,
-      metadata: {
-        transactionId: payload.transactionId,
-        amount: payload.amount
-      }
+      logType: "payment-success-callback",
+      targetUrl: undefined
     });
+  }
 
-    return {
-      orderNo: payload.orderNo,
-      forwarded: true
-    };
+  async notifyPaymentSuccess(
+    payload: SmartVmPaymentPayload & {
+      openId?: string;
+    },
+    actorUserId?: string
+  ) {
+    return this.forwardPaymentSuccessToPlatform(payload, {
+      actor: this.getAdminActor(actorUserId),
+      logType: "manual-payment-success",
+      targetUrl: undefined
+    });
   }
 
   private assertSignature(payload: Record<string, unknown>) {
@@ -446,5 +465,141 @@ export class CabinetEventsService {
     }
 
     return event;
+  }
+
+  private async tryAutoForwardPaymentSuccess(
+    event: CabinetEventRecord,
+    payload: SmartVmPaymentPayload,
+    targetUrl?: string
+  ) {
+    try {
+      await this.forwardPaymentSuccessToPlatform(payload, {
+        actor: {
+          type: "system",
+          name: "系统回写"
+        },
+        logType: "auto-payment-success",
+        targetUrl
+      });
+    } catch (error) {
+      const message = this.smartVmGateway.extractErrorMessage(error);
+      event.paymentNotifyStatus = "failed";
+      event.paymentNotifyMessage = message;
+      event.updatedAt = new Date().toISOString();
+      this.alertsService.create({
+        type: "callback",
+        title: "付款成功回写平台失败",
+        deviceCode: event.deviceCode,
+        targetUserId: event.userId,
+        dueAt: event.updatedAt,
+        detail: `订单 ${event.orderNo} 回写平台失败：${message}`,
+        relatedEventId: event.eventId
+      });
+      this.store.logOperation({
+        category: "inventory",
+        type: "auto-payment-success",
+        status: "failed",
+        actor: {
+          type: "system",
+          name: "系统回写"
+        },
+        primarySubject: {
+          type: "device",
+          id: event.deviceCode,
+          label: event.deviceCode
+        },
+        secondarySubject: {
+          type: "event",
+          id: event.eventId,
+          label: event.orderNo
+        },
+        description: `订单 ${event.orderNo} 回写平台付款成功失败。`,
+        detail: `平台返回：${message}`,
+        relatedEventId: event.eventId,
+        relatedOrderNo: event.orderNo,
+        metadata: {
+          amount: payload.amount,
+          transactionId: payload.transactionId,
+          undoState: "not_undoable"
+        }
+      });
+    }
+  }
+
+  private async forwardPaymentSuccessToPlatform(
+    payload: SmartVmPaymentPayload & { openId?: string },
+    options: {
+      actor: {
+        type: "admin" | "merchant" | "special" | "system";
+        id?: string;
+        name: string;
+        role?: "admin" | "merchant" | "special";
+      };
+      logType: string;
+      targetUrl?: string;
+    }
+  ) {
+    const event = this.getEventByOrderNo(payload.orderNo);
+    event.amount = payload.amount;
+    event.updatedAt = new Date().toISOString();
+
+    const resolvedTargetUrl = options.targetUrl ?? event.adjustmentNoticeUrl ?? event.paymentNotifyUrl;
+    await this.smartVmGateway.notifyPaymentSuccess(payload, {
+      targetUrl: resolvedTargetUrl
+    });
+
+    event.paymentNotifyStatus = "success";
+    event.paymentNotifyMessage = resolvedTargetUrl
+      ? `已回写平台付款成功，目标地址 ${resolvedTargetUrl}`
+      : "已回写平台付款成功。";
+    event.paymentNotifiedAt = event.updatedAt;
+    event.paymentTransactionId = payload.transactionId;
+
+    this.store.logOperation({
+      category: "inventory",
+      type: options.logType,
+      status: "success",
+      actor: options.actor,
+      primarySubject: {
+        type: "device",
+        id: payload.deviceCode,
+        label: payload.deviceCode
+      },
+      secondarySubject: {
+        type: "event",
+        id: event.eventId,
+        label: event.orderNo
+      },
+      description: `订单 ${payload.orderNo} 已回写平台付款成功。`,
+      detail: `交易号 ${payload.transactionId}，金额 ${payload.amount}${resolvedTargetUrl ? `，目标 ${resolvedTargetUrl}` : ""}。`,
+      relatedEventId: event.eventId,
+      relatedOrderNo: payload.orderNo,
+      metadata: {
+        transactionId: payload.transactionId,
+        amount: payload.amount,
+        targetUrl: resolvedTargetUrl,
+        undoState: "not_undoable"
+      }
+    });
+
+    return {
+      orderNo: payload.orderNo,
+      forwarded: true,
+      transactionId: payload.transactionId,
+      targetUrl: resolvedTargetUrl
+    };
+  }
+
+  private getAdminActor(actorUserId?: string) {
+    const adminUser =
+      (actorUserId ? this.store.users.find((entry) => entry.id === actorUserId) : undefined) ??
+      this.store.users.find((entry) => entry.role === "admin");
+
+    return {
+      type: "admin" as const,
+      id: adminUser?.id,
+      name: adminUser?.name ?? "管理员",
+      role: "admin" as const
+    };
   }
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type {
   CabinetOpenRequest,
@@ -61,5 +61,21 @@ export class CabinetEventsController {
   @Post("callbacks/payment-success")
   async paymentSuccess(@Body() body: SmartVmPaymentPayload & Record<string, unknown>) {
     return ok(await this.cabinetEventsService.handlePaymentSuccess(body), "支付回调已处理。");
+  }
+
+  @Post("payment-success")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  async notifyPaymentSuccess(
+    @Body()
+    body: SmartVmPaymentPayload & {
+      openId?: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(
+      await this.cabinetEventsService.notifyPaymentSuccess(body, request?.authUser?.id),
+      "操作成功"
+    );
   }
 }

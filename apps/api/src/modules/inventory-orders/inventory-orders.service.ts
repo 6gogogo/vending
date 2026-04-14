@@ -58,7 +58,9 @@ export class InventoryOrdersService {
   recordSettlement(event: CabinetEventRecord, payload: SmartVmSettlementPayload) {
     const movements =
       payload.detail?.map((item) =>
-        this.createMovementFromLineItem(event, item.goodsId, item.goodsName, item.quantity, item.unitPrice)
+        this.createMovementFromLineItem(event, item.goodsId, item.goodsName, item.quantity, item.unitPrice, {
+          orderNo: event.orderNo
+        })
       ) ?? [];
 
     for (const movement of movements) {
@@ -185,7 +187,11 @@ export class InventoryOrdersService {
           item.goodsName,
           item.quantity,
           item.unitPrice,
-          "adjustment"
+          {
+            type: "adjustment",
+            orderNo: payload.orderNo,
+            sourceOrderNo: payload.orgOrderNo
+          }
         )
       ) ?? [];
 
@@ -248,19 +254,25 @@ export class InventoryOrdersService {
     const movement: InventoryMovement = {
       id: this.store.createId("movement"),
       orderNo,
+      eventId: event.eventId,
       userId: event.userId,
       deviceCode: event.deviceCode,
       goodsId: event.goods[0]?.goodsId ?? "unknown",
       goodsName: event.goods[0]?.goodsName ?? "unknown",
       category: event.goods[0]?.category ?? "daily",
-      quantity: 1,
+      quantity: event.goods.reduce((sum, item) => sum + item.quantity, 0) || 1,
       unitPrice: amount,
       type: "refund",
-      happenedAt: new Date().toISOString()
+      happenedAt: new Date().toISOString(),
+      transactionId,
+      refundNo: options?.refundNo
     };
 
     event.status = "refunded";
     event.updatedAt = new Date().toISOString();
+    event.refundNo = options?.refundNo;
+    event.refundTransactionId = transactionId;
+    event.refundedAt = event.updatedAt;
     this.store.inventory.unshift(movement);
 
     const isCallback = options?.source === "callback";
@@ -315,7 +327,11 @@ export class InventoryOrdersService {
     goodsName: string,
     quantity: number,
     unitPrice: number,
-    typeOverride?: InventoryMovement["type"]
+    options?: {
+      type?: InventoryMovement["type"];
+      orderNo?: string;
+      sourceOrderNo?: string;
+    }
   ): InventoryMovement {
     const localGoods = this.devicesService.findGoods(event.deviceCode, goodsId);
     const category = (localGoods?.category ?? "daily") as GoodsCategory;
@@ -329,7 +345,9 @@ export class InventoryOrdersService {
 
     return {
       id: this.store.createId("movement"),
-      orderNo: event.orderNo,
+      orderNo: options?.orderNo ?? event.orderNo,
+      sourceOrderNo: options?.sourceOrderNo,
+      eventId: event.eventId,
       userId: event.userId,
       deviceCode: event.deviceCode,
       goodsId,
@@ -337,7 +355,7 @@ export class InventoryOrdersService {
       category,
       quantity,
       unitPrice,
-      type: typeOverride ?? (event.role === "merchant" ? "donation" : "pickup"),
+      type: options?.type ?? (event.role === "merchant" ? "donation" : "pickup"),
       happenedAt: new Date().toISOString(),
       expiresAt
     };

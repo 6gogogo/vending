@@ -134,6 +134,29 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         description: `系统确认了${device}的支付成功通知。`,
         detail: baseDetail([`柜机 ${device}`, `关联事件 ${secondary}`, typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined, `状态 ${result}`])
       };
+    case "auto-payment-success":
+      return {
+        description: `系统向${device}回写了付款成功结果。`,
+        detail: baseDetail([
+          `柜机 ${device}`,
+          `关联事件 ${secondary}`,
+          typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
+          typeof entry.metadata?.targetUrl === "string" ? `目标 ${entry.metadata.targetUrl}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "manual-payment-success":
+      return {
+        description: `${actor}向${device}回写了付款成功结果。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `关联事件 ${secondary}`,
+          typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
+          typeof entry.metadata?.targetUrl === "string" ? `目标 ${entry.metadata.targetUrl}` : undefined,
+          `状态 ${result}`
+        ])
+      };
     case "manual-refund":
       return {
         description: `${actor}对${device}执行了退款操作。`,

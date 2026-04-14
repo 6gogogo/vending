@@ -141,6 +141,8 @@ export const adminApi = {
     payload: {
       deviceCode: string;
       goodsId: string;
+      relatedEventId?: string;
+      relatedOrderNo?: string;
       goodsName?: string;
       category?: "food" | "drink" | "daily";
       quantity: number;
@@ -264,6 +266,25 @@ export const adminApi = {
       `/devices/${deviceCode}/remote-open`,
       { doorNum }
     );
+  },
+  notifyPaymentSuccess(payload: {
+    orderNo: string;
+    eventId: string;
+    transactionId: string;
+    deviceCode: string;
+    amount: number;
+    openId?: string;
+  }) {
+    return adminClient.post("/cabinet-events/payment-success", payload);
+  },
+  refundOrder(payload: {
+    orderNo: string;
+    transactionId: string;
+    deviceCode: string;
+    refundNo: string;
+    amount: number;
+  }) {
+    return adminClient.post("/inventory-orders/refund", payload);
   },
   goodsOverview() {
     return adminClient.get<GoodsOverviewSnapshot>("/goods-overview");

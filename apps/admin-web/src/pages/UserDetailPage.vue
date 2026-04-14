@@ -371,7 +371,7 @@ onMounted(async () => {
         <article v-if="detail.user.role !== 'admin'" class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">记录明细</span><h3 class="admin-panel__title">{{ detail.user.role === "merchant" ? "最近投放记录" : "最近取货 / 补货记录" }}</h3></div></div>
           <table class="admin-table">
-            <thead><tr><th>时间</th><th>货品</th><th>数量</th><th>柜机</th><th>类型</th></tr></thead>
+            <thead><tr><th>时间</th><th>货品</th><th>数量</th><th>柜机</th><th>类型</th><th>平台关联</th></tr></thead>
             <tbody>
               <tr v-for="record in detail.recentRecords" :key="record.id">
                 <td class="admin-code">{{ record.happenedAt.slice(0, 16).replace("T", " ") }}</td>
@@ -379,6 +379,13 @@ onMounted(async () => {
                 <td class="admin-code">{{ record.quantity }}</td>
                 <td><RouterLink class="admin-link" :to="`/operations/${record.deviceCode}`">{{ record.deviceCode }}</RouterLink></td>
                 <td>{{ formatRecordType(record.type) }}</td>
+                <td>
+                  <span v-if="record.orderNo" class="admin-table__subtext">订单 {{ record.orderNo }}</span>
+                  <span v-if="record.sourceOrderNo" class="admin-table__subtext">原订单 {{ record.sourceOrderNo }}</span>
+                  <span v-if="record.transactionId" class="admin-table__subtext">交易号 {{ record.transactionId }}</span>
+                  <span v-if="record.refundNo" class="admin-table__subtext">退款单 {{ record.refundNo }}</span>
+                  <span v-if="!record.orderNo && !record.sourceOrderNo && !record.transactionId && !record.refundNo" class="admin-table__subtext">本地记录</span>
+                </td>
               </tr>
             </tbody>
           </table>
