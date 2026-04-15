@@ -407,9 +407,7 @@ export class CabinetEventsService {
 
     const event = this.getEventByPlatformOrderNo(payload.orgOrderNo);
     event.updatedAt = new Date().toISOString();
-    event.adjustmentOrderNo = payload.orderNo;
-    event.adjustmentNoticeUrl = payload.noticeUrl;
-    event.adjustmentAmount = payload.amount;
+    const adjustment = this.upsertAdjustment(event, payload);
 
     const adjustmentRecorded = this.inventoryOrdersService.recordAdjustment(event, payload);
 
@@ -445,8 +443,9 @@ export class CabinetEventsService {
     }
 
     if (payload.amount > 0) {
-      event.adjustmentPaymentNotifyStatus = "pending";
-      event.adjustmentPaymentNotifyMessage = `等待补扣订单 ${payload.orderNo} 支付成功后，再向平台回写付款成功。`;
+      adjustment.paymentNotifyStatus = "pending";
+      adjustment.paymentNotifyMessage = `等待补扣订单 ${payload.orderNo} 支付成功后，再向平台回写付款成功。`;
+      this.syncLatestAdjustmentFields(event);
       return {
         code: 200,
         message: "补扣回调已接收，等待支付成功后回写平台",
@@ -454,8 +453,9 @@ export class CabinetEventsService {
       };
     }
 
-    event.adjustmentPaymentNotifyStatus = "pending";
-    event.adjustmentPaymentNotifyMessage = `补扣订单 ${payload.orderNo} 金额为 0，准备自动回写平台。`;
+    adjustment.paymentNotifyStatus = "pending";
+    adjustment.paymentNotifyMessage = `补扣订单 ${payload.orderNo} 金额为 0，准备自动回写平台。`;
+    this.syncLatestAdjustmentFields(event);
     void this.tryAutoForwardPaymentSuccess(event, {
       orderNo: payload.orderNo,
       eventId: event.eventId,
@@ -523,7 +523,10 @@ export class CabinetEventsService {
 
   private getEventByPlatformOrderNo(orderNo: string) {
     const event = this.store.events.find(
-      (entry) => entry.orderNo === orderNo || entry.adjustmentOrderNo === orderNo
+      (entry) =>
+        entry.orderNo === orderNo ||
+        entry.adjustmentOrderNo === orderNo ||
+        entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo)
     );
 
     if (!event) {
@@ -549,10 +552,12 @@ export class CabinetEventsService {
       });
     } catch (error) {
       const message = this.smartVmGateway.extractErrorMessage(error);
-      const isAdjustmentOrder = event.adjustmentOrderNo === payload.orderNo;
-      if (isAdjustmentOrder) {
-        event.adjustmentPaymentNotifyStatus = "failed";
-        event.adjustmentPaymentNotifyMessage = message;
+      const adjustment = this.getAdjustment(event, payload.orderNo);
+      if (adjustment) {
+        adjustment.paymentNotifyStatus = "failed";
+        adjustment.paymentNotifyMessage = message;
+        adjustment.updatedAt = new Date().toISOString();
+        this.syncLatestAdjustmentFields(event);
       } else {
         event.paymentNotifyStatus = "failed";
         event.paymentNotifyMessage = message;
@@ -614,9 +619,14 @@ export class CabinetEventsService {
     const event = this.getEventByPlatformOrderNo(payload.orderNo);
     event.amount = payload.amount;
     event.updatedAt = new Date().toISOString();
-    const isAdjustmentOrder = event.adjustmentOrderNo === payload.orderNo;
+    const adjustment = this.getAdjustment(event, payload.orderNo);
+    const isAdjustmentOrder = Boolean(adjustment);
 
-    const resolvedTargetUrl = options.targetUrl ?? event.adjustmentNoticeUrl ?? event.paymentNotifyUrl;
+    const resolvedTargetUrl =
+      options.targetUrl ??
+      adjustment?.noticeUrl ??
+      event.adjustmentNoticeUrl ??
+      event.paymentNotifyUrl;
 
     if (!resolvedTargetUrl) {
       throw new BadRequestException(
@@ -628,13 +638,15 @@ export class CabinetEventsService {
       targetUrl: resolvedTargetUrl
     });
 
-    if (isAdjustmentOrder) {
-      event.adjustmentPaymentNotifyStatus = "success";
-      event.adjustmentPaymentNotifyMessage = resolvedTargetUrl
+    if (adjustment) {
+      adjustment.paymentNotifyStatus = "success";
+      adjustment.paymentNotifyMessage = resolvedTargetUrl
         ? `已回写平台付款成功，补扣订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
         : `已回写平台付款成功，补扣订单 ${payload.orderNo}。`;
-      event.adjustmentPaymentNotifiedAt = event.updatedAt;
-      event.adjustmentPaymentTransactionId = payload.transactionId;
+      adjustment.paymentNotifiedAt = event.updatedAt;
+      adjustment.paymentTransactionId = payload.transactionId;
+      adjustment.updatedAt = event.updatedAt;
+      this.syncLatestAdjustmentFields(event);
     } else {
       event.paymentNotifyStatus = "success";
       event.paymentNotifyMessage = resolvedTargetUrl
@@ -677,6 +689,65 @@ export class CabinetEventsService {
       transactionId: payload.transactionId,
       targetUrl: resolvedTargetUrl
     };
+  }
+
+  private upsertAdjustment(event: CabinetEventRecord, payload: SmartVmAdjustmentPayload) {
+    event.adjustments ??= [];
+    const now = new Date().toISOString();
+    let adjustment = event.adjustments.find((entry) => entry.orderNo === payload.orderNo);
+
+    if (!adjustment) {
+      adjustment = {
+        orderNo: payload.orderNo,
+        sourceOrderNo: payload.orgOrderNo,
+        noticeUrl: payload.noticeUrl,
+        amount: payload.amount,
+        createdAt: now,
+        updatedAt: now,
+        goods:
+          payload.detail?.map((item) => ({
+            goodsId: item.goodsId,
+            goodsName: item.goodsName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice
+          })) ?? []
+      };
+      event.adjustments.unshift(adjustment);
+    } else {
+      adjustment.sourceOrderNo = payload.orgOrderNo;
+      adjustment.noticeUrl = payload.noticeUrl;
+      adjustment.amount = payload.amount;
+      adjustment.updatedAt = now;
+      adjustment.goods =
+        payload.detail?.map((item) => ({
+          goodsId: item.goodsId,
+          goodsName: item.goodsName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice
+        })) ?? adjustment.goods;
+    }
+
+    this.syncLatestAdjustmentFields(event);
+    return adjustment;
+  }
+
+  private getAdjustment(event: CabinetEventRecord, orderNo: string) {
+    return event.adjustments?.find((entry) => entry.orderNo === orderNo);
+  }
+
+  private syncLatestAdjustmentFields(event: CabinetEventRecord) {
+    const latest = event.adjustments?.[0];
+
+    event.adjustmentOrderNo = latest?.orderNo;
+    event.adjustmentNoticeUrl = latest?.noticeUrl;
+    event.adjustmentAmount = latest?.amount;
+    event.adjustmentPaymentNotifyStatus = latest?.paymentNotifyStatus;
+    event.adjustmentPaymentNotifyMessage = latest?.paymentNotifyMessage;
+    event.adjustmentPaymentNotifiedAt = latest?.paymentNotifiedAt;
+    event.adjustmentPaymentTransactionId = latest?.paymentTransactionId;
+    event.adjustmentRefundNo = latest?.refundNo;
+    event.adjustmentRefundTransactionId = latest?.refundTransactionId;
+    event.adjustmentRefundedAt = latest?.refundedAt;
   }
 
   private getAdminActor(actorUserId?: string) {

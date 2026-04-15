@@ -377,6 +377,7 @@ export interface CabinetEventRecord {
   paymentNotifyMessage?: string;
   paymentNotifiedAt?: string;
   paymentTransactionId?: string;
+  adjustments?: CabinetAdjustmentRecord[];
   adjustmentOrderNo?: string;
   adjustmentNoticeUrl?: string;
   adjustmentAmount?: number;
@@ -397,6 +398,28 @@ export interface CabinetEventRecord {
     quantity: number;
     unitPrice: number;
   }>;
+}
+
+export interface CabinetAdjustmentRecord {
+  orderNo: string;
+  sourceOrderNo?: string;
+  noticeUrl?: string;
+  amount: number;
+  createdAt: string;
+  updatedAt: string;
+  goods?: Array<{
+    goodsId: string;
+    goodsName: string;
+    quantity: number;
+    unitPrice: number;
+  }>;
+  paymentNotifyStatus?: "pending" | "success" | "failed";
+  paymentNotifyMessage?: string;
+  paymentNotifiedAt?: string;
+  paymentTransactionId?: string;
+  refundNo?: string;
+  refundTransactionId?: string;
+  refundedAt?: string;
 }
 
 export interface InventoryMovement {

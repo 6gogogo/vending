@@ -76,11 +76,18 @@ export class PersistenceInterceptor implements NestInterceptor {
   }) {
     const contentDisposition = payload.response.getHeader?.("content-disposition");
     const isFileDownload = typeof contentDisposition === "string" && contentDisposition.length > 0;
+    const requestPath = payload.request.path ?? payload.request.url ?? "";
+    const normalizedResponse = payload.error
+      ? undefined
+      : isFileDownload
+        ? "[file download]"
+        : this.normalizeForLog(payload.responseBody);
+    const isCallback = requestPath.includes("/callbacks/");
 
     appendSystemAuditLog({
       occurredAt: new Date().toISOString(),
       method: payload.request.method ?? "UNKNOWN",
-      path: payload.request.path ?? payload.request.url ?? "",
+      path: requestPath,
       query: this.normalizeForLog(payload.request.query),
       params: this.normalizeForLog(payload.request.params),
       body: this.normalizeForLog(payload.request.body),
@@ -92,17 +99,19 @@ export class PersistenceInterceptor implements NestInterceptor {
       actorRole: payload.request.authUser?.role as "admin" | "merchant" | "special" | undefined,
       ip: payload.request.ip,
       userAgent: payload.request.headers?.["user-agent"],
-      response: payload.error
-        ? undefined
-        : isFileDownload
-          ? "[file download]"
-          : this.normalizeForLog(payload.responseBody),
+      response: normalizedResponse,
       error: payload.error
         ? {
             name: payload.error instanceof Error ? payload.error.name : "Error",
             message: payload.error instanceof Error ? payload.error.message : "unknown"
           }
-        : undefined
+        : undefined,
+      metadata: {
+        direction: isCallback ? "incoming" : "internal",
+        source: isCallback ? "platform" : "client",
+        target: "backend",
+        actualResponseBodyRecorded: normalizedResponse !== undefined
+      }
     });
   }
 

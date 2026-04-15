@@ -301,16 +301,19 @@ export class InventoryOrdersService {
       refundNo: options?.refundNo
     };
 
-    const isAdjustmentOrder = event.adjustmentOrderNo === orderNo;
+    const adjustment = event.adjustments?.find((entry) => entry.orderNo === orderNo);
+    const isAdjustmentOrder = Boolean(adjustment);
 
     if (!isAdjustmentOrder) {
       event.status = "refunded";
     }
     event.updatedAt = new Date().toISOString();
-    if (isAdjustmentOrder) {
-      event.adjustmentRefundNo = options?.refundNo;
-      event.adjustmentRefundTransactionId = transactionId;
-      event.adjustmentRefundedAt = event.updatedAt;
+    if (adjustment) {
+      adjustment.refundNo = options?.refundNo;
+      adjustment.refundTransactionId = transactionId;
+      adjustment.refundedAt = event.updatedAt;
+      adjustment.updatedAt = event.updatedAt;
+      this.syncLatestAdjustmentFields(event);
     } else {
       event.refundNo = options?.refundNo;
       event.refundTransactionId = transactionId;
@@ -366,8 +369,26 @@ export class InventoryOrdersService {
 
   findEventByPlatformOrderNo(orderNo: string) {
     return this.store.events.find(
-      (entry) => entry.orderNo === orderNo || entry.adjustmentOrderNo === orderNo
+      (entry) =>
+        entry.orderNo === orderNo ||
+        entry.adjustmentOrderNo === orderNo ||
+        entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo)
     );
+  }
+
+  private syncLatestAdjustmentFields(event: CabinetEventRecord) {
+    const latest = event.adjustments?.[0];
+
+    event.adjustmentOrderNo = latest?.orderNo;
+    event.adjustmentNoticeUrl = latest?.noticeUrl;
+    event.adjustmentAmount = latest?.amount;
+    event.adjustmentPaymentNotifyStatus = latest?.paymentNotifyStatus;
+    event.adjustmentPaymentNotifyMessage = latest?.paymentNotifyMessage;
+    event.adjustmentPaymentNotifiedAt = latest?.paymentNotifiedAt;
+    event.adjustmentPaymentTransactionId = latest?.paymentTransactionId;
+    event.adjustmentRefundNo = latest?.refundNo;
+    event.adjustmentRefundTransactionId = latest?.refundTransactionId;
+    event.adjustmentRefundedAt = latest?.refundedAt;
   }
 
   private createMovementFromLineItem(

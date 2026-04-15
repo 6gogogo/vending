@@ -28,8 +28,8 @@ const debugAuditLimit = ref(100);
 const debugCallbackLimit = ref(100);
 const debugCallbackLogs = ref<Awaited<ReturnType<typeof adminApi.deviceCallbackLogs>>>([]);
 const debugSystemAuditLogs = ref<Awaited<ReturnType<typeof adminApi.systemAuditLogs>>>([]);
-const notifyingPaymentEventId = ref("");
-const refundingEventId = ref("");
+const notifyingPaymentOrderNo = ref("");
+const refundingOrderNo = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -93,41 +93,59 @@ const formatEventStatus = (status: string) => {
   return status;
 };
 
-const formatPlatformSyncStatus = (event: NonNullable<typeof recentEvents.value>[number]) => {
-  if (event.adjustmentOrderNo && event.adjustmentRefundedAt) {
-    return `补扣已退款${event.adjustmentRefundNo ? ` / ${event.adjustmentRefundNo}` : ""}`;
+const getEventAdjustments = (event: NonNullable<typeof recentEvents.value>[number]) =>
+  event.adjustments?.length
+    ? event.adjustments
+    : event.adjustmentOrderNo
+      ? [
+          {
+            orderNo: event.adjustmentOrderNo,
+            noticeUrl: event.adjustmentNoticeUrl,
+            amount: event.adjustmentAmount ?? 0,
+            createdAt: event.updatedAt,
+            updatedAt: event.updatedAt,
+            paymentNotifyStatus: event.adjustmentPaymentNotifyStatus,
+            paymentNotifyMessage: event.adjustmentPaymentNotifyMessage,
+            paymentNotifiedAt: event.adjustmentPaymentNotifiedAt,
+            paymentTransactionId: event.adjustmentPaymentTransactionId,
+            refundNo: event.adjustmentRefundNo,
+            refundTransactionId: event.adjustmentRefundTransactionId,
+            refundedAt: event.adjustmentRefundedAt
+          }
+        ]
+      : [];
+
+const formatOrderSyncStatus = (order: {
+  orderNo: string;
+  paymentNotifyStatus?: string;
+  paymentNotifyMessage?: string;
+  paymentTransactionId?: string;
+  refundNo?: string;
+  refundedAt?: string;
+  amount?: number;
+}, kind: "original" | "adjustment") => {
+  if (order.refundedAt) {
+    return `${kind === "adjustment" ? "补扣已退款" : "已退款"}${order.refundNo ? ` / ${order.refundNo}` : ""}`;
   }
 
-  if (event.refundedAt) {
-    return `已退款${event.refundNo ? ` / ${event.refundNo}` : ""}`;
+  if (order.paymentNotifyStatus === "success") {
+    return `${kind === "adjustment" ? "补扣已回写付款成功" : "已回写付款成功"}${order.paymentTransactionId ? ` / ${order.paymentTransactionId}` : ""}`;
   }
 
-  if (event.adjustmentOrderNo && event.adjustmentPaymentNotifyStatus === "success") {
-    return `补扣已回写付款成功${event.adjustmentPaymentTransactionId ? ` / ${event.adjustmentPaymentTransactionId}` : ""}`;
+  if (order.paymentNotifyStatus === "failed") {
+    return `${kind === "adjustment" ? "补扣回写失败" : "回写失败"}${order.paymentNotifyMessage ? `：${order.paymentNotifyMessage}` : ""}`;
   }
 
-  if (event.adjustmentOrderNo && event.adjustmentPaymentNotifyStatus === "failed") {
-    return `补扣回写失败${event.adjustmentPaymentNotifyMessage ? `：${event.adjustmentPaymentNotifyMessage}` : ""}`;
+  if (kind === "adjustment" && (order.amount ?? 0) > 0) {
+    return `补扣待支付 / ${order.orderNo}`;
   }
 
-  if (event.paymentNotifyStatus === "success") {
-    return `已回写付款成功${event.paymentTransactionId ? ` / ${event.paymentTransactionId}` : ""}`;
+  if (kind === "adjustment") {
+    return `补扣已产生 / ${order.orderNo}`;
   }
 
-  if (event.paymentNotifyStatus === "failed") {
-    return `回写失败${event.paymentNotifyMessage ? `：${event.paymentNotifyMessage}` : ""}`;
-  }
-
-  if (event.adjustmentOrderNo && event.adjustmentAmount && event.adjustmentAmount > 0) {
-    return `补扣待支付 / ${event.adjustmentOrderNo}`;
-  }
-
-  if (event.adjustmentOrderNo) {
-    return `补扣已产生 / ${event.adjustmentOrderNo}`;
-  }
-
-  if (event.paymentNotifyStatus === "pending") {
-    return event.paymentNotifyMessage || "待回写";
+  if (order.paymentNotifyStatus === "pending") {
+    return order.paymentNotifyMessage || "待回写";
   }
 
   return "未关联平台动作";
@@ -135,35 +153,31 @@ const formatPlatformSyncStatus = (event: NonNullable<typeof recentEvents.value>[
 
 const resolvePlatformOrderContext = (
   event: NonNullable<typeof recentEvents.value>[number],
-  intent: "payment" | "refund"
+  intent: "payment" | "refund",
+  adjustmentOrderNo?: string
 ) => {
-  const shouldUseAdjustmentOrder =
-    Boolean(event.adjustmentOrderNo) &&
-    ((event.adjustmentAmount ?? 0) > 0 ||
-      (intent === "refund" && Boolean(event.adjustmentOrderNo)));
+  const adjustment = adjustmentOrderNo
+    ? getEventAdjustments(event).find((entry) => entry.orderNo === adjustmentOrderNo)
+    : undefined;
 
   return {
-    orderNo: shouldUseAdjustmentOrder ? event.adjustmentOrderNo ?? event.orderNo : event.orderNo,
-    amount: shouldUseAdjustmentOrder ? event.adjustmentAmount ?? event.amount : event.amount,
-    targetUrl: shouldUseAdjustmentOrder ? event.adjustmentNoticeUrl : event.paymentNotifyUrl,
-    label: shouldUseAdjustmentOrder ? "补扣订单" : "原始订单",
-    isAdjustmentOrder: shouldUseAdjustmentOrder,
-    transactionId: shouldUseAdjustmentOrder
-      ? event.adjustmentPaymentTransactionId
-      : event.paymentTransactionId,
-    refundedAt: shouldUseAdjustmentOrder ? event.adjustmentRefundedAt : event.refundedAt,
-    refundNo: shouldUseAdjustmentOrder ? event.adjustmentRefundNo : event.refundNo,
-    refundTransactionId: shouldUseAdjustmentOrder
-      ? event.adjustmentRefundTransactionId
-      : event.refundTransactionId
+    orderNo: adjustment?.orderNo ?? event.orderNo,
+    amount: adjustment?.amount ?? event.amount,
+    targetUrl: adjustment?.noticeUrl ?? event.paymentNotifyUrl,
+    label: adjustment ? "补扣订单" : "原始订单",
+    isAdjustmentOrder: Boolean(adjustment),
+    transactionId: adjustment?.paymentTransactionId ?? event.paymentTransactionId,
+    refundedAt: adjustment?.refundedAt ?? event.refundedAt,
+    refundNo: adjustment?.refundNo ?? event.refundNo,
+    refundTransactionId: adjustment?.refundTransactionId ?? event.refundTransactionId
   };
 };
 
-const paymentActionLabel = (event: NonNullable<typeof recentEvents.value>[number]) =>
-  resolvePlatformOrderContext(event, "payment").isAdjustmentOrder ? "补扣付款成功" : "付款成功";
+const paymentActionLabel = (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) =>
+  resolvePlatformOrderContext(event, "payment", adjustmentOrderNo).isAdjustmentOrder ? "补扣付款成功" : "付款成功";
 
-const refundActionLabel = (event: NonNullable<typeof recentEvents.value>[number]) =>
-  resolvePlatformOrderContext(event, "refund").isAdjustmentOrder ? "补扣退款" : "退款";
+const refundActionLabel = (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) =>
+  resolvePlatformOrderContext(event, "refund", adjustmentOrderNo).isAdjustmentOrder ? "补扣退款" : "退款";
 
 const formatLogStatus = (status: string) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
@@ -255,7 +269,7 @@ const getAuditRequestLabel = (entry: NonNullable<typeof debugSystemAuditRows.val
   getAuditDirection(entry) === "发" ? "发送内容" : "收到内容";
 
 const getAuditResponseLabel = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) =>
-  getAuditDirection(entry) === "发" ? "平台响应" : "后端响应";
+  getAuditDirection(entry) === "发" ? "平台实际响应" : "后端实际响应";
 
 const formatCallbackTypeLabel = (type: string) => {
   if (type === "door-status") return "门状态推送";
@@ -377,8 +391,8 @@ const remoteOpen = async () => {
   }
 };
 
-const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value>[number]) => {
-  const platformContext = resolvePlatformOrderContext(event, "payment");
+const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) => {
+  const platformContext = resolvePlatformOrderContext(event, "payment", adjustmentOrderNo);
   const defaultTransactionId =
     platformContext.transactionId ||
     createCompactReference("txn");
@@ -406,7 +420,7 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
     return;
   }
 
-  notifyingPaymentEventId.value = event.eventId;
+  notifyingPaymentOrderNo.value = platformContext.orderNo;
   try {
     await adminApi.notifyPaymentSuccess({
       orderNo: platformContext.orderNo,
@@ -421,7 +435,7 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
   } catch (error) {
     window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
   } finally {
-    notifyingPaymentEventId.value = "";
+    notifyingPaymentOrderNo.value = "";
   }
 
   if (debugPanelVisible.value) {
@@ -429,8 +443,8 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
   }
 };
 
-const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]) => {
-  const platformContext = resolvePlatformOrderContext(event, "refund");
+const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) => {
+  const platformContext = resolvePlatformOrderContext(event, "refund", adjustmentOrderNo);
   const defaultTransactionId = platformContext.transactionId || createCompactReference("txn");
   const transactionId = window.prompt("请输入退款对应的交易号 transactionId", defaultTransactionId)?.trim();
 
@@ -463,7 +477,7 @@ const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]
     return;
   }
 
-  refundingEventId.value = event.eventId;
+  refundingOrderNo.value = platformContext.orderNo;
   try {
     await adminApi.refundOrder({
       orderNo: platformContext.orderNo,
@@ -477,7 +491,7 @@ const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]
   } catch (error) {
     window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
   } finally {
-    refundingEventId.value = "";
+    refundingOrderNo.value = "";
   }
 
   if (debugPanelVisible.value) {
@@ -860,23 +874,40 @@ onUnmounted(() => {
                       <span class="admin-table__strong">{{ event.orderNo }}</span>
                       <span class="admin-table__subtext">{{ event.eventId }}</span>
                     </td>
-                    <td>{{ formatEventStatus(event.status) }}</td>
                     <td>
-                      <span class="admin-table__strong">{{ formatPlatformSyncStatus(event) }}</span>
-                      <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
+                      <span class="admin-table__strong">{{ formatEventStatus(event.status) }}</span>
                       <span
-                        v-if="event.adjustmentOrderNo"
+                        v-for="adjustment in getEventAdjustments(event)"
+                        :key="`${event.eventId}-${adjustment.orderNo}-status`"
                         class="admin-table__subtext"
                       >
-                        补扣单 {{ event.adjustmentOrderNo }}{{ event.adjustmentAmount !== undefined ? ` / ${event.adjustmentAmount} 分` : "" }}
+                        补扣单：{{ adjustment.orderNo }}
+                      </span>
+                    </td>
+                    <td>
+                      <span class="admin-table__strong">{{ formatOrderSyncStatus(event, "original") }}</span>
+                      <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
+                      <span
+                        v-for="adjustment in getEventAdjustments(event)"
+                        :key="`${event.eventId}-${adjustment.orderNo}-sync`"
+                        class="admin-table__subtext"
+                      >
+                        {{ formatOrderSyncStatus(adjustment, "adjustment") }}
                       </span>
                       <span
-                        v-if="event.refundNo || event.refundTransactionId || event.adjustmentRefundNo || event.adjustmentRefundTransactionId"
+                        v-if="event.refundNo || event.refundTransactionId"
                         class="admin-table__subtext"
                       >
                         {{ event.refundNo ? `原始退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `原始交易号 ${event.refundTransactionId}` : "" }}
-                        {{ (event.refundNo || event.refundTransactionId) && (event.adjustmentRefundNo || event.adjustmentRefundTransactionId) ? " / " : "" }}
-                        {{ event.adjustmentRefundNo ? `补扣退款单 ${event.adjustmentRefundNo}` : "" }}{{ event.adjustmentRefundNo && event.adjustmentRefundTransactionId ? " / " : "" }}{{ event.adjustmentRefundTransactionId ? `补扣交易号 ${event.adjustmentRefundTransactionId}` : "" }}
+                      </span>
+                      <span
+                        v-for="adjustment in getEventAdjustments(event)"
+                        :key="`${event.eventId}-${adjustment.orderNo}-refund`"
+                        class="admin-table__subtext"
+                      >
+                        补扣单 {{ adjustment.orderNo }}{{ adjustment.amount !== undefined ? ` / ${adjustment.amount} 分` : "" }}
+                        {{ adjustment.refundNo ? ` / 退款单 ${adjustment.refundNo}` : "" }}
+                        {{ adjustment.refundTransactionId ? ` / 交易号 ${adjustment.refundTransactionId}` : "" }}
                       </span>
                     </td>
                     <td>
@@ -889,18 +920,39 @@ onUnmounted(() => {
                       <div class="device-event-actions">
                         <button
                           class="admin-button admin-button--ghost"
-                          :disabled="notifyingPaymentEventId === event.eventId"
+                          :disabled="notifyingPaymentOrderNo === event.orderNo"
                           @click="notifyPaymentSuccess(event)"
                         >
-                          {{ notifyingPaymentEventId === event.eventId ? "回写中" : paymentActionLabel(event) }}
+                          {{ notifyingPaymentOrderNo === event.orderNo ? "回写中" : paymentActionLabel(event) }}
                         </button>
                         <button
                           class="admin-button admin-button--ghost"
-                          :disabled="refundingEventId === event.eventId || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
+                          :disabled="refundingOrderNo === event.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
                           @click="refundEvent(event)"
                         >
-                          {{ refundingEventId === event.eventId ? "退款中" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
+                          {{ refundingOrderNo === event.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
                         </button>
+                        <div
+                          v-for="adjustment in getEventAdjustments(event)"
+                          :key="`${event.eventId}-${adjustment.orderNo}-actions`"
+                          class="device-event-actions device-event-actions--nested"
+                        >
+                          <span class="admin-table__subtext">补扣单 {{ adjustment.orderNo }}</span>
+                          <button
+                            class="admin-button admin-button--ghost"
+                            :disabled="notifyingPaymentOrderNo === adjustment.orderNo"
+                            @click="notifyPaymentSuccess(event, adjustment.orderNo)"
+                          >
+                            {{ notifyingPaymentOrderNo === adjustment.orderNo ? "回写中" : paymentActionLabel(event, adjustment.orderNo) }}
+                          </button>
+                          <button
+                            class="admin-button admin-button--ghost"
+                            :disabled="refundingOrderNo === adjustment.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt)"
+                            @click="refundEvent(event, adjustment.orderNo)"
+                          >
+                            {{ refundingOrderNo === adjustment.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt ? "已退款" : refundActionLabel(event, adjustment.orderNo) }}
+                          </button>
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -1123,6 +1175,12 @@ onUnmounted(() => {
 .device-event-actions {
   display: grid;
   gap: 6px;
+}
+
+.device-event-actions--nested {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--admin-line);
 }
 
 .device-goods-toolbar {
