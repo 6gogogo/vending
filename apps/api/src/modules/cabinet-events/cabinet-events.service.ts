@@ -295,56 +295,65 @@ export class CabinetEventsService {
     this.store.logCallback("settlement", payload);
     this.assertSignature(payload);
 
-    const event = this.getEventByOrderNo(payload.orderNo);
+    const event = this.getEventByPlatformOrderNo(payload.orderNo);
     event.status = "settled";
     event.amount = payload.amount;
     event.updatedAt = new Date().toISOString();
     event.paymentNotifyUrl = payload.notifyUrl;
+    const settlementAlreadyRecorded = this.inventoryOrdersService
+      .recordSettlement(event, payload);
+
     event.paymentNotifyStatus = "pending";
-    event.paymentNotifyMessage = "等待向平台回写付款成功。";
-    event.goods =
-      payload.detail?.map((item) => ({
-        goodsId: item.goodsId,
-        goodsName: item.goodsName,
-        category:
-          this.store.devices
-            .flatMap((device) => device.doors)
-            .flatMap((door) => door.goods)
-            .find((goods) => goods.goodsId === item.goodsId)?.category ?? "daily",
-        quantity: item.quantity,
-        unitPrice: item.unitPrice
-          })) ?? [];
+    event.paymentNotifyMessage = settlementAlreadyRecorded.duplicated
+      ? "重复收到结算回调，已保持现有记录，等待向平台回写付款成功。"
+      : "等待向平台回写付款成功。";
+    if (!settlementAlreadyRecorded.duplicated) {
+      event.goods =
+        payload.detail?.map((item) => ({
+          goodsId: item.goodsId,
+          goodsName: item.goodsName,
+          category:
+            this.store.devices
+              .flatMap((device) => device.doors)
+              .flatMap((door) => door.goods)
+              .find((goods) => goods.goodsId === item.goodsId)?.category ?? "daily",
+          quantity: item.quantity,
+          unitPrice: item.unitPrice
+            })) ?? [];
+    }
 
-    this.store.logOperation({
-      category: event.role === "merchant" ? "restock" : "pickup",
-      type: "settlement-callback",
-      status: "success",
-      actor: {
-        type: event.role === "admin" ? "admin" : event.role,
-        id: event.userId,
-        name: this.store.users.find((entry) => entry.id === event.userId)?.name ?? event.phone,
-        role: event.role
-      },
-      primarySubject: {
-        type: "device",
-        id: event.deviceCode,
-        label: event.deviceCode
-      },
-      secondarySubject: {
-        type: "event",
-        id: event.eventId,
-        label: event.orderNo
-      },
-      description: `订单 ${event.orderNo} 已完成结算。`,
-      detail: `设备 ${event.deviceCode} 的结算回调已入库，事件状态更新为 settled。`,
-      relatedEventId: event.eventId,
-      relatedOrderNo: event.orderNo,
-      metadata: {
-        amount: payload.amount
-      }
-    });
+    if (!settlementAlreadyRecorded.duplicated) {
+      this.store.logOperation({
+        category: event.role === "merchant" ? "restock" : "pickup",
+        type: "settlement-callback",
+        status: "success",
+        actor: {
+          type: event.role === "admin" ? "admin" : event.role,
+          id: event.userId,
+          name: this.store.users.find((entry) => entry.id === event.userId)?.name ?? event.phone,
+          role: event.role
+        },
+        primarySubject: {
+          type: "device",
+          id: event.deviceCode,
+          label: event.deviceCode
+        },
+        secondarySubject: {
+          type: "event",
+          id: event.eventId,
+          label: event.orderNo
+        },
+        description: `订单 ${event.orderNo} 已完成结算。`,
+        detail: `设备 ${event.deviceCode} 的结算回调已入库，事件状态更新为 settled。`,
+        relatedEventId: event.eventId,
+        relatedOrderNo: event.orderNo,
+        metadata: {
+          amount: payload.amount,
+          undoState: "not_undoable"
+        }
+      });
+    }
 
-    const movements = this.inventoryOrdersService.recordSettlement(event, payload);
     if (this.shouldAutoForwardSettlementPaymentSuccess()) {
       void this.tryAutoForwardPaymentSuccess(
         event,
@@ -363,7 +372,8 @@ export class CabinetEventsService {
     }
 
     return {
-      movements,
+      movements: settlementAlreadyRecorded.movements,
+      duplicated: settlementAlreadyRecorded.duplicated,
       paymentNotifyStatus: event.paymentNotifyStatus,
       paymentNotifyMessage: event.paymentNotifyMessage
     };
@@ -373,54 +383,59 @@ export class CabinetEventsService {
     this.store.logCallback("adjustment", payload);
     this.assertSignature(payload);
 
-    const event = this.getEventByOrderNo(payload.orgOrderNo);
+    const event = this.getEventByPlatformOrderNo(payload.orgOrderNo);
     event.updatedAt = new Date().toISOString();
     event.adjustmentOrderNo = payload.orderNo;
     event.adjustmentNoticeUrl = payload.noticeUrl;
     event.adjustmentAmount = payload.amount;
 
-    this.inventoryOrdersService.recordAdjustment(event, payload);
+    const adjustmentRecorded = this.inventoryOrdersService.recordAdjustment(event, payload);
 
-    this.store.logOperation({
-      category: "inventory",
-      type: "adjustment-callback",
-      status: payload.amount > 0 ? "warning" : "success",
-      actor: {
-        type: "system",
-        name: "补扣回调"
-      },
-      primarySubject: {
-        type: "device",
-        id: payload.deviceCode,
-        label: payload.deviceCode
-      },
-      secondarySubject: {
-        type: "event",
-        id: event.eventId,
-        label: event.orderNo
-      },
-      description: `订单 ${payload.orderNo} 收到补扣回调。`,
-      detail: payload.amount > 0 ? "补扣订单仍需等待用户支付。" : "补扣订单已完成。",
-      relatedEventId: event.eventId,
-      relatedOrderNo: payload.orderNo,
-      metadata: {
-        amount: payload.amount
-      }
-    });
+    if (!adjustmentRecorded.duplicated) {
+      this.store.logOperation({
+        category: "inventory",
+        type: "adjustment-callback",
+        status: payload.amount > 0 ? "warning" : "success",
+        actor: {
+          type: "system",
+          name: "补扣回调"
+        },
+        primarySubject: {
+          type: "device",
+          id: payload.deviceCode,
+          label: payload.deviceCode
+        },
+        secondarySubject: {
+          type: "event",
+          id: event.eventId,
+          label: event.orderNo
+        },
+        description: `订单 ${payload.orderNo} 收到补扣回调。`,
+        detail: payload.amount > 0 ? "补扣订单仍需等待用户支付。" : "补扣订单已完成。",
+        relatedEventId: event.eventId,
+        relatedOrderNo: payload.orderNo,
+        metadata: {
+          amount: payload.amount,
+          orgOrderNo: payload.orgOrderNo,
+          undoState: "not_undoable"
+        }
+      });
+    }
 
     if (payload.amount > 0) {
-      event.paymentNotifyStatus = "pending";
-      event.paymentNotifyMessage = "等待补扣订单支付成功后，再向平台回写付款成功。";
+      event.adjustmentPaymentNotifyStatus = "pending";
+      event.adjustmentPaymentNotifyMessage = `等待补扣订单 ${payload.orderNo} 支付成功后，再向平台回写付款成功。`;
       return {
         code: 200,
-        message: "补扣回调已接收，等待支付成功后回写平台"
+        message: "补扣回调已接收，等待支付成功后回写平台",
+        duplicated: adjustmentRecorded.duplicated
       };
     }
 
-    event.paymentNotifyStatus = "pending";
-    event.paymentNotifyMessage = "补扣金额为 0，准备自动回写平台。";
+    event.adjustmentPaymentNotifyStatus = "pending";
+    event.adjustmentPaymentNotifyMessage = `补扣订单 ${payload.orderNo} 金额为 0，准备自动回写平台。`;
     void this.tryAutoForwardPaymentSuccess(event, {
-      orderNo: event.orderNo,
+      orderNo: payload.orderNo,
       eventId: event.eventId,
       transactionId: `auto-adjustment-${payload.orderNo}`,
       deviceCode: payload.deviceCode,
@@ -429,7 +444,8 @@ export class CabinetEventsService {
 
     return {
       code: 200,
-      message: "补扣回调已接收"
+      message: "补扣回调已接收",
+      duplicated: adjustmentRecorded.duplicated
     };
   }
 
@@ -483,8 +499,10 @@ export class CabinetEventsService {
     }
   }
 
-  private getEventByOrderNo(orderNo: string) {
-    const event = this.store.events.find((entry) => entry.orderNo === orderNo);
+  private getEventByPlatformOrderNo(orderNo: string) {
+    const event = this.store.events.find(
+      (entry) => entry.orderNo === orderNo || entry.adjustmentOrderNo === orderNo
+    );
 
     if (!event) {
       throw new BadRequestException(`订单 ${orderNo} 不存在。`);
@@ -509,8 +527,14 @@ export class CabinetEventsService {
       });
     } catch (error) {
       const message = this.smartVmGateway.extractErrorMessage(error);
-      event.paymentNotifyStatus = "failed";
-      event.paymentNotifyMessage = message;
+      const isAdjustmentOrder = event.adjustmentOrderNo === payload.orderNo;
+      if (isAdjustmentOrder) {
+        event.adjustmentPaymentNotifyStatus = "failed";
+        event.adjustmentPaymentNotifyMessage = message;
+      } else {
+        event.paymentNotifyStatus = "failed";
+        event.paymentNotifyMessage = message;
+      }
       event.updatedAt = new Date().toISOString();
       this.alertsService.create({
         type: "callback",
@@ -565,9 +589,10 @@ export class CabinetEventsService {
       targetUrl?: string;
     }
   ) {
-    const event = this.getEventByOrderNo(payload.orderNo);
+    const event = this.getEventByPlatformOrderNo(payload.orderNo);
     event.amount = payload.amount;
     event.updatedAt = new Date().toISOString();
+    const isAdjustmentOrder = event.adjustmentOrderNo === payload.orderNo;
 
     const resolvedTargetUrl = options.targetUrl ?? event.adjustmentNoticeUrl ?? event.paymentNotifyUrl;
 
@@ -581,12 +606,21 @@ export class CabinetEventsService {
       targetUrl: resolvedTargetUrl
     });
 
-    event.paymentNotifyStatus = "success";
-    event.paymentNotifyMessage = resolvedTargetUrl
-      ? `已回写平台付款成功，目标地址 ${resolvedTargetUrl}`
-      : "已回写平台付款成功。";
-    event.paymentNotifiedAt = event.updatedAt;
-    event.paymentTransactionId = payload.transactionId;
+    if (isAdjustmentOrder) {
+      event.adjustmentPaymentNotifyStatus = "success";
+      event.adjustmentPaymentNotifyMessage = resolvedTargetUrl
+        ? `已回写平台付款成功，补扣订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
+        : `已回写平台付款成功，补扣订单 ${payload.orderNo}。`;
+      event.adjustmentPaymentNotifiedAt = event.updatedAt;
+      event.adjustmentPaymentTransactionId = payload.transactionId;
+    } else {
+      event.paymentNotifyStatus = "success";
+      event.paymentNotifyMessage = resolvedTargetUrl
+        ? `已回写平台付款成功，订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
+        : `已回写平台付款成功，订单 ${payload.orderNo}。`;
+      event.paymentNotifiedAt = event.updatedAt;
+      event.paymentTransactionId = payload.transactionId;
+    }
 
     this.store.logOperation({
       category: "inventory",
@@ -603,7 +637,7 @@ export class CabinetEventsService {
         id: event.eventId,
         label: event.orderNo
       },
-      description: `订单 ${payload.orderNo} 已回写平台付款成功。`,
+      description: `订单 ${payload.orderNo}${isAdjustmentOrder ? "（补扣单）" : ""} 已回写平台付款成功。`,
       detail: `交易号 ${payload.transactionId}，金额 ${payload.amount}${resolvedTargetUrl ? `，目标 ${resolvedTargetUrl}` : ""}。`,
       relatedEventId: event.eventId,
       relatedOrderNo: payload.orderNo,

@@ -380,6 +380,13 @@ export interface CabinetEventRecord {
   adjustmentOrderNo?: string;
   adjustmentNoticeUrl?: string;
   adjustmentAmount?: number;
+  adjustmentPaymentNotifyStatus?: "pending" | "success" | "failed";
+  adjustmentPaymentNotifyMessage?: string;
+  adjustmentPaymentNotifiedAt?: string;
+  adjustmentPaymentTransactionId?: string;
+  adjustmentRefundNo?: string;
+  adjustmentRefundTransactionId?: string;
+  adjustmentRefundedAt?: string;
   refundNo?: string;
   refundTransactionId?: string;
   refundedAt?: string;

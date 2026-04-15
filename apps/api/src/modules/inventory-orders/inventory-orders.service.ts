@@ -56,6 +56,19 @@ export class InventoryOrdersService {
   }
 
   recordSettlement(event: CabinetEventRecord, payload: SmartVmSettlementPayload) {
+    const existingMovements = this.store.inventory.filter(
+      (entry) =>
+        entry.orderNo === payload.orderNo &&
+        (entry.type === "pickup" || entry.type === "donation")
+    );
+
+    if (existingMovements.length) {
+      return {
+        movements: existingMovements,
+        duplicated: true
+      };
+    }
+
     const movements =
       payload.detail?.map((item) =>
         this.createMovementFromLineItem(event, item.goodsId, item.goodsName, item.quantity, item.unitPrice, {
@@ -175,10 +188,24 @@ export class InventoryOrdersService {
       });
     }
 
-    return movements;
+    return {
+      movements,
+      duplicated: false
+    };
   }
 
   recordAdjustment(event: CabinetEventRecord, payload: SmartVmAdjustmentPayload) {
+    const existingMovements = this.store.inventory.filter(
+      (entry) => entry.orderNo === payload.orderNo && entry.type === "adjustment"
+    );
+
+    if (existingMovements.length) {
+      return {
+        movements: existingMovements,
+        duplicated: true
+      };
+    }
+
     const movements =
       payload.detail?.map((item) =>
         this.createMovementFromLineItem(
@@ -210,7 +237,10 @@ export class InventoryOrdersService {
       });
     }
 
-    return movements;
+    return {
+      movements,
+      duplicated: false
+    };
   }
 
   logRefundCallback(payload: unknown) {
@@ -233,14 +263,17 @@ export class InventoryOrdersService {
       refundNo?: string;
     }
   ) {
-    const event = this.store.events.find((entry) => entry.orderNo === orderNo);
+    const event = this.findEventByPlatformOrderNo(orderNo);
 
     if (!event) {
       throw new NotFoundException("未找到可退款的订单。");
     }
 
     const existingMovement = this.store.inventory.find(
-      (entry) => entry.orderNo === orderNo && entry.type === "refund"
+      (entry) =>
+        entry.orderNo === orderNo &&
+        entry.type === "refund" &&
+        entry.transactionId === transactionId
     );
 
     if (event.status === "refunded" && existingMovement) {
@@ -268,11 +301,21 @@ export class InventoryOrdersService {
       refundNo: options?.refundNo
     };
 
-    event.status = "refunded";
+    const isAdjustmentOrder = event.adjustmentOrderNo === orderNo;
+
+    if (!isAdjustmentOrder) {
+      event.status = "refunded";
+    }
     event.updatedAt = new Date().toISOString();
-    event.refundNo = options?.refundNo;
-    event.refundTransactionId = transactionId;
-    event.refundedAt = event.updatedAt;
+    if (isAdjustmentOrder) {
+      event.adjustmentRefundNo = options?.refundNo;
+      event.adjustmentRefundTransactionId = transactionId;
+      event.adjustmentRefundedAt = event.updatedAt;
+    } else {
+      event.refundNo = options?.refundNo;
+      event.refundTransactionId = transactionId;
+      event.refundedAt = event.updatedAt;
+    }
     this.store.inventory.unshift(movement);
 
     const isCallback = options?.source === "callback";
@@ -303,8 +346,8 @@ export class InventoryOrdersService {
       },
       description: isCallback ? `订单 ${orderNo} 收到退款回调。` : `管理员对订单 ${orderNo} 执行了退款。`,
       detail: isCallback
-        ? `退款单号 ${options?.refundNo ?? "-"}，退款金额 ${amount}，交易号 ${transactionId}。`
-        : `退款金额 ${amount}，交易号 ${transactionId}。`,
+        ? `退款单号 ${options?.refundNo ?? "-"}，退款金额 ${amount}，交易号 ${transactionId}。${isAdjustmentOrder ? " 当前退款对象为补扣订单。" : ""}`
+        : `退款金额 ${amount}，交易号 ${transactionId}。${isAdjustmentOrder ? " 当前退款对象为补扣订单。" : ""}`,
       relatedEventId: event.eventId,
       relatedOrderNo: orderNo,
       metadata: {
@@ -319,6 +362,12 @@ export class InventoryOrdersService {
       movement,
       transactionId
     };
+  }
+
+  findEventByPlatformOrderNo(orderNo: string) {
+    return this.store.events.find(
+      (entry) => entry.orderNo === orderNo || entry.adjustmentOrderNo === orderNo
+    );
   }
 
   private createMovementFromLineItem(

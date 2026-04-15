@@ -24,6 +24,8 @@ const selectedGoodsToAdd = ref("");
 const debugPanelVisible = ref(false);
 const debugLoading = ref(false);
 const debugLoaded = ref(false);
+const debugAuditLimit = ref(100);
+const debugCallbackLimit = ref(100);
 const debugCallbackLogs = ref<Awaited<ReturnType<typeof adminApi.deviceCallbackLogs>>>([]);
 const debugSystemAuditLogs = ref<Awaited<ReturnType<typeof adminApi.systemAuditLogs>>>([]);
 const notifyingPaymentEventId = ref("");
@@ -62,6 +64,8 @@ const debugSystemAuditRows = computed(() =>
   debugSystemAuditLogs.value.filter(
     (entry) =>
       entry.path.includes("/external/smartvm") ||
+      entry.path.includes("/api/cabinet-events/payment-success") ||
+      entry.path.includes("/api/inventory-orders/refund") ||
       entry.path.includes("/api/cabinet-events/callbacks") ||
       entry.path.includes("/api/inventory-orders/callbacks/refund")
   )
@@ -87,8 +91,20 @@ const formatEventStatus = (status: string) => {
 };
 
 const formatPlatformSyncStatus = (event: NonNullable<typeof recentEvents.value>[number]) => {
+  if (event.adjustmentOrderNo && event.adjustmentRefundedAt) {
+    return `补扣已退款${event.adjustmentRefundNo ? ` / ${event.adjustmentRefundNo}` : ""}`;
+  }
+
   if (event.refundedAt) {
     return `已退款${event.refundNo ? ` / ${event.refundNo}` : ""}`;
+  }
+
+  if (event.adjustmentOrderNo && event.adjustmentPaymentNotifyStatus === "success") {
+    return `补扣已回写付款成功${event.adjustmentPaymentTransactionId ? ` / ${event.adjustmentPaymentTransactionId}` : ""}`;
+  }
+
+  if (event.adjustmentOrderNo && event.adjustmentPaymentNotifyStatus === "failed") {
+    return `补扣回写失败${event.adjustmentPaymentNotifyMessage ? `：${event.adjustmentPaymentNotifyMessage}` : ""}`;
   }
 
   if (event.paymentNotifyStatus === "success") {
@@ -113,6 +129,38 @@ const formatPlatformSyncStatus = (event: NonNullable<typeof recentEvents.value>[
 
   return "未关联平台动作";
 };
+
+const resolvePlatformOrderContext = (
+  event: NonNullable<typeof recentEvents.value>[number],
+  intent: "payment" | "refund"
+) => {
+  const shouldUseAdjustmentOrder =
+    Boolean(event.adjustmentOrderNo) &&
+    ((event.adjustmentAmount ?? 0) > 0 ||
+      (intent === "refund" && Boolean(event.adjustmentOrderNo)));
+
+  return {
+    orderNo: shouldUseAdjustmentOrder ? event.adjustmentOrderNo ?? event.orderNo : event.orderNo,
+    amount: shouldUseAdjustmentOrder ? event.adjustmentAmount ?? event.amount : event.amount,
+    targetUrl: shouldUseAdjustmentOrder ? event.adjustmentNoticeUrl : event.paymentNotifyUrl,
+    label: shouldUseAdjustmentOrder ? "补扣订单" : "原始订单",
+    isAdjustmentOrder: shouldUseAdjustmentOrder,
+    transactionId: shouldUseAdjustmentOrder
+      ? event.adjustmentPaymentTransactionId
+      : event.paymentTransactionId,
+    refundedAt: shouldUseAdjustmentOrder ? event.adjustmentRefundedAt : event.refundedAt,
+    refundNo: shouldUseAdjustmentOrder ? event.adjustmentRefundNo : event.refundNo,
+    refundTransactionId: shouldUseAdjustmentOrder
+      ? event.adjustmentRefundTransactionId
+      : event.refundTransactionId
+  };
+};
+
+const paymentActionLabel = (event: NonNullable<typeof recentEvents.value>[number]) =>
+  resolvePlatformOrderContext(event, "payment").isAdjustmentOrder ? "补扣付款成功" : "付款成功";
+
+const refundActionLabel = (event: NonNullable<typeof recentEvents.value>[number]) =>
+  resolvePlatformOrderContext(event, "refund").isAdjustmentOrder ? "补扣退款" : "退款";
 
 const formatLogStatus = (status: string) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
@@ -270,10 +318,10 @@ const loadDebugPanel = async () => {
   debugLoading.value = true;
   try {
     const [callbackLogs, systemAuditLogs] = await Promise.all([
-      adminApi.deviceCallbackLogs(String(route.params.deviceCode), 30),
+      adminApi.deviceCallbackLogs(String(route.params.deviceCode), Number(debugCallbackLimit.value)),
       adminApi.systemAuditLogs({
         deviceCode: String(route.params.deviceCode),
-        limit: 40
+        limit: Number(debugAuditLimit.value)
       })
     ]);
     debugCallbackLogs.value = callbackLogs;
@@ -327,9 +375,10 @@ const remoteOpen = async () => {
 };
 
 const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value>[number]) => {
+  const platformContext = resolvePlatformOrderContext(event, "payment");
   const defaultTransactionId =
-    event.paymentTransactionId ||
-    event.adjustmentOrderNo ||
+    platformContext.transactionId ||
+    platformContext.orderNo ||
     `manual-pay-${event.orderNo}-${Date.now()}`;
   const transactionId = window.prompt("请输入支付交易号 transactionId", defaultTransactionId)?.trim();
 
@@ -337,7 +386,7 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
     return;
   }
 
-  const defaultAmount = String(event.adjustmentAmount ?? event.amount ?? 0);
+  const defaultAmount = String(platformContext.amount ?? 0);
   const amountInput = window.prompt("请输入支付金额（单位：分）", defaultAmount)?.trim();
 
   if (!amountInput) {
@@ -351,18 +400,19 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
     return;
   }
 
-  if (!window.confirm(`确认向平台回写订单 ${event.orderNo} 的付款成功结果吗？`)) {
+  if (!window.confirm(`确认向平台回写${platformContext.label} ${platformContext.orderNo} 的付款成功结果吗？`)) {
     return;
   }
 
   notifyingPaymentEventId.value = event.eventId;
   try {
     await adminApi.notifyPaymentSuccess({
-      orderNo: event.orderNo,
+      orderNo: platformContext.orderNo,
       eventId: event.eventId,
       transactionId,
       deviceCode: event.deviceCode,
-      amount
+      amount,
+      targetUrl: platformContext.targetUrl
     });
     window.alert("操作成功");
     await load();
@@ -378,21 +428,22 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
 };
 
 const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]) => {
-  const defaultTransactionId = event.paymentTransactionId || `refund-txn-${event.orderNo}`;
+  const platformContext = resolvePlatformOrderContext(event, "refund");
+  const defaultTransactionId = platformContext.transactionId || `refund-txn-${platformContext.orderNo}`;
   const transactionId = window.prompt("请输入退款对应的交易号 transactionId", defaultTransactionId)?.trim();
 
   if (!transactionId) {
     return;
   }
 
-  const defaultRefundNo = event.refundNo || `refund-${event.orderNo}-${Date.now()}`;
+  const defaultRefundNo = event.refundNo || `refund-${platformContext.orderNo}-${Date.now()}`;
   const refundNo = window.prompt("请输入退款单号 refundNo", defaultRefundNo)?.trim();
 
   if (!refundNo) {
     return;
   }
 
-  const defaultAmount = String(event.amount ?? event.adjustmentAmount ?? 0);
+  const defaultAmount = String(platformContext.amount ?? 0);
   const amountInput = window.prompt("请输入退款金额（单位：分）", defaultAmount)?.trim();
 
   if (!amountInput) {
@@ -406,14 +457,14 @@ const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]
     return;
   }
 
-  if (!window.confirm(`确认向平台发起订单 ${event.orderNo} 的退款吗？`)) {
+  if (!window.confirm(`确认向平台发起${platformContext.label} ${platformContext.orderNo} 的退款吗？`)) {
     return;
   }
 
   refundingEventId.value = event.eventId;
   try {
     await adminApi.refundOrder({
-      orderNo: event.orderNo,
+      orderNo: platformContext.orderNo,
       transactionId,
       deviceCode: event.deviceCode,
       refundNo,
@@ -818,10 +869,12 @@ onUnmounted(() => {
                         补扣单 {{ event.adjustmentOrderNo }}{{ event.adjustmentAmount !== undefined ? ` / ${event.adjustmentAmount} 分` : "" }}
                       </span>
                       <span
-                        v-if="event.refundNo || event.refundTransactionId"
+                        v-if="event.refundNo || event.refundTransactionId || event.adjustmentRefundNo || event.adjustmentRefundTransactionId"
                         class="admin-table__subtext"
                       >
-                        {{ event.refundNo ? `退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `交易号 ${event.refundTransactionId}` : "" }}
+                        {{ event.refundNo ? `原始退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `原始交易号 ${event.refundTransactionId}` : "" }}
+                        {{ (event.refundNo || event.refundTransactionId) && (event.adjustmentRefundNo || event.adjustmentRefundTransactionId) ? " / " : "" }}
+                        {{ event.adjustmentRefundNo ? `补扣退款单 ${event.adjustmentRefundNo}` : "" }}{{ event.adjustmentRefundNo && event.adjustmentRefundTransactionId ? " / " : "" }}{{ event.adjustmentRefundTransactionId ? `补扣交易号 ${event.adjustmentRefundTransactionId}` : "" }}
                       </span>
                     </td>
                     <td>
@@ -837,14 +890,14 @@ onUnmounted(() => {
                           :disabled="notifyingPaymentEventId === event.eventId"
                           @click="notifyPaymentSuccess(event)"
                         >
-                          {{ notifyingPaymentEventId === event.eventId ? "回写中" : "付款成功" }}
+                          {{ notifyingPaymentEventId === event.eventId ? "回写中" : paymentActionLabel(event) }}
                         </button>
                         <button
                           class="admin-button admin-button--ghost"
-                          :disabled="refundingEventId === event.eventId || event.status === 'refunded'"
+                          :disabled="refundingEventId === event.eventId || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
                           @click="refundEvent(event)"
                         >
-                          {{ refundingEventId === event.eventId ? "退款中" : event.status === "refunded" ? "已退款" : "退款" }}
+                          {{ refundingEventId === event.eventId ? "退款中" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
                         </button>
                       </div>
                     </td>
@@ -884,7 +937,17 @@ onUnmounted(() => {
         <article v-if="debugPanelVisible" class="admin-panel admin-panel-block">
           <div class="debug-grid">
             <section class="debug-panel">
-              <h4 class="debug-panel__title">平台外呼与系统审计</h4>
+              <div class="debug-panel__head">
+                <h4 class="debug-panel__title">平台外呼与系统审计</h4>
+                <label class="admin-field admin-field--inline debug-panel__limit">
+                  <span class="admin-field__label">显示条数</span>
+                  <select v-model="debugAuditLimit" class="admin-select" @change="loadDebugPanel">
+                    <option :value="50">50</option>
+                    <option :value="100">100</option>
+                    <option :value="200">200</option>
+                  </select>
+                </label>
+              </div>
               <div v-if="debugSystemAuditRows.length" class="debug-list">
                 <article v-for="entry in debugSystemAuditRows" :key="`${entry.occurredAt}-${entry.path}`" class="debug-card">
                   <div class="debug-card__meta">
@@ -922,7 +985,17 @@ onUnmounted(() => {
             </section>
 
             <section class="debug-panel">
-              <h4 class="debug-panel__title">平台回调原始记录</h4>
+              <div class="debug-panel__head">
+                <h4 class="debug-panel__title">平台回调原始记录</h4>
+                <label class="admin-field admin-field--inline debug-panel__limit">
+                  <span class="admin-field__label">显示条数</span>
+                  <select v-model="debugCallbackLimit" class="admin-select" @change="loadDebugPanel">
+                    <option :value="50">50</option>
+                    <option :value="100">100</option>
+                    <option :value="200">200</option>
+                  </select>
+                </label>
+              </div>
               <div v-if="debugCallbackLogs.length" class="debug-list">
                 <article v-for="entry in debugCallbackLogs" :key="entry.id" class="debug-card">
                   <div class="debug-card__meta">
@@ -1025,12 +1098,18 @@ onUnmounted(() => {
 
 .device-detail__layout {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  min-width: 0;
 }
 
 .device-detail__main,
 .device-detail__aside,
 .device-detail-status__item {
   min-width: 0;
+}
+
+.device-detail__aside {
+  min-width: 0;
+  align-content: start;
 }
 
 .device-detail-actions {
@@ -1050,21 +1129,46 @@ onUnmounted(() => {
   gap: 10px;
   align-items: end;
   margin-bottom: 12px;
+  min-width: 0;
 }
 
 .device-goods-toolbar__field {
   min-width: 0;
 }
 
+.device-goods-toolbar > * {
+  min-width: 0;
+}
+
+.device-detail__aside :deep(.admin-kv__value),
+.device-detail__aside :deep(.admin-table__subtext),
+.device-detail__aside :deep(.admin-note) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .debug-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  min-width: 0;
 }
 
 .debug-panel {
   display: grid;
   gap: 10px;
+  min-width: 0;
+}
+
+.debug-panel__head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.debug-panel__limit {
+  min-width: 110px;
 }
 
 .debug-panel__title {
@@ -1077,6 +1181,9 @@ onUnmounted(() => {
 .debug-list {
   display: grid;
   gap: 10px;
+  max-height: 72vh;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .debug-card {
@@ -1137,7 +1244,8 @@ onUnmounted(() => {
   border: 1px solid var(--admin-line);
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
   overflow: auto;
   max-height: 260px;
 }
@@ -1169,7 +1277,7 @@ onUnmounted(() => {
 }
 
 .device-table-scroll :deep(table) {
-  min-width: 100%;
+  min-width: 780px;
 }
 
 .admin-field--inline {

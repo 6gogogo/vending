@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import type { OperationLogRecord } from "@vm/shared-types";
+import type { CallbackLogRecord, OperationLogRecord, SystemAuditLogEntry } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
@@ -10,6 +10,8 @@ const route = useRoute();
 const log = ref<OperationLogRecord>();
 const loading = ref(false);
 const undoing = ref(false);
+const relatedAuditLogs = ref<SystemAuditLogEntry[]>([]);
+const relatedCallbackLogs = ref<CallbackLogRecord[]>([]);
 
 const resolveActorRoute = (entry?: OperationLogRecord) => resolveActorLink(entry?.actor);
 
@@ -30,10 +32,99 @@ const undoStateLabel = (entry?: OperationLogRecord) => {
   return "不可撤销";
 };
 
+const deviceCode = computed(() => {
+  if (typeof log.value?.metadata?.deviceCode === "string") {
+    return log.value.metadata.deviceCode;
+  }
+
+  if (log.value?.primarySubject?.type === "device") {
+    return log.value.primarySubject.id;
+  }
+
+  if (log.value?.secondarySubject?.type === "device") {
+    return log.value.secondarySubject.id;
+  }
+
+  return "";
+});
+
+const logIdentityTokens = computed(() => {
+  const tokens = new Set<string>();
+
+  if (log.value?.relatedOrderNo) {
+    tokens.add(log.value.relatedOrderNo);
+  }
+
+  if (log.value?.relatedEventId) {
+    tokens.add(log.value.relatedEventId);
+  }
+
+  if (log.value?.primarySubject?.id) {
+    tokens.add(log.value.primarySubject.id);
+  }
+
+  if (log.value?.secondarySubject?.id) {
+    tokens.add(log.value.secondarySubject.id);
+  }
+
+  return Array.from(tokens);
+});
+
+const stringifyForSearch = (value: unknown) => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+};
+
+const formatJsonBlock = (value: unknown) => {
+  if (value === undefined || value === null) {
+    return "-";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
 const load = async () => {
   loading.value = true;
   try {
     log.value = await adminApi.logDetail(String(route.params.logId));
+    if (deviceCode.value) {
+      const [auditLogs, callbackLogs] = await Promise.all([
+        adminApi.systemAuditLogs({ deviceCode: deviceCode.value, limit: 150 }),
+        adminApi.deviceCallbackLogs(deviceCode.value, 150)
+      ]);
+
+      const matchesCurrentLog = (value: unknown) =>
+        logIdentityTokens.value.some((token) => stringifyForSearch(value).includes(token));
+
+      relatedAuditLogs.value = auditLogs.filter((entry) =>
+        [entry.path, entry.body, entry.response, entry.error, entry.metadata].some((item) =>
+          matchesCurrentLog(item)
+        )
+      );
+      relatedCallbackLogs.value = callbackLogs.filter((entry) => matchesCurrentLog(entry.payload));
+    } else {
+      relatedAuditLogs.value = [];
+      relatedCallbackLogs.value = [];
+    }
   } finally {
     loading.value = false;
   }
@@ -93,6 +184,12 @@ onMounted(load);
             <span class="admin-kv__label">撤销状态</span>
             <span class="admin-kv__value">{{ undoStateLabel(log) }}</span>
           </div>
+          <div v-if="log.metadata" class="admin-kv__row">
+            <span class="admin-kv__label">底层元数据</span>
+            <span class="admin-kv__value">
+              <pre class="log-detail__pre">{{ formatJsonBlock(log.metadata) }}</pre>
+            </span>
+          </div>
           <div v-if="log.relatedOrderNo || log.relatedEventId" class="admin-kv__row">
             <span class="admin-kv__label">关联业务编号</span>
             <span class="admin-kv__value admin-code">
@@ -136,6 +233,45 @@ onMounted(load);
         <article class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
+              <span class="admin-kicker">底层记录</span>
+              <h3 class="admin-panel__title">相关系统审计与平台回调</h3>
+            </div>
+          </div>
+          <div class="admin-list">
+            <div v-if="relatedAuditLogs.length" class="log-detail__trace-list">
+              <article v-for="entry in relatedAuditLogs" :key="`${entry.occurredAt}-${entry.path}`" class="log-detail__trace-card">
+                <div class="log-detail__trace-head">
+                  <span class="admin-code">{{ entry.occurredAt.slice(0, 19).replace("T", " ") }}</span>
+                  <span class="admin-pill" :class="entry.path.startsWith('/external/smartvm') ? 'admin-pill--success' : 'admin-pill--neutral'">
+                    {{ entry.path.startsWith("/external/smartvm") ? "发" : "收" }}
+                  </span>
+                  <span class="admin-table__subtext">{{ entry.path }}</span>
+                </div>
+                <div class="log-detail__trace-grid">
+                  <pre class="log-detail__pre">{{ formatJsonBlock(entry.body) }}</pre>
+                  <pre class="log-detail__pre">{{ formatJsonBlock(entry.response ?? entry.error) }}</pre>
+                </div>
+              </article>
+            </div>
+            <span v-else class="admin-table__subtext">暂无关联系统审计。</span>
+
+            <div v-if="relatedCallbackLogs.length" class="log-detail__trace-list">
+              <article v-for="entry in relatedCallbackLogs" :key="entry.id" class="log-detail__trace-card">
+                <div class="log-detail__trace-head">
+                  <span class="admin-code">{{ entry.receivedAt.slice(0, 19).replace("T", " ") }}</span>
+                  <span class="admin-pill admin-pill--neutral">平台回调</span>
+                  <span class="admin-table__subtext">{{ entry.type }}</span>
+                </div>
+                <pre class="log-detail__pre">{{ formatJsonBlock(entry.payload) }}</pre>
+              </article>
+            </div>
+            <span v-else class="admin-table__subtext">暂无关联平台回调。</span>
+          </div>
+        </article>
+
+        <article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
+            <div>
               <span class="admin-kicker">操作</span>
               <h3 class="admin-panel__title">撤销与继续追踪</h3>
             </div>
@@ -173,3 +309,47 @@ onMounted(load);
     </div>
   </section>
 </template>
+
+<style scoped>
+.log-detail__pre {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  max-height: 320px;
+}
+
+.log-detail__trace-list {
+  display: grid;
+  gap: 10px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.log-detail__trace-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel-muted);
+}
+
+.log-detail__trace-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-detail__trace-grid {
+  display: grid;
+  gap: 8px;
+}
+</style>
