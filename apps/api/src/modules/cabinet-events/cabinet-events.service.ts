@@ -1,4 +1,5 @@
 import { BadGatewayException, BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 
 import type {
   CabinetEventRecord,
@@ -22,7 +23,8 @@ export class CabinetEventsService {
     @Inject(AccessRulesService) private readonly accessRulesService: AccessRulesService,
     @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway,
     @Inject(InventoryOrdersService) private readonly inventoryOrdersService: InventoryOrdersService,
-    @Inject(AlertsService) private readonly alertsService: AlertsService
+    @Inject(AlertsService) private readonly alertsService: AlertsService,
+    @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
   async openCabinet(payload: CabinetOpenRequest) {
@@ -343,17 +345,22 @@ export class CabinetEventsService {
     });
 
     const movements = this.inventoryOrdersService.recordSettlement(event, payload);
-    void this.tryAutoForwardPaymentSuccess(
-      event,
-      {
-        orderNo: event.orderNo,
-        eventId: event.eventId,
-        transactionId: `auto-settlement-${event.orderNo}`,
-        deviceCode: payload.deviceCode,
-        amount: payload.amount
-      },
-      payload.notifyUrl
-    );
+    if (this.shouldAutoForwardSettlementPaymentSuccess()) {
+      void this.tryAutoForwardPaymentSuccess(
+        event,
+        {
+          orderNo: event.orderNo,
+          eventId: event.eventId,
+          transactionId: `auto-settlement-${event.orderNo}`,
+          deviceCode: payload.deviceCode,
+          amount: payload.amount
+        },
+        payload.notifyUrl
+      );
+    } else {
+      event.paymentNotifyStatus = "pending";
+      event.paymentNotifyMessage = "已收到结算回调，等待手动或外部支付成功后回写平台。";
+    }
 
     return {
       movements,
@@ -405,8 +412,8 @@ export class CabinetEventsService {
       event.paymentNotifyStatus = "pending";
       event.paymentNotifyMessage = "等待补扣订单支付成功后，再向平台回写付款成功。";
       return {
-        code: 500,
-        message: "等待用户完成支付"
+        code: 200,
+        message: "补扣回调已接收，等待支付成功后回写平台"
       };
     }
 
@@ -424,6 +431,19 @@ export class CabinetEventsService {
       code: 200,
       message: "补扣回调已接收"
     };
+  }
+
+  private shouldAutoForwardSettlementPaymentSuccess() {
+    const raw = this.configService
+      .get<string>("SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS")
+      ?.trim()
+      .toLowerCase();
+
+    if (!raw) {
+      return true;
+    }
+
+    return raw === "true" || raw === "1" || raw === "yes" || raw === "on";
   }
 
   async handlePaymentSuccess(payload: SmartVmPaymentPayload & Record<string, unknown>) {

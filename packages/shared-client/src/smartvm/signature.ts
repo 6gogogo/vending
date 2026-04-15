@@ -52,5 +52,9 @@ export const verifySmartVmSignature = (
   credentials: SmartVmCredentials
 ) => {
   const { sign, ...unsignedPayload } = payload;
-  return sign === signSmartVmPayload(unsignedPayload, credentials);
+  if (typeof sign !== "string" || !sign.trim()) {
+    return false;
+  }
+
+  return sign.trim().toUpperCase() === signSmartVmPayload(unsignedPayload, credentials);
 };
