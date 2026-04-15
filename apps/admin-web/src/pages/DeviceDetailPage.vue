@@ -136,6 +136,85 @@ const formatDebugPayload = (value: unknown) => {
   }
 };
 
+const getAuditDirection = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) =>
+  entry.path.startsWith("/external/smartvm") ? "发" : "收";
+
+const getAuditSource = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) => {
+  if (entry.path.startsWith("/external/smartvm")) {
+    return "后端";
+  }
+
+  if (entry.path.includes("/callbacks/")) {
+    return "平台";
+  }
+
+  return "外部调用方";
+};
+
+const getAuditTarget = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) => {
+  if (entry.path.startsWith("/external/smartvm")) {
+    return "平台";
+  }
+
+  return "后端";
+};
+
+const getAuditRequestUrl = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) => {
+  const metadata = entry.metadata as Record<string, unknown> | undefined;
+  return typeof metadata?.requestUrl === "string" ? metadata.requestUrl : "";
+};
+
+const getAuditLabel = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) => {
+  if (entry.path.includes("/api/pay/container/opendoor")) {
+    return "开门接口";
+  }
+
+  if (entry.path.includes("/api/pay/container/getCabinetGoodsInfo")) {
+    return "获取设备商品列表";
+  }
+
+  if (entry.path.includes("/payment-success")) {
+    return "付款成功异步通知";
+  }
+
+  if (entry.path.includes("/refund")) {
+    return "退款接口";
+  }
+
+  if (entry.path.includes("/callbacks/door-status")) {
+    return "门状态推送";
+  }
+
+  if (entry.path.includes("/callbacks/settlement")) {
+    return "结算商品推送";
+  }
+
+  if (entry.path.includes("/callbacks/adjustment")) {
+    return "补扣商品推送";
+  }
+
+  if (entry.path.includes("/callbacks/payment-success")) {
+    return "外部付款成功通知";
+  }
+
+  return entry.path;
+};
+
+const getAuditRequestLabel = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) =>
+  getAuditDirection(entry) === "发" ? "发送内容" : "收到内容";
+
+const getAuditResponseLabel = (entry: NonNullable<typeof debugSystemAuditRows.value>[number]) =>
+  getAuditDirection(entry) === "发" ? "平台响应" : "后端响应";
+
+const formatCallbackTypeLabel = (type: string) => {
+  if (type === "door-status") return "门状态推送";
+  if (type === "settlement") return "结算商品推送";
+  if (type === "adjustment") return "补扣商品推送";
+  if (type === "payment-success") return "付款成功异步通知";
+  if (type === "refund") return "退款接口";
+  return type;
+};
+
 const formatGoodsStock = (goods: NonNullable<typeof selectedDoorGoods.value>[number]) => {
   const base =
     goods.thresholdEnabled && goods.lowStockThreshold !== undefined
@@ -804,25 +883,35 @@ onUnmounted(() => {
                 <article v-for="entry in debugSystemAuditRows" :key="`${entry.occurredAt}-${entry.path}`" class="debug-card">
                   <div class="debug-card__meta">
                     <span class="admin-code">{{ entry.occurredAt.slice(0, 19).replace("T", " ") }}</span>
+                    <span class="admin-pill" :class="getAuditDirection(entry) === '发' ? 'admin-pill--success' : 'admin-pill--neutral'">
+                      {{ getAuditDirection(entry) }}
+                    </span>
+                    <span class="admin-pill admin-pill--neutral">{{ getAuditLabel(entry) }}</span>
                     <span class="admin-pill" :class="entry.statusCode >= 500 ? 'admin-pill--danger' : entry.statusCode >= 400 ? 'admin-pill--warning' : 'admin-pill--success'">
                       {{ entry.statusCode }}
                     </span>
-                    <span class="admin-code">{{ entry.path }}</span>
+                    <span class="debug-card__route">{{ getAuditSource(entry) }} → {{ getAuditTarget(entry) }}</span>
+                  </div>
+                  <div class="debug-card__endpoint">
+                    <span class="admin-table__subtext">接口路径：{{ entry.path }}</span>
+                    <span v-if="getAuditRequestUrl(entry)" class="admin-table__subtext">目标地址：{{ getAuditRequestUrl(entry) }}</span>
                   </div>
                   <p v-if="entry.error?.message" class="debug-card__error">错误：{{ entry.error.message }}</p>
-                  <details>
-                    <summary>查看请求与响应</summary>
-                    <pre class="debug-card__pre">请求：
-{{ formatDebugPayload(entry.body) }}
-
-响应：
-{{ formatDebugPayload(entry.response) }}</pre>
-                  </details>
+                  <div class="debug-card__payload-grid">
+                    <section class="debug-card__payload-panel">
+                      <div class="debug-card__payload-title">{{ getAuditRequestLabel(entry) }}</div>
+                      <pre class="debug-card__pre">{{ formatDebugPayload(entry.body) }}</pre>
+                    </section>
+                    <section class="debug-card__payload-panel">
+                      <div class="debug-card__payload-title">{{ getAuditResponseLabel(entry) }}</div>
+                      <pre class="debug-card__pre">{{ formatDebugPayload(entry.response ?? entry.error) }}</pre>
+                    </section>
+                  </div>
                 </article>
               </div>
               <div v-else class="admin-empty">
                 <div class="admin-empty__title">{{ debugLoading ? "正在加载系统审计" : "暂无底层系统审计" }}</div>
-                <div class="admin-empty__body">这里会显示 SmartVM 外呼请求、返回状态和错误原文。</div>
+                <div class="admin-empty__body">这里会显示后端发给平台和平台发给后端的接口记录，并标出收/发方向。</div>
               </div>
             </section>
 
@@ -832,9 +921,14 @@ onUnmounted(() => {
                 <article v-for="entry in debugCallbackLogs" :key="entry.id" class="debug-card">
                   <div class="debug-card__meta">
                     <span class="admin-code">{{ entry.receivedAt.slice(0, 19).replace("T", " ") }}</span>
-                    <span class="admin-pill admin-pill--neutral">{{ entry.type }}</span>
+                    <span class="admin-pill admin-pill--neutral">收</span>
+                    <span class="admin-pill admin-pill--neutral">{{ formatCallbackTypeLabel(entry.type) }}</span>
+                    <span class="debug-card__route">平台 → 后端</span>
                   </div>
-                  <pre class="debug-card__pre">{{ formatDebugPayload(entry.payload) }}</pre>
+                  <div class="debug-card__payload-panel">
+                    <div class="debug-card__payload-title">收到内容</div>
+                    <pre class="debug-card__pre">{{ formatDebugPayload(entry.payload) }}</pre>
+                  </div>
                 </article>
               </div>
               <div v-else class="admin-empty">
@@ -983,10 +1077,38 @@ onUnmounted(() => {
   align-items: center;
 }
 
+.debug-card__route {
+  font-size: 12px;
+  color: var(--admin-text-muted);
+}
+
+.debug-card__endpoint {
+  display: grid;
+  gap: 4px;
+}
+
 .debug-card__error {
   margin: 0;
   color: #b42318;
   font-size: 13px;
+}
+
+.debug-card__payload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.debug-card__payload-panel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.debug-card__payload-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--admin-text);
 }
 
 .debug-card__pre {
@@ -997,8 +1119,9 @@ onUnmounted(() => {
   border: 1px solid var(--admin-line);
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  overflow: auto;
+  max-height: 260px;
 }
 
 .device-task-actions {
@@ -1036,6 +1159,10 @@ onUnmounted(() => {
   }
 
   .debug-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-card__payload-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -1,0 +1,19 @@
+{
+  "clientId": "2066260320115214",
+  "nonceStr": "D3VkCSZRxazdGti",
+  "sign": "e02b6e4210fdca6eclef54dabebad5f5",
+  "orderNo": "91120149H260414105041H855556H103",
+  "eventId": "event-1776135041936-2978",
+  "phone": "13800000002",
+  "deviceCode": "91120149",
+  "amount": 500,
+  "notifyUrl": "https://pre.smartvm.cn/api/pay/container/openapipayback/69bed853d503050009000001/69bcd8533c982804a4e57d9f",
+  "detail": [
+    {
+      "goodsName": "旺仔牛奶原味245ml",
+      "quantity": 1,
+      "unitPrice": 500,
+      "goodsId": "9110011"
+    }
+  ]
+}

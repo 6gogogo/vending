@@ -14,6 +14,7 @@ interface SmartVmClientOptions {
   fetchImpl?: typeof fetch;
   onExchange?: (payload: {
     path: string;
+    requestUrl: string;
     requestBody: SmartVmPayload;
     statusCode: number;
     responseBody: unknown;
@@ -105,6 +106,7 @@ export class SmartVmClient {
 
       this.onExchange?.({
         path,
+        requestUrl: targetUrl,
         requestBody: signedPayload,
         statusCode: response.status,
         responseBody: parsed,
@@ -120,6 +122,7 @@ export class SmartVmClient {
       const detail = this.extractDetail(json, "SmartVM business request failed");
       this.onExchange?.({
         path,
+        requestUrl: targetUrl,
         requestBody: signedPayload,
         statusCode: response.status,
         responseBody: json,
@@ -136,6 +139,7 @@ export class SmartVmClient {
 
     this.onExchange?.({
       path,
+      requestUrl: targetUrl,
       requestBody: signedPayload,
       statusCode: response.status,
       responseBody: json,

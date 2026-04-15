@@ -623,6 +623,8 @@ export class UsersService {
     payload: {
       deviceCode: string;
       goodsId: string;
+      relatedEventId?: string;
+      relatedOrderNo?: string;
       goodsName?: string;
       category?: InventoryMovement["category"];
       quantity: number;
@@ -636,6 +638,8 @@ export class UsersService {
     const localGoods = this.devicesService.findGoods(payload.deviceCode, payload.goodsId);
     const movement: InventoryMovement = {
       id: this.store.createId("movement"),
+      sourceOrderNo: payload.relatedOrderNo,
+      eventId: payload.relatedEventId,
       userId: user.id,
       deviceCode: payload.deviceCode,
       goodsId: payload.goodsId,
@@ -704,6 +708,8 @@ export class UsersService {
         id: payload.deviceCode,
         label: payload.deviceCode
       },
+      relatedEventId: payload.relatedEventId,
+      relatedOrderNo: payload.relatedOrderNo,
       metadata: {
         direction: payload.direction,
         quantity: payload.quantity,
@@ -711,6 +717,10 @@ export class UsersService {
         goodsName: movement.goodsName,
         note: payload.note ?? "",
         deviceCode: payload.deviceCode,
+        platformSync: "local_only",
+        platformSyncLabel: "仅本地，未同步平台",
+        relatedEventId: payload.relatedEventId,
+        relatedOrderNo: payload.relatedOrderNo,
         batchId: createdBatchId,
         consumedBatches,
         undoState: "undoable"

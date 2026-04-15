@@ -1,5 +1,7 @@
 import {
+  ensureAdminToken,
   findEvent,
+  getSystemAuditEntries,
   readFixture,
   getSandboxConfig,
   postJson
@@ -46,15 +48,50 @@ if (Number.isNaN(payload.amount)) {
 
 const response = await postJson(baseUrl, "/cabinet-events/callbacks/payment-success", payload);
 
+let platformApi;
+let auditLookupError;
+
+try {
+  const token = await ensureAdminToken(baseUrl);
+  const auditEntries = await getSystemAuditEntries(baseUrl, token, {
+    pathContains: "/external/smartvm/api/pay/container/paymentSuccess",
+    deviceCode: payload.deviceCode,
+    limit: 20
+  });
+
+  const matchedAudit = Array.isArray(auditEntries)
+    ? auditEntries.find((entry) => {
+        const body = entry?.body ?? {};
+        return body?.orderNo === payload.orderNo && body?.transactionId === payload.transactionId;
+      })
+    : undefined;
+
+  if (matchedAudit) {
+    platformApi = {
+      apiName: "付款成功异步通知",
+      requestUrl: matchedAudit.metadata?.requestUrl ?? matchedAudit.path,
+      requestBody: matchedAudit.body,
+      responseStatus: matchedAudit.statusCode,
+      responseBody: matchedAudit.response ?? matchedAudit.error ?? null
+    };
+  }
+} catch (error) {
+  auditLookupError = error instanceof Error ? error.message : "无法读取平台转发审计日志。";
+}
+
 console.log(
   JSON.stringify(
     {
       mode: "via-local-api",
-      requestUrl: `${baseUrl.replace(/\/$/, "")}/cabinet-events/callbacks/payment-success`,
-      source: useFixture ? maybeFixturePath : payload.orderNo,
-      requestBody: payload,
-      responseStatus: response.status,
-      responseBody: response.json
+      localApi: {
+        requestUrl: `${baseUrl.replace(/\/$/, "")}/cabinet-events/callbacks/payment-success`,
+        source: useFixture ? maybeFixturePath : payload.orderNo,
+        requestBody: payload,
+        responseStatus: response.status,
+        responseBody: response.json
+      },
+      platformApi,
+      auditLookupError
     },
     null,
     2

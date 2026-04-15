@@ -219,7 +219,7 @@ npm run sandbox:payment-success
 实际执行内容：
 
 ```bash
-node sandbox/scripts/payment-success.mjs sandbox/fixtures/payment-success.sample.json
+node sandbox/scripts/payment-success.mjs
 ```
 
 作用：
@@ -229,7 +229,8 @@ node sandbox/scripts/payment-success.mjs sandbox/fixtures/payment-success.sample
 
 目标地址：
 
-- `SMARTVM_BASE_URL + /api/pay/container/paymentSuccess`
+- 优先使用结算/补扣回调里返回的 `notifyUrl / noticeUrl`
+- 如果示例文件里没有这两个字段，才回退到 `SMARTVM_BASE_URL + /api/pay/container/paymentSuccess`
 
 依赖环境变量：
 
@@ -240,6 +241,23 @@ node sandbox/scripts/payment-success.mjs sandbox/fixtures/payment-success.sample
 补充说明：
 
 - 如果你还没有真实的 SmartVM 签名参数，这个命令不会继续请求测试平台
+- 不传参数时，默认读取 `sandbox/fixtures/payment-success.sample.json`
+- 如果你要用真实结算回调里的 `notifyUrl / noticeUrl`，请显式传入文件：
+
+```bash
+npm run sandbox:payment-success -- sandbox/fixtures/payment-success-from-settlement.sample.json
+```
+
+也可以直接使用当前测试柜机 `91120149` 的付款成功样例：
+
+```bash
+npm run sandbox:payment-success -- sandbox/fixtures/payment-success-91120149.sample.json
+```
+- 当前输出会严格按赛方文档“付款成功异步通知”的方式展示：
+  - `requestUrl`
+  - `requestBody`
+  - `responseStatus`
+  - `responseBody`
 
 补充命令：
 
@@ -265,6 +283,7 @@ npm run sandbox:payment-success:api -- sandbox/fixtures/payment-success-from-set
 - 再由本地后端转发到 SmartVM 平台
 - 用于核对“PC 后端 / 正式业务后端”这条转发链是否正常
 - 如果第一参数是 JSON 文件路径，脚本会直接从文件里读取 `orderNo / eventId / deviceCode / amount`
+- 如果能拿到管理员 token，输出里还会追加平台侧“付款成功异步通知”的原始请求/响应
 
 补充说明：
 
@@ -272,6 +291,9 @@ npm run sandbox:payment-success:api -- sandbox/fixtures/payment-success-from-set
 - `transactionId` 和 `amount` 也支持手工传入，便于和平台实际补扣单对齐
 - 如果第一参数是文件路径，第二参数仍然是 `transactionId`，第三参数可选覆盖金额
 - 这个命令调用的是 `/api/cabinet-events/callbacks/payment-success`
+- 输出分两层：
+  - `localApi`：本地后端入口
+  - `platformApi`：后端实际转发到平台的请求/返回，字段风格对齐赛方文档
 - 如果 PC 后台还提示 `Cannot POST /api/cabinet-events/payment-success`，说明你云端后端还没更新到当前代码；当前源码里管理员入口和回调入口都已经存在
 
 ---
@@ -382,7 +404,7 @@ npm run sandbox:settlement
 实际执行内容：
 
 ```bash
-node sandbox/scripts/simulate-settlement.mjs sandbox/fixtures/settlement.sample.json
+node sandbox/scripts/simulate-settlement.mjs
 ```
 
 作用：
@@ -397,6 +419,17 @@ node sandbox/scripts/simulate-settlement.mjs sandbox/fixtures/settlement.sample.
 依赖环境变量：
 
 - `LOCAL_API_BASE_URL`
+
+补充说明：
+
+- 不传参数时，默认读取 `sandbox/fixtures/settlement.sample.json`
+- 如果你要用平台实际回调参数，请显式传入你自己的 JSON 文件
+
+例如当前测试柜机 `91120149` 的结算样例：
+
+```bash
+npm run sandbox:settlement -- sandbox/fixtures/settlement-91120149.sample.json
+```
 
 ---
 

@@ -91,13 +91,27 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "manual-restock":
       return {
-        description: `${actor}修改了${device}的${goods}存货量，增加${quantity ?? 0}件。`,
-        detail: baseDetail([`关联人员 ${primary}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `增加 ${quantity} 件` : undefined, `状态 ${result}`])
+        description: `${actor}修改了${device}的${goods}存货量，增加${quantity ?? 0}件（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `关联人员 ${primary}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `增加 ${quantity} 件` : undefined,
+          `同步范围 仅本地，未同步平台`,
+          `状态 ${result}`
+        ])
       };
     case "manual-deduction":
       return {
-        description: `${actor}修改了${device}的${goods}存货量，减少${quantity ?? 0}件。`,
-        detail: baseDetail([`关联人员 ${primary}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `减少 ${quantity} 件` : undefined, `状态 ${result}`])
+        description: `${actor}修改了${device}的${goods}存货量，减少${quantity ?? 0}件（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `关联人员 ${primary}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `减少 ${quantity} 件` : undefined,
+          `同步范围 仅本地，未同步平台`,
+          `状态 ${result}`
+        ])
       };
     case "remote-open-device":
       return {
@@ -121,18 +135,36 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "settlement-callback":
       return {
-        description: `系统完成了${device}的结算处理，订单${secondary}已入库。`,
-        detail: baseDetail([`柜机 ${device}`, `关联事件 ${secondary}`, `金额 ${String(entry.metadata?.amount ?? 0)}`, `状态 ${result}`])
+        description: `系统收到了${device}的结算商品推送，订单${secondary}已入库。`,
+        detail: baseDetail([
+          `来源 平台结算商品推送`,
+          `柜机 ${device}`,
+          `关联事件 ${secondary}`,
+          `金额 ${String(entry.metadata?.amount ?? 0)}`,
+          `状态 ${result}`
+        ])
       };
     case "adjustment-callback":
       return {
-        description: `系统处理了${device}的补扣结果，当前结果为${result}。`,
-        detail: baseDetail([`柜机 ${device}`, `关联事件 ${secondary}`, `补扣金额 ${String(entry.metadata?.amount ?? 0)}`, `状态 ${result}`])
+        description: `系统收到了${device}的补扣推送，当前结果为${result}。`,
+        detail: baseDetail([
+          `来源 平台补扣商品推送`,
+          `柜机 ${device}`,
+          `关联事件 ${secondary}`,
+          `补扣金额 ${String(entry.metadata?.amount ?? 0)}`,
+          `状态 ${result}`
+        ])
       };
     case "payment-success-callback":
       return {
-        description: `系统确认了${device}的支付成功通知。`,
-        detail: baseDetail([`柜机 ${device}`, `关联事件 ${secondary}`, typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined, `状态 ${result}`])
+        description: `系统收到了${device}的付款成功通知，并已准备向平台回写结果。`,
+        detail: baseDetail([
+          `来源 外部支付成功通知`,
+          `柜机 ${device}`,
+          `关联事件 ${secondary}`,
+          typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
+          `状态 ${result}`
+        ])
       };
     case "auto-payment-success":
       return {
@@ -159,13 +191,21 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "manual-refund":
       return {
-        description: `${actor}对${device}执行了退款操作。`,
-        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `关联事件 ${secondary}`, `退款金额 ${String(entry.metadata?.amount ?? 0)}`, `状态 ${result}`])
+        description: `${actor}对${device}执行了退款，并已同步平台。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `关联事件 ${secondary}`,
+          `退款金额 ${String(entry.metadata?.amount ?? 0)}`,
+          `同步范围 已调用平台退款接口`,
+          `状态 ${result}`
+        ])
       };
     case "refund-callback":
       return {
-        description: `系统确认了${device}的退款回调。`,
+        description: `系统收到了${device}的退款回调。`,
         detail: baseDetail([
+          `来源 平台退款回调`,
           `柜机 ${device}`,
           `关联事件 ${secondary}`,
           typeof entry.metadata?.refundNo === "string" ? `退款单号 ${entry.metadata.refundNo}` : undefined,
@@ -196,25 +236,27 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "manual-add-batch":
       return {
-        description: `${actor}向${device}新增了${goods}批次${quantity ? ` x${quantity}` : ""}。`,
+        description: `${actor}向${device}新增了${goods}批次${quantity ? ` x${quantity}` : ""}（仅本地，未同步平台）。`,
         detail: baseDetail([
           `动作人 ${actor}`,
           `柜机 ${device}`,
           `货品 ${goods}`,
           quantity ? `数量 ${quantity}` : undefined,
           typeof entry.metadata?.expiresAt === "string" ? `保质期 ${entry.metadata.expiresAt}` : undefined,
+          `同步范围 仅本地，未同步平台`,
           `状态 ${result}`
         ])
       };
     case "manual-remove-batch":
       return {
-        description: `${actor}从${device}去除了${goods}批次${quantity ? ` x${quantity}` : ""}。`,
+        description: `${actor}从${device}去除了${goods}批次${quantity ? ` x${quantity}` : ""}（仅本地，未同步平台）。`,
         detail: baseDetail([
           `动作人 ${actor}`,
           `柜机 ${device}`,
           `货品 ${goods}`,
           quantity ? `数量 ${quantity}` : undefined,
           typeof entry.metadata?.note === "string" && entry.metadata.note ? `说明 ${entry.metadata.note}` : undefined,
+          `同步范围 仅本地，未同步平台`,
           `状态 ${result}`
         ])
       };
@@ -268,13 +310,27 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "undo-manual-restock":
       return {
-        description: `${actor}撤销了对${device}的${goods}补货${quantity ? ` x${quantity}` : ""}。`,
-        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
+        description: `${actor}撤销了对${device}的${goods}补货${quantity ? ` x${quantity}` : ""}（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `数量 ${quantity}` : undefined,
+          `同步范围 仅本地，未同步平台`,
+          `状态 ${result}`
+        ])
       };
     case "undo-manual-deduction":
       return {
-        description: `${actor}撤销了对${device}的${goods}补扣${quantity ? ` x${quantity}` : ""}。`,
-        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
+        description: `${actor}撤销了对${device}的${goods}补扣${quantity ? ` x${quantity}` : ""}（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `数量 ${quantity}` : undefined,
+          `同步范围 仅本地，未同步平台`,
+          `状态 ${result}`
+        ])
       };
     case "undo-user-update":
       return {
@@ -288,13 +344,27 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "undo-manual-add-batch":
       return {
-        description: `${actor}撤销了向${device}新增${goods}批次的操作。`,
-        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
+        description: `${actor}撤销了向${device}新增${goods}批次的操作（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `数量 ${quantity}` : undefined,
+          `同步范围 仅本地，未同步平台`,
+          `状态 ${result}`
+        ])
       };
     case "undo-manual-remove-batch":
       return {
-        description: `${actor}撤销了从${device}去除${goods}批次的操作。`,
-        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `货品 ${goods}`, quantity ? `数量 ${quantity}` : undefined, `状态 ${result}`])
+        description: `${actor}撤销了从${device}去除${goods}批次的操作（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          `货品 ${goods}`,
+          quantity ? `数量 ${quantity}` : undefined,
+          `同步范围 仅本地，未同步平台`,
+          `状态 ${result}`
+        ])
       };
     case "create-user":
       return {
@@ -402,6 +472,30 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           `动作人 ${actor}`,
           `柜机 ${device}`,
           typeof entry.metadata?.count === "number" ? `同步种类 ${entry.metadata.count}` : undefined,
+          `状态 ${result}`
+        ])
+      };
+    case "inventory-transfer":
+      return {
+        description: `${actor}执行了${primary}到${secondary}的货物调拨（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `来源 ${primary}`,
+          `去向 ${secondary}`,
+          `货品 ${goods}`,
+          quantity ? `数量 ${quantity}` : undefined,
+          `同步范围 仅本地，未同步平台`,
+          `状态 ${result}`
+        ])
+      };
+    case "stocktake-device":
+      return {
+        description: `${actor}完成了${device}的柜机盘点（仅本地，未同步平台）。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          typeof entry.metadata?.itemCount === "number" ? `盘点货品 ${entry.metadata.itemCount} 种` : undefined,
+          `同步范围 仅本地，未同步平台`,
           `状态 ${result}`
         ])
       };

@@ -81,11 +81,28 @@ const selectedGoods = computed(() => selectedDeviceGoods.value.find((entry) => e
 const resolveLogActorRoute = (actor: UserManagementDetail["recentLogs"][number]["actor"]) => resolveActorLink(actor);
 const formatRole = (role: UserManagementDetail["user"]["role"]) => role === "special" ? "普通用户" : role === "merchant" ? "爱心商户" : "管理员";
 const formatLogStatus = (status: UserManagementDetail["recentLogs"][number]["status"]) => status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
-const formatRecordType = (type: UserManagementDetail["recentRecords"][number]["type"]) => type === "pickup" ? "取货" : type === "donation" || type === "manual-restock" ? "补货" : type === "adjustment" || type === "manual-deduction" ? "补扣" : type === "refund" ? "退款" : type;
+const formatRecordType = (type: UserManagementDetail["recentRecords"][number]["type"]) =>
+  type === "pickup"
+    ? "取货"
+    : type === "donation"
+      ? "补货"
+      : type === "manual-restock"
+        ? "手工补货"
+        : type === "adjustment"
+          ? "平台补扣"
+          : type === "manual-deduction"
+            ? "手工补扣"
+            : type === "refund"
+              ? "退款"
+              : type;
 const formatCalendarState = (status?: "complete" | "partial" | "unserved" | "not_applicable") => status === "complete" ? "calendar-day--complete" : status === "partial" ? "calendar-day--partial" : "";
 const formatBusinessStatus = (status?: "complete" | "partial" | "unserved" | "not_applicable") => status === "complete" ? "全部领取" : status === "partial" ? "部分领取" : status === "unserved" ? "物资未领取" : "未配置";
 const formatWeekdays = (weekdays: number[]) => weekdayOptions.filter((item) => weekdays.includes(item.value)).map((item) => item.label).join("、");
 const buildPolicyName = (goodsId: string, startHour: number, endHour: number, weekdays: number[]) => `${goodsCatalogMap.value.get(goodsId)?.name || goodsId} ${formatWeekdays(weekdays)} ${String(startHour).padStart(2, "0")}:00-${String(endHour).padStart(2, "0")}:00`;
+const isLocalOnlyRecord = (record: UserManagementDetail["recentRecords"][number]) =>
+  record.type === "manual-restock" || record.type === "manual-deduction";
+const isPlatformRefundRecord = (record: UserManagementDetail["recentRecords"][number]) =>
+  record.type === "refund" || Boolean(record.refundNo);
 
 const directPersonalPolicies = computed(() =>
   (detail.value?.user.accessPolicies ?? [])
@@ -380,11 +397,14 @@ onMounted(async () => {
                 <td><RouterLink class="admin-link" :to="`/operations/${record.deviceCode}`">{{ record.deviceCode }}</RouterLink></td>
                 <td>{{ formatRecordType(record.type) }}</td>
                 <td>
+                  <span v-if="isLocalOnlyRecord(record)" class="admin-table__strong user-detail__local-only">仅本地，未同步平台</span>
+                  <span v-else-if="isPlatformRefundRecord(record)" class="admin-table__strong">已同步平台退款</span>
+                  <span v-else-if="record.orderNo || record.sourceOrderNo || record.transactionId" class="admin-table__strong">已关联平台订单</span>
                   <span v-if="record.orderNo" class="admin-table__subtext">订单 {{ record.orderNo }}</span>
                   <span v-if="record.sourceOrderNo" class="admin-table__subtext">原订单 {{ record.sourceOrderNo }}</span>
                   <span v-if="record.transactionId" class="admin-table__subtext">交易号 {{ record.transactionId }}</span>
                   <span v-if="record.refundNo" class="admin-table__subtext">退款单 {{ record.refundNo }}</span>
-                  <span v-if="!record.orderNo && !record.sourceOrderNo && !record.transactionId && !record.refundNo" class="admin-table__subtext">本地记录</span>
+                  <span v-if="!record.orderNo && !record.sourceOrderNo && !record.transactionId && !record.refundNo" class="admin-table__subtext">{{ isLocalOnlyRecord(record) ? "本地手工记录" : "本地记录" }}</span>
                 </td>
               </tr>
             </tbody>
@@ -448,6 +468,7 @@ onMounted(async () => {
             <label class="admin-field"><span class="admin-field__label">数量</span><input v-model.number="form.quantity" class="admin-input" type="number" min="1" /></label>
             <label class="admin-field"><span class="admin-field__label">方向</span><select v-model="form.direction" class="admin-select"><option value="deduct">补扣</option><option value="restock">补货</option></select></label>
             <label class="admin-field"><span class="admin-field__label">备注</span><input v-model="form.note" class="admin-input" placeholder="例如用户领取异常后人工补扣" /></label>
+            <div class="admin-note">当前手工补货 / 手工补扣只修正本地库存与人员记录，不会在平台创建补货或补扣订单。</div>
             <button class="admin-button" :disabled="saving || !selectedGoods" @click="submitAdjustment">{{ saving ? "提交中" : form.direction === "restock" ? "提交手工补货" : "提交手工补扣" }}</button>
           </div>
         </article>
@@ -493,5 +514,6 @@ onMounted(async () => {
 .user-detail__usage-list{display:grid;gap:4px}
 .admin-text-button{border:0;padding:0;background:transparent;color:var(--admin-accent);font:inherit;cursor:pointer}
 .user-policy-delete{color:var(--admin-danger)}
+.user-detail__local-only{color:var(--admin-warning-strong)}
 @media (max-width:720px){.user-policy-hours,.user-policy-limits__row,.user-policy-weekdays,.user-policy-bar{grid-template-columns:1fr}.user-policy-group__head{flex-direction:column;align-items:flex-start}}
 </style>

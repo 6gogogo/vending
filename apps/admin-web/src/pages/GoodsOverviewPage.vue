@@ -976,6 +976,7 @@ onMounted(load);
             <span class="admin-field__label">备注</span>
             <input v-model="transferForm.note" class="admin-input" placeholder="例如 上午调拨" />
           </label>
+          <div class="admin-note">货物调拨和仓库流转只维护本地库存台账，不会在平台创建调拨、补货或退货订单。</div>
           <button class="admin-button" :disabled="saving" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
         </div>
       </article>

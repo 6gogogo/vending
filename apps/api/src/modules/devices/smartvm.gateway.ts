@@ -74,7 +74,7 @@ export class SmartVmGateway {
     return new SmartVmClient({
       baseUrl,
       credentials,
-      onExchange: ({ path, requestBody, responseBody, statusCode, ok }) => {
+      onExchange: ({ path, requestUrl, requestBody, responseBody, statusCode, ok }) => {
         appendSystemAuditLog({
           occurredAt: new Date().toISOString(),
           method: "POST",
@@ -90,7 +90,8 @@ export class SmartVmGateway {
                 message: this.formatResponseError(responseBody)
               },
           metadata: {
-            upstreamBaseUrl: baseUrl
+            upstreamBaseUrl: baseUrl,
+            requestUrl
           }
         });
       }

@@ -27,13 +27,13 @@
     "sandbox:goods": "node sandbox/scripts/query-goods.mjs",
     "sandbox:latest-event": "node sandbox/scripts/simulate-latest-event.mjs",
     "sandbox:mock-device": "node sandbox/scripts/upsert-mock-device.mjs sandbox/fixtures/mock-device.sample.json",
-    "sandbox:payment-success": "node sandbox/scripts/payment-success.mjs sandbox/fixtures/payment-success.sample.json",
+    "sandbox:payment-success": "node sandbox/scripts/payment-success.mjs",
     "sandbox:payment-success:api": "node sandbox/scripts/payment-success-via-api.mjs",
     "sandbox:refund": "node sandbox/scripts/refund.mjs sandbox/fixtures/refund.sample.json",
     "sandbox:refund:api": "node sandbox/scripts/refund-via-api.mjs",
     "sandbox:sms:send": "node sandbox/scripts/send-sms-code.mjs",
     "sandbox:sms:verify": "node sandbox/scripts/verify-sms-code.mjs",
-    "sandbox:settlement": "node sandbox/scripts/simulate-settlement.mjs sandbox/fixtures/settlement.sample.json",
+    "sandbox:settlement": "node sandbox/scripts/simulate-settlement.mjs",
     "sandbox:sign": "node sandbox/scripts/generate-signature.mjs sandbox/fixtures/open-door.sample.json",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

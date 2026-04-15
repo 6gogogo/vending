@@ -550,6 +550,13 @@ export class CabinetEventsService {
     event.updatedAt = new Date().toISOString();
 
     const resolvedTargetUrl = options.targetUrl ?? event.adjustmentNoticeUrl ?? event.paymentNotifyUrl;
+
+    if (!resolvedTargetUrl) {
+      throw new BadRequestException(
+        `订单 ${payload.orderNo} 缺少平台付款成功通知地址，请先接收结算或补扣回调中的 notifyUrl / noticeUrl。`
+      );
+    }
+
     await this.smartVmGateway.notifyPaymentSuccess(payload, {
       targetUrl: resolvedTargetUrl
     });

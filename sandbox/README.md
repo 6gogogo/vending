@@ -44,7 +44,10 @@
 - `device` 用于查本地业务后端里的柜机详情，适合你已知柜机编号时直接核对库存、门信息和状态。
 - `events` 用于直接查本地或云端后端里最近的开柜事件，会返回 `orderNo / eventId / deviceCode / status`，适合先定位退款、支付成功通知要用的参数。
 - `goods`、`door`、`payment-success`、`refund` 默认请求 `SMARTVM_BASE_URL`，适合直接对接测试平台。
+- `payment-success` 会优先使用结算/补扣回调里带回的 `notifyUrl / noticeUrl`，并按赛方“付款成功异步通知”接口格式输出 `requestUrl / requestBody / responseBody`。
+- `payment-success` 不传参数时默认读取 `sandbox/fixtures/payment-success.sample.json`；如果你要验证真实待支付订单，请显式传入结算回调文件。
 - `payment-success:api` 会先请求本地后端 `/cabinet-events/callbacks/payment-success`，再由后端转发到平台，适合核对“经后端转发”的链路。
+- `payment-success:api` 如果能拿到管理员 token，还会补读系统审计，把平台侧“付款成功异步通知”的原始请求/响应一起输出。
 - `payment-success:api` 如果第一参数是一个真实存在的 JSON 文件路径，会直接从文件里读取 `orderNo / eventId / deviceCode / amount`，适合拿平台回调或待支付订单信息直接补发付款成功。
 - `refund:api` 会先登录本地管理员账号，再请求本地后端 `/inventory-orders/refund`，适合核对 PC 后台同款退款链路。
 - `door:probe` 会分别测试 `payStyle=2/3/7` 以及 `SMARTVM_EXTRA_PAY_STYLES` 里配置的自定义支付方式，并同时覆盖“传 doorNum / 不传 doorNum”两组情况。

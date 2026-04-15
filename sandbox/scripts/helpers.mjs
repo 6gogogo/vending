@@ -211,7 +211,40 @@ export const postJson = async (baseUrl, path, payload, headers = {}) => {
     body: JSON.stringify(payload)
   });
 
-  const json = await response.json();
+  const raw = await response.text();
+  let json;
+
+  try {
+    json = raw ? JSON.parse(raw) : null;
+  } catch {
+    json = raw;
+  }
+
+  return {
+    status: response.status,
+    json
+  };
+};
+
+export const postAbsoluteJson = async (url, payload, headers = {}) => {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  let json;
+
+  try {
+    json = raw ? JSON.parse(raw) : null;
+  } catch {
+    json = raw;
+  }
+
   return {
     status: response.status,
     json
@@ -226,6 +259,33 @@ export const authPostJson = async (baseUrl, path, payload, token) => {
   return postJson(baseUrl, path, payload, {
     Authorization: `Bearer ${token}`
   });
+};
+
+export const authGetJson = async (baseUrl, path, token) => {
+  if (!token) {
+    throw new Error("调用受保护的本地后端接口时必须提供管理员 token。");
+  }
+
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const raw = await response.text();
+  let json;
+
+  try {
+    json = raw ? JSON.parse(raw) : null;
+  } catch {
+    json = raw;
+  }
+
+  return {
+    status: response.status,
+    json
+  };
 };
 
 export const ensureAdminToken = async (baseUrl) => {
@@ -295,4 +355,24 @@ export const findEvent = async (baseUrl, orderNo) => {
   }
 
   return events[0];
+};
+
+export const getSystemAuditEntries = async (baseUrl, token, filters = {}) => {
+  const query = new URLSearchParams();
+
+  if (filters.pathContains) {
+    query.set("pathContains", filters.pathContains);
+  }
+
+  if (filters.deviceCode) {
+    query.set("deviceCode", filters.deviceCode);
+  }
+
+  if (filters.limit !== undefined) {
+    query.set("limit", String(filters.limit));
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await authGetJson(baseUrl, `/operation-logs/system-audit${suffix}`, token);
+  return unwrapEnvelope(response.json);
 };

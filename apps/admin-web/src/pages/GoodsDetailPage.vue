@@ -458,6 +458,8 @@ onMounted(load);
               </label>
             </div>
 
+            <div class="admin-note">手工入库、手工去除和批次调整只维护本地库存台账，不会在平台创建补货或退货订单。</div>
+
             <button class="admin-button" :disabled="saving" @click="addBatch">
               {{ saving ? "处理中" : "新增批次" }}
             </button>
