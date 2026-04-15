@@ -33,6 +33,9 @@ const refundingEventId = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
+const createCompactReference = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
 const selectedDoorGoods = computed(() => {
   const device = detail.value?.device;
 
@@ -378,8 +381,7 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
   const platformContext = resolvePlatformOrderContext(event, "payment");
   const defaultTransactionId =
     platformContext.transactionId ||
-    platformContext.orderNo ||
-    `manual-pay-${event.orderNo}-${Date.now()}`;
+    createCompactReference("txn");
   const transactionId = window.prompt("请输入支付交易号 transactionId", defaultTransactionId)?.trim();
 
   if (!transactionId) {
@@ -429,14 +431,14 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
 
 const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]) => {
   const platformContext = resolvePlatformOrderContext(event, "refund");
-  const defaultTransactionId = platformContext.transactionId || `refund-txn-${platformContext.orderNo}`;
+  const defaultTransactionId = platformContext.transactionId || createCompactReference("txn");
   const transactionId = window.prompt("请输入退款对应的交易号 transactionId", defaultTransactionId)?.trim();
 
   if (!transactionId) {
     return;
   }
 
-  const defaultRefundNo = event.refundNo || `refund-${platformContext.orderNo}-${Date.now()}`;
+  const defaultRefundNo = event.refundNo || createCompactReference("rfd");
   const refundNo = window.prompt("请输入退款单号 refundNo", defaultRefundNo)?.trim();
 
   if (!refundNo) {

@@ -111,7 +111,11 @@ export class InMemoryStoreService {
   }
 
   createId(prefix: string) {
-    return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+    return `${this.normalizePrefix(prefix)}-${this.createCompactSuffix()}`;
+  }
+
+  createReference(prefix: string) {
+    return `${this.normalizePrefix(prefix)}-${this.createCompactSuffix(4)}`;
   }
 
   issueVerificationCode(phone: string) {
@@ -290,6 +294,17 @@ export class InMemoryStoreService {
         });
       }
     }
+  }
+
+  private normalizePrefix(prefix: string) {
+    const normalized = prefix.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12);
+    return normalized || "id";
+  }
+
+  private createCompactSuffix(randomLength = 5) {
+    const timePart = Date.now().toString(36);
+    const randomPart = Math.random().toString(36).slice(2, 2 + randomLength);
+    return `${timePart}${randomPart}`;
   }
 
   getDeviceRuntime(deviceCode: string) {

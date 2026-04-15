@@ -382,7 +382,7 @@ export class CabinetEventsService {
         {
           orderNo: event.orderNo,
           eventId: event.eventId,
-          transactionId: `auto-settlement-${event.orderNo}`,
+          transactionId: this.store.createReference("txn"),
           deviceCode: payload.deviceCode,
           amount: payload.amount
         },
@@ -459,7 +459,7 @@ export class CabinetEventsService {
     void this.tryAutoForwardPaymentSuccess(event, {
       orderNo: payload.orderNo,
       eventId: event.eventId,
-      transactionId: `auto-adjustment-${payload.orderNo}`,
+      transactionId: this.store.createReference("txn"),
       deviceCode: payload.deviceCode,
       amount: payload.amount
     }, payload.noticeUrl);

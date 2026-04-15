@@ -114,8 +114,9 @@ export class SmartVmGateway {
     const payStyle = this.getDefaultOpenDoorPayStyle(payload.payStyle);
 
     if (!client) {
+      const compactEventId = payload.eventId.replace(/[^a-zA-Z0-9]/g, "").slice(-12) || Date.now().toString(36);
       return {
-        orderNo: `mock-order-${payload.eventId}`
+        orderNo: `mock-${compactEventId}`
       };
     }
 
