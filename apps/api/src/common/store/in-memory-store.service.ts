@@ -38,6 +38,8 @@ interface BatchConsumptionEntry {
   quantity: number;
 }
 
+const MAX_CALLBACK_LOGS = 1000;
+
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
 
@@ -216,6 +218,10 @@ export class InMemoryStoreService {
       receivedAt: new Date().toISOString(),
       payload
     });
+
+    if (this.callbackLog.length > MAX_CALLBACK_LOGS) {
+      this.callbackLog.splice(MAX_CALLBACK_LOGS);
+    }
   }
 
   private ensureCompetitionTestDevice() {

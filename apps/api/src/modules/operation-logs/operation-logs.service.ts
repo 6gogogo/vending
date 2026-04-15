@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, openSync, readFileSync, readSync, closeSync, statSync } from "node:fs";
 
 import type {
   CallbackLogRecord,
@@ -14,6 +14,11 @@ import type {
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { resolveSystemLogFile } from "../../common/store/persistence";
+
+const MAX_SYSTEM_AUDIT_LIMIT = 200;
+const MAX_SYSTEM_AUDIT_SCAN_LINES = 2_000;
+const MAX_SYSTEM_AUDIT_READ_BYTES = 2 * 1024 * 1024;
+const MAX_SYSTEM_AUDIT_LINE_LENGTH = 256 * 1024;
 
 @Injectable()
 export class OperationLogsService {
@@ -142,33 +147,94 @@ export class OperationLogsService {
 
     const pathContains = filters?.pathContains?.trim();
     const deviceCode = filters?.deviceCode?.trim();
-    const limit = Math.max(1, filters?.limit ?? 50);
+    const limit = Math.min(MAX_SYSTEM_AUDIT_LIMIT, Math.max(1, filters?.limit ?? 50));
+    const scanLineCount = Math.min(MAX_SYSTEM_AUDIT_SCAN_LINES, Math.max(limit * 20, 500));
+    const lines = this.readTailLines(filePath, scanLineCount);
+    const matches: SystemAuditLogEntry[] = [];
 
-    return readFileSync(filePath, "utf8")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line) as SystemAuditLogEntry;
-        } catch {
-          return undefined;
-        }
-      })
-      .filter((entry): entry is SystemAuditLogEntry => Boolean(entry))
-      .filter((entry) => {
-        if (pathContains && !entry.path.includes(pathContains)) {
-          return false;
-        }
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index]?.trim();
 
-        if (deviceCode && !this.auditContainsDeviceCode(entry, deviceCode)) {
-          return false;
-        }
+      if (!line) {
+        continue;
+      }
 
-        return true;
-      })
-      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
-      .slice(0, limit);
+       if (line.length > MAX_SYSTEM_AUDIT_LINE_LENGTH) {
+        continue;
+      }
+
+      let entry: SystemAuditLogEntry | undefined;
+
+      try {
+        entry = JSON.parse(line) as SystemAuditLogEntry;
+      } catch {
+        entry = undefined;
+      }
+
+      if (!entry) {
+        continue;
+      }
+
+      if (pathContains && !entry.path.includes(pathContains)) {
+        continue;
+      }
+
+      if (deviceCode && !this.auditContainsDeviceCode(entry, deviceCode)) {
+        continue;
+      }
+
+      matches.push(entry);
+
+      if (matches.length >= limit) {
+        break;
+      }
+    }
+
+    return matches;
+  }
+
+  private readTailLines(filePath: string, maxLines: number) {
+    const fileSize = statSync(filePath).size;
+
+    if (fileSize <= 0) {
+      return [] as string[];
+    }
+
+    const chunkSize = 64 * 1024;
+    const handle = openSync(filePath, "r");
+    const chunks: string[] = [];
+    let position = fileSize;
+    let newlineCount = 0;
+    let bytesReadTotal = 0;
+
+    try {
+      while (position > 0 && bytesReadTotal < MAX_SYSTEM_AUDIT_READ_BYTES && newlineCount <= maxLines + 1) {
+        const bytesToRead = Math.min(chunkSize, position);
+        position -= bytesToRead;
+        const buffer = Buffer.alloc(bytesToRead);
+        readSync(handle, buffer, 0, bytesToRead, position);
+        const text = buffer.toString("utf8");
+        chunks.unshift(text);
+        bytesReadTotal += bytesToRead;
+        newlineCount += this.countNewlines(text);
+      }
+    } finally {
+      closeSync(handle);
+    }
+
+    return chunks.join("").split("\n").filter(Boolean).slice(-maxLines);
+  }
+
+  private countNewlines(value: string) {
+    let count = 0;
+
+    for (const char of value) {
+      if (char === "\n") {
+        count += 1;
+      }
+    }
+
+    return count;
   }
 
   private auditContainsDeviceCode(entry: SystemAuditLogEntry, deviceCode: string) {

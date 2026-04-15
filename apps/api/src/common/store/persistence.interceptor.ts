@@ -4,6 +4,11 @@ import { tap } from "rxjs";
 import { InMemoryStoreService } from "./in-memory-store.service";
 import { appendSystemAuditLog } from "./persistence";
 
+const MAX_LOG_DEPTH = 4;
+const MAX_LOG_STRING_LENGTH = 4_000;
+const MAX_LOG_ARRAY_ITEMS = 20;
+const MAX_LOG_OBJECT_KEYS = 40;
+
 @Injectable()
 export class PersistenceInterceptor implements NestInterceptor {
   constructor(
@@ -102,16 +107,32 @@ export class PersistenceInterceptor implements NestInterceptor {
   }
 
   private normalizeForLog(value: unknown): unknown {
+    return this.normalizeForLogValue(value, 0);
+  }
+
+  private normalizeForLogValue(value: unknown, depth: number): unknown {
     if (value === undefined || value === null) {
       return value;
     }
 
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      return value;
+      return typeof value === "string" ? this.truncateString(value) : value;
+    }
+
+    if (depth >= MAX_LOG_DEPTH) {
+      return "[truncated: max depth]";
     }
 
     if (Array.isArray(value)) {
-      return value.map((item) => this.normalizeForLog(item));
+      const normalizedItems = value
+        .slice(0, MAX_LOG_ARRAY_ITEMS)
+        .map((item) => this.normalizeForLogValue(item, depth + 1));
+
+      if (value.length > MAX_LOG_ARRAY_ITEMS) {
+        normalizedItems.push(`[truncated: ${value.length - MAX_LOG_ARRAY_ITEMS} more items]`);
+      }
+
+      return normalizedItems;
     }
 
     if (typeof FormData !== "undefined" && value instanceof FormData) {
@@ -124,13 +145,33 @@ export class PersistenceInterceptor implements NestInterceptor {
 
     if (typeof value === "object") {
       try {
-        return JSON.parse(JSON.stringify(value));
+        const normalizedObject: Record<string, unknown> = {};
+        const entries = Object.entries(value as Record<string, unknown>);
+
+        for (const [index, [key, nestedValue]] of entries.entries()) {
+          if (index >= MAX_LOG_OBJECT_KEYS) {
+            normalizedObject.__truncated__ = `${entries.length - MAX_LOG_OBJECT_KEYS} more keys`;
+            break;
+          }
+
+          normalizedObject[key] = this.normalizeForLogValue(nestedValue, depth + 1);
+        }
+
+        return normalizedObject;
       } catch {
         return "[unserializable]";
       }
     }
 
     return String(value);
+  }
+
+  private truncateString(value: string) {
+    if (value.length <= MAX_LOG_STRING_LENGTH) {
+      return value;
+    }
+
+    return `${value.slice(0, MAX_LOG_STRING_LENGTH)}...[truncated ${value.length - MAX_LOG_STRING_LENGTH} chars]`;
   }
 
   private readErrorStatus(error: unknown) {

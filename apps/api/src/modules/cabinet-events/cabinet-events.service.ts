@@ -183,13 +183,35 @@ export class CabinetEventsService {
   listCallbackLogs(limit = 20, deviceCode?: string) {
     const resolvedLimit = Math.max(1, limit);
     const normalizedDeviceCode = deviceCode?.trim();
-    const logs = normalizedDeviceCode
-      ? this.store.callbackLog.filter((entry) =>
-          JSON.stringify(entry.payload ?? {}).includes(normalizedDeviceCode)
-        )
-      : this.store.callbackLog;
 
-    return logs.slice(0, resolvedLimit);
+    if (!normalizedDeviceCode) {
+      return this.store.callbackLog.slice(0, resolvedLimit);
+    }
+
+    const matches: typeof this.store.callbackLog = [];
+
+    for (const entry of this.store.callbackLog) {
+      const serialized =
+        typeof entry.payload === "string"
+          ? entry.payload
+          : (() => {
+              try {
+                return JSON.stringify(entry.payload ?? {});
+              } catch {
+                return "";
+              }
+            })();
+
+      if (serialized.includes(normalizedDeviceCode)) {
+        matches.push(entry);
+      }
+
+      if (matches.length >= resolvedLimit) {
+        break;
+      }
+    }
+
+    return matches;
   }
 
   handleDoorStatus(payload: SmartVmDoorStatusPayload & Record<string, unknown>) {

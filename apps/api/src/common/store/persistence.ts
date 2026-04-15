@@ -53,6 +53,8 @@ export interface PersistedStoreState {
   deviceRuntime: Array<[string, DeviceRuntimeState]>;
 }
 
+const MAX_PERSISTED_CALLBACK_LOGS = 1000;
+
 const findApiWorkspaceRoot = () => {
   const cwdApiRoot = resolve(process.cwd(), "apps/api");
 
@@ -207,7 +209,7 @@ const normalizePersistedState = (raw: Partial<PersistedStoreState>): PersistedSt
     verificationCodes: raw.verificationCodes ?? seeded.verificationCodes,
     sessions: raw.sessions ?? seeded.sessions,
     draftSessions: raw.draftSessions ?? seeded.draftSessions,
-    callbackLog: raw.callbackLog ?? seeded.callbackLog,
+    callbackLog: (raw.callbackLog ?? seeded.callbackLog).slice(0, MAX_PERSISTED_CALLBACK_LOGS),
     deviceRuntime: raw.deviceRuntime ?? seeded.deviceRuntime
   };
 };
