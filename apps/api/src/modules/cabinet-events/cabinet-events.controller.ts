@@ -8,7 +8,7 @@ import type {
   SmartVmSettlementPayload
 } from "@vm/shared-types";
 
-import { ok } from "../../common/dto/api-response";
+import { ack, ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { CabinetEventsService } from "./cabinet-events.service";
@@ -45,22 +45,26 @@ export class CabinetEventsController {
 
   @Post("callbacks/door-status")
   doorStatus(@Body() body: SmartVmDoorStatusPayload & Record<string, unknown>) {
-    return ok(this.cabinetEventsService.handleDoorStatus(body), "门状态回调已处理。");
+    this.cabinetEventsService.handleDoorStatus(body);
+    return ack();
   }
 
   @Post("callbacks/settlement")
   settlement(@Body() body: SmartVmSettlementPayload & Record<string, unknown>) {
-    return ok(this.cabinetEventsService.handleSettlement(body), "结算回调已处理。");
+    this.cabinetEventsService.handleSettlement(body);
+    return ack();
   }
 
   @Post("callbacks/adjustment")
   adjustment(@Body() body: SmartVmAdjustmentPayload & Record<string, unknown>) {
-    return this.cabinetEventsService.handleAdjustment(body);
+    this.cabinetEventsService.handleAdjustment(body);
+    return ack();
   }
 
   @Post("callbacks/payment-success")
   async paymentSuccess(@Body() body: SmartVmPaymentPayload & Record<string, unknown>) {
-    return ok(await this.cabinetEventsService.handlePaymentSuccess(body), "支付回调已处理。");
+    await this.cabinetEventsService.handlePaymentSuccess(body);
+    return ack();
   }
 
   @Post("payment-success")

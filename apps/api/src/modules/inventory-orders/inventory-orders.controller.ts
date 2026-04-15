@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, Inject, Post, Query, UseGua
 
 import type { SmartVmRefundPayload } from "@vm/shared-types";
 
-import { ok } from "../../common/dto/api-response";
+import { ack, ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { SmartVmGateway } from "../devices/smartvm.gateway";
@@ -38,7 +38,8 @@ export class InventoryOrdersController {
       throw new BadRequestException("签名校验失败。");
     }
 
-    return ok(this.inventoryOrdersService.handleRefundCallback(body), "退款回调已处理。");
+    this.inventoryOrdersService.handleRefundCallback(body);
+    return ack();
   }
 
   @Post("refund")
