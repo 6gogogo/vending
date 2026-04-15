@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from "vue-router";
 
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
+import { formatDate, formatDateTime, formatDateTimeSeconds, formatNowInBeijing } from "../utils/datetime";
 
 const route = useRoute();
 
@@ -32,6 +33,7 @@ const notifyingPaymentOrderNo = ref("");
 const refundingOrderNo = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
+let visibilityHandler: (() => void) | undefined;
 
 const createCompactReference = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -310,6 +312,38 @@ const taskActionLabel = (task: NonNullable<typeof pendingTasks.value>[number]) =
 const taskGradeLabel = (grade: "fault" | "feedback" | "warning") =>
   grade === "fault" ? "故障" : grade === "feedback" ? "反馈" : "预警";
 
+const shouldShowPaymentAction = (
+  event: NonNullable<typeof recentEvents.value>[number],
+  adjustmentOrderNo?: string
+) => {
+  const platformContext = resolvePlatformOrderContext(event, "payment", adjustmentOrderNo);
+
+  if (platformContext.isAdjustmentOrder) {
+    const adjustment = getEventAdjustments(event).find((entry) => entry.orderNo === adjustmentOrderNo);
+    return Boolean(adjustment?.noticeUrl) && adjustment?.paymentNotifyStatus === "pending";
+  }
+
+  return Boolean(event.paymentNotifyUrl) && event.paymentNotifyStatus === "pending";
+};
+
+const shouldShowRefundAction = (
+  event: NonNullable<typeof recentEvents.value>[number],
+  adjustmentOrderNo?: string
+) => {
+  const platformContext = resolvePlatformOrderContext(event, "refund", adjustmentOrderNo);
+
+  if (platformContext.refundedAt || !platformContext.transactionId) {
+    return false;
+  }
+
+  if (platformContext.isAdjustmentOrder) {
+    const adjustment = getEventAdjustments(event).find((entry) => entry.orderNo === adjustmentOrderNo);
+    return adjustment?.paymentNotifyStatus === "success";
+  }
+
+  return event.paymentNotifyStatus === "success";
+};
+
 const load = async () => {
   loading.value = true;
   try {
@@ -325,7 +359,7 @@ const load = async () => {
     if (!selectedGoodsToAdd.value || !addableGoodsOptions.value.some((item) => item.goodsId === selectedGoodsToAdd.value)) {
       selectedGoodsToAdd.value = addableGoodsOptions.value[0]?.goodsId ?? "";
     }
-    lastUpdatedAt.value = new Date().toLocaleString("zh-CN", { hour12: false });
+    lastUpdatedAt.value = formatNowInBeijing();
   } finally {
     loading.value = false;
   }
@@ -353,7 +387,7 @@ const refreshDevice = async () => {
   refreshing.value = true;
   try {
     detail.value = await adminApi.refreshDevice(String(route.params.deviceCode));
-    lastUpdatedAt.value = new Date().toLocaleString("zh-CN", { hour12: false });
+    lastUpdatedAt.value = formatNowInBeijing();
   } finally {
     refreshing.value = false;
   }
@@ -588,11 +622,32 @@ watch(
 onMounted(async () => {
   await load();
   timer = setInterval(load, 8_000);
+  if (typeof document !== "undefined") {
+    visibilityHandler = () => {
+      if (document.hidden) {
+        if (timer) {
+          clearInterval(timer);
+          timer = undefined;
+        }
+        return;
+      }
+
+      void load();
+      if (timer) {
+        clearInterval(timer);
+      }
+      timer = setInterval(load, 8_000);
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+  }
 });
 
 onUnmounted(() => {
   if (timer) {
     clearInterval(timer);
+  }
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
   }
 });
 </script>
@@ -627,8 +682,8 @@ onUnmounted(() => {
           </div>
           <div class="device-detail-status__item">
             <span class="admin-kicker">最近开门</span>
-            <strong class="admin-code">{{ detail.runtime.lastOpenedAt ? detail.runtime.lastOpenedAt.slice(0, 16).replace("T", " ") : "-" }}</strong>
-            <span class="admin-table__subtext">最近关门：{{ detail.runtime.lastClosedAt ? detail.runtime.lastClosedAt.slice(0, 16).replace("T", " ") : "-" }}</span>
+            <strong class="admin-code">{{ formatDateTime(detail.runtime.lastOpenedAt) }}</strong>
+            <span class="admin-table__subtext">最近关门：{{ formatDateTime(detail.runtime.lastClosedAt) }}</span>
           </div>
           <div class="device-detail-status__item">
             <span class="admin-kicker">库存与服务</span>
@@ -638,7 +693,7 @@ onUnmounted(() => {
           <div class="device-detail-status__item">
             <span class="admin-kicker">待处理</span>
             <strong class="admin-code">{{ pendingTasks.length }} 项</strong>
-            <span class="admin-table__subtext">最近心跳：{{ detail.device.lastSeenAt.slice(0, 16).replace("T", " ") }}</span>
+            <span class="admin-table__subtext">最近心跳：{{ formatDateTime(detail.device.lastSeenAt) }}</span>
           </div>
         </div>
       </article>
@@ -710,7 +765,7 @@ onUnmounted(() => {
                     </span>
                   </td>
                   <td class="admin-code">
-                    {{ goods.expiresAt ? goods.expiresAt.slice(0, 16).replace("T", " ") : "-" }}
+                    {{ formatDate(goods.expiresAt) }}
                   </td>
                   <td>
                     <button
@@ -783,7 +838,7 @@ onUnmounted(() => {
                     </td>
                     <td>{{ entry.goodsSummary }}</td>
                     <td class="admin-code">{{ entry.totalQuantity }}</td>
-                    <td class="admin-code">{{ entry.lastServedAt.slice(0, 16).replace("T", " ") }}</td>
+                    <td class="admin-code">{{ formatDateTime(entry.lastServedAt) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -826,7 +881,7 @@ onUnmounted(() => {
                 <div class="admin-list__main">
                   <span class="admin-list__title">{{ task.title }}</span>
                   <span class="admin-list__meta">
-                    {{ taskGradeLabel(task.grade) }} · {{ task.status === "acknowledged" ? "已知晓" : "待处理" }} · {{ task.dueAt.slice(0, 16).replace("T", " ") }}
+                    {{ taskGradeLabel(task.grade) }} · {{ task.status === "acknowledged" ? "已知晓" : "待处理" }} · {{ formatDateTime(task.dueAt) }}
                   </span>
                   <span class="admin-table__subtext">{{ task.detail }}</span>
                 </div>
@@ -873,6 +928,13 @@ onUnmounted(() => {
                     <td>
                       <span class="admin-table__strong">{{ event.orderNo }}</span>
                       <span class="admin-table__subtext">{{ event.eventId }}</span>
+                      <span
+                        v-for="goods in event.goods"
+                        :key="`${event.eventId}-${goods.goodsId}-goods`"
+                        class="admin-table__subtext"
+                      >
+                        {{ goods.goodsName }} / {{ goods.goodsId }} ×{{ goods.quantity }}
+                      </span>
                     </td>
                     <td>
                       <span class="admin-table__strong">{{ formatEventStatus(event.status) }}</span>
@@ -882,6 +944,17 @@ onUnmounted(() => {
                         class="admin-table__subtext"
                       >
                         补扣单：{{ adjustment.orderNo }}
+                      </span>
+                      <span
+                        v-for="adjustment in getEventAdjustments(event)"
+                        :key="`${event.eventId}-${adjustment.orderNo}-goods`"
+                        class="admin-table__subtext"
+                      >
+                        {{
+                          adjustment.goods?.length
+                            ? adjustment.goods.map((goods) => `${goods.goodsName} / ${goods.goodsId} ×${goods.quantity}`).join("；")
+                            : "未记录补扣货品"
+                        }}
                       </span>
                     </td>
                     <td>
@@ -911,7 +984,7 @@ onUnmounted(() => {
                       </span>
                     </td>
                     <td>
-                      <span class="admin-code">{{ event.updatedAt.slice(0, 16).replace("T", " ") }}</span>
+                      <span class="admin-code">{{ formatDateTime(event.updatedAt) }}</span>
                       <RouterLink class="admin-table__subtext admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">
                         查看关联日志
                       </RouterLink>
@@ -919,6 +992,7 @@ onUnmounted(() => {
                     <td>
                       <div class="device-event-actions">
                         <button
+                          v-if="shouldShowPaymentAction(event)"
                           class="admin-button admin-button--ghost"
                           :disabled="notifyingPaymentOrderNo === event.orderNo"
                           @click="notifyPaymentSuccess(event)"
@@ -926,6 +1000,7 @@ onUnmounted(() => {
                           {{ notifyingPaymentOrderNo === event.orderNo ? "回写中" : paymentActionLabel(event) }}
                         </button>
                         <button
+                          v-if="shouldShowRefundAction(event)"
                           class="admin-button admin-button--ghost"
                           :disabled="refundingOrderNo === event.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
                           @click="refundEvent(event)"
@@ -939,6 +1014,7 @@ onUnmounted(() => {
                         >
                           <span class="admin-table__subtext">补扣单 {{ adjustment.orderNo }}</span>
                           <button
+                            v-if="shouldShowPaymentAction(event, adjustment.orderNo)"
                             class="admin-button admin-button--ghost"
                             :disabled="notifyingPaymentOrderNo === adjustment.orderNo"
                             @click="notifyPaymentSuccess(event, adjustment.orderNo)"
@@ -946,6 +1022,7 @@ onUnmounted(() => {
                             {{ notifyingPaymentOrderNo === adjustment.orderNo ? "回写中" : paymentActionLabel(event, adjustment.orderNo) }}
                           </button>
                           <button
+                            v-if="shouldShowRefundAction(event, adjustment.orderNo)"
                             class="admin-button admin-button--ghost"
                             :disabled="refundingOrderNo === adjustment.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt)"
                             @click="refundEvent(event, adjustment.orderNo)"
@@ -953,6 +1030,12 @@ onUnmounted(() => {
                             {{ refundingOrderNo === adjustment.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt ? "已退款" : refundActionLabel(event, adjustment.orderNo) }}
                           </button>
                         </div>
+                        <span
+                          v-if="!shouldShowPaymentAction(event) && !shouldShowRefundAction(event) && !getEventAdjustments(event).some((adjustment) => shouldShowPaymentAction(event, adjustment.orderNo) || shouldShowRefundAction(event, adjustment.orderNo))"
+                          class="admin-table__subtext"
+                        >
+                          当前没有待平台确认的支付或退款动作
+                        </span>
                       </div>
                     </td>
                   </tr>
@@ -1005,7 +1088,7 @@ onUnmounted(() => {
               <div v-if="debugSystemAuditRows.length" class="debug-list">
                 <article v-for="entry in debugSystemAuditRows" :key="`${entry.occurredAt}-${entry.path}`" class="debug-card">
                   <div class="debug-card__meta">
-                    <span class="admin-code">{{ entry.occurredAt.slice(0, 19).replace("T", " ") }}</span>
+                    <span class="admin-code">{{ formatDateTimeSeconds(entry.occurredAt) }}</span>
                     <span class="admin-pill" :class="getAuditDirection(entry) === '发' ? 'admin-pill--success' : 'admin-pill--neutral'">
                       {{ getAuditDirection(entry) }}
                     </span>
@@ -1053,7 +1136,7 @@ onUnmounted(() => {
               <div v-if="debugCallbackLogs.length" class="debug-list">
                 <article v-for="entry in debugCallbackLogs" :key="entry.id" class="debug-card">
                   <div class="debug-card__meta">
-                    <span class="admin-code">{{ entry.receivedAt.slice(0, 19).replace("T", " ") }}</span>
+                    <span class="admin-code">{{ formatDateTimeSeconds(entry.receivedAt) }}</span>
                     <span class="admin-pill admin-pill--neutral">收</span>
                     <span class="admin-pill admin-pill--neutral">{{ formatCallbackTypeLabel(entry.type) }}</span>
                     <span class="debug-card__route">平台 → 后端</span>
@@ -1095,7 +1178,7 @@ onUnmounted(() => {
               </thead>
               <tbody>
                 <tr v-for="log in recentLogs" :key="log.id">
-                  <td class="admin-code">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</td>
+                  <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
                   <td>
                     <span class="admin-table__strong">{{ log.description }}</span>
                     <span class="admin-table__subtext">{{ log.detail }}</span>
@@ -1151,7 +1234,7 @@ onUnmounted(() => {
 }
 
 .device-detail__layout {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.95fr);
   min-width: 0;
 }
 
@@ -1164,6 +1247,11 @@ onUnmounted(() => {
 .device-detail__aside {
   min-width: 0;
   align-content: start;
+  overflow: hidden;
+}
+
+.device-detail__main {
+  overflow: hidden;
 }
 
 .device-detail-actions {
@@ -1175,6 +1263,7 @@ onUnmounted(() => {
 .device-event-actions {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .device-event-actions--nested {
@@ -1185,7 +1274,7 @@ onUnmounted(() => {
 
 .device-goods-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 320px) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 320px) auto minmax(0, 1fr);
   gap: 10px;
   align-items: end;
   margin-bottom: 12px;
@@ -1241,7 +1330,7 @@ onUnmounted(() => {
 .debug-list {
   display: grid;
   gap: 10px;
-  max-height: 72vh;
+  max-height: 78vh;
   overflow: auto;
   padding-right: 4px;
 }
@@ -1334,6 +1423,7 @@ onUnmounted(() => {
 .device-table-scroll {
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .device-table-scroll :deep(table) {

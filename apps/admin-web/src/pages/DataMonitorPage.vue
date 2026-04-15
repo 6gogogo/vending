@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import type {
   DataMonitorMetricKey,
@@ -9,6 +9,7 @@ import type {
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
+import { formatDateTime, getTodayDateKeyInBeijing } from "../utils/datetime";
 
 const metricOptions: Array<{
   key: DataMonitorMetricKey;
@@ -17,10 +18,10 @@ const metricOptions: Array<{
 }> = [
   { key: "servedUsers", label: "服务人数", unit: "人" },
   { key: "pickupUnits", label: "领取件数", unit: "件" },
-  { key: "restockUnits", label: "补货与调拨", unit: "件" },
-  { key: "adjustmentUnits", label: "补扣与退款", unit: "件" },
+  { key: "restockUnits", label: "补货件数", unit: "件" },
+  { key: "transferUnits", label: "调拨件数", unit: "件" },
   { key: "eventCount", label: "开柜事件", unit: "次" },
-  { key: "taskCount", label: "待办数量", unit: "项" },
+  { key: "feedbackResolvedCount", label: "完成反馈数", unit: "项" },
   { key: "logCount", label: "日志数量", unit: "条" }
 ];
 
@@ -30,13 +31,16 @@ const rangeOptions: Array<{ value: DataMonitorRange; label: string }> = [
   { value: "7d", label: "一周内" }
 ];
 
-const todayDateKey = new Date().toISOString().slice(0, 10);
+const todayDateKey = getTodayDateKeyInBeijing();
 const snapshot = ref<DataMonitorSnapshot>();
 const loading = ref(false);
 const calendarMonth = ref(todayDateKey.slice(0, 7));
 const selectedDateKey = ref(todayDateKey);
 const selectedMetric = ref<DataMonitorMetricKey>("servedUsers");
 const selectedRange = ref<DataMonitorRange>("today");
+
+let timer: ReturnType<typeof setInterval> | undefined;
+let visibilityHandler: (() => void) | undefined;
 
 const currentMonthTitle = computed(() => {
   const source = snapshot.value?.monthKey ?? calendarMonth.value;
@@ -45,6 +49,7 @@ const currentMonthTitle = computed(() => {
 });
 
 const selectedDateSummary = computed(() => snapshot.value?.selectedDateSummary);
+const periodSummary = computed(() => snapshot.value?.periodSummary ?? snapshot.value?.selectedDateSummary);
 const metricBars = computed(() => selectedDateSummary.value?.metricBars ?? []);
 const rangeSeries = computed(() => snapshot.value?.rangeSeries ?? []);
 const regionBreakdown = computed(() => snapshot.value?.regionBreakdown ?? []);
@@ -77,16 +82,8 @@ const chartBars = computed(() =>
       }))
 );
 
-const maxChartValue = computed(() =>
-  Math.max(1, ...chartBars.value.map((item) => item.value))
-);
-
-const maxRegionValue = computed(() =>
-  Math.max(1, ...regionBreakdown.value.map((item) => item.pickupUnits))
-);
-
-const formatDateTime = (value?: string) =>
-  value ? value.slice(0, 16).replace("T", " ") : "-";
+const maxChartValue = computed(() => Math.max(1, ...chartBars.value.map((item) => item.value)));
+const maxRegionValue = computed(() => Math.max(1, ...regionBreakdown.value.map((item) => item.pickupUnits)));
 
 const formatRangeTitle = computed(() => {
   if (!snapshot.value) {
@@ -117,11 +114,33 @@ const load = async () => {
   }
 };
 
+const startPolling = () => {
+  if (timer) {
+    clearInterval(timer);
+  }
+
+  if (typeof document !== "undefined" && document.hidden) {
+    return;
+  }
+
+  timer = setInterval(() => {
+    void load();
+  }, 15_000);
+};
+
+const stopPolling = () => {
+  if (timer) {
+    clearInterval(timer);
+    timer = undefined;
+  }
+};
+
 const changeMonth = async (offset: number) => {
   const [year, month] = calendarMonth.value.split("-").map(Number);
   const next = new Date(year, month - 1 + offset, 1);
-  calendarMonth.value = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
-  selectedDateKey.value = `${calendarMonth.value}-01`;
+  const nextMonth = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+  calendarMonth.value = nextMonth;
+  selectedDateKey.value = `${nextMonth}-01`;
   await load();
 };
 
@@ -138,7 +157,36 @@ const selectRange = async (nextRange: DataMonitorRange) => {
   await load();
 };
 
-onMounted(load);
+const buildLogQuery = (category?: string) => ({
+  path: "/logs",
+  query: {
+    category,
+    dateFrom: snapshot.value?.rangeStartDateKey,
+    dateTo: snapshot.value?.rangeEndDateKey
+  }
+});
+
+onMounted(async () => {
+  await load();
+  startPolling();
+  visibilityHandler = () => {
+    if (document.hidden) {
+      stopPolling();
+      return;
+    }
+
+    void load();
+    startPolling();
+  };
+  document.addEventListener("visibilitychange", visibilityHandler);
+});
+
+onUnmounted(() => {
+  stopPolling();
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+  }
+});
 </script>
 
 <template>
@@ -150,6 +198,7 @@ onMounted(load);
           <h3 class="admin-page__section-title">按业务日、时间段与区域查看服务走势</h3>
         </div>
         <div class="admin-toolbar">
+          <span class="admin-copy">自动刷新 15 秒一次</span>
           <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
             {{ loading ? "刷新中" : "刷新数据" }}
           </button>
@@ -158,16 +207,69 @@ onMounted(load);
     </section>
 
     <section v-if="rangeSummary" class="admin-grid admin-grid--stats-4">
-      <StatTile title="服务人数" :value="`${rangeSummary.servedUsers} 人`" hint="所选时间段内至少发生过一次领取的人员" tone="accent" />
-      <StatTile title="领取件数" :value="`${rangeSummary.pickupUnits} 件`" hint="按选定业务日范围汇总" tone="success" />
-      <StatTile title="补货与调拨" :value="`${rangeSummary.restockUnits} 件`" hint="包含补货、调拨和仓库流转" />
-      <StatTile title="补扣与退款" :value="`${rangeSummary.adjustmentUnits} 件`" hint="包含补扣、手工调整与退款" tone="warning" />
+      <RouterLink class="data-monitor-stat-link" :to="buildLogQuery('pickup')">
+        <StatTile
+          title="服务人数"
+          :value="`${rangeSummary.servedUsers} 人`"
+          hint="所选时间段内至少发生过一次领取或补扣的人员"
+          action-label="查看明细 >"
+          tone="accent"
+        />
+      </RouterLink>
+      <RouterLink class="data-monitor-stat-link" :to="buildLogQuery('pickup')">
+        <StatTile
+          title="领取件数"
+          :value="`${rangeSummary.pickupUnits} 件`"
+          hint="包含领取、补扣和人工补扣"
+          action-label="查看明细 >"
+          tone="success"
+        />
+      </RouterLink>
+      <RouterLink class="data-monitor-stat-link" :to="buildLogQuery('restock')">
+        <StatTile
+          title="补货件数"
+          :value="`${rangeSummary.restockUnits} 件`"
+          hint="仅统计补货，不再混入调拨"
+          action-label="查看明细 >"
+        />
+      </RouterLink>
+      <RouterLink class="data-monitor-stat-link" :to="buildLogQuery('inventory')">
+        <StatTile
+          title="调拨件数"
+          :value="`${rangeSummary.transferUnits} 件`"
+          hint="仓库与柜机之间的调拨流转"
+          action-label="查看明细 >"
+          tone="warning"
+        />
+      </RouterLink>
     </section>
 
     <section v-if="rangeSummary" class="admin-grid admin-grid--stats-3">
-      <StatTile title="开柜事件" :value="`${rangeSummary.eventCount} 次`" hint="该时间段内记录到的全部开门事件" />
-      <StatTile title="待办数量" :value="`${rangeSummary.taskCount} 项`" hint="按创建时间落在所选范围内汇总" tone="warning" />
-      <StatTile title="日志数量" :value="`${rangeSummary.logCount} 条`" hint="操作日志与盘点记录汇总" />
+      <RouterLink class="data-monitor-stat-link" :to="buildLogQuery('device')">
+        <StatTile
+          title="开柜事件"
+          :value="`${rangeSummary.eventCount} 次`"
+          hint="该时间段内记录到的全部开门事件"
+          action-label="查看明细 >"
+        />
+      </RouterLink>
+      <RouterLink class="data-monitor-stat-link" :to="buildLogQuery('alert')">
+        <StatTile
+          title="完成反馈数"
+          :value="`${rangeSummary.feedbackResolvedCount} 项`"
+          hint="仅统计已完成的反馈事项"
+          action-label="查看明细 >"
+          tone="warning"
+        />
+      </RouterLink>
+      <RouterLink class="data-monitor-stat-link" :to="buildLogQuery()">
+        <StatTile
+          title="日志数量"
+          :value="`${rangeSummary.logCount} 条`"
+          hint="操作日志与盘点记录汇总"
+          action-label="查看明细 >"
+        />
+      </RouterLink>
     </section>
 
     <section class="admin-grid admin-grid--main-aside">
@@ -230,8 +332,9 @@ onMounted(load);
           已选业务日 {{ selectedDateSummary.businessDateKey }}：
           服务 {{ selectedDateSummary.servedUsers }} 人，
           领取 {{ selectedDateSummary.pickupUnits }} 件，
-          补货与调拨 {{ selectedDateSummary.restockUnits }} 件，
-          补扣与退款 {{ selectedDateSummary.adjustmentUnits }} 件。
+          补货 {{ selectedDateSummary.restockUnits }} 件，
+          调拨 {{ selectedDateSummary.transferUnits }} 件，
+          完成反馈 {{ selectedDateSummary.feedbackResolvedCount }} 项。
         </div>
       </article>
 
@@ -323,7 +426,7 @@ onMounted(load);
         </div>
         <div v-else class="admin-empty">
           <div class="admin-empty__title">当前范围没有区域领取数据</div>
-          <div class="admin-empty__body">当普通用户产生领取动作后，这里会按区域显示时间分布。</div>
+          <div class="admin-empty__body">当普通用户产生领取或补扣动作后，这里会按区域显示时间分布。</div>
         </div>
       </article>
 
@@ -331,14 +434,14 @@ onMounted(load);
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">柜机与货品</span>
-            <h3 class="admin-panel__title">查看所选日期的活跃柜机和热门货品</h3>
+            <h3 class="admin-panel__title">查看当前时间范围的活跃柜机和热门货品</h3>
           </div>
         </div>
 
         <div class="data-monitor-side-grid">
           <section>
             <div class="data-monitor-side-grid__head">热门货品</div>
-            <table v-if="selectedDateSummary?.topGoods.length" class="admin-table">
+            <table v-if="periodSummary?.topGoods.length" class="admin-table">
               <thead>
                 <tr>
                   <th>货品</th>
@@ -346,11 +449,12 @@ onMounted(load);
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in selectedDateSummary.topGoods" :key="item.goodsId">
+                <tr v-for="item in periodSummary.topGoods" :key="item.goodsId">
                   <td>
                     <RouterLink class="admin-link admin-table__strong" :to="`/goods/${item.goodsId}`">
                       {{ item.goodsName }}
                     </RouterLink>
+                    <span class="admin-table__subtext">{{ item.goodsId }}</span>
                   </td>
                   <td class="admin-code">{{ item.quantity }}</td>
                 </tr>
@@ -363,7 +467,7 @@ onMounted(load);
 
           <section>
             <div class="data-monitor-side-grid__head">活跃柜机</div>
-            <table v-if="selectedDateSummary?.topDevices.length" class="admin-table">
+            <table v-if="periodSummary?.topDevices.length" class="admin-table">
               <thead>
                 <tr>
                   <th>柜机</th>
@@ -372,7 +476,7 @@ onMounted(load);
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in selectedDateSummary.topDevices" :key="item.deviceCode">
+                <tr v-for="item in periodSummary.topDevices" :key="item.deviceCode">
                   <td>
                     <RouterLink class="admin-link admin-table__strong" :to="`/operations/${item.deviceCode}`">
                       {{ item.deviceName }}
@@ -392,16 +496,16 @@ onMounted(load);
       </article>
     </section>
 
-    <section v-if="selectedDateSummary" class="admin-page__section">
+    <section v-if="periodSummary" class="admin-page__section">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
-            <span class="admin-kicker">当日日志</span>
-            <h3 class="admin-panel__title">查看所选业务日的关键动作</h3>
+            <span class="admin-kicker">范围内日志</span>
+            <h3 class="admin-panel__title">查看当前时间范围的关键动作</h3>
           </div>
         </div>
 
-        <table v-if="selectedDateSummary.recentLogs.length" class="admin-table">
+        <table v-if="periodSummary.recentLogs.length" class="admin-table">
           <thead>
             <tr>
               <th>时间</th>
@@ -411,7 +515,7 @@ onMounted(load);
             </tr>
           </thead>
           <tbody>
-            <tr v-for="log in selectedDateSummary.recentLogs" :key="log.id">
+            <tr v-for="log in periodSummary.recentLogs" :key="log.id">
               <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
               <td>
                 <span class="admin-table__strong">{{ log.description }}</span>
@@ -440,8 +544,8 @@ onMounted(load);
           </tbody>
         </table>
         <div v-else class="admin-empty">
-          <div class="admin-empty__title">当前日期没有日志</div>
-          <div class="admin-empty__body">选择其他日期后可以查看对应业务日的系统动作。</div>
+          <div class="admin-empty__title">当前范围没有日志</div>
+          <div class="admin-empty__body">切换到有业务动作的日期或放宽范围后，这里会显示关键动作。</div>
         </div>
       </article>
     </section>
@@ -449,6 +553,20 @@ onMounted(load);
 </template>
 
 <style scoped>
+.data-monitor-stat-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.data-monitor-stat-link:hover {
+  text-decoration: none;
+}
+
+.data-monitor-stat-link :deep(.stat-tile) {
+  height: 100%;
+}
+
 .data-monitor-range-switch,
 .data-monitor-metric-switch {
   display: flex;

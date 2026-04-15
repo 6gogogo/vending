@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import type { AlertTask } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { formatDateTime } from "../utils/datetime";
 
 const alerts = ref<AlertTask[]>([]);
 const loading = ref(false);
@@ -88,7 +89,7 @@ onMounted(load);
             <div class="admin-list__main">
               <span class="admin-list__title">{{ alert.title }}</span>
               <span class="admin-list__meta">{{ alert.previewDetail || alert.detail }}</span>
-              <span class="admin-list__meta">截止时间 {{ alert.dueAt.slice(0, 16).replace("T", " ") }}</span>
+              <span class="admin-list__meta">截止时间 {{ formatDateTime(alert.dueAt) }}</span>
             </div>
             <div class="alerts-actions">
               <span class="admin-pill" :class="alert.grade === 'fault' ? 'admin-pill--danger' : alert.grade === 'feedback' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ gradeLabel(alert) }}</span>
@@ -159,7 +160,7 @@ onMounted(load);
           </div>
           <div class="admin-kv__row">
             <span class="admin-kv__label">截止时间</span>
-            <span class="admin-kv__value admin-code">{{ activeAlert.dueAt.slice(0, 16).replace("T", " ") }}</span>
+            <span class="admin-kv__value admin-code">{{ formatDateTime(activeAlert.dueAt) }}</span>
           </div>
           <div class="admin-kv__row">
             <span class="admin-kv__label">详细内容</span>

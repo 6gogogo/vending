@@ -4,12 +4,14 @@ import { RouterLink } from "vue-router";
 import type { DeviceRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { formatDateTime, formatNowInBeijing } from "../utils/datetime";
 
 const devices = ref<DeviceRecord[]>([]);
 const loading = ref(false);
 const lastUpdatedAt = ref("");
 
 let timer: ReturnType<typeof setInterval> | undefined;
+let visibilityHandler: (() => void) | undefined;
 
 const sortedDevices = computed(() =>
   [...devices.value].sort((left, right) => {
@@ -60,8 +62,9 @@ const formatGoodsStock = (goods: DeviceRecord["doors"][number]["goods"][number])
   const tags: string[] = [];
 
   if (
-    (goods.thresholdEnabled && goods.lowStockThreshold !== undefined && goods.stock <= goods.lowStockThreshold) ||
-    goods.stock <= 0
+    goods.thresholdEnabled &&
+    goods.lowStockThreshold !== undefined &&
+    goods.stock <= goods.lowStockThreshold
   ) {
     tags.push("缺货");
   }
@@ -82,9 +85,7 @@ const load = async () => {
   loading.value = true;
   try {
     devices.value = await adminApi.devices();
-    lastUpdatedAt.value = new Date().toLocaleString("zh-CN", {
-      hour12: false
-    });
+    lastUpdatedAt.value = formatNowInBeijing();
   } finally {
     loading.value = false;
   }
@@ -93,11 +94,32 @@ const load = async () => {
 onMounted(async () => {
   await load();
   timer = setInterval(load, 8_000);
+  if (typeof document !== "undefined") {
+    visibilityHandler = () => {
+      if (document.hidden) {
+        if (timer) {
+          clearInterval(timer);
+          timer = undefined;
+        }
+        return;
+      }
+
+      void load();
+      if (timer) {
+        clearInterval(timer);
+      }
+      timer = setInterval(load, 8_000);
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+  }
 });
 
 onUnmounted(() => {
   if (timer) {
     clearInterval(timer);
+  }
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
   }
 });
 </script>
@@ -147,15 +169,15 @@ onUnmounted(() => {
           </div>
           <div class="operations-card__row">
             <span>最近在线</span>
-            <span class="admin-code">{{ device.lastSeenAt.slice(0, 16).replace("T", " ") }}</span>
+            <span class="admin-code">{{ formatDateTime(device.lastSeenAt) }}</span>
           </div>
           <div class="operations-card__row">
             <span>最近开门</span>
-            <span class="admin-code">{{ device.runtime?.lastOpenedAt ? device.runtime.lastOpenedAt.slice(0, 16).replace("T", " ") : "-" }}</span>
+            <span class="admin-code">{{ formatDateTime(device.runtime?.lastOpenedAt) }}</span>
           </div>
           <div class="operations-card__row">
             <span>最近关门</span>
-            <span class="admin-code">{{ device.runtime?.lastClosedAt ? device.runtime.lastClosedAt.slice(0, 16).replace("T", " ") : "-" }}</span>
+            <span class="admin-code">{{ formatDateTime(device.runtime?.lastClosedAt) }}</span>
           </div>
         </div>
 

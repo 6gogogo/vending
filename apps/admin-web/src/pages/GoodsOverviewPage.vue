@@ -14,6 +14,7 @@ import type {
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 import { useAdminSessionStore } from "../stores/session";
+import { formatDateTime } from "../utils/datetime";
 
 const sessionStore = useAdminSessionStore();
 
@@ -170,9 +171,6 @@ const sourceGoodsOptions = computed(() => {
     ) ?? []
   );
 });
-
-const formatDateTime = (value?: string) =>
-  value ? value.slice(0, 16).replace("T", " ") : "-";
 
 const formatDate = (value?: string) => (value ? value.slice(0, 10) : "-");
 

@@ -151,14 +151,17 @@ export class AnalyticsService {
     const dayActivity = this.buildDayActivityMap();
     const rangeDateKeys = this.buildRangeDateKeys(selectedDateKey, range);
     const rangeSeries = rangeDateKeys.map((dateKey) => this.buildRangePoint(dateKey));
-    const rangeSummary = this.buildRangeSummary(rangeSeries);
+    const selectedDateSummary = this.buildDataMonitorDailySummary(selectedDateKey);
+    const periodSummary = this.buildDataMonitorAggregateSummary(rangeDateKeys);
+    const rangeSummary = this.buildRangeSummary(periodSummary);
 
     return {
       monthKey: currentMonth,
       selectedDateKey,
       range,
       days: this.buildMonthCalendar(currentMonth, dayActivity),
-      selectedDateSummary: this.buildDataMonitorDailySummary(selectedDateKey),
+      selectedDateSummary,
+      periodSummary,
       rangeStartDateKey: rangeDateKeys[0] ?? selectedDateKey,
       rangeEndDateKey: rangeDateKeys[rangeDateKeys.length - 1] ?? selectedDateKey,
       rangeSeries,
@@ -256,35 +259,22 @@ export class AnalyticsService {
       servedUsers: summary.servedUsers,
       pickupUnits: summary.pickupUnits,
       restockUnits: summary.restockUnits,
-      adjustmentUnits: summary.adjustmentUnits,
+      transferUnits: summary.transferUnits,
       eventCount: summary.eventCount,
-      taskCount: summary.taskCount,
+      feedbackResolvedCount: summary.feedbackResolvedCount,
       logCount: summary.logCount
     };
   }
 
-  private buildRangeSummary(series: DataMonitorRangePoint[]): DataMonitorSnapshot["rangeSummary"] {
-    const servedUsers = new Set<string>();
-    const relevantDateKeys = new Set(series.map((entry) => entry.dateKey));
-
-    this.store.inventory.forEach((entry) => {
-      if (
-        entry.type === "pickup" &&
-        entry.userId &&
-        relevantDateKeys.has(getBusinessDayKey(entry.happenedAt))
-      ) {
-        servedUsers.add(entry.userId);
-      }
-    });
-
+  private buildRangeSummary(summary: DataMonitorDailySummary): DataMonitorSnapshot["rangeSummary"] {
     return {
-      servedUsers: servedUsers.size,
-      pickupUnits: series.reduce((sum, entry) => sum + entry.pickupUnits, 0),
-      restockUnits: series.reduce((sum, entry) => sum + entry.restockUnits, 0),
-      adjustmentUnits: series.reduce((sum, entry) => sum + entry.adjustmentUnits, 0),
-      eventCount: series.reduce((sum, entry) => sum + entry.eventCount, 0),
-      taskCount: series.reduce((sum, entry) => sum + entry.taskCount, 0),
-      logCount: series.reduce((sum, entry) => sum + entry.logCount, 0)
+      servedUsers: summary.servedUsers,
+      pickupUnits: summary.pickupUnits,
+      restockUnits: summary.restockUnits,
+      transferUnits: summary.transferUnits,
+      eventCount: summary.eventCount,
+      feedbackResolvedCount: summary.feedbackResolvedCount,
+      logCount: summary.logCount
     };
   }
 
@@ -338,7 +328,9 @@ export class AnalyticsService {
     this.store.inventory
       .filter(
         (entry) =>
-          entry.type === "pickup" &&
+          (entry.type === "pickup" ||
+            entry.type === "adjustment" ||
+            entry.type === "manual-deduction") &&
           dateKeySet.has(getBusinessDayKey(entry.happenedAt))
       )
       .forEach((entry) => {
@@ -401,54 +393,65 @@ export class AnalyticsService {
   }
 
   private buildDataMonitorDailySummary(dateKey: string): DataMonitorDailySummary {
+    return this.buildDataMonitorAggregateSummary([dateKey], dateKey);
+  }
+
+  private buildDataMonitorAggregateSummary(dateKeys: string[], businessDateKey?: string): DataMonitorDailySummary {
+    const dateKeySet = new Set(dateKeys);
     const inventory = this.store.inventory.filter(
-      (entry) => getBusinessDayKey(entry.happenedAt) === dateKey
+      (entry) => dateKeySet.has(getBusinessDayKey(entry.happenedAt))
     );
-    const events = this.store.events.filter((entry) => getBusinessDayKey(entry.createdAt) === dateKey);
-    const logs = this.store.logs.filter((entry) => getBusinessDayKey(entry.occurredAt) === dateKey);
-    const tasks = this.store.alerts.filter((entry) => getBusinessDayKey(entry.createdAt) === dateKey);
+    const events = this.store.events.filter((entry) => dateKeySet.has(getBusinessDayKey(entry.createdAt)));
+    const logs = this.store.logs.filter((entry) => dateKeySet.has(getBusinessDayKey(entry.occurredAt)));
+    const resolvedFeedbacks = this.store.alerts.filter(
+      (entry) =>
+        entry.grade === "feedback" &&
+        entry.status === "resolved" &&
+        entry.resolvedAt &&
+        dateKeySet.has(getBusinessDayKey(entry.resolvedAt))
+    );
     const transfers = this.store.inventoryTransfers.filter(
-      (entry) => getBusinessDayKey(entry.happenedAt) === dateKey
+      (entry) => dateKeySet.has(getBusinessDayKey(entry.happenedAt))
     );
     const stocktakes = this.store.stocktakes.filter(
-      (entry) => getBusinessDayKey(entry.createdAt) === dateKey
+      (entry) => dateKeySet.has(getBusinessDayKey(entry.createdAt))
     );
 
-    const pickupInventory = inventory.filter((entry) => entry.type === "pickup");
+    const pickupInventory = inventory.filter(
+      (entry) =>
+        entry.type === "pickup" ||
+        entry.type === "adjustment" ||
+        entry.type === "manual-deduction"
+    );
     const restockInventory = inventory.filter(
       (entry) => entry.type === "donation" || entry.type === "manual-restock"
     );
-    const adjustmentInventory = inventory.filter(
-      (entry) =>
-        entry.type === "adjustment" ||
-        entry.type === "manual-deduction" ||
-        entry.type === "refund"
-    );
-
     const servedUsers = new Set(
       pickupInventory.map((entry) => entry.userId).filter((entry): entry is string => Boolean(entry))
     ).size;
     const pickupUnits = pickupInventory.reduce((sum, entry) => sum + entry.quantity, 0);
-    const restockUnits =
-      restockInventory.reduce((sum, entry) => sum + entry.quantity, 0) +
-      transfers.reduce((sum, entry) => sum + entry.quantity, 0);
-    const adjustmentUnits = adjustmentInventory.reduce((sum, entry) => sum + entry.quantity, 0);
+    const restockUnits = restockInventory.reduce((sum, entry) => sum + entry.quantity, 0);
+    const transferUnits = transfers.reduce((sum, entry) => sum + entry.quantity, 0);
     const eventCount = events.length;
-    const taskCount = tasks.length;
+    const feedbackResolvedCount = resolvedFeedbacks.length;
     const logCount = logs.length + stocktakes.length;
 
     const metricBars: DataMonitorMetricBar[] = [
       { key: "servedUsers", label: "服务人数", value: servedUsers, unit: "人" },
       { key: "pickupUnits", label: "领取件数", value: pickupUnits, unit: "件" },
-      { key: "restockUnits", label: "补货与调拨", value: restockUnits, unit: "件" },
-      { key: "adjustmentUnits", label: "补扣与退款", value: adjustmentUnits, unit: "件" },
+      { key: "restockUnits", label: "补货件数", value: restockUnits, unit: "件" },
+      { key: "transferUnits", label: "调拨件数", value: transferUnits, unit: "件" },
       { key: "eventCount", label: "开柜事件", value: eventCount, unit: "次" },
-      { key: "taskCount", label: "新增待办", value: taskCount, unit: "项" },
+      { key: "feedbackResolvedCount", label: "完成反馈数", value: feedbackResolvedCount, unit: "项" },
       { key: "logCount", label: "日志数量", value: logCount, unit: "条" }
     ];
 
     const topGoods = Array.from(
-      inventory.reduce((map, entry) => {
+      [...inventory, ...transfers.map((entry) => ({
+        goodsId: entry.goodsId,
+        goodsName: entry.goodsName,
+        quantity: entry.quantity
+      }))].reduce((map, entry) => {
         const current = map.get(entry.goodsId) ?? {
           goodsId: entry.goodsId,
           goodsName: entry.goodsName,
@@ -464,7 +467,11 @@ export class AnalyticsService {
       .slice(0, 8);
 
     const topDevices = Array.from(
-      inventory.reduce((map, entry) => {
+      [...inventory, ...transfers.map((entry) => ({
+        deviceCode: entry.toCode,
+        type: "transfer" as const,
+        quantity: entry.quantity
+      }))].reduce((map, entry) => {
         const deviceName =
           this.store.devices.find((device) => device.deviceCode === entry.deviceCode)?.name ??
           entry.deviceCode;
@@ -478,7 +485,16 @@ export class AnalyticsService {
 
         if (entry.type === "pickup") {
           current.pickupUnits += entry.quantity;
-        } else if (entry.type === "donation" || entry.type === "manual-restock") {
+        } else if (
+          entry.type === "adjustment" ||
+          entry.type === "manual-deduction"
+        ) {
+          current.pickupUnits += entry.quantity;
+        } else if (
+          entry.type === "donation" ||
+          entry.type === "manual-restock" ||
+          entry.type === "transfer"
+        ) {
           current.restockUnits += entry.quantity;
         }
 
@@ -515,13 +531,13 @@ export class AnalyticsService {
     );
 
     return {
-      businessDateKey: dateKey,
+      businessDateKey: businessDateKey ?? dateKeys[0] ?? getBusinessDayKey(new Date()),
       servedUsers,
       pickupUnits,
       restockUnits,
-      adjustmentUnits,
+      transferUnits,
       eventCount,
-      taskCount,
+      feedbackResolvedCount,
       logCount,
       metricBars,
       topGoods,

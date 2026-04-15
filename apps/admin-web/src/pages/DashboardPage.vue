@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import type { DashboardSnapshot, OperationLogRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
+import { formatDateTime } from "../utils/datetime";
 
 type BucketKey = "completeUsers" | "partialUsers" | "unservedUsers";
 
@@ -14,6 +15,8 @@ const loading = ref(false);
 const activeBucket = ref<BucketKey>();
 const resolvingTaskId = ref<string>();
 const activeTask = ref<NonNullable<typeof pendingTasks.value>[number]>();
+let timer: ReturnType<typeof setInterval> | undefined;
+let visibilityHandler: (() => void) | undefined;
 
 const summaryLogs = computed(() => dashboard.value?.summaryLogs ?? []);
 const pendingTasks = computed(() => dashboard.value?.pendingTasks ?? []);
@@ -105,7 +108,37 @@ const resolveTask = async (id: string) => {
   }
 };
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  timer = setInterval(load, 15_000);
+  if (typeof document !== "undefined") {
+    visibilityHandler = () => {
+      if (document.hidden) {
+        if (timer) {
+          clearInterval(timer);
+          timer = undefined;
+        }
+        return;
+      }
+
+      void load();
+      if (timer) {
+        clearInterval(timer);
+      }
+      timer = setInterval(load, 15_000);
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+  }
+});
+
+onUnmounted(() => {
+  if (timer) {
+    clearInterval(timer);
+  }
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+  }
+});
 </script>
 
 <template>
@@ -184,7 +217,7 @@ onMounted(load);
           </thead>
           <tbody>
             <tr v-for="task in pendingTasks" :key="task.id">
-              <td class="admin-code">{{ task.dueAt.slice(0, 16).replace("T", " ") }}</td>
+              <td class="admin-code">{{ formatDateTime(task.dueAt) }}</td>
               <td>
                 <span class="admin-table__strong">{{ task.title }}</span>
                 <span class="admin-table__subtext">分级：{{ taskGradeLabel(task.grade) }} · 状态：{{ task.status === "acknowledged" ? "已知晓" : "待处理" }}</span>
@@ -282,7 +315,7 @@ onMounted(load);
           </thead>
           <tbody>
             <tr v-for="log in summaryLogs" :key="log.id">
-              <td class="admin-code">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</td>
+              <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
               <td>
                 <RouterLink class="admin-link" :to="resolveLogLink(log)">{{ log.description }}</RouterLink>
                 <span class="admin-table__subtext">{{ log.detail }}</span>
@@ -385,7 +418,7 @@ onMounted(load);
           </div>
           <div class="admin-kv__row">
             <span class="admin-kv__label">截止时间</span>
-            <span class="admin-kv__value admin-code">{{ activeTask.dueAt.slice(0, 16).replace("T", " ") }}</span>
+            <span class="admin-kv__value admin-code">{{ formatDateTime(activeTask.dueAt) }}</span>
           </div>
           <div class="admin-kv__row">
             <span class="admin-kv__label">完整备注</span>

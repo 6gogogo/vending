@@ -255,17 +255,6 @@ export class CabinetEventsService {
             ? true
             : this.store.getDeviceRuntime(payload.deviceCode).openedAfterLastCommand
       });
-      if (payload.doorIsOpen === "N") {
-        this.alertsService.create({
-          type: "device_fault",
-          title: "开门后未实际拉开柜门",
-          deviceCode: payload.deviceCode,
-          targetUserId: event.userId,
-          dueAt: event.updatedAt,
-          detail: `事件 ${payload.eventId} 已关门，但回调显示用户未实际拉开柜门。`,
-          relatedEventId: event.eventId
-        });
-      }
     } else if (payload.status === "FAIL") {
       event.status = "failed";
       this.store.updateDeviceRuntime(payload.deviceCode, {

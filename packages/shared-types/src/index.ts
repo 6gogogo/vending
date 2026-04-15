@@ -855,9 +855,9 @@ export type DataMonitorMetricKey =
   | "servedUsers"
   | "pickupUnits"
   | "restockUnits"
-  | "adjustmentUnits"
+  | "transferUnits"
   | "eventCount"
-  | "taskCount"
+  | "feedbackResolvedCount"
   | "logCount";
 
 export type DataMonitorRange = "today" | "3d" | "7d";
@@ -875,9 +875,9 @@ export interface DataMonitorRangePoint {
   servedUsers: number;
   pickupUnits: number;
   restockUnits: number;
-  adjustmentUnits: number;
+  transferUnits: number;
   eventCount: number;
-  taskCount: number;
+  feedbackResolvedCount: number;
   logCount: number;
 }
 
@@ -904,9 +904,9 @@ export interface DataMonitorDailySummary {
   servedUsers: number;
   pickupUnits: number;
   restockUnits: number;
-  adjustmentUnits: number;
+  transferUnits: number;
   eventCount: number;
-  taskCount: number;
+  feedbackResolvedCount: number;
   logCount: number;
   metricBars: DataMonitorMetricBar[];
   topGoods: Array<{
@@ -930,6 +930,7 @@ export interface DataMonitorSnapshot {
   range: DataMonitorRange;
   days: DataMonitorCalendarDay[];
   selectedDateSummary?: DataMonitorDailySummary;
+  periodSummary?: DataMonitorDailySummary;
   rangeStartDateKey: string;
   rangeEndDateKey: string;
   rangeSeries: DataMonitorRangePoint[];

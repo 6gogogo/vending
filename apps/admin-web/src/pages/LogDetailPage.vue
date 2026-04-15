@@ -5,6 +5,7 @@ import type { CallbackLogRecord, OperationLogRecord, SystemAuditLogEntry } from 
 
 import { adminApi } from "../api/admin";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
+import { formatDateTimeSeconds } from "../utils/datetime";
 
 const route = useRoute();
 const log = ref<OperationLogRecord>();
@@ -164,7 +165,7 @@ onMounted(load);
         <div class="admin-kv">
           <div class="admin-kv__row">
             <span class="admin-kv__label">发生时间</span>
-            <span class="admin-kv__value admin-code">{{ log.occurredAt.slice(0, 19).replace("T", " ") }}</span>
+            <span class="admin-kv__value admin-code">{{ formatDateTimeSeconds(log.occurredAt) }}</span>
           </div>
           <div class="admin-kv__row">
             <span class="admin-kv__label">动作人</span>
@@ -241,7 +242,7 @@ onMounted(load);
             <div v-if="relatedAuditLogs.length" class="log-detail__trace-list">
               <article v-for="entry in relatedAuditLogs" :key="`${entry.occurredAt}-${entry.path}`" class="log-detail__trace-card">
                 <div class="log-detail__trace-head">
-                  <span class="admin-code">{{ entry.occurredAt.slice(0, 19).replace("T", " ") }}</span>
+                  <span class="admin-code">{{ formatDateTimeSeconds(entry.occurredAt) }}</span>
                   <span class="admin-pill" :class="entry.path.startsWith('/external/smartvm') ? 'admin-pill--success' : 'admin-pill--neutral'">
                     {{ entry.path.startsWith("/external/smartvm") ? "发" : "收" }}
                   </span>
@@ -258,7 +259,7 @@ onMounted(load);
             <div v-if="relatedCallbackLogs.length" class="log-detail__trace-list">
               <article v-for="entry in relatedCallbackLogs" :key="entry.id" class="log-detail__trace-card">
                 <div class="log-detail__trace-head">
-                  <span class="admin-code">{{ entry.receivedAt.slice(0, 19).replace("T", " ") }}</span>
+                  <span class="admin-code">{{ formatDateTimeSeconds(entry.receivedAt) }}</span>
                   <span class="admin-pill admin-pill--neutral">平台回调</span>
                   <span class="admin-table__subtext">{{ entry.type }}</span>
                 </div>

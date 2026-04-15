@@ -6,6 +6,7 @@ import type { DeviceRecord, SpecialAccessPolicy, UserAccessPolicy, UserManagemen
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 import { resolveActorLink } from "../utils/entity-links";
+import { formatDateTime } from "../utils/datetime";
 
 const route = useRoute();
 const weekdayOptions = [
@@ -335,7 +336,7 @@ onMounted(async () => {
             <StatTile title="补货件数" :value="detail.stats.donationCount" hint="该人员累计补货数量" />
             <StatTile title="补扣件数" :value="detail.stats.adjustmentCount" hint="该人员累计人工补扣数量" tone="warning" />
           </div>
-          <div class="admin-note">最近活跃时间：{{ detail.stats.lastActiveAt ? detail.stats.lastActiveAt.slice(0, 16).replace("T", " ") : "暂无" }}</div>
+          <div class="admin-note">最近活跃时间：{{ formatDateTime(detail.stats.lastActiveAt) }}</div>
         </article>
 
         <article v-if="detail.user.role === 'special' && detail.policyCalendar" class="admin-panel admin-panel-block">
@@ -373,7 +374,7 @@ onMounted(async () => {
             <thead><tr><th>到期时间</th><th>任务</th><th>柜机</th></tr></thead>
             <tbody>
               <tr v-for="task in detail.relatedTasks" :key="task.id">
-                <td class="admin-code">{{ task.dueAt.slice(0, 16).replace("T", " ") }}</td>
+                <td class="admin-code">{{ formatDateTime(task.dueAt) }}</td>
                 <td><span class="admin-table__strong">{{ task.title }}</span><span class="admin-table__subtext">{{ task.detail }}</span></td>
                 <td><RouterLink v-if="task.deviceCode" class="admin-link" :to="`/operations/${task.deviceCode}`">{{ task.deviceCode }}</RouterLink><span v-else>-</span></td>
               </tr>
@@ -388,7 +389,7 @@ onMounted(async () => {
             <thead><tr><th>时间</th><th>动作</th><th>动作人</th><th>状态</th><th>详情</th></tr></thead>
             <tbody>
               <tr v-for="log in detail.recentLogs" :key="log.id">
-                <td class="admin-code">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</td>
+                <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
                 <td><span class="admin-table__strong">{{ log.description }}</span><span class="admin-table__subtext">{{ log.detail }}</span></td>
                 <td><RouterLink v-if="resolveLogActorRoute(log.actor)" class="admin-link" :to="resolveLogActorRoute(log.actor)!">{{ log.actor.name }}</RouterLink><span v-else>{{ log.actor.name }}</span><span class="admin-table__subtext">{{ log.actor.type }}</span></td>
                 <td><span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">{{ formatLogStatus(log.status) }}</span></td>
@@ -405,7 +406,7 @@ onMounted(async () => {
             <thead><tr><th>时间</th><th>货品</th><th>数量</th><th>柜机</th><th>类型</th><th>平台关联</th></tr></thead>
             <tbody>
               <tr v-for="record in detail.recentRecords" :key="record.id">
-                <td class="admin-code">{{ record.happenedAt.slice(0, 16).replace("T", " ") }}</td>
+                <td class="admin-code">{{ formatDateTime(record.happenedAt) }}</td>
                 <td><span class="admin-table__strong">{{ record.goodsName }}</span><span class="admin-table__subtext">{{ record.goodsId }}</span></td>
                 <td class="admin-code">{{ record.quantity }}</td>
                 <td><RouterLink class="admin-link" :to="`/operations/${record.deviceCode}`">{{ record.deviceCode }}</RouterLink></td>
@@ -502,7 +503,7 @@ onMounted(async () => {
           <div class="admin-panel__head"><div><span class="admin-kicker">关联事件</span><h3 class="admin-panel__title">最近开柜事件</h3></div></div>
           <div v-if="detail.recentEvents.length" class="admin-list">
             <div v-for="event in detail.recentEvents" :key="event.eventId" class="admin-list__row">
-              <div class="admin-list__main"><span class="admin-list__title">{{ event.orderNo }}</span><span class="admin-list__meta">{{ event.updatedAt.slice(0, 16).replace("T", " ") }} · {{ event.deviceCode }} · {{ event.status }}</span></div>
+              <div class="admin-list__main"><span class="admin-list__title">{{ event.orderNo }}</span><span class="admin-list__meta">{{ formatDateTime(event.updatedAt) }} · {{ event.deviceCode }} · {{ event.status }}</span></div>
               <RouterLink class="admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">查看日志</RouterLink>
             </div>
           </div>

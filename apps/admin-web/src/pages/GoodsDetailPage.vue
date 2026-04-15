@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from "vue-router";
 import type { GoodsCategory, GoodsCategoryRecord, WarehouseRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { formatDate, formatDateTime } from "../utils/datetime";
 
 const route = useRoute();
 const packageFormOptions = ["瓶装", "盒装", "袋装", "杯装", "罐装", "桶装", "份装", "散装", "其他"];
@@ -477,7 +478,7 @@ onMounted(load);
               <div v-for="log in recentLogs" :key="log.id" class="admin-list__row">
                 <div class="admin-list__main">
                   <span class="admin-list__title">{{ log.description }}</span>
-                  <span class="admin-list__meta">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</span>
+                  <span class="admin-list__meta">{{ formatDateTime(log.occurredAt) }}</span>
                 </div>
                 <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
               </div>
@@ -514,7 +515,7 @@ onMounted(load);
               <tr v-for="batch in batches" :key="batch.batchId">
                 <td>
                   <span class="admin-table__strong">{{ batch.batchId }}</span>
-                  <span class="admin-table__subtext">{{ batch.createdAt.slice(0, 16).replace("T", " ") }}</span>
+                  <span class="admin-table__subtext">{{ formatDate(batch.createdAt) }}</span>
                 </td>
                 <td>
                   <span class="admin-table__strong">{{ batch.sourceUserName || batch.sourceType }}</span>

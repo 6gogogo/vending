@@ -4,6 +4,7 @@ import { RouterLink } from "vue-router";
 import type { GoodsCatalogItem, RegionRecord, RegistrationApplication, SpecialAccessPolicy, UserLedgerStatus, UserRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { formatDateTime } from "../utils/datetime";
 
 type DrawerMode = "" | "create-user" | "edit-user" | "create-policy" | "edit-policy";
 
@@ -285,7 +286,7 @@ onMounted(load);
           <div v-for="item in filteredApplications" :key="item.id" class="admin-list__row users-review-row">
             <div class="admin-list__main">
               <span class="admin-list__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</span>
-              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "普通用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }} · 更新于 {{ item.updatedAt.slice(0, 16).replace("T", " ") }}</span>
+              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "普通用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
               <span class="admin-table__subtext">{{ item.requestedRole === "special" ? `${item.profile.regionName || "待补充区域"}${item.profile.note ? ` · ${item.profile.note}` : ""}` : item.requestedRole === "merchant" ? `${item.profile.contactName || "待补充联系人"} · ${item.profile.address || "待补充地址"}` : `${item.profile.organization || "待补充单位"} · ${item.profile.title || "待补充职务"}` }}</span>
               <span v-if="item.reviewReason" class="users-review-row__reason">驳回原因：{{ item.reviewReason }}</span>
             </div>

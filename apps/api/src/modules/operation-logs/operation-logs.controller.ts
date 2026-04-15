@@ -18,14 +18,18 @@ export class OperationLogsController {
     @Query("category") category?: OperationLogCategory,
     @Query("status") status?: OperationLogStatus,
     @Query("subjectType") subjectType?: OperationLogSubject["type"],
-    @Query("subjectId") subjectId?: string
+    @Query("subjectId") subjectId?: string,
+    @Query("dateFrom") dateFrom?: string,
+    @Query("dateTo") dateTo?: string
   ) {
     return ok(
       this.operationLogsService.list({
         category,
         status,
         subjectType,
-        subjectId
+        subjectId,
+        dateFrom,
+        dateTo
       })
     );
   }
@@ -40,13 +44,17 @@ export class OperationLogsController {
     @Query("category") category?: OperationLogCategory,
     @Query("status") status?: OperationLogStatus,
     @Query("subjectType") subjectType?: OperationLogSubject["type"],
-    @Query("subjectId") subjectId?: string
+    @Query("subjectId") subjectId?: string,
+    @Query("dateFrom") dateFrom?: string,
+    @Query("dateTo") dateTo?: string
   ) {
     const file = this.operationLogsService.buildExport({
       category,
       status,
       subjectType,
-      subjectId
+      subjectId,
+      dateFrom,
+      dateTo
     });
     response.setHeader("Content-Type", file.contentType);
     response.setHeader("Content-Disposition", `attachment; filename=\"${file.filename}\"`);

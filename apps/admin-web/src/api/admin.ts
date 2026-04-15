@@ -479,6 +479,8 @@ export const adminApi = {
     status?: OperationLogStatus;
     subjectType?: "user" | "device" | "event" | "alert" | "goods" | "warehouse" | "stocktake";
     subjectId?: string;
+    dateFrom?: string;
+    dateTo?: string;
   }) {
     return adminClient.get<OperationLogRecord[]>("/operation-logs", {
       query: filters
@@ -494,6 +496,8 @@ export const adminApi = {
       status?: OperationLogStatus;
       subjectType?: "user" | "device" | "event" | "alert" | "goods" | "warehouse" | "stocktake";
       subjectId?: string;
+      dateFrom?: string;
+      dateTo?: string;
     }
   ) {
     const query = new URLSearchParams();
@@ -512,6 +516,14 @@ export const adminApi = {
 
     if (filters?.subjectId) {
       query.set("subjectId", filters.subjectId);
+    }
+
+    if (filters?.dateFrom) {
+      query.set("dateFrom", filters.dateFrom);
+    }
+
+    if (filters?.dateTo) {
+      query.set("dateTo", filters.dateTo);
     }
 
     const response = await fetch(

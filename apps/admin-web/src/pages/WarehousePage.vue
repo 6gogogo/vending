@@ -7,6 +7,7 @@ import type { DeviceMonitoringDetail, DeviceRecord, WarehouseInventorySnapshot }
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 import { useAdminSessionStore } from "../stores/session";
+import { formatDate, formatDateTime } from "../utils/datetime";
 
 const sessionStore = useAdminSessionStore();
 const loading = ref(false);
@@ -286,7 +287,7 @@ onMounted(load);
               </td>
               <td class="admin-code">{{ item.totalStock }}</td>
               <td class="admin-code">{{ item.batchCount }}</td>
-              <td class="admin-code">{{ item.nearestExpiryAt ? item.nearestExpiryAt.slice(0, 16).replace("T", " ") : "-" }}</td>
+              <td class="admin-code">{{ formatDate(item.nearestExpiryAt) }}</td>
               <td><RouterLink class="admin-link" :to="`/goods/${item.goodsId}`">详情</RouterLink></td>
             </tr>
           </tbody>
@@ -402,7 +403,7 @@ onMounted(load);
           </thead>
           <tbody>
             <tr v-for="item in snapshot.transfers" :key="item.id">
-              <td class="admin-code">{{ item.happenedAt.slice(0, 16).replace("T", " ") }}</td>
+              <td class="admin-code">{{ formatDateTime(item.happenedAt) }}</td>
               <td>{{ item.goodsName }}</td>
               <td>{{ item.fromName }}</td>
               <td>{{ item.toName }}</td>
@@ -435,7 +436,7 @@ onMounted(load);
           </thead>
           <tbody>
             <tr v-for="item in snapshot.stocktakes" :key="item.id">
-              <td class="admin-code">{{ item.createdAt.slice(0, 16).replace("T", " ") }}</td>
+              <td class="admin-code">{{ formatDateTime(item.createdAt) }}</td>
               <td>
                 <RouterLink class="admin-link" :to="`/operations/${item.deviceCode}`">{{ item.deviceName }}</RouterLink>
               </td>

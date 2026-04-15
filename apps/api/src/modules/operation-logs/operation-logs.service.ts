@@ -14,6 +14,7 @@ import type {
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { resolveSystemLogFile } from "../../common/store/persistence";
+import { getBusinessDayKey } from "../../common/time/business-day";
 
 const MAX_SYSTEM_AUDIT_LIMIT = 200;
 const MAX_SYSTEM_AUDIT_SCAN_LINES = 2_000;
@@ -29,6 +30,8 @@ export class OperationLogsService {
     status?: OperationLogStatus;
     subjectType?: OperationLogSubject["type"];
     subjectId?: string;
+    dateFrom?: string;
+    dateTo?: string;
   }) {
     return this.store.logs
       .filter((entry) => {
@@ -58,6 +61,17 @@ export class OperationLogsService {
           }
         }
 
+        const businessDateKey =
+          filters?.dateFrom || filters?.dateTo ? getBusinessDayKey(entry.occurredAt) : undefined;
+
+        if (filters?.dateFrom && businessDateKey && businessDateKey < filters.dateFrom) {
+          return false;
+        }
+
+        if (filters?.dateTo && businessDateKey && businessDateKey > filters.dateTo) {
+          return false;
+        }
+
         return true;
       })
       .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
@@ -78,6 +92,8 @@ export class OperationLogsService {
     status?: OperationLogStatus;
     subjectType?: OperationLogSubject["type"];
     subjectId?: string;
+    dateFrom?: string;
+    dateTo?: string;
   }) {
     const logs = this.list(filters);
     const rows = logs

@@ -6,6 +6,7 @@ import type { OperationLogCategory, OperationLogRecord, OperationLogStatus, Oper
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
+import { formatDateTime } from "../utils/datetime";
 
 const route = useRoute();
 const router = useRouter();
@@ -20,6 +21,8 @@ const category = ref<"" | OperationLogCategory>("");
 const status = ref<"" | OperationLogStatus>("");
 const subjectType = ref<"" | OperationLogSubject["type"]>("");
 const subjectId = ref("");
+const dateFrom = ref("");
+const dateTo = ref("");
 
 const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.actor);
 
@@ -45,6 +48,8 @@ const syncFromRoute = () => {
   status.value = (route.query.status as OperationLogStatus | undefined) ?? "";
   subjectType.value = (route.query.subjectType as OperationLogSubject["type"] | undefined) ?? "";
   subjectId.value = typeof route.query.subjectId === "string" ? route.query.subjectId : "";
+  dateFrom.value = typeof route.query.dateFrom === "string" ? route.query.dateFrom : "";
+  dateTo.value = typeof route.query.dateTo === "string" ? route.query.dateTo : "";
 };
 
 const load = async () => {
@@ -54,7 +59,9 @@ const load = async () => {
       category: category.value || undefined,
       status: status.value || undefined,
       subjectType: subjectType.value || undefined,
-      subjectId: subjectId.value || undefined
+      subjectId: subjectId.value || undefined,
+      dateFrom: dateFrom.value || undefined,
+      dateTo: dateTo.value || undefined
     });
   } finally {
     loading.value = false;
@@ -68,7 +75,9 @@ const applyFilters = async () => {
       category: category.value || undefined,
       status: status.value || undefined,
       subjectType: subjectType.value || undefined,
-      subjectId: subjectId.value || undefined
+      subjectId: subjectId.value || undefined,
+      dateFrom: dateFrom.value || undefined,
+      dateTo: dateTo.value || undefined
     }
   });
 };
@@ -85,7 +94,9 @@ const exportLogs = async () => {
       category: category.value || undefined,
       status: status.value || undefined,
       subjectType: subjectType.value || undefined,
-      subjectId: subjectId.value || undefined
+      subjectId: subjectId.value || undefined,
+      dateFrom: dateFrom.value || undefined,
+      dateTo: dateTo.value || undefined
     });
     const url = window.URL.createObjectURL(exported.blob);
     const link = window.document.createElement("a");
@@ -202,6 +213,14 @@ onMounted(async () => {
           <span class="admin-field__label">主体编号</span>
           <input v-model="subjectId" class="admin-input" placeholder="例如 CAB-1001 / special-001 / evt-001" />
         </label>
+        <label class="admin-field">
+          <span class="admin-field__label">起始业务日</span>
+          <input v-model="dateFrom" type="date" class="admin-input" />
+        </label>
+        <label class="admin-field">
+          <span class="admin-field__label">结束业务日</span>
+          <input v-model="dateTo" type="date" class="admin-input" />
+        </label>
         <div class="logs-filters__actions">
           <button class="admin-button" @click="applyFilters">应用筛选</button>
           <button class="admin-button admin-button--ghost" :disabled="exporting" @click="exportLogs">
@@ -230,7 +249,7 @@ onMounted(async () => {
           </thead>
           <tbody>
             <tr v-for="log in logs" :key="log.id">
-              <td class="admin-code">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</td>
+              <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
               <td>
                 <RouterLink class="admin-link" :to="`/logs/${log.id}`">{{ log.description }}</RouterLink>
                 <span class="admin-table__subtext">{{ log.detail }}</span>
