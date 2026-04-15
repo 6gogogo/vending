@@ -1,43 +1,117 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import type { DataMonitorSnapshot } from "@vm/shared-types";
+import type {
+  DataMonitorMetricKey,
+  DataMonitorRange,
+  DataMonitorSnapshot
+} from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import StatTile from "../components/StatTile.vue";
 
+const metricOptions: Array<{
+  key: DataMonitorMetricKey;
+  label: string;
+  unit: string;
+}> = [
+  { key: "servedUsers", label: "服务人数", unit: "人" },
+  { key: "pickupUnits", label: "领取件数", unit: "件" },
+  { key: "restockUnits", label: "补货与调拨", unit: "件" },
+  { key: "adjustmentUnits", label: "补扣与退款", unit: "件" },
+  { key: "eventCount", label: "开柜事件", unit: "次" },
+  { key: "taskCount", label: "待办数量", unit: "项" },
+  { key: "logCount", label: "日志数量", unit: "条" }
+];
+
+const rangeOptions: Array<{ value: DataMonitorRange; label: string }> = [
+  { value: "today", label: "今天" },
+  { value: "3d", label: "近三天" },
+  { value: "7d", label: "一周内" }
+];
+
+const todayDateKey = new Date().toISOString().slice(0, 10);
 const snapshot = ref<DataMonitorSnapshot>();
 const loading = ref(false);
-const calendarMonth = ref(new Date().toISOString().slice(0, 7));
-const selectedDateKey = ref(`${calendarMonth.value}-01`);
+const calendarMonth = ref(todayDateKey.slice(0, 7));
+const selectedDateKey = ref(todayDateKey);
+const selectedMetric = ref<DataMonitorMetricKey>("servedUsers");
+const selectedRange = ref<DataMonitorRange>("today");
 
 const currentMonthTitle = computed(() => {
   const source = snapshot.value?.monthKey ?? calendarMonth.value;
-  if (!source) {
-    return "";
-  }
-
   const [year, month] = source.split("-");
   return `${year}年 ${month}月`;
 });
 
-const metricBars = computed(() => snapshot.value?.selectedDateSummary?.metricBars ?? []);
-const maxBarValue = computed(() =>
-  Math.max(1, ...metricBars.value.map((item) => item.value))
+const selectedDateSummary = computed(() => snapshot.value?.selectedDateSummary);
+const metricBars = computed(() => selectedDateSummary.value?.metricBars ?? []);
+const rangeSeries = computed(() => snapshot.value?.rangeSeries ?? []);
+const regionBreakdown = computed(() => snapshot.value?.regionBreakdown ?? []);
+const rangeSummary = computed(() => snapshot.value?.rangeSummary);
+
+const selectedMetricMeta = computed(
+  () => metricOptions.find((item) => item.key === selectedMetric.value) ?? metricOptions[0]
+);
+
+const getMetricValue = (
+  point:
+    | NonNullable<DataMonitorSnapshot["rangeSeries"]>[number]
+    | NonNullable<DataMonitorSnapshot["rangeSummary"]>,
+  metric: DataMonitorMetricKey
+) => point[metric];
+
+const chartBars = computed(() =>
+  selectedRange.value === "today"
+    ? metricBars.value.map((item) => ({
+        key: item.key,
+        label: item.label,
+        value: item.value,
+        unit: item.unit
+      }))
+    : rangeSeries.value.map((item) => ({
+        key: item.dateKey,
+        label: item.label,
+        value: getMetricValue(item, selectedMetric.value),
+        unit: selectedMetricMeta.value.unit
+      }))
+);
+
+const maxChartValue = computed(() =>
+  Math.max(1, ...chartBars.value.map((item) => item.value))
+);
+
+const maxRegionValue = computed(() =>
+  Math.max(1, ...regionBreakdown.value.map((item) => item.pickupUnits))
 );
 
 const formatDateTime = (value?: string) =>
   value ? value.slice(0, 16).replace("T", " ") : "-";
+
+const formatRangeTitle = computed(() => {
+  if (!snapshot.value) {
+    return selectedRange.value === "today" ? "按选中日期汇总关键指标" : "按日期查看指标分布";
+  }
+
+  if (selectedRange.value === "today") {
+    return `业务日 ${snapshot.value.selectedDateKey} 指标汇总`;
+  }
+
+  return `${selectedMetricMeta.value.label}在 ${snapshot.value.rangeStartDateKey} 至 ${snapshot.value.rangeEndDateKey} 的分布`;
+});
 
 const load = async () => {
   loading.value = true;
   try {
     const response = await adminApi.dataMonitor({
       month: calendarMonth.value,
-      date: selectedDateKey.value
+      date: selectedDateKey.value,
+      range: selectedRange.value
     });
     snapshot.value = response;
     calendarMonth.value = response.monthKey;
     selectedDateKey.value = response.selectedDateKey;
+    selectedRange.value = response.range;
   } finally {
     loading.value = false;
   }
@@ -59,6 +133,11 @@ const selectDate = async (dateKey: string) => {
   await load();
 };
 
+const selectRange = async (nextRange: DataMonitorRange) => {
+  selectedRange.value = nextRange;
+  await load();
+};
+
 onMounted(load);
 </script>
 
@@ -68,7 +147,7 @@ onMounted(load);
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">数据监控</p>
-          <h3 class="admin-page__section-title">按业务日查看服务、货品、事件与日志变化</h3>
+          <h3 class="admin-page__section-title">按业务日、时间段与区域查看服务走势</h3>
         </div>
         <div class="admin-toolbar">
           <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
@@ -78,18 +157,43 @@ onMounted(load);
       </div>
     </section>
 
+    <section v-if="rangeSummary" class="admin-grid admin-grid--stats-4">
+      <StatTile title="服务人数" :value="`${rangeSummary.servedUsers} 人`" hint="所选时间段内至少发生过一次领取的人员" tone="accent" />
+      <StatTile title="领取件数" :value="`${rangeSummary.pickupUnits} 件`" hint="按选定业务日范围汇总" tone="success" />
+      <StatTile title="补货与调拨" :value="`${rangeSummary.restockUnits} 件`" hint="包含补货、调拨和仓库流转" />
+      <StatTile title="补扣与退款" :value="`${rangeSummary.adjustmentUnits} 件`" hint="包含补扣、手工调整与退款" tone="warning" />
+    </section>
+
+    <section v-if="rangeSummary" class="admin-grid admin-grid--stats-3">
+      <StatTile title="开柜事件" :value="`${rangeSummary.eventCount} 次`" hint="该时间段内记录到的全部开门事件" />
+      <StatTile title="待办数量" :value="`${rangeSummary.taskCount} 项`" hint="按创建时间落在所选范围内汇总" tone="warning" />
+      <StatTile title="日志数量" :value="`${rangeSummary.logCount} 条`" hint="操作日志与盘点记录汇总" />
+    </section>
+
     <section class="admin-grid admin-grid--main-aside">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">日期选择</span>
-            <h3 class="admin-panel__title">按日查看全部运营数据</h3>
+            <h3 class="admin-panel__title">选择业务日并切换观察区间</h3>
           </div>
           <div class="admin-toolbar">
             <button class="admin-button admin-button--ghost" @click="changeMonth(-1)">上月</button>
             <span class="admin-code">{{ currentMonthTitle }}</span>
             <button class="admin-button admin-button--ghost" @click="changeMonth(1)">下月</button>
           </div>
+        </div>
+
+        <div class="data-monitor-range-switch">
+          <button
+            v-for="item in rangeOptions"
+            :key="item.value"
+            class="admin-button admin-button--ghost"
+            :class="selectedRange === item.value ? 'data-monitor-range-switch__active' : ''"
+            @click="selectRange(item.value)"
+          >
+            {{ item.label }}
+          </button>
         </div>
 
         <div class="data-monitor-calendar">
@@ -122,11 +226,12 @@ onMounted(load);
           </button>
         </div>
 
-        <div v-if="snapshot?.selectedDateSummary" class="admin-note">
-          已选业务日 {{ snapshot.selectedDateSummary.businessDateKey }}：
-          服务人数 {{ snapshot.selectedDateSummary.servedUsers }} 人，
-          领取 {{ snapshot.selectedDateSummary.pickupUnits }} 件，
-          补货与调拨 {{ snapshot.selectedDateSummary.restockUnits }} 件。
+        <div v-if="selectedDateSummary" class="admin-note">
+          已选业务日 {{ selectedDateSummary.businessDateKey }}：
+          服务 {{ selectedDateSummary.servedUsers }} 人，
+          领取 {{ selectedDateSummary.pickupUnits }} 件，
+          补货与调拨 {{ selectedDateSummary.restockUnits }} 件，
+          补扣与退款 {{ selectedDateSummary.adjustmentUnits }} 件。
         </div>
       </article>
 
@@ -134,112 +239,169 @@ onMounted(load);
         <article class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
-              <span class="admin-kicker">柱状图</span>
-              <h3 class="admin-panel__title">按选中日期汇总关键指标</h3>
+              <span class="admin-kicker">指标切换</span>
+              <h3 class="admin-panel__title">{{ formatRangeTitle }}</h3>
             </div>
           </div>
 
-          <div v-if="metricBars.length" class="data-monitor-chart">
-            <div v-for="item in metricBars" :key="item.key" class="data-monitor-chart__item">
-              <div class="data-monitor-chart__bar-shell">
+          <div class="data-monitor-metric-switch">
+            <button
+              v-for="item in metricOptions"
+              :key="item.key"
+              class="admin-button admin-button--ghost"
+              :class="selectedMetric === item.key ? 'data-monitor-metric-switch__active' : ''"
+              @click="selectedMetric = item.key"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+
+          <div v-if="chartBars.length" class="data-monitor-series-chart">
+            <div v-for="item in chartBars" :key="item.key" class="data-monitor-series-chart__item">
+              <span class="data-monitor-series-chart__value">{{ item.value }}{{ item.unit }}</span>
+              <div class="data-monitor-series-chart__shell">
                 <div
-                  class="data-monitor-chart__bar-fill"
-                  :style="{ height: `${Math.max(10, (item.value / maxBarValue) * 100)}%` }"
+                  class="data-monitor-series-chart__fill"
+                  :style="{ height: `${Math.max(10, (item.value / maxChartValue) * 100)}%` }"
                 />
               </div>
-              <span class="data-monitor-chart__label">{{ item.label }}</span>
-              <span class="data-monitor-chart__value">{{ item.value }}{{ item.unit }}</span>
+              <span class="data-monitor-series-chart__label">{{ item.label }}</span>
             </div>
           </div>
           <div v-else class="admin-empty">
-            <div class="admin-empty__title">当前日期没有可视化数据</div>
-            <div class="admin-empty__body">选择一个有业务动作的日期后，这里会显示柱状图。</div>
+            <div class="admin-empty__title">当前区间没有可视化数据</div>
+            <div class="admin-empty__body">选择一个有业务动作的日期或切换时间范围后，这里会显示指标分布。</div>
           </div>
         </article>
       </aside>
     </section>
 
-    <section v-if="snapshot?.selectedDateSummary" class="admin-grid admin-grid--two">
+    <section class="admin-grid admin-grid--two">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
-            <span class="admin-kicker">热门货品</span>
-            <h3 class="admin-panel__title">当日流动最多的货品</h3>
+            <span class="admin-kicker">区域服务分布</span>
+            <h3 class="admin-panel__title">按区域查看领取人数、件数与时间段</h3>
           </div>
         </div>
 
-        <table v-if="snapshot.selectedDateSummary.topGoods.length" class="admin-table">
-          <thead>
-            <tr>
-              <th>货品</th>
-              <th>数量</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in snapshot.selectedDateSummary.topGoods" :key="item.goodsId">
-              <td>
-                <RouterLink class="admin-link admin-table__strong" :to="`/goods/${item.goodsId}`">
-                  {{ item.goodsName }}
-                </RouterLink>
-              </td>
-              <td class="admin-code">{{ item.quantity }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-if="regionBreakdown.length" class="region-chart">
+          <section v-for="region in regionBreakdown" :key="region.regionId ?? region.regionName" class="region-chart__row">
+            <div class="region-chart__main">
+              <div class="region-chart__head">
+                <div>
+                  <span class="admin-table__strong">{{ region.regionName }}</span>
+                  <span class="admin-table__subtext">
+                    服务 {{ region.servedUsers }} 人 · 领取 {{ region.pickupUnits }} 件 · 发生 {{ region.pickupTimes }} 次
+                  </span>
+                </div>
+                <span class="admin-code">{{ region.peakHourLabel ?? "无峰值" }}</span>
+              </div>
+              <div class="region-chart__bar-shell">
+                <div
+                  class="region-chart__bar-fill"
+                  :style="{ width: `${Math.max(8, (region.pickupUnits / maxRegionValue) * 100)}%` }"
+                />
+              </div>
+              <div class="region-chart__time-strip">
+                <span
+                  v-for="timeBar in region.timeBars"
+                  :key="timeBar.key"
+                  class="region-chart__time-segment"
+                  :class="`region-chart__time-segment--${timeBar.key}`"
+                  :style="{ flexGrow: String(Math.max(1, timeBar.value)) }"
+                >
+                  {{ timeBar.label }} {{ timeBar.value }}
+                </span>
+              </div>
+            </div>
+            <div class="region-chart__meta">
+              <span class="admin-table__subtext">首次领取：{{ formatDateTime(region.firstPickupAt) }}</span>
+              <span class="admin-table__subtext">最近领取：{{ formatDateTime(region.lastPickupAt) }}</span>
+            </div>
+          </section>
+        </div>
         <div v-else class="admin-empty">
-          <div class="admin-empty__title">当前日期没有货品流动</div>
-          <div class="admin-empty__body">领取、补货、补扣和调拨都会在这里汇总。</div>
+          <div class="admin-empty__title">当前范围没有区域领取数据</div>
+          <div class="admin-empty__body">当普通用户产生领取动作后，这里会按区域显示时间分布。</div>
         </div>
       </article>
 
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
-            <span class="admin-kicker">柜机活跃度</span>
-            <h3 class="admin-panel__title">按柜机查看当日动作量</h3>
+            <span class="admin-kicker">柜机与货品</span>
+            <h3 class="admin-panel__title">查看所选日期的活跃柜机和热门货品</h3>
           </div>
         </div>
 
-        <table v-if="snapshot.selectedDateSummary.topDevices.length" class="admin-table">
-          <thead>
-            <tr>
-              <th>柜机</th>
-              <th>领取</th>
-              <th>补货</th>
-              <th>事件</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in snapshot.selectedDateSummary.topDevices" :key="item.deviceCode">
-              <td>
-                <RouterLink class="admin-link admin-table__strong" :to="`/operations/${item.deviceCode}`">
-                  {{ item.deviceName }}
-                </RouterLink>
-                <span class="admin-table__subtext">{{ item.deviceCode }}</span>
-              </td>
-              <td class="admin-code">{{ item.pickupUnits }}</td>
-              <td class="admin-code">{{ item.restockUnits }}</td>
-              <td class="admin-code">{{ item.eventCount }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="admin-empty">
-          <div class="admin-empty__title">当前日期没有柜机动作</div>
-          <div class="admin-empty__body">选择其他日期后可查看对应柜机的当日活跃度。</div>
+        <div class="data-monitor-side-grid">
+          <section>
+            <div class="data-monitor-side-grid__head">热门货品</div>
+            <table v-if="selectedDateSummary?.topGoods.length" class="admin-table">
+              <thead>
+                <tr>
+                  <th>货品</th>
+                  <th>数量</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in selectedDateSummary.topGoods" :key="item.goodsId">
+                  <td>
+                    <RouterLink class="admin-link admin-table__strong" :to="`/goods/${item.goodsId}`">
+                      {{ item.goodsName }}
+                    </RouterLink>
+                  </td>
+                  <td class="admin-code">{{ item.quantity }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="admin-empty admin-empty--compact">
+              <div class="admin-empty__title">没有货品流动</div>
+            </div>
+          </section>
+
+          <section>
+            <div class="data-monitor-side-grid__head">活跃柜机</div>
+            <table v-if="selectedDateSummary?.topDevices.length" class="admin-table">
+              <thead>
+                <tr>
+                  <th>柜机</th>
+                  <th>领取</th>
+                  <th>事件</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in selectedDateSummary.topDevices" :key="item.deviceCode">
+                  <td>
+                    <RouterLink class="admin-link admin-table__strong" :to="`/operations/${item.deviceCode}`">
+                      {{ item.deviceName }}
+                    </RouterLink>
+                    <span class="admin-table__subtext">{{ item.deviceCode }}</span>
+                  </td>
+                  <td class="admin-code">{{ item.pickupUnits }}</td>
+                  <td class="admin-code">{{ item.eventCount }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="admin-empty admin-empty--compact">
+              <div class="admin-empty__title">没有柜机动作</div>
+            </div>
+          </section>
         </div>
       </article>
     </section>
 
-    <section v-if="snapshot?.selectedDateSummary" class="admin-page__section">
+    <section v-if="selectedDateSummary" class="admin-page__section">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">当日日志</span>
-            <h3 class="admin-panel__title">查看该业务日的关键系统动作</h3>
+            <h3 class="admin-panel__title">查看所选业务日的关键动作</h3>
           </div>
         </div>
 
-        <table v-if="snapshot.selectedDateSummary.recentLogs.length" class="admin-table">
+        <table v-if="selectedDateSummary.recentLogs.length" class="admin-table">
           <thead>
             <tr>
               <th>时间</th>
@@ -249,7 +411,7 @@ onMounted(load);
             </tr>
           </thead>
           <tbody>
-            <tr v-for="log in snapshot.selectedDateSummary.recentLogs" :key="log.id">
+            <tr v-for="log in selectedDateSummary.recentLogs" :key="log.id">
               <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
               <td>
                 <span class="admin-table__strong">{{ log.description }}</span>
@@ -287,6 +449,20 @@ onMounted(load);
 </template>
 
 <style scoped>
+.data-monitor-range-switch,
+.data-monitor-metric-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.data-monitor-range-switch__active,
+.data-monitor-metric-switch__active {
+  background: var(--admin-accent-soft);
+  border-color: #aebfe1;
+  color: var(--admin-accent-strong);
+}
+
 .data-monitor-calendar {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -341,24 +517,25 @@ onMounted(load);
   border-radius: 999px;
 }
 
-.data-monitor-chart {
+.data-monitor-series-chart {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
   gap: 12px;
   align-items: end;
-  min-height: 260px;
+  min-height: 290px;
 }
 
-.data-monitor-chart__item {
+.data-monitor-series-chart__item {
+  min-width: 0;
   display: grid;
   gap: 8px;
   justify-items: center;
 }
 
-.data-monitor-chart__bar-shell {
+.data-monitor-series-chart__shell {
   width: 100%;
-  max-width: 56px;
-  height: 170px;
+  max-width: 60px;
+  height: 190px;
   display: flex;
   align-items: flex-end;
   padding: 4px;
@@ -367,26 +544,147 @@ onMounted(load);
   background: var(--admin-panel-muted);
 }
 
-.data-monitor-chart__bar-fill {
+.data-monitor-series-chart__fill {
   width: 100%;
   border-radius: 6px;
   background: linear-gradient(180deg, var(--admin-accent) 0%, var(--admin-accent-strong) 100%);
 }
 
-.data-monitor-chart__label {
+.data-monitor-series-chart__label {
   text-align: center;
   font-size: 0.82rem;
   color: var(--admin-muted);
 }
 
-.data-monitor-chart__value {
+.data-monitor-series-chart__value {
   font-family: var(--admin-code-font);
   font-weight: 700;
 }
 
-@media (max-width: 720px) {
-  .data-monitor-chart {
+.data-monitor-side-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.data-monitor-side-grid__head {
+  margin-bottom: 8px;
+  color: var(--admin-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-empty--compact {
+  min-height: 120px;
+}
+
+.region-chart {
+  display: grid;
+  gap: 12px;
+}
+
+.region-chart__row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel-muted);
+}
+
+.region-chart__main {
+  display: grid;
+  gap: 8px;
+}
+
+.region-chart__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.region-chart__bar-shell {
+  height: 12px;
+  border-radius: 999px;
+  background: #e5ebf3;
+  overflow: hidden;
+}
+
+.region-chart__bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--admin-accent) 0%, var(--admin-accent-strong) 100%);
+}
+
+.region-chart__time-strip {
+  display: flex;
+  gap: 6px;
+}
+
+.region-chart__time-segment {
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.region-chart__time-segment--morning {
+  background: #4c6fff;
+}
+
+.region-chart__time-segment--midday {
+  background: #2a91d8;
+}
+
+.region-chart__time-segment--afternoon {
+  background: #18a06f;
+}
+
+.region-chart__time-segment--night {
+  background: #7a5af8;
+}
+
+.region-chart__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media (max-width: 960px) {
+  .data-monitor-series-chart {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .region-chart__head,
+  .region-chart__meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .region-chart__time-strip {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .data-monitor-series-chart {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .data-monitor-calendar {
+    gap: 6px;
+  }
+
+  .data-monitor-calendar__day {
+    min-height: 60px;
   }
 }
 </style>

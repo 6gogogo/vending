@@ -3,6 +3,9 @@ import { Inject, Injectable } from "@nestjs/common";
 import type {
   DataMonitorDailySummary,
   DataMonitorMetricBar,
+  DataMonitorRange,
+  DataMonitorRangePoint,
+  DataMonitorRegionBreakdown,
   DataMonitorSnapshot,
   DashboardSnapshot,
   TrendPoint
@@ -140,16 +143,27 @@ export class AnalyticsService {
     ];
   }
 
-  getDataMonitor(query?: { month?: string; date?: string }): DataMonitorSnapshot {
-    const currentMonth = query?.month ?? getBusinessDayKey(new Date()).slice(0, 7);
-    const selectedDateKey = query?.date ?? `${currentMonth}-01`;
+  getDataMonitor(query?: { month?: string; date?: string; range?: DataMonitorRange }): DataMonitorSnapshot {
+    const fallbackDateKey = getBusinessDayKey(new Date());
+    const selectedDateKey = query?.date ?? fallbackDateKey;
+    const currentMonth = query?.month ?? selectedDateKey.slice(0, 7);
+    const range = query?.range ?? "today";
     const dayActivity = this.buildDayActivityMap();
+    const rangeDateKeys = this.buildRangeDateKeys(selectedDateKey, range);
+    const rangeSeries = rangeDateKeys.map((dateKey) => this.buildRangePoint(dateKey));
+    const rangeSummary = this.buildRangeSummary(rangeSeries);
 
     return {
       monthKey: currentMonth,
       selectedDateKey,
+      range,
       days: this.buildMonthCalendar(currentMonth, dayActivity),
-      selectedDateSummary: this.buildDataMonitorDailySummary(selectedDateKey)
+      selectedDateSummary: this.buildDataMonitorDailySummary(selectedDateKey),
+      rangeStartDateKey: rangeDateKeys[0] ?? selectedDateKey,
+      rangeEndDateKey: rangeDateKeys[rangeDateKeys.length - 1] ?? selectedDateKey,
+      rangeSeries,
+      rangeSummary,
+      regionBreakdown: this.buildRegionBreakdown(rangeDateKeys)
     };
   }
 
@@ -218,6 +232,172 @@ export class AnalyticsService {
         activityLevel
       };
     });
+  }
+
+  private buildRangeDateKeys(selectedDateKey: string, range: DataMonitorRange) {
+    if (range === "today") {
+      return [selectedDateKey];
+    }
+
+    const offset = range === "3d" ? 1 : 3;
+    const startDateKey = addDaysToDateKey(selectedDateKey, -offset);
+
+    return Array.from({ length: offset * 2 + 1 }, (_, index) =>
+      addDaysToDateKey(startDateKey, index)
+    );
+  }
+
+  private buildRangePoint(dateKey: string): DataMonitorRangePoint {
+    const summary = this.buildDataMonitorDailySummary(dateKey);
+
+    return {
+      dateKey,
+      label: dateKey.slice(5),
+      servedUsers: summary.servedUsers,
+      pickupUnits: summary.pickupUnits,
+      restockUnits: summary.restockUnits,
+      adjustmentUnits: summary.adjustmentUnits,
+      eventCount: summary.eventCount,
+      taskCount: summary.taskCount,
+      logCount: summary.logCount
+    };
+  }
+
+  private buildRangeSummary(series: DataMonitorRangePoint[]): DataMonitorSnapshot["rangeSummary"] {
+    const servedUsers = new Set<string>();
+    const relevantDateKeys = new Set(series.map((entry) => entry.dateKey));
+
+    this.store.inventory.forEach((entry) => {
+      if (
+        entry.type === "pickup" &&
+        entry.userId &&
+        relevantDateKeys.has(getBusinessDayKey(entry.happenedAt))
+      ) {
+        servedUsers.add(entry.userId);
+      }
+    });
+
+    return {
+      servedUsers: servedUsers.size,
+      pickupUnits: series.reduce((sum, entry) => sum + entry.pickupUnits, 0),
+      restockUnits: series.reduce((sum, entry) => sum + entry.restockUnits, 0),
+      adjustmentUnits: series.reduce((sum, entry) => sum + entry.adjustmentUnits, 0),
+      eventCount: series.reduce((sum, entry) => sum + entry.eventCount, 0),
+      taskCount: series.reduce((sum, entry) => sum + entry.taskCount, 0),
+      logCount: series.reduce((sum, entry) => sum + entry.logCount, 0)
+    };
+  }
+
+  private buildRegionBreakdown(dateKeys: string[]): DataMonitorRegionBreakdown[] {
+    const dateKeySet = new Set(dateKeys);
+    const userMap = new Map(this.store.users.map((entry) => [entry.id, entry]));
+    const regions = new Map<
+      string,
+      {
+        regionId?: string;
+        regionName: string;
+        servedUsers: Set<string>;
+        pickupUnits: number;
+        pickupTimes: number;
+        firstPickupAt?: string;
+        lastPickupAt?: string;
+        hourCounts: Map<number, number>;
+        timeBars: Record<"morning" | "midday" | "afternoon" | "night", number>;
+      }
+    >();
+
+    const ensureRegion = (regionId: string | undefined, regionName: string) => {
+      const key = regionId ?? `name:${regionName}`;
+      const existing = regions.get(key);
+
+      if (existing) {
+        return existing;
+      }
+
+      const created = {
+        regionId,
+        regionName,
+        servedUsers: new Set<string>(),
+        pickupUnits: 0,
+        pickupTimes: 0,
+        firstPickupAt: undefined as string | undefined,
+        lastPickupAt: undefined as string | undefined,
+        hourCounts: new Map<number, number>(),
+        timeBars: {
+          morning: 0,
+          midday: 0,
+          afternoon: 0,
+          night: 0
+        }
+      };
+
+      regions.set(key, created);
+      return created;
+    };
+
+    this.store.inventory
+      .filter(
+        (entry) =>
+          entry.type === "pickup" &&
+          dateKeySet.has(getBusinessDayKey(entry.happenedAt))
+      )
+      .forEach((entry) => {
+        const user = entry.userId ? userMap.get(entry.userId) : undefined;
+        const regionName = user?.regionName ?? user?.neighborhood ?? "未分配区域";
+        const regionId = user?.regionId;
+        const bucket = ensureRegion(regionId, regionName);
+        const hour = new Date(entry.happenedAt).getHours();
+        const hourCount = bucket.hourCounts.get(hour) ?? 0;
+
+        if (entry.userId) {
+          bucket.servedUsers.add(entry.userId);
+        }
+
+        bucket.pickupUnits += entry.quantity;
+        bucket.pickupTimes += 1;
+        bucket.hourCounts.set(hour, hourCount + entry.quantity);
+
+        if (!bucket.firstPickupAt || entry.happenedAt < bucket.firstPickupAt) {
+          bucket.firstPickupAt = entry.happenedAt;
+        }
+
+        if (!bucket.lastPickupAt || entry.happenedAt > bucket.lastPickupAt) {
+          bucket.lastPickupAt = entry.happenedAt;
+        }
+
+        if (hour >= 4 && hour < 10) {
+          bucket.timeBars.morning += entry.quantity;
+        } else if (hour >= 10 && hour < 14) {
+          bucket.timeBars.midday += entry.quantity;
+        } else if (hour >= 14 && hour < 18) {
+          bucket.timeBars.afternoon += entry.quantity;
+        } else {
+          bucket.timeBars.night += entry.quantity;
+        }
+      });
+
+    return Array.from(regions.values())
+      .map((entry) => {
+        const peakHour = Array.from(entry.hourCounts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0];
+
+        return {
+          regionId: entry.regionId,
+          regionName: entry.regionName,
+          servedUsers: entry.servedUsers.size,
+          pickupUnits: entry.pickupUnits,
+          pickupTimes: entry.pickupTimes,
+          firstPickupAt: entry.firstPickupAt,
+          lastPickupAt: entry.lastPickupAt,
+          peakHourLabel: peakHour === undefined ? undefined : `${String(peakHour).padStart(2, "0")}:00`,
+          timeBars: [
+            { key: "morning" as const, label: "清晨", value: entry.timeBars.morning },
+            { key: "midday" as const, label: "午间", value: entry.timeBars.midday },
+            { key: "afternoon" as const, label: "下午", value: entry.timeBars.afternoon },
+            { key: "night" as const, label: "夜间", value: entry.timeBars.night }
+          ]
+        };
+      })
+      .sort((left, right) => right.pickupUnits - left.pickupUnits || right.servedUsers - left.servedUsers);
   }
 
   private buildDataMonitorDailySummary(dateKey: string): DataMonitorDailySummary {

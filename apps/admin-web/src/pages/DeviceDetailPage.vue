@@ -576,8 +576,8 @@ onUnmounted(() => {
         </div>
       </article>
 
-      <section class="admin-grid admin-grid--main-aside">
-        <article class="admin-panel admin-panel-block">
+      <section class="admin-grid admin-grid--main-aside device-detail__layout">
+        <article class="admin-panel admin-panel-block device-detail__main">
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">货品台账</span>
@@ -614,53 +614,55 @@ onUnmounted(() => {
             <span class="admin-copy">零库存且已移除的货品将不再显示；未开启阈值时即使库存为 0 也不会触发缺货提醒。</span>
           </div>
 
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>货品</th>
-                <th>分类</th>
-                <th>库存</th>
-                <th>今日变化</th>
-                <th>临期</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="goods in selectedDoorGoods" :key="goods.goodsId">
-                <td>
-                  <span class="admin-table__strong">{{ goods.name }}</span>
-                  <span class="admin-table__subtext">{{ goods.goodsId }}</span>
-                </td>
-                <td>{{ goods.category }}</td>
-                <td class="admin-code">{{ formatGoodsStock(goods) }}</td>
-                <td>
-                  <span
-                    class="admin-pill"
-                    :class="(stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? 'admin-pill--success' : 'admin-pill--warning'"
-                  >
-                    {{ (stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? "+" : "" }}{{ stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0 }}
-                  </span>
-                </td>
-                <td class="admin-code">
-                  {{ goods.expiresAt ? goods.expiresAt.slice(0, 16).replace("T", " ") : "-" }}
-                </td>
-                <td>
-                  <button
-                    v-if="goods.stock <= 0"
-                    class="admin-button admin-button--ghost"
-                    :disabled="removingGoodsId === goods.goodsId"
-                    @click="removeGoods(goods.goodsId)"
-                  >
-                    {{ removingGoodsId === goods.goodsId ? "移除中" : "移除" }}
-                  </button>
-                  <span v-else class="admin-table__subtext">库存未清零</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="device-table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>货品</th>
+                  <th>分类</th>
+                  <th>库存</th>
+                  <th>今日变化</th>
+                  <th>临期</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="goods in selectedDoorGoods" :key="goods.goodsId">
+                  <td>
+                    <span class="admin-table__strong">{{ goods.name }}</span>
+                    <span class="admin-table__subtext">{{ goods.goodsId }}</span>
+                  </td>
+                  <td>{{ goods.category }}</td>
+                  <td class="admin-code">{{ formatGoodsStock(goods) }}</td>
+                  <td>
+                    <span
+                      class="admin-pill"
+                      :class="(stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? 'admin-pill--success' : 'admin-pill--warning'"
+                    >
+                      {{ (stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? "+" : "" }}{{ stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0 }}
+                    </span>
+                  </td>
+                  <td class="admin-code">
+                    {{ goods.expiresAt ? goods.expiresAt.slice(0, 16).replace("T", " ") : "-" }}
+                  </td>
+                  <td>
+                    <button
+                      v-if="goods.stock <= 0"
+                      class="admin-button admin-button--ghost"
+                      :disabled="removingGoodsId === goods.goodsId"
+                      @click="removeGoods(goods.goodsId)"
+                    >
+                      {{ removingGoodsId === goods.goodsId ? "移除中" : "移除" }}
+                    </button>
+                    <span v-else class="admin-table__subtext">库存未清零</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </article>
 
-        <aside class="admin-grid">
+        <aside class="admin-grid device-detail__aside">
           <article class="admin-panel admin-panel-block">
             <div class="admin-panel__head">
               <div>
@@ -696,27 +698,29 @@ onUnmounted(() => {
                 <h3 class="admin-panel__title">业务日 {{ detail.businessDateKey }} 内的领取 / 补货情况</h3>
               </div>
             </div>
-            <table v-if="businessDayServedUsers.length" class="admin-table">
-              <thead>
-                <tr>
-                  <th>人员</th>
-                  <th>商品</th>
-                  <th>数量</th>
-                  <th>最近时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="entry in businessDayServedUsers" :key="entry.userId">
-                  <td>
-                    <RouterLink class="admin-link" :to="`/users/${entry.userId}`">{{ entry.userName }}</RouterLink>
-                    <span class="admin-table__subtext">{{ formatUserRole(entry.role) }}</span>
-                  </td>
-                  <td>{{ entry.goodsSummary }}</td>
-                  <td class="admin-code">{{ entry.totalQuantity }}</td>
-                  <td class="admin-code">{{ entry.lastServedAt.slice(0, 16).replace("T", " ") }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <div v-if="businessDayServedUsers.length" class="device-table-scroll">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>人员</th>
+                    <th>商品</th>
+                    <th>数量</th>
+                    <th>最近时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in businessDayServedUsers" :key="entry.userId">
+                    <td>
+                      <RouterLink class="admin-link" :to="`/users/${entry.userId}`">{{ entry.userName }}</RouterLink>
+                      <span class="admin-table__subtext">{{ formatUserRole(entry.role) }}</span>
+                    </td>
+                    <td>{{ entry.goodsSummary }}</td>
+                    <td class="admin-code">{{ entry.totalQuantity }}</td>
+                    <td class="admin-code">{{ entry.lastServedAt.slice(0, 16).replace("T", " ") }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <div v-else class="admin-empty">
               <div class="admin-empty__title">今日还没有人员操作这台柜机</div>
               <div class="admin-empty__body">领取、补货和手工补扣都会在这里汇总。</div>
@@ -786,66 +790,68 @@ onUnmounted(() => {
                 <h3 class="admin-panel__title">按时间倒序查看</h3>
               </div>
             </div>
-            <table v-if="recentEvents.length" class="admin-table">
-              <thead>
-                <tr>
-                  <th>订单</th>
-                  <th>状态</th>
-                  <th>平台联动</th>
-                  <th>时间</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="event in recentEvents" :key="event.eventId">
-                  <td>
-                    <span class="admin-table__strong">{{ event.orderNo }}</span>
-                    <span class="admin-table__subtext">{{ event.eventId }}</span>
-                  </td>
-                  <td>{{ formatEventStatus(event.status) }}</td>
-                  <td>
-                    <span class="admin-table__strong">{{ formatPlatformSyncStatus(event) }}</span>
-                    <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
-                    <span
-                      v-if="event.adjustmentOrderNo"
-                      class="admin-table__subtext"
-                    >
-                      补扣单 {{ event.adjustmentOrderNo }}{{ event.adjustmentAmount !== undefined ? ` / ${event.adjustmentAmount} 分` : "" }}
-                    </span>
-                    <span
-                      v-if="event.refundNo || event.refundTransactionId"
-                      class="admin-table__subtext"
-                    >
-                      {{ event.refundNo ? `退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `交易号 ${event.refundTransactionId}` : "" }}
-                    </span>
-                  </td>
-                  <td>
-                    <span class="admin-code">{{ event.updatedAt.slice(0, 16).replace("T", " ") }}</span>
-                    <RouterLink class="admin-table__subtext admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">
-                      查看关联日志
-                    </RouterLink>
-                  </td>
-                  <td>
-                    <div class="device-event-actions">
-                      <button
-                        class="admin-button admin-button--ghost"
-                        :disabled="notifyingPaymentEventId === event.eventId"
-                        @click="notifyPaymentSuccess(event)"
+            <div v-if="recentEvents.length" class="device-table-scroll">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>订单</th>
+                    <th>状态</th>
+                    <th>平台联动</th>
+                    <th>时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="event in recentEvents" :key="event.eventId">
+                    <td>
+                      <span class="admin-table__strong">{{ event.orderNo }}</span>
+                      <span class="admin-table__subtext">{{ event.eventId }}</span>
+                    </td>
+                    <td>{{ formatEventStatus(event.status) }}</td>
+                    <td>
+                      <span class="admin-table__strong">{{ formatPlatformSyncStatus(event) }}</span>
+                      <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
+                      <span
+                        v-if="event.adjustmentOrderNo"
+                        class="admin-table__subtext"
                       >
-                        {{ notifyingPaymentEventId === event.eventId ? "回写中" : "付款成功" }}
-                      </button>
-                      <button
-                        class="admin-button admin-button--ghost"
-                        :disabled="refundingEventId === event.eventId || event.status === 'refunded'"
-                        @click="refundEvent(event)"
+                        补扣单 {{ event.adjustmentOrderNo }}{{ event.adjustmentAmount !== undefined ? ` / ${event.adjustmentAmount} 分` : "" }}
+                      </span>
+                      <span
+                        v-if="event.refundNo || event.refundTransactionId"
+                        class="admin-table__subtext"
                       >
-                        {{ refundingEventId === event.eventId ? "退款中" : event.status === "refunded" ? "已退款" : "退款" }}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                        {{ event.refundNo ? `退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `交易号 ${event.refundTransactionId}` : "" }}
+                      </span>
+                    </td>
+                    <td>
+                      <span class="admin-code">{{ event.updatedAt.slice(0, 16).replace("T", " ") }}</span>
+                      <RouterLink class="admin-table__subtext admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">
+                        查看关联日志
+                      </RouterLink>
+                    </td>
+                    <td>
+                      <div class="device-event-actions">
+                        <button
+                          class="admin-button admin-button--ghost"
+                          :disabled="notifyingPaymentEventId === event.eventId"
+                          @click="notifyPaymentSuccess(event)"
+                        >
+                          {{ notifyingPaymentEventId === event.eventId ? "回写中" : "付款成功" }}
+                        </button>
+                        <button
+                          class="admin-button admin-button--ghost"
+                          :disabled="refundingEventId === event.eventId || event.status === 'refunded'"
+                          @click="refundEvent(event)"
+                        >
+                          {{ refundingEventId === event.eventId ? "退款中" : event.status === "refunded" ? "已退款" : "退款" }}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <div v-else class="admin-empty">
               <div class="admin-empty__title">{{ loading ? "正在加载事件" : "当前没有开柜事件" }}</div>
               <div class="admin-empty__body">远程开门、用户取货和商户补货都会在这里记录。</div>
@@ -950,33 +956,35 @@ onUnmounted(() => {
         </div>
 
         <article class="admin-panel admin-panel-block">
-          <table v-if="recentLogs.length" class="admin-table">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>动作</th>
-                <th>状态</th>
-                <th>详情</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="log in recentLogs" :key="log.id">
-                <td class="admin-code">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</td>
-                <td>
-                  <span class="admin-table__strong">{{ log.description }}</span>
-                  <span class="admin-table__subtext">{{ log.detail }}</span>
-                </td>
-                <td>
-                  <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
-                    {{ formatLogStatus(log.status) }}
-                  </span>
-                </td>
-                <td>
-                  <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div v-if="recentLogs.length" class="device-table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>动作</th>
+                  <th>状态</th>
+                  <th>详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="log in recentLogs" :key="log.id">
+                  <td class="admin-code">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</td>
+                  <td>
+                    <span class="admin-table__strong">{{ log.description }}</span>
+                    <span class="admin-table__subtext">{{ log.detail }}</span>
+                  </td>
+                  <td>
+                    <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
+                      {{ formatLogStatus(log.status) }}
+                    </span>
+                  </td>
+                  <td>
+                    <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <div v-else class="admin-empty">
             <div class="admin-empty__title">当前没有柜机日志</div>
             <div class="admin-empty__body">刷新、远程开门、故障回调和货物流动会自动记录在这里。</div>
@@ -1002,7 +1010,7 @@ onUnmounted(() => {
 <style scoped>
 .device-detail-status {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
 }
 
@@ -1013,6 +1021,16 @@ onUnmounted(() => {
   border: 1px solid var(--admin-line);
   border-radius: 8px;
   background: var(--admin-panel-muted);
+}
+
+.device-detail__layout {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+}
+
+.device-detail__main,
+.device-detail__aside,
+.device-detail-status__item {
+  min-width: 0;
 }
 
 .device-detail-actions {
@@ -1028,7 +1046,7 @@ onUnmounted(() => {
 
 .device-goods-toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 360px) auto minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 320px) auto minmax(0, 1fr);
   gap: 10px;
   align-items: end;
   margin-bottom: 12px;
@@ -1145,13 +1163,32 @@ onUnmounted(() => {
   padding: 14px;
 }
 
+.device-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.device-table-scroll :deep(table) {
+  min-width: 100%;
+}
+
 .admin-field--inline {
   min-width: 160px;
+}
+
+@media (max-width: 1600px) {
+  .device-detail__layout {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  }
 }
 
 @media (max-width: 1280px) {
   .device-detail-status {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .device-detail__layout {
+    grid-template-columns: 1fr;
   }
 
   .device-goods-toolbar {

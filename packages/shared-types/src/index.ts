@@ -821,18 +821,52 @@ export interface DataMonitorCalendarDay {
   activityLevel: "none" | "light" | "medium" | "high";
 }
 
+export type DataMonitorMetricKey =
+  | "servedUsers"
+  | "pickupUnits"
+  | "restockUnits"
+  | "adjustmentUnits"
+  | "eventCount"
+  | "taskCount"
+  | "logCount";
+
+export type DataMonitorRange = "today" | "3d" | "7d";
+
 export interface DataMonitorMetricBar {
-  key:
-    | "servedUsers"
-    | "pickupUnits"
-    | "restockUnits"
-    | "adjustmentUnits"
-    | "eventCount"
-    | "taskCount"
-    | "logCount";
+  key: DataMonitorMetricKey;
   label: string;
   value: number;
   unit: string;
+}
+
+export interface DataMonitorRangePoint {
+  dateKey: string;
+  label: string;
+  servedUsers: number;
+  pickupUnits: number;
+  restockUnits: number;
+  adjustmentUnits: number;
+  eventCount: number;
+  taskCount: number;
+  logCount: number;
+}
+
+export interface DataMonitorTimeBucketBar {
+  key: "morning" | "midday" | "afternoon" | "night";
+  label: string;
+  value: number;
+}
+
+export interface DataMonitorRegionBreakdown {
+  regionId?: string;
+  regionName: string;
+  servedUsers: number;
+  pickupUnits: number;
+  pickupTimes: number;
+  firstPickupAt?: string;
+  lastPickupAt?: string;
+  peakHourLabel?: string;
+  timeBars: DataMonitorTimeBucketBar[];
 }
 
 export interface DataMonitorDailySummary {
@@ -863,8 +897,14 @@ export interface DataMonitorDailySummary {
 export interface DataMonitorSnapshot {
   monthKey: string;
   selectedDateKey: string;
+  range: DataMonitorRange;
   days: DataMonitorCalendarDay[];
   selectedDateSummary?: DataMonitorDailySummary;
+  rangeStartDateKey: string;
+  rangeEndDateKey: string;
+  rangeSeries: DataMonitorRangePoint[];
+  rangeSummary: Omit<DataMonitorRangePoint, "dateKey" | "label">;
+  regionBreakdown: DataMonitorRegionBreakdown[];
 }
 
 export interface UserManagementDetail {

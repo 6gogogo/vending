@@ -1,6 +1,7 @@
 import type {
   AlertTask,
   CallbackLogRecord,
+  DataMonitorRange,
   DataMonitorSnapshot,
   DashboardSnapshot,
   DeviceMonitoringDetail,
@@ -59,7 +60,7 @@ export const adminApi = {
   dashboard() {
     return adminClient.get<DashboardSnapshot>("/analytics/dashboard");
   },
-  dataMonitor(query?: { month?: string; date?: string }) {
+  dataMonitor(query?: { month?: string; date?: string; range?: DataMonitorRange }) {
     return adminClient.get<DataMonitorSnapshot>("/analytics/data-monitor", {
       query
     });
@@ -173,6 +174,9 @@ export const adminApi = {
   },
   deleteUserAccessPolicy(userId: string, policyId: string) {
     return adminClient.delete<UserAccessPolicy>(`/users/${userId}/access-policies/${policyId}`);
+  },
+  applyUserAccessPolicyNow(userId: string, policyId: string) {
+    return adminClient.post<UserAccessPolicy>(`/users/${userId}/access-policies/${policyId}/apply-now`);
   },
   policies() {
     return adminClient.get<SpecialAccessPolicy[]>("/special-access-policies");

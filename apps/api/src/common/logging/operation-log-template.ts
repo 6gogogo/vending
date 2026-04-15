@@ -465,6 +465,16 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           `状态 ${result}`
         ])
       };
+    case "apply-user-access-policy-now":
+      return {
+        description: `${actor}将${primary}的个人取货设定${String(entry.metadata?.policyName ? ` ${entry.metadata.policyName}` : "")}改为立即生效。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `人员 ${primary}`,
+          typeof entry.metadata?.policyName === "string" ? `设定 ${entry.metadata.policyName}` : undefined,
+          `状态 ${result}`
+        ])
+      };
     case "sync-device-goods":
       return {
         description: `${actor}同步了${device}的货品种类。`,

@@ -33,6 +33,7 @@ interface PersonalPolicyRow {
   sourcePolicyId?: string;
   sourceLabel: string;
   effectiveLabel: string;
+  effectiveFromDateKey?: string;
 }
 
 const detail = ref<UserManagementDetail>();
@@ -41,6 +42,7 @@ const goodsCatalog = ref<Array<{ goodsId: string; name: string; category: "food"
 const policyTemplates = ref<SpecialAccessPolicy[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+const applyingNowPolicyId = ref("");
 const calendarMonth = ref("");
 const selectedDateKey = ref("");
 const editingAccessPolicyId = ref("");
@@ -123,7 +125,8 @@ const personalPolicyRows = computed<PersonalPolicyRow[]>(() =>
       status: policy.status,
       sourcePolicyId: policy.sourcePolicyId,
       sourceLabel: policy.sourcePolicyId ? policyTemplateMap.value.get(policy.sourcePolicyId)?.name || "模板" : "自定义",
-      effectiveLabel: (policy.effectiveFromDateKey ?? currentBusinessDateKey.value) > currentBusinessDateKey.value ? "次日生效" : "当前生效"
+      effectiveLabel: (policy.effectiveFromDateKey ?? currentBusinessDateKey.value) > currentBusinessDateKey.value ? "次日生效" : "当前生效",
+      effectiveFromDateKey: policy.effectiveFromDateKey
     }))
   )
 );
@@ -242,6 +245,17 @@ const deleteAccessPolicy = async (row: PersonalPolicyRow) => {
     await load();
   } finally {
     saving.value = false;
+  }
+};
+
+const applyAccessPolicyNow = async (row: PersonalPolicyRow) => {
+  if (!detail.value) return;
+  applyingNowPolicyId.value = row.policyId;
+  try {
+    await adminApi.applyUserAccessPolicyNow(detail.value.user.id, row.policyId);
+    await load();
+  } finally {
+    applyingNowPolicyId.value = "";
   }
 };
 
@@ -421,7 +435,18 @@ onMounted(async () => {
               <div class="user-policy-bars">
                 <div v-for="row in group.rows" :key="`${row.policyId}-${row.goodsId}`" class="user-policy-bar">
                   <div class="user-policy-bar__main"><span class="user-policy-bar__quantity"><span class="user-policy-bar__quantity-label">数量</span><span class="user-policy-bar__quantity-value">{{ row.quantity }}</span><span class="user-policy-bar__quantity-unit">件</span></span><span class="user-policy-bar__meta">{{ formatWeekdays(row.weekdays) }} · {{ String(row.startHour).padStart(2, "0") }}:00-{{ String(row.endHour).padStart(2, "0") }}:00</span><span class="admin-table__subtext">来源：{{ row.sourceLabel }} · {{ row.effectiveLabel }}</span></div>
-                  <div class="admin-inline-links"><button class="admin-text-button" @click="fillAccessPolicyForm(row)">修改</button><button class="admin-text-button user-policy-delete" @click="deleteAccessPolicy(row)">删除</button></div>
+                  <div class="admin-inline-links">
+                    <button class="admin-text-button" @click="fillAccessPolicyForm(row)">修改</button>
+                    <button
+                      v-if="row.effectiveLabel === '次日生效'"
+                      class="admin-text-button"
+                      :disabled="applyingNowPolicyId === row.policyId"
+                      @click="applyAccessPolicyNow(row)"
+                    >
+                      {{ applyingNowPolicyId === row.policyId ? "处理中" : "立即生效" }}
+                    </button>
+                    <button class="admin-text-button user-policy-delete" @click="deleteAccessPolicy(row)">删除</button>
+                  </div>
                 </div>
               </div>
             </section>

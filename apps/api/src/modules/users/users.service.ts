@@ -618,6 +618,85 @@ export class UsersService {
     return existing;
   }
 
+  applyAccessPolicyNow(userId: string, policyId: string, actorUserId?: string) {
+    const user = this.findById(userId);
+
+    if (user.role !== "special") {
+      throw new BadRequestException("只有普通用户支持立即生效。");
+    }
+
+    const targetPolicies = user.accessPolicies ?? [];
+    user.accessPolicies = targetPolicies;
+
+    const target = targetPolicies.find((entry) => entry.id === policyId);
+
+    if (!target) {
+      throw new NotFoundException("未找到对应的个人取货设定。");
+    }
+
+    const businessDateKey = getBusinessDayKey(new Date());
+    const previousBusinessDateKey = addDaysToDateKey(businessDateKey, -1);
+    const now = new Date().toISOString();
+
+    if ((target.effectiveFromDateKey ?? businessDateKey) <= businessDateKey) {
+      return target;
+    }
+
+    for (const entry of targetPolicies) {
+      if (entry.id === target.id || entry.status !== "active") {
+        continue;
+      }
+
+      const effectiveFromDateKey = entry.effectiveFromDateKey ?? "0000-01-01";
+      const effectiveToDateKey = entry.effectiveToDateKey ?? "9999-12-31";
+
+      if (effectiveFromDateKey > businessDateKey || effectiveToDateKey < businessDateKey) {
+        continue;
+      }
+
+      const isSameSourceVersion =
+        Boolean(target.sourcePolicyId) && entry.sourcePolicyId === target.sourcePolicyId;
+      const hasSameName = entry.name === target.name;
+      const hasSameWindow =
+        entry.startHour === target.startHour &&
+        entry.endHour === target.endHour &&
+        entry.weekdays.length === target.weekdays.length &&
+        entry.weekdays.every((weekday, index) => weekday === target.weekdays[index]);
+      const sharesGoods = entry.goodsLimits.some((limit) =>
+        target.goodsLimits.some((targetLimit) => targetLimit.goodsId === limit.goodsId)
+      );
+
+      if (isSameSourceVersion || hasSameName || (hasSameWindow && sharesGoods)) {
+        entry.status = "inactive";
+        entry.effectiveToDateKey = previousBusinessDateKey;
+        entry.updatedAt = now;
+      }
+    }
+
+    target.status = "active";
+    target.effectiveFromDateKey = businessDateKey;
+    target.updatedAt = now;
+
+    this.store.logOperation({
+      category: "policy",
+      type: "apply-user-access-policy-now",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "user",
+        id: user.id,
+        label: user.name
+      },
+      metadata: {
+        policyId: target.id,
+        policyName: target.name,
+        undoState: "not_undoable"
+      }
+    });
+
+    return target;
+  }
+
   manualAdjustment(
     userId: string,
     payload: {

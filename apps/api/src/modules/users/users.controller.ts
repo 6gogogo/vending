@@ -160,4 +160,13 @@ export class UsersController {
   ) {
     return ok(this.usersService.deleteAccessPolicy(userId, policyId, request.authUser?.id), "操作成功");
   }
+
+  @Post(":userId/access-policies/:policyId/apply-now")
+  applyAccessPolicyNow(
+    @Param("userId") userId: string,
+    @Param("policyId") policyId: string,
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.usersService.applyAccessPolicyNow(userId, policyId, request.authUser?.id), "操作成功");
+  }
 }

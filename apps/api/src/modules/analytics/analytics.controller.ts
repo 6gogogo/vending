@@ -4,6 +4,7 @@ import { ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AnalyticsService } from "./analytics.service";
+import type { DataMonitorRange } from "@vm/shared-types";
 
 @Controller("analytics")
 @UseGuards(RoleGuard)
@@ -27,7 +28,11 @@ export class AnalyticsController {
   }
 
   @Get("data-monitor")
-  dataMonitor(@Query("month") month?: string, @Query("date") date?: string) {
-    return ok(this.analyticsService.getDataMonitor({ month, date }));
+  dataMonitor(
+    @Query("month") month?: string,
+    @Query("date") date?: string,
+    @Query("range") range?: DataMonitorRange
+  ) {
+    return ok(this.analyticsService.getDataMonitor({ month, date, range }));
   }
 }
