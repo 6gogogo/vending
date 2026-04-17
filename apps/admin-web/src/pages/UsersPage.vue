@@ -47,6 +47,7 @@ const goodsCatalog = ref<GoodsCatalogItem[]>([]);
 const regions = ref<RegionRecord[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+const creatingRegion = ref(false);
 const drawerMode = ref<DrawerMode>("");
 const editingUserId = ref("");
 const editingPolicyId = ref("");
@@ -57,6 +58,8 @@ const reviewFilter = ref<"pending" | "rejected" | "approved">("pending");
 const selectedUserIds = ref<string[]>([]);
 const batchPolicyIds = ref<string[]>([]);
 const batchMode = ref<"bind" | "unbind" | "replace">("bind");
+const regionDraftName = ref("");
+const regionDraftSortOrder = ref<number | undefined>(undefined);
 const rejectReasons = ref<Record<string, string>>({});
 const userForm = ref<UserFormState>({ role: "special", phone: "", name: "", status: "active", regionId: "", regionName: "", tagsText: "" });
 const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: "", quantity: 1 }] });
@@ -190,6 +193,11 @@ const closeDrawer = () => {
 };
 
 const submitUserForm = async () => {
+  if (userForm.value.regionId === OTHER_REGION_VALUE && !userForm.value.regionName.trim()) {
+    window.alert("操作失败：选择“其他”时必须填写具体地区内容");
+    return;
+  }
+
   const regionPayload = resolveRegionPayload(userForm.value);
   saving.value = true;
   try {
@@ -212,6 +220,32 @@ const submitUserForm = async () => {
     await load();
   } finally {
     saving.value = false;
+  }
+};
+
+const createRegionDirect = async () => {
+  const name = regionDraftName.value.trim();
+
+  if (!name) {
+    window.alert("操作失败：请先填写地区名称");
+    return;
+  }
+
+  creatingRegion.value = true;
+  try {
+    const region = await adminApi.createRegion({
+      name,
+      sortOrder: regionDraftSortOrder.value
+    });
+    regionDraftName.value = "";
+    regionDraftSortOrder.value = undefined;
+    await load();
+    userForm.value.regionId = region.id;
+    userForm.value.regionName = "";
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    creatingRegion.value = false;
   }
 };
 
@@ -342,6 +376,22 @@ onMounted(load);
           <span class="admin-field__label">搜索</span>
           <input v-model="keyword" class="admin-input" placeholder="输入姓名、手机号、标签或区域" />
         </label>
+        <div class="admin-field">
+          <span class="admin-field__label">新增地区</span>
+          <div class="users-region-create">
+            <input v-model="regionDraftName" class="admin-input" placeholder="输入新的地区名称" />
+            <input
+              v-model.number="regionDraftSortOrder"
+              class="admin-input"
+              type="number"
+              min="1"
+              placeholder="排序"
+            />
+            <button class="admin-button admin-button--ghost" :disabled="creatingRegion || !regionDraftName.trim()" @click="createRegionDirect">
+              {{ creatingRegion ? "新增中" : "新增地区" }}
+            </button>
+          </div>
+        </div>
         <div class="users-filters__summary admin-note">
           当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。人员台账默认按地区分组，普通用户领取状态单独显示。
         </div>
@@ -523,18 +573,26 @@ onMounted(load);
             <span class="admin-field__label">区域</span>
             <select v-model="userForm.regionId" class="admin-select">
               <option value="">未分配区域</option>
-              <option v-for="region in regionOptions" :key="region.id" :value="region.id">{{ region.name }}</option>
+              <option v-for="region in regionOptions" :key="region.id" :value="region.id">
+                {{ region.id === OTHER_REGION_VALUE ? "其他（需填写）" : region.name }}
+              </option>
             </select>
           </label>
           <label v-if="userForm.regionId === OTHER_REGION_VALUE" class="admin-field">
-            <span class="admin-field__label">自定义区域</span>
-            <input v-model="userForm.regionName" class="admin-input" placeholder="请输入区域名称" />
+            <span class="admin-field__label">其他地区内容</span>
+            <input v-model="userForm.regionName" class="admin-input" placeholder="必填，请输入具体地区名称" />
           </label>
           <label class="admin-field">
             <span class="admin-field__label">标签</span>
             <input v-model="userForm.tagsText" class="admin-input" placeholder="多个标签请用中文逗号分隔" />
           </label>
-          <button class="admin-button" :disabled="saving || !userForm.name || !userForm.phone" @click="submitUserForm">{{ saving ? "保存中" : "保存人员信息" }}</button>
+          <button
+            class="admin-button"
+            :disabled="saving || !userForm.name || !userForm.phone || (userForm.regionId === OTHER_REGION_VALUE && !userForm.regionName.trim())"
+            @click="submitUserForm"
+          >
+            {{ saving ? "保存中" : "保存人员信息" }}
+          </button>
         </div>
 
         <div v-else class="users-drawer__body">
@@ -645,7 +703,8 @@ onMounted(load);
 
 .users-policy-limit-row,
 .users-hours,
-.users-region-form-grid {
+.users-region-form-grid,
+.users-region-create {
   display: grid;
   gap: 8px;
 }
@@ -657,6 +716,10 @@ onMounted(load);
 .users-hours,
 .users-region-form-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.users-region-create {
+  grid-template-columns: minmax(0, 1fr) 92px auto;
 }
 
 .users-drawer-backdrop {
@@ -692,6 +755,10 @@ onMounted(load);
   .users-policy-limit-row,
   .users-hours,
   .users-region-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .users-region-create {
     grid-template-columns: 1fr;
   }
 }

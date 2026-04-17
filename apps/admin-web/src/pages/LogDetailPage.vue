@@ -71,6 +71,28 @@ const logIdentityTokens = computed(() => {
   return Array.from(tokens);
 });
 
+const aiDiagnosisLink = computed(() => {
+  if (!log.value) {
+    return "/ai?tab=report";
+  }
+
+  const query = new URLSearchParams({ tab: "diagnosis" });
+
+  if (log.value.relatedEventId) {
+    query.set("eventId", log.value.relatedEventId);
+  }
+
+  if (log.value.relatedOrderNo) {
+    query.set("orderNo", log.value.relatedOrderNo);
+  }
+
+  if (log.value.id) {
+    query.set("logId", log.value.id);
+  }
+
+  return `/ai?${query.toString()}`;
+});
+
 const stringifyForSearch = (value: unknown) => {
   if (value === undefined || value === null) {
     return "";
@@ -286,7 +308,10 @@ onMounted(load);
             >
               {{ undoing ? "撤销中" : "撤销这条操作" }}
             </button>
-            <span v-else class="admin-table__subtext">{{ undoStateLabel(log) }}</span>
+            <RouterLink class="admin-link" :to="aiDiagnosisLink">进入 AI 异常诊断</RouterLink>
+            <span v-if="log.metadata?.undoState !== 'undoable'" class="admin-table__subtext">
+              {{ undoStateLabel(log) }}
+            </span>
           </div>
         </article>
 

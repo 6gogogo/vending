@@ -175,6 +175,7 @@ const load = async () => {
     let query: { longitude?: number; latitude?: number } | undefined;
 
     try {
+      // 能拿到定位就按距离推荐，让用户先看到最省路程、最容易到达的柜机。
       const location = await new Promise<UniApp.GetLocationSuccess>((resolve, reject) => {
         uni.getLocation({
           type: "gcj02",
@@ -194,6 +195,7 @@ const load = async () => {
       };
       distanceEnabled.value = true;
     } catch {
+      // 没有定位权限也不能阻断服务，至少要保证列表还能按默认顺序继续使用。
       currentLocation.value = undefined;
       distanceEnabled.value = false;
       locationMessage.value = "未获得定位权限，已按默认顺序展示柜机";

@@ -29,6 +29,7 @@ export const useCabinetFlow = () => {
       latestOrder.value = response.orderNo;
       latestEventId.value = response.eventId;
       if (response.remainingQuota) {
+        // 立即刷新剩余额度，减少用户反复确认“今天还能不能领”的不确定感。
         const normalizedQuota = Object.fromEntries(
           Object.entries(response.remainingQuota).filter(([, value]) => value !== undefined)
         ) as Record<string, number>;

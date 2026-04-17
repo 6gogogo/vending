@@ -546,6 +546,7 @@ export interface ServiceOverviewPerson {
   fulfilledGoods: number;
   totalGoods: number;
   summary: string;
+  detailLines?: string[];
 }
 
 export interface ServiceOverviewBucket {
@@ -936,6 +937,102 @@ export interface DataMonitorSnapshot {
   rangeSeries: DataMonitorRangePoint[];
   rangeSummary: Omit<DataMonitorRangePoint, "dateKey" | "label">;
   regionBreakdown: DataMonitorRegionBreakdown[];
+}
+
+export type AiInsightConfidence = "high" | "medium" | "low";
+export type AiInsightUrgency = "high" | "medium" | "low";
+export type AiOperationsReportType = "morning" | "daily";
+
+export interface AiProviderStatus {
+  enabled: boolean;
+  provider: "openai-compatible";
+  baseUrl: string;
+  model: string;
+  missingConfig: string[];
+}
+
+export interface AiInsightMeta {
+  generatedAt: string;
+  provider: "openai-compatible";
+  model: string;
+}
+
+export interface AiEventDiagnosis {
+  meta: AiInsightMeta;
+  target: {
+    eventId: string;
+    orderNo: string;
+    deviceCode: string;
+    deviceName?: string;
+    status: CabinetEventStatus;
+    relatedLogId?: string;
+  };
+  summary: string;
+  confidence: AiInsightConfidence;
+  possibleCauses: string[];
+  handlingSuggestions: string[];
+  requiresOnsiteInspection: boolean;
+  onsiteInspectionReason: string;
+  referencedSignals: string[];
+}
+
+export interface AiOperationsReport {
+  meta: AiInsightMeta;
+  dateKey: string;
+  reportType: AiOperationsReportType;
+  summary: string;
+  priorityItems: string[];
+  stockRisks: string[];
+  expiryRisks: string[];
+  feedbackHighlights: string[];
+  recommendedActions: string[];
+}
+
+export interface AiDeviceRestockRecommendation {
+  deviceCode: string;
+  deviceName: string;
+  goodsId?: string;
+  goodsName: string;
+  suggestedQuantity?: number;
+  reason: string;
+}
+
+export interface AiRegionLayoutRecommendation {
+  regionId?: string;
+  regionName: string;
+  suggestion: string;
+  reason: string;
+}
+
+export interface AiRestockLayoutSuggestion {
+  meta: AiInsightMeta;
+  dateKey: string;
+  range: DataMonitorRange;
+  summary: string;
+  deviceRecommendations: AiDeviceRestockRecommendation[];
+  regionRecommendations: AiRegionLayoutRecommendation[];
+  scheduleInsights: string[];
+}
+
+export interface AiFeedbackDraft {
+  meta: AiInsightMeta;
+  alertId: string;
+  title: string;
+  classification: string;
+  urgency: AiInsightUrgency;
+  summary: string;
+  dispatchRecommendation: string;
+  replyDraft: string;
+}
+
+export interface AiPolicyOptimizationSuggestion {
+  meta: AiInsightMeta;
+  dateKey: string;
+  range: DataMonitorRange;
+  summary: string;
+  underservedSignals: string[];
+  proposedAdjustments: string[];
+  cautionNotes: string[];
 }
 
 export interface UserManagementDetail {

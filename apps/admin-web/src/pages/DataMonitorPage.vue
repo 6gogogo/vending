@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 import type {
   DataMonitorMetricKey,
   DataMonitorRange,
@@ -32,6 +32,7 @@ const rangeOptions: Array<{ value: DataMonitorRange; label: string }> = [
 ];
 
 const todayDateKey = getTodayDateKeyInBeijing();
+const router = useRouter();
 const snapshot = ref<DataMonitorSnapshot>();
 const loading = ref(false);
 const calendarMonth = ref(todayDateKey.slice(0, 7));
@@ -166,6 +167,15 @@ const buildLogQuery = (category?: string) => ({
   }
 });
 
+const goBack = async () => {
+  if (window.history.length > 1) {
+    await router.back();
+    return;
+  }
+
+  await router.push("/dashboard");
+};
+
 onMounted(async () => {
   await load();
   startPolling();
@@ -198,6 +208,7 @@ onUnmounted(() => {
           <h3 class="admin-page__section-title">按业务日、时间段与区域查看服务走势</h3>
         </div>
         <div class="admin-toolbar">
+          <button class="admin-button admin-button--ghost" @click="goBack">返回上一页</button>
           <span class="admin-copy">自动刷新 15 秒一次</span>
           <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
             {{ loading ? "刷新中" : "刷新数据" }}

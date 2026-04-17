@@ -68,6 +68,7 @@ export class AccessRulesService {
         entry.type === "pickup" &&
         getBusinessDayKey(entry.happenedAt) === getBusinessDayKey(new Date())
     );
+    // 对特殊群体来说，额度不仅是数量控制，也是在有限供给下尽量保证关键时段有人能领到物资。
     const policyQuota = getActiveWindowCategoryQuota(
       user,
       this.store.specialAccessPolicies,
@@ -114,6 +115,7 @@ export class AccessRulesService {
     const summary = this.getQuotaSummaryForUser(user);
     const activeWindows = summary.activeWindows ?? [];
 
+    // 先拦住不在服务窗口的请求，避免用户走到柜前才发现今天这个时段根本不能领取。
     if (!activeWindows.length) {
       throw new BadRequestException("当前不在可领取时间段内。");
     }

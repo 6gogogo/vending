@@ -218,6 +218,7 @@ export class CabinetEventsService {
     this.store.logCallback("door-status", payload);
     this.assertSignature(payload);
 
+    // 把门状态链路完整落下来，管理员才能快速判断是设备异常还是流程卡住。
     const event = this.store.events.find((entry) => entry.eventId === payload.eventId);
 
     if (!event) {

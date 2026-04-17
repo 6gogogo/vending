@@ -35,6 +35,7 @@ export class DevicesService {
       return devices;
     }
 
+    // 有定位时优先返回最近柜机，尽量减少行动不便用户的步行和来回试错成本。
     return devices.sort((left, right) => {
       if (left.distanceMeters === undefined && right.distanceMeters === undefined) {
         return left.deviceCode.localeCompare(right.deviceCode);

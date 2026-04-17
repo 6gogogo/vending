@@ -58,9 +58,32 @@ const taskActionLabel = (task: NonNullable<typeof pendingTasks.value>[number]) =
 const taskGradeLabel = (grade: "fault" | "feedback" | "warning") =>
   grade === "fault" ? "故障" : grade === "feedback" ? "反馈" : "预警";
 
+const resolveTaskAiLink = (task: NonNullable<typeof pendingTasks.value>[number]) => {
+  if (task.grade === "feedback" || task.type === "user_feedback") {
+    return `/ai?tab=feedback&alertId=${encodeURIComponent(task.id)}`;
+  }
+
+  if (task.relatedEventId || task.sourceLogId) {
+    const query = new URLSearchParams({ tab: "diagnosis" });
+
+    if (task.relatedEventId) {
+      query.set("eventId", task.relatedEventId);
+    }
+
+    if (task.sourceLogId) {
+      query.set("logId", task.sourceLogId);
+    }
+
+    return `/ai?${query.toString()}`;
+  }
+
+  return "/ai?tab=report";
+};
+
 const load = async () => {
   loading.value = true;
   try {
+    // 后台首页首先要回答“今天还有谁没被服务到、还有哪些问题没处理完”。
     dashboard.value = await adminApi.dashboard();
   } finally {
     loading.value = false;
@@ -238,6 +261,7 @@ onUnmounted(() => {
               <td class="dashboard-task-cell">
                 <div class="dashboard-task-actions">
                   <button class="admin-button admin-button--ghost" @click="openTaskDetail(task)">详情</button>
+                  <RouterLink class="admin-link" :to="resolveTaskAiLink(task)">AI 分析</RouterLink>
                   <button
                     class="admin-button admin-button--ghost"
                     :disabled="resolvingTaskId === task.id"
@@ -286,6 +310,13 @@ onUnmounted(() => {
                 <span class="admin-table__subtext">按人、柜、货和事件查看动作日志。</span>
               </div>
               <RouterLink class="admin-link" to="/logs">打开</RouterLink>
+            </div>
+            <div class="admin-list__row">
+              <div class="admin-list__main">
+                <span class="admin-list__title">AI 工作台</span>
+                <span class="admin-table__subtext">生成异常诊断、日报、反馈草稿和策略建议。</span>
+              </div>
+              <RouterLink class="admin-link" to="/ai">打开</RouterLink>
             </div>
           </div>
         </article>
@@ -395,6 +426,13 @@ onUnmounted(() => {
               <td>
                 <span class="admin-table__strong">{{ person.summary }}</span>
                 <span class="admin-table__subtext">{{ person.fulfilledGoods }}/{{ person.totalGoods }}</span>
+                <span
+                  v-for="(detailLine, index) in person.detailLines ?? []"
+                  :key="`${person.userId}-detail-${index}`"
+                  class="admin-table__subtext"
+                >
+                  {{ detailLine }}
+                </span>
               </td>
             </tr>
           </tbody>

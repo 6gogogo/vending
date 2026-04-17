@@ -909,138 +909,120 @@ onUnmounted(() => {
             <div class="admin-panel__head">
               <div>
                 <span class="admin-kicker">最近开柜事件</span>
-                <h3 class="admin-panel__title">按时间倒序查看</h3>
+                <h3 class="admin-panel__title">按事件分组查看，一次开门下的补扣单单独列出</h3>
               </div>
             </div>
-            <div v-if="recentEvents.length" class="device-table-scroll">
-              <table class="admin-table">
-                <thead>
-                  <tr>
-                    <th>订单</th>
-                    <th>状态</th>
-                    <th>平台联动</th>
-                    <th>时间</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="event in recentEvents" :key="event.eventId">
-                    <td>
-                      <span class="admin-table__strong">{{ event.orderNo }}</span>
-                      <span class="admin-table__subtext">{{ event.eventId }}</span>
-                      <span
-                        v-for="goods in event.goods"
-                        :key="`${event.eventId}-${goods.goodsId}-goods`"
-                        class="admin-table__subtext"
-                      >
-                        {{ goods.goodsName }} / {{ goods.goodsId }} ×{{ goods.quantity }}
-                      </span>
-                    </td>
-                    <td>
-                      <span class="admin-table__strong">{{ formatEventStatus(event.status) }}</span>
-                      <span
-                        v-for="adjustment in getEventAdjustments(event)"
-                        :key="`${event.eventId}-${adjustment.orderNo}-status`"
-                        class="admin-table__subtext"
-                      >
-                        补扣单：{{ adjustment.orderNo }}
-                      </span>
-                      <span
-                        v-for="adjustment in getEventAdjustments(event)"
-                        :key="`${event.eventId}-${adjustment.orderNo}-goods`"
-                        class="admin-table__subtext"
-                      >
-                        {{
-                          adjustment.goods?.length
-                            ? adjustment.goods.map((goods) => `${goods.goodsName} / ${goods.goodsId} ×${goods.quantity}`).join("；")
-                            : "未记录补扣货品"
-                        }}
-                      </span>
-                    </td>
-                    <td>
-                      <span class="admin-table__strong">{{ formatOrderSyncStatus(event, "original") }}</span>
-                      <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
-                      <span
-                        v-for="adjustment in getEventAdjustments(event)"
-                        :key="`${event.eventId}-${adjustment.orderNo}-sync`"
-                        class="admin-table__subtext"
-                      >
-                        {{ formatOrderSyncStatus(adjustment, "adjustment") }}
-                      </span>
-                      <span
-                        v-if="event.refundNo || event.refundTransactionId"
-                        class="admin-table__subtext"
-                      >
-                        {{ event.refundNo ? `原始退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `原始交易号 ${event.refundTransactionId}` : "" }}
-                      </span>
-                      <span
-                        v-for="adjustment in getEventAdjustments(event)"
-                        :key="`${event.eventId}-${adjustment.orderNo}-refund`"
-                        class="admin-table__subtext"
-                      >
-                        补扣单 {{ adjustment.orderNo }}{{ adjustment.amount !== undefined ? ` / ${adjustment.amount} 分` : "" }}
-                        {{ adjustment.refundNo ? ` / 退款单 ${adjustment.refundNo}` : "" }}
-                        {{ adjustment.refundTransactionId ? ` / 交易号 ${adjustment.refundTransactionId}` : "" }}
-                      </span>
-                    </td>
-                    <td>
-                      <span class="admin-code">{{ formatDateTime(event.updatedAt) }}</span>
-                      <RouterLink class="admin-table__subtext admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">
-                        查看关联日志
-                      </RouterLink>
-                    </td>
-                    <td>
-                      <div class="device-event-actions">
-                        <button
-                          v-if="shouldShowPaymentAction(event)"
-                          class="admin-button admin-button--ghost"
-                          :disabled="notifyingPaymentOrderNo === event.orderNo"
-                          @click="notifyPaymentSuccess(event)"
-                        >
-                          {{ notifyingPaymentOrderNo === event.orderNo ? "回写中" : paymentActionLabel(event) }}
-                        </button>
-                        <button
-                          v-if="shouldShowRefundAction(event)"
-                          class="admin-button admin-button--ghost"
-                          :disabled="refundingOrderNo === event.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
-                          @click="refundEvent(event)"
-                        >
-                          {{ refundingOrderNo === event.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
-                        </button>
-                        <div
-                          v-for="adjustment in getEventAdjustments(event)"
-                          :key="`${event.eventId}-${adjustment.orderNo}-actions`"
-                          class="device-event-actions device-event-actions--nested"
-                        >
-                          <span class="admin-table__subtext">补扣单 {{ adjustment.orderNo }}</span>
-                          <button
-                            v-if="shouldShowPaymentAction(event, adjustment.orderNo)"
-                            class="admin-button admin-button--ghost"
-                            :disabled="notifyingPaymentOrderNo === adjustment.orderNo"
-                            @click="notifyPaymentSuccess(event, adjustment.orderNo)"
-                          >
-                            {{ notifyingPaymentOrderNo === adjustment.orderNo ? "回写中" : paymentActionLabel(event, adjustment.orderNo) }}
-                          </button>
-                          <button
-                            v-if="shouldShowRefundAction(event, adjustment.orderNo)"
-                            class="admin-button admin-button--ghost"
-                            :disabled="refundingOrderNo === adjustment.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt)"
-                            @click="refundEvent(event, adjustment.orderNo)"
-                          >
-                            {{ refundingOrderNo === adjustment.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt ? "已退款" : refundActionLabel(event, adjustment.orderNo) }}
-                          </button>
-                        </div>
-                        <span
-                          v-if="!shouldShowPaymentAction(event) && !shouldShowRefundAction(event) && !getEventAdjustments(event).some((adjustment) => shouldShowPaymentAction(event, adjustment.orderNo) || shouldShowRefundAction(event, adjustment.orderNo))"
-                          class="admin-table__subtext"
-                        >
-                          当前没有待平台确认的支付或退款动作
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-if="recentEvents.length" class="device-event-list">
+              <article v-for="event in recentEvents" :key="event.eventId" class="device-event-card">
+                <div class="device-event-card__head">
+                  <div class="device-event-card__title-wrap">
+                    <span class="admin-table__strong">事件 {{ event.eventId }}</span>
+                    <span class="admin-table__subtext">
+                      {{ formatEventStatus(event.status) }} · {{ formatDateTime(event.updatedAt) }}
+                    </span>
+                  </div>
+                  <RouterLink class="admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">
+                    查看关联日志
+                  </RouterLink>
+                </div>
+
+                <div class="device-event-order-row">
+                  <div class="device-event-order-row__kind">
+                    <span class="admin-pill admin-pill--neutral">原始订单</span>
+                  </div>
+                  <div class="device-event-order-row__main">
+                    <span class="admin-table__strong">{{ event.orderNo }}</span>
+                    <span class="admin-table__subtext">
+                      {{
+                        event.goods.length
+                          ? event.goods.map((goods) => `${goods.goodsName} / ${goods.goodsId} ×${goods.quantity}`).join("；")
+                          : "未记录结算货品"
+                      }}
+                    </span>
+                    <span class="admin-table__subtext">{{ formatOrderSyncStatus(event, "original") }}</span>
+                    <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
+                    <span v-if="event.refundNo || event.refundTransactionId" class="admin-table__subtext">
+                      {{ event.refundNo ? `退款单 ${event.refundNo}` : "" }}{{ event.refundNo && event.refundTransactionId ? " / " : "" }}{{ event.refundTransactionId ? `交易号 ${event.refundTransactionId}` : "" }}
+                    </span>
+                  </div>
+                  <div class="device-event-order-row__actions">
+                    <button
+                      v-if="shouldShowPaymentAction(event)"
+                      class="admin-button admin-button--ghost"
+                      :disabled="notifyingPaymentOrderNo === event.orderNo"
+                      @click="notifyPaymentSuccess(event)"
+                    >
+                      {{ notifyingPaymentOrderNo === event.orderNo ? "回写中" : paymentActionLabel(event) }}
+                    </button>
+                    <button
+                      v-if="shouldShowRefundAction(event)"
+                      class="admin-button admin-button--ghost"
+                      :disabled="refundingOrderNo === event.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
+                      @click="refundEvent(event)"
+                    >
+                      {{ refundingOrderNo === event.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
+                    </button>
+                    <span
+                      v-if="!shouldShowPaymentAction(event) && !shouldShowRefundAction(event)"
+                      class="admin-table__subtext"
+                    >
+                      当前没有待平台确认动作
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  v-for="adjustment in getEventAdjustments(event)"
+                  :key="`${event.eventId}-${adjustment.orderNo}`"
+                  class="device-event-order-row device-event-order-row--adjustment"
+                >
+                  <div class="device-event-order-row__kind">
+                    <span class="admin-pill admin-pill--warning">补扣单</span>
+                  </div>
+                  <div class="device-event-order-row__main">
+                    <span class="admin-table__strong">{{ adjustment.orderNo }}</span>
+                    <span class="admin-table__subtext">
+                      {{
+                        adjustment.goods?.length
+                          ? adjustment.goods.map((goods) => `${goods.goodsName} / ${goods.goodsId} ×${goods.quantity}`).join("；")
+                          : "未记录补扣货品"
+                      }}
+                    </span>
+                    <span class="admin-table__subtext">{{ formatOrderSyncStatus(adjustment, "adjustment") }}</span>
+                    <span class="admin-table__subtext">金额 {{ adjustment.amount ?? 0 }} 分 · {{ formatDateTime(adjustment.updatedAt ?? adjustment.createdAt) }}</span>
+                    <span
+                      v-if="adjustment.refundNo || adjustment.refundTransactionId"
+                      class="admin-table__subtext"
+                    >
+                      {{ adjustment.refundNo ? `退款单 ${adjustment.refundNo}` : "" }}{{ adjustment.refundNo && adjustment.refundTransactionId ? " / " : "" }}{{ adjustment.refundTransactionId ? `交易号 ${adjustment.refundTransactionId}` : "" }}
+                    </span>
+                  </div>
+                  <div class="device-event-order-row__actions">
+                    <button
+                      v-if="shouldShowPaymentAction(event, adjustment.orderNo)"
+                      class="admin-button admin-button--ghost"
+                      :disabled="notifyingPaymentOrderNo === adjustment.orderNo"
+                      @click="notifyPaymentSuccess(event, adjustment.orderNo)"
+                    >
+                      {{ notifyingPaymentOrderNo === adjustment.orderNo ? "回写中" : paymentActionLabel(event, adjustment.orderNo) }}
+                    </button>
+                    <button
+                      v-if="shouldShowRefundAction(event, adjustment.orderNo)"
+                      class="admin-button admin-button--ghost"
+                      :disabled="refundingOrderNo === adjustment.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt)"
+                      @click="refundEvent(event, adjustment.orderNo)"
+                    >
+                      {{ refundingOrderNo === adjustment.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt ? "已退款" : refundActionLabel(event, adjustment.orderNo) }}
+                    </button>
+                    <span
+                      v-if="!shouldShowPaymentAction(event, adjustment.orderNo) && !shouldShowRefundAction(event, adjustment.orderNo)"
+                      class="admin-table__subtext"
+                    >
+                      当前没有待平台确认动作
+                    </span>
+                  </div>
+                </div>
+              </article>
             </div>
             <div v-else class="admin-empty">
               <div class="admin-empty__title">{{ loading ? "正在加载事件" : "当前没有开柜事件" }}</div>
@@ -1272,6 +1254,67 @@ onUnmounted(() => {
   border-top: 1px dashed var(--admin-line);
 }
 
+.device-event-list {
+  display: grid;
+  gap: 12px;
+}
+
+.device-event-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-panel-muted);
+  min-width: 0;
+}
+
+.device-event-card__head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.device-event-card__title-wrap {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.device-event-order-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) minmax(140px, 180px);
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: #fff;
+  min-width: 0;
+}
+
+.device-event-order-row--adjustment {
+  border-style: dashed;
+}
+
+.device-event-order-row__kind,
+.device-event-order-row__main,
+.device-event-order-row__actions {
+  min-width: 0;
+}
+
+.device-event-order-row__main,
+.device-event-order-row__actions {
+  display: grid;
+  gap: 4px;
+}
+
+.device-event-order-row__actions {
+  align-content: start;
+  justify-items: start;
+}
+
 .device-goods-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 320px) auto minmax(0, 1fr);
@@ -1294,6 +1337,17 @@ onUnmounted(() => {
 .device-detail__aside :deep(.admin-note) {
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.device-detail__aside :deep(.admin-list__row) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.device-detail__aside :deep(.admin-list__main) {
+  min-width: 0;
 }
 
 .debug-grid {
@@ -1403,6 +1457,7 @@ onUnmounted(() => {
   display: grid;
   justify-items: end;
   gap: 6px;
+  min-width: 112px;
 }
 
 .device-map-backdrop {
@@ -1458,6 +1513,10 @@ onUnmounted(() => {
   }
 
   .debug-card__payload-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .device-event-order-row {
     grid-template-columns: 1fr;
   }
 }

@@ -1,4 +1,11 @@
 import type {
+  AiEventDiagnosis,
+  AiFeedbackDraft,
+  AiOperationsReport,
+  AiOperationsReportType,
+  AiPolicyOptimizationSuggestion,
+  AiProviderStatus,
+  AiRestockLayoutSuggestion,
   AlertTask,
   CallbackLogRecord,
   DataMonitorRange,
@@ -427,6 +434,30 @@ export const adminApi = {
   },
   alerts() {
     return adminClient.get<AlertTask[]>("/alerts");
+  },
+  aiStatus() {
+    return adminClient.get<AiProviderStatus>("/ai-insights/status");
+  },
+  aiEventDiagnosis(payload: { eventId?: string; orderNo?: string; logId?: string }) {
+    return adminClient.post<AiEventDiagnosis>("/ai-insights/event-diagnosis", payload);
+  },
+  aiOperationsReport(query?: { dateKey?: string; reportType?: AiOperationsReportType }) {
+    return adminClient.get<AiOperationsReport>("/ai-insights/operations-report", {
+      query
+    });
+  },
+  aiRestockLayoutSuggestions(query?: { dateKey?: string; range?: DataMonitorRange }) {
+    return adminClient.get<AiRestockLayoutSuggestion>("/ai-insights/restock-layout-suggestions", {
+      query
+    });
+  },
+  aiFeedbackDraft(payload: { alertId: string }) {
+    return adminClient.post<AiFeedbackDraft>("/ai-insights/feedback-draft", payload);
+  },
+  aiPolicyOptimization(query?: { dateKey?: string; range?: DataMonitorRange }) {
+    return adminClient.get<AiPolicyOptimizationSuggestion>("/ai-insights/policy-optimization", {
+      query
+    });
   },
   warehouses() {
     return adminClient.get<WarehouseRecord[]>("/warehouses");

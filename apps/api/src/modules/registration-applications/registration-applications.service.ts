@@ -275,6 +275,7 @@ export class RegistrationApplicationsService {
   }
 
   private completeExistingImportedUser(user: UserRecord, profile: RegistrationApplicationProfile) {
+    // 街道已预登记的人应当能顺畅激活，避免在线下登记和线上补录之间来回折返。
     this.applyProfileToUser(user, profile, user.role);
     user.mobileProfileCompleted = true;
     user.status = "active";
@@ -343,6 +344,7 @@ export class RegistrationApplicationsService {
     const now = new Date().toISOString();
 
     if (existing) {
+      // 重提申请时直接覆盖旧草稿，保证后台看到的是申请人当前最真实、最新的情况。
       existing.phone = payload.phone;
       existing.requestedRole = payload.requestedRole;
       existing.profile = payload.profile;

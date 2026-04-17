@@ -48,6 +48,15 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       }
     ]
   },
+  {
+    title: "智能助手",
+    items: [
+      {
+        to: "/ai",
+        label: "AI 工作台"
+      }
+    ]
+  },
 ];
 
 const currentMeta = computed(() => ({
@@ -87,6 +96,10 @@ const isActive = (target: string) => {
 
   if (target === "/logs") {
     return route.path.startsWith("/logs");
+  }
+
+  if (target === "/ai") {
+    return route.path.startsWith("/ai");
   }
 
   return route.path === target;

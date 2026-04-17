@@ -48,6 +48,7 @@ export class AnalyticsService {
         };
       })
       .filter((entry) => entry.summary.totalGoods > 0);
+    // 总览不只统计“做了多少”，还要把今天尚未被服务到的人明确找出来。
     const allPendingTasks = this.alertsService
       .list("open")
       .slice()
@@ -63,7 +64,15 @@ export class AnalyticsService {
       completionStatus: entry.summary.completionStatus,
       fulfilledGoods: entry.summary.fulfilledGoods,
       totalGoods: entry.summary.totalGoods,
-      summary: `已领取 ${entry.summary.fulfilledGoods}/${entry.summary.totalGoods} 件应领物资`
+      summary: `已领取 ${entry.summary.fulfilledGoods}/${entry.summary.totalGoods} 件应领物资`,
+      detailLines: entry.summary.windows.map((window) => {
+        const rangeLabel = `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`;
+        const goodsLabel = window.goodsUsage
+          .map((usage) => `${usage.goodsName} ${Math.min(usage.usedQuantity, usage.quantityLimit)}/${usage.quantityLimit}`)
+          .join("，");
+
+        return `${rangeLabel} ${goodsLabel}`;
+      })
     });
 
     const completeUsers = usersWithPolicies
@@ -72,6 +81,7 @@ export class AnalyticsService {
     const partialUsers = usersWithPolicies
       .filter((entry) => entry.summary.completionStatus === "partial")
       .map(mapPerson);
+    // “未服务人数”是街道最需要优先关注的名单，所以这里单独聚合并保留可展开明细。
     const unservedUsers = usersWithPolicies
       .filter((entry) => entry.summary.completionStatus === "unserved")
       .map(mapPerson);

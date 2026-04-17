@@ -197,6 +197,7 @@ export class AlertsService {
           continue;
         }
 
+        // 缺货预警要尽早暴露，避免依赖固定领取窗口的用户白跑一趟。
         if (currentStock <= 0) {
           this.create({
             type: "inventory",

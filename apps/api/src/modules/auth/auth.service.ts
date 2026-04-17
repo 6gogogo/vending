@@ -85,6 +85,7 @@ export class AuthService {
 
     if (existingUser) {
       if (!existingUser.mobileProfileCompleted) {
+        // 已预登记用户优先走续填流程，尽量不让需要帮助的人重复填写整套资料。
         const draftToken = this.store.createDraftSession({
           phone,
           linkedUserId: existingUser.id,
@@ -177,6 +178,7 @@ export class AuthService {
         throw new UnauthorizedException("当前用户资料不存在，请重新登录。");
       }
 
+      // 对已在库的人群，补齐资料后直接开通，减少再次等待人工审核带来的使用门槛。
       this.applyProfileToUser(user, payload.profile, user.role);
       user.mobileProfileCompleted = true;
       const snapshot = this.createSessionSnapshot(user);

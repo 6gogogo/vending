@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import { useAdminSessionStore } from "../stores/session";
 import AdminLayout from "../layouts/AdminLayout.vue";
 import AdminLoginPage from "../pages/AdminLoginPage.vue";
+import AiWorkspacePage from "../pages/AiWorkspacePage.vue";
 import DataMonitorPage from "../pages/DataMonitorPage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
 import DeviceDetailPage from "../pages/DeviceDetailPage.vue";
@@ -68,6 +69,16 @@ export const router = createRouter({
             eyebrow: "本地仓库",
             title: "本地仓库与盘点",
             description: "处理本地仓库库存、调拨、盘点和 Excel 导出。"
+          }
+        },
+        {
+          path: "/ai",
+          component: AiWorkspacePage,
+          meta: {
+            group: "智能助手",
+            eyebrow: "AI 工作台",
+            title: "AI 运营助手",
+            description: "生成异常诊断、日报、补货布局建议、反馈草稿和策略建议。"
           }
         },
         {
