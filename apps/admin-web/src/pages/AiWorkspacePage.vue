@@ -17,8 +17,30 @@ import { adminApi } from "../api/admin";
 import { formatDateTime, getTodayDateKeyInBeijing } from "../utils/datetime";
 
 type WorkspaceTab = "report" | "diagnosis" | "restock" | "feedback" | "policy";
+type WorkspaceResultPayload =
+  | AiEventDiagnosis
+  | AiOperationsReport
+  | AiRestockLayoutSuggestion
+  | AiFeedbackDraft
+  | AiPolicyOptimizationSuggestion;
+
+interface AiWorkspaceHistoryEntry {
+  id: string;
+  tab: WorkspaceTab;
+  title: string;
+  summary: string;
+  generatedAt: string;
+  payload: WorkspaceResultPayload;
+}
+
+interface AiWorkspaceStorage {
+  lastResults: Partial<Record<WorkspaceTab, AiWorkspaceHistoryEntry>>;
+  history: AiWorkspaceHistoryEntry[];
+}
 
 const todayDateKey = getTodayDateKeyInBeijing();
+const aiWorkspaceStorageKey = "vm-admin-ai-workspace";
+const maxHistoryEntries = 12;
 const route = useRoute();
 const router = useRouter();
 
@@ -83,10 +105,12 @@ const feedbackError = ref("");
 const policyResult = ref<AiPolicyOptimizationSuggestion>();
 const policyLoading = ref(false);
 const policyError = ref("");
+const historyEntries = ref<AiWorkspaceHistoryEntry[]>([]);
 
 const activeTabMeta = computed(() => tabOptions.find((item) => item.key === activeTab.value) ?? tabOptions[0]);
 const isAiEnabled = computed(() => aiStatus.value?.enabled ?? false);
 const missingConfig = computed(() => aiStatus.value?.missingConfig ?? []);
+const recentHistoryEntries = computed(() => historyEntries.value.slice(0, 8));
 const feedbackAlerts = computed(() =>
   alerts.value.filter((alert) => alert.grade === "feedback" || alert.type === "user_feedback")
 );
@@ -176,6 +200,137 @@ const pillClass = (value?: "high" | "medium" | "low") => {
   return "admin-pill--neutral";
 };
 
+const createEmptyWorkspaceStorage = (): AiWorkspaceStorage => ({
+  lastResults: {},
+  history: []
+});
+
+const canUseWorkspaceStorage = () =>
+  typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+
+const readWorkspaceStorage = (): AiWorkspaceStorage => {
+  if (!canUseWorkspaceStorage()) {
+    return createEmptyWorkspaceStorage();
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(aiWorkspaceStorageKey);
+    if (!rawValue) {
+      return createEmptyWorkspaceStorage();
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<AiWorkspaceStorage>;
+    return {
+      lastResults:
+        parsed.lastResults && typeof parsed.lastResults === "object"
+          ? (parsed.lastResults as AiWorkspaceStorage["lastResults"])
+          : {},
+      history: Array.isArray(parsed.history)
+        ? (parsed.history as AiWorkspaceHistoryEntry[]).slice(0, maxHistoryEntries)
+        : []
+    };
+  } catch {
+    return createEmptyWorkspaceStorage();
+  }
+};
+
+const writeWorkspaceStorage = (storage: AiWorkspaceStorage) => {
+  if (!canUseWorkspaceStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(aiWorkspaceStorageKey, JSON.stringify(storage));
+};
+
+const applyHistoryPayload = (entry: AiWorkspaceHistoryEntry) => {
+  switch (entry.tab) {
+    case "diagnosis":
+      diagnosisResult.value = entry.payload as AiEventDiagnosis;
+      break;
+    case "report":
+      operationsReportResult.value = entry.payload as AiOperationsReport;
+      break;
+    case "restock":
+      restockResult.value = entry.payload as AiRestockLayoutSuggestion;
+      break;
+    case "feedback":
+      feedbackResult.value = entry.payload as AiFeedbackDraft;
+      break;
+    case "policy":
+      policyResult.value = entry.payload as AiPolicyOptimizationSuggestion;
+      break;
+  }
+};
+
+const restoreSavedResults = () => {
+  const storage = readWorkspaceStorage();
+  historyEntries.value = storage.history;
+
+  if (storage.lastResults.diagnosis) {
+    diagnosisResult.value = storage.lastResults.diagnosis.payload as AiEventDiagnosis;
+  }
+
+  if (storage.lastResults.report) {
+    operationsReportResult.value = storage.lastResults.report.payload as AiOperationsReport;
+  }
+
+  if (storage.lastResults.restock) {
+    restockResult.value = storage.lastResults.restock.payload as AiRestockLayoutSuggestion;
+  }
+
+  if (storage.lastResults.feedback) {
+    feedbackResult.value = storage.lastResults.feedback.payload as AiFeedbackDraft;
+  }
+
+  if (storage.lastResults.policy) {
+    policyResult.value = storage.lastResults.policy.payload as AiPolicyOptimizationSuggestion;
+  }
+};
+
+const recordHistoryEntry = (
+  entry: Omit<AiWorkspaceHistoryEntry, "id">
+) => {
+  const savedEntry: AiWorkspaceHistoryEntry = {
+    ...entry,
+    id: `${entry.tab}-${entry.generatedAt}-${Date.now().toString(36)}`
+  };
+  const storage = readWorkspaceStorage();
+  const nextStorage: AiWorkspaceStorage = {
+    lastResults: {
+      ...storage.lastResults,
+      [savedEntry.tab]: savedEntry
+    },
+    history: [
+      savedEntry,
+      ...storage.history.filter(
+        (item) =>
+          !(
+            item.tab === savedEntry.tab &&
+            item.generatedAt === savedEntry.generatedAt &&
+            item.title === savedEntry.title
+          )
+      )
+    ].slice(0, maxHistoryEntries)
+  };
+
+  historyEntries.value = nextStorage.history;
+  writeWorkspaceStorage(nextStorage);
+};
+
+const workspaceTabLabel = (tab: WorkspaceTab) =>
+  tabOptions.find((item) => item.key === tab)?.label ?? "AI 内容";
+
+const openHistoryEntry = async (entry: AiWorkspaceHistoryEntry) => {
+  applyHistoryPayload(entry);
+  activeTab.value = entry.tab;
+  await setTab(entry.tab);
+};
+
+const clearSavedHistory = () => {
+  historyEntries.value = [];
+  writeWorkspaceStorage(createEmptyWorkspaceStorage());
+};
+
 const syncRouteQuery = () => {
   activeTab.value = readTab(firstQueryValue(route.query.tab));
 
@@ -261,10 +416,18 @@ const runDiagnosis = async () => {
   try {
     ensureAiEnabled();
     diagnosisLoading.value = true;
-    diagnosisResult.value = await adminApi.aiEventDiagnosis({
+    const result = await adminApi.aiEventDiagnosis({
       eventId: diagnosisForm.value.eventId.trim() || undefined,
       orderNo: diagnosisForm.value.orderNo.trim() || undefined,
       logId: diagnosisForm.value.logId.trim() || undefined
+    });
+    diagnosisResult.value = result;
+    recordHistoryEntry({
+      tab: "diagnosis",
+      title: `异常诊断 · ${result.target.orderNo || result.target.eventId || result.target.deviceCode}`,
+      summary: result.summary,
+      generatedAt: result.meta.generatedAt,
+      payload: result
     });
   } catch (error) {
     diagnosisError.value = readErrorMessage(error);
@@ -280,9 +443,17 @@ const runOperationsReport = async () => {
   try {
     ensureAiEnabled();
     operationsReportLoading.value = true;
-    operationsReportResult.value = await adminApi.aiOperationsReport({
+    const result = await adminApi.aiOperationsReport({
       dateKey: reportDateKey.value,
       reportType: reportType.value
+    });
+    operationsReportResult.value = result;
+    recordHistoryEntry({
+      tab: "report",
+      title: `${result.reportType === "morning" ? "晨报" : "日报"} · ${result.dateKey}`,
+      summary: result.summary,
+      generatedAt: result.meta.generatedAt,
+      payload: result
     });
   } catch (error) {
     operationsReportError.value = readErrorMessage(error);
@@ -298,9 +469,17 @@ const runRestockSuggestions = async () => {
   try {
     ensureAiEnabled();
     restockLoading.value = true;
-    restockResult.value = await adminApi.aiRestockLayoutSuggestions({
+    const result = await adminApi.aiRestockLayoutSuggestions({
       dateKey: restockDateKey.value,
       range: restockRange.value
+    });
+    restockResult.value = result;
+    recordHistoryEntry({
+      tab: "restock",
+      title: `补货布局 · ${restockDateKey.value}`,
+      summary: result.summary,
+      generatedAt: result.meta.generatedAt,
+      payload: result
     });
   } catch (error) {
     restockError.value = readErrorMessage(error);
@@ -321,8 +500,16 @@ const runFeedbackDraft = async () => {
   try {
     ensureAiEnabled();
     feedbackLoading.value = true;
-    feedbackResult.value = await adminApi.aiFeedbackDraft({
+    const result = await adminApi.aiFeedbackDraft({
       alertId: feedbackAlertId.value
+    });
+    feedbackResult.value = result;
+    recordHistoryEntry({
+      tab: "feedback",
+      title: `反馈分流 · ${result.title}`,
+      summary: result.summary,
+      generatedAt: result.meta.generatedAt,
+      payload: result
     });
   } catch (error) {
     feedbackError.value = readErrorMessage(error);
@@ -338,9 +525,17 @@ const runPolicyOptimization = async () => {
   try {
     ensureAiEnabled();
     policyLoading.value = true;
-    policyResult.value = await adminApi.aiPolicyOptimization({
+    const result = await adminApi.aiPolicyOptimization({
       dateKey: policyDateKey.value,
       range: policyRange.value
+    });
+    policyResult.value = result;
+    recordHistoryEntry({
+      tab: "policy",
+      title: `策略优化 · ${policyDateKey.value}`,
+      summary: result.summary,
+      generatedAt: result.meta.generatedAt,
+      payload: result
     });
   } catch (error) {
     policyError.value = readErrorMessage(error);
@@ -350,6 +545,7 @@ const runPolicyOptimization = async () => {
 };
 
 onMounted(() => {
+  restoreSavedResults();
   void loadBootstrap();
 });
 </script>
@@ -887,6 +1083,52 @@ onMounted(() => {
         <article class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
+              <span class="admin-kicker">本地记录</span>
+              <h3 class="admin-panel__title">最近生成内容</h3>
+            </div>
+            <button
+              v-if="recentHistoryEntries.length"
+              class="admin-button admin-button--ghost"
+              type="button"
+              @click="clearSavedHistory"
+            >
+              清空记录
+            </button>
+          </div>
+
+          <div v-if="recentHistoryEntries.length" class="admin-list">
+            <div
+              v-for="item in recentHistoryEntries"
+              :key="item.id"
+              class="admin-list__row ai-page__clickable-row"
+              @click="openHistoryEntry(item)"
+            >
+              <div class="admin-list__main">
+                <span class="admin-list__title">
+                  {{ item.title }}
+                  <span class="admin-table__subtext">{{ workspaceTabLabel(item.tab) }}</span>
+                </span>
+                <span class="admin-list__meta">{{ item.summary }}</span>
+                <span class="admin-list__meta ai-page__history-time">
+                  {{ formatDateTime(item.generatedAt) }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="admin-empty">
+            <div class="admin-empty__title">还没有已保存的 AI 结果</div>
+            <div class="admin-empty__body">每次生成成功后，最近内容会保存在当前浏览器里。</div>
+          </div>
+
+          <div class="admin-note ai-page__note">
+            这些记录只保存在当前浏览器，用来避免页面跳转后内容丢失，不会自动写入业务台账。
+          </div>
+        </article>
+
+        <article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
+            <div>
               <span class="admin-kicker">关联入口</span>
               <h3 class="admin-panel__title">继续追踪原始数据</h3>
             </div>
@@ -1043,6 +1285,10 @@ onMounted(() => {
 
 .ai-page__clickable-row:hover {
   background: #f8fbff;
+}
+
+.ai-page__history-time {
+  font-size: 0.8rem;
 }
 
 @media (max-width: 980px) {
