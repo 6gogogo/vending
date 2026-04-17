@@ -22,6 +22,7 @@
 ## 常用命令
 
 - `npm run sandbox:device -- CAB-1001`
+- `npm run sandbox:ai`
 - `npm run sandbox:events`
 - `npm run sandbox:sign`
 - `npm run sandbox:goods -- CAB-1001`
@@ -42,6 +43,7 @@
 - 签名规则与 `descriptions/1.1apis.md` 保持一致。
 - 回调模拟脚本默认请求本地业务后端。
 - `device` 用于查本地业务后端里的柜机详情，适合你已知柜机编号时直接核对库存、门信息和状态。
+- `ai` 会依次检查本地后端健康状态、管理员鉴权、AI 工作台依赖的 `/alerts`、`/ai-insights/status`，并默认再触发一次 `/ai-insights/operations-report` 来验证大模型实际调用是否成功；如果只想做基础检查，可执行 `npm run sandbox:ai -- status`。
 - `events` 用于直接查本地或云端后端里最近的开柜事件，会返回 `orderNo / eventId / deviceCode / status`，适合先定位退款、支付成功通知要用的参数。
 - `goods`、`door`、`payment-success`、`refund` 默认请求 `SMARTVM_BASE_URL`，适合直接对接测试平台。
 - `payment-success` 会优先使用结算/补扣回调里带回的 `notifyUrl / noticeUrl`，并按赛方“付款成功异步通知”接口格式输出 `requestUrl / requestBody / responseBody`。

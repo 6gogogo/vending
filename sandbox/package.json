@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "ai": "node scripts/check-ai.mjs",
     "device": "node scripts/query-device-info.mjs",
     "events": "node scripts/query-events.mjs",
     "sign": "node scripts/generate-signature.mjs fixtures/open-door.sample.json",
