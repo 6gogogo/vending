@@ -1,9 +1,18 @@
-import { BadGatewayException, BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  BadGatewayException,
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  UnauthorizedException
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type {
   CabinetEventRecord,
   CabinetOpenRequest,
+  CabinetSettlementComparison,
+  CabinetSettlementComparisonItem,
   SmartVmAdjustmentPayload,
   SmartVmDoorStatusPayload,
   SmartVmPaymentPayload,
@@ -47,24 +56,31 @@ export class CabinetEventsService {
     if (user.role === "special") {
       quotaSummary = this.accessRulesService.assertCanOpenSpecialCabinet(user, payload.category);
 
-      if (payload.intentItems?.length) {
-        const remainingToday = (quotaSummary.remainingToday ?? {}) as Record<string, number>;
-        const remainingByGoods =
-          ((quotaSummary.remainingByGoods as Record<string, number> | undefined) ?? {});
+      if (!payload.intentItems?.length) {
+        throw new BadRequestException("正式开柜前请先选择本次计划领取的商品。");
+      }
 
-        for (const item of payload.intentItems) {
-          const fallbackCategory = payload.category ?? "daily";
-          const remaining = remainingByGoods[item.goodsId] ?? remainingToday[fallbackCategory] ?? 0;
+      const remainingToday = (quotaSummary.remainingToday ?? {}) as Record<string, number>;
+      const remainingByGoods =
+        ((quotaSummary.remainingByGoods as Record<string, number> | undefined) ?? {});
 
-          if (item.quantity > remaining) {
-            throw new BadRequestException("意向领取数量超过当前可用额度。");
-          }
+      for (const item of payload.intentItems) {
+        const fallbackCategory = item.category ?? payload.category ?? "daily";
+        const remaining = remainingByGoods[item.goodsId] ?? remainingToday[fallbackCategory] ?? 0;
+
+        if (item.quantity > remaining) {
+          throw new BadRequestException("意向领取数量超过当前可用额度。");
         }
       }
     }
 
     const eventId = this.store.createId("event");
     const doorNum = payload.doorNum ?? "1";
+    const intentItems = this.resolveIntentItems(
+      payload.deviceCode,
+      payload.intentItems ?? [],
+      payload.category ?? "daily"
+    );
     let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
 
     try {
@@ -119,10 +135,12 @@ export class CabinetEventsService {
       role: user.role,
       deviceCode: payload.deviceCode,
       doorNum,
+      openMode: payload.openMode ?? "manual",
       status: "created",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       amount: 0,
+      intentItems,
       goods: []
     });
 
@@ -157,7 +175,8 @@ export class CabinetEventsService {
       metadata: {
         deviceCode: payload.deviceCode,
         category: payload.category,
-        intentItems: payload.intentItems ?? []
+        openMode: payload.openMode ?? "manual",
+        intentItems
       }
     });
 
@@ -167,8 +186,13 @@ export class CabinetEventsService {
       deviceCode: payload.deviceCode,
       doorNum,
       role: user.role,
+      openMode: payload.openMode ?? "manual",
       remainingQuota: quotaSummary?.remainingToday,
-      acceptedIntentItems: payload.intentItems ?? []
+      acceptedIntentItems: intentItems.map((item) => ({
+        goodsId: item.goodsId,
+        goodsName: item.goodsName,
+        quantity: item.quantity
+      }))
     };
   }
 
@@ -178,6 +202,20 @@ export class CabinetEventsService {
     }
 
     return this.store.events.filter((entry) => entry.userId === userId);
+  }
+
+  getDetail(eventId: string, actor?: { id: string; role: CabinetEventRecord["role"] }) {
+    const event = this.store.events.find((entry) => entry.eventId === eventId);
+
+    if (!event) {
+      throw new BadRequestException("未找到对应开柜事件。");
+    }
+
+    if (actor && actor.role !== "admin" && actor.id !== event.userId) {
+      throw new ForbiddenException("当前账号无权查看该开柜事件。");
+    }
+
+    return event;
   }
 
   listCallbackLogs(limit = 20, deviceCode?: string) {
@@ -332,6 +370,28 @@ export class CabinetEventsService {
           quantity: item.quantity,
           unitPrice: item.unitPrice
             })) ?? [];
+    }
+
+    const settlementComparison = this.compareSettlement(event, payload);
+    event.settlementComparison = settlementComparison;
+
+    if (event.intentItems?.length && !settlementComparison.matched) {
+      this.alertsService.create({
+        type: "callback",
+        grade: "feedback",
+        title: "实际领取与用户选择不一致",
+        deviceCode: event.deviceCode,
+        targetUserId: event.userId,
+        dueAt: event.updatedAt,
+        detail: [
+          `事件 ${event.eventId}`,
+          `柜机 ${event.deviceCode}`,
+          `用户选择：${this.formatComparisonItems(settlementComparison.intendedItems)}`,
+          `平台结算：${this.formatComparisonItems(settlementComparison.settledItems)}`
+        ].join("；"),
+        previewDetail: settlementComparison.summary,
+        relatedEventId: event.eventId
+      });
     }
 
     if (!settlementAlreadyRecorded.duplicated) {
@@ -751,5 +811,109 @@ export class CabinetEventsService {
       name: adminUser?.name ?? "管理员",
       role: "admin" as const
     };
+  }
+
+  private resolveIntentItems(
+    deviceCode: string,
+    intentItems: NonNullable<CabinetOpenRequest["intentItems"]>,
+    fallbackCategory: CabinetOpenRequest["category"] = "daily"
+  ) {
+    return intentItems.map((item) => {
+      const deviceGoods = this.store.devices
+        .find((device) => device.deviceCode === deviceCode)
+        ?.doors.flatMap((door) => door.goods)
+        .find((goods) => goods.goodsId === item.goodsId);
+      const catalogGoods = this.store.goodsCatalog.find((goods) => goods.goodsId === item.goodsId);
+
+      return {
+        goodsId: item.goodsId,
+        goodsName: item.goodsName || deviceGoods?.name || catalogGoods?.name || item.goodsId,
+        category: item.category || deviceGoods?.category || catalogGoods?.category || fallbackCategory,
+        quantity: item.quantity
+      };
+    });
+  }
+
+  private compareSettlement(event: CabinetEventRecord, payload: SmartVmSettlementPayload) {
+    const intendedItems = (event.intentItems ?? []).map((item) => ({
+      goodsId: item.goodsId,
+      goodsName: item.goodsName,
+      quantity: item.quantity
+    }));
+    const settledItems =
+      payload.detail?.map((item) => ({
+        goodsId: item.goodsId,
+        goodsName: item.goodsName,
+        quantity: item.quantity
+      })) ?? [];
+
+    const intendedMap = new Map(intendedItems.map((item) => [item.goodsId, item]));
+    const settledMap = new Map(settledItems.map((item) => [item.goodsId, item]));
+    const missingItems: CabinetSettlementComparisonItem[] = [];
+    const extraItems: CabinetSettlementComparisonItem[] = [];
+
+    for (const item of intendedItems) {
+      const settled = settledMap.get(item.goodsId);
+
+      if (!settled) {
+        missingItems.push(item);
+        continue;
+      }
+
+      if (settled.quantity !== item.quantity) {
+        const delta = item.quantity - settled.quantity;
+
+        if (delta > 0) {
+          missingItems.push({
+            goodsId: item.goodsId,
+            goodsName: item.goodsName,
+            quantity: delta
+          });
+        } else if (delta < 0) {
+          extraItems.push({
+            goodsId: item.goodsId,
+            goodsName: item.goodsName,
+            quantity: Math.abs(delta)
+          });
+        }
+      }
+    }
+
+    for (const item of settledItems) {
+      if (!intendedMap.has(item.goodsId)) {
+        extraItems.push(item);
+      }
+    }
+
+    const matched = missingItems.length === 0 && extraItems.length === 0;
+    const summaryParts: string[] = [];
+
+    if (missingItems.length) {
+      summaryParts.push(`少领 ${this.formatComparisonItems(missingItems)}`);
+    }
+
+    if (extraItems.length) {
+      summaryParts.push(`多领 ${this.formatComparisonItems(extraItems)}`);
+    }
+
+    return {
+      matched,
+      comparedAt: new Date().toISOString(),
+      summary: matched
+        ? "平台结算结果与用户选择一致。"
+        : `存在差异：${summaryParts.join("；")}`,
+      intendedItems,
+      settledItems,
+      missingItems,
+      extraItems
+    } satisfies CabinetSettlementComparison;
+  }
+
+  private formatComparisonItems(items: CabinetSettlementComparisonItem[]) {
+    if (!items.length) {
+      return "无";
+    }
+
+    return items.map((item) => `${item.goodsName} x${item.quantity}`).join("、");
   }
 }

@@ -35,10 +35,15 @@ const selectedItems = computed(() =>
   goodsList.value
     .map((item) => ({
       goodsId: item.goodsId,
+      goodsName: item.name,
       quantity: selectedMap[item.goodsId] ?? 0,
       category: item.category
     }))
     .filter((item) => item.quantity > 0)
+);
+
+const selectedSummary = computed(() =>
+  selectedItems.value.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
 );
 
 const load = async () => {
@@ -82,11 +87,12 @@ const updateSelected = (goodsId: string, delta: number) => {
   selectedMap[goodsId] = next;
 };
 
-const submit = async () => {
+const performOpen = async () => {
   if (!sessionStore.user || !selectedItems.value.length) {
-    uni.showToast({
-      title: "请至少选择一种意向货品",
-      icon: "none"
+    uni.showModal({
+      title: "请选择商品",
+      content: "正式开柜前需要先选择本次计划领取的商品。",
+      showCancel: false
     });
     return;
   }
@@ -98,9 +104,12 @@ const submit = async () => {
       deviceCode: deviceCode.value,
       doorNum: "1",
       category: selectedItems.value[0]?.category,
+      openMode: scanMode.value ? "scan" : "manual",
       intentItems: selectedItems.value.map((item) => ({
         goodsId: item.goodsId,
-        quantity: item.quantity
+        goodsName: item.goodsName,
+        quantity: item.quantity,
+        category: item.category
       }))
     });
 
@@ -111,45 +120,40 @@ const submit = async () => {
       });
     }
 
-    uni.reLaunch({
-      url: `/pages/common/result?status=success&title=${encodeURIComponent("取货申请已提交")}&detail=${encodeURIComponent("柜门已处理，本次会按柜机关门后的实际取货结果结算。")}`
+    uni.redirectTo({
+      url: `/pages/common/opening?eventId=${encodeURIComponent(response.eventId)}&deviceCode=${encodeURIComponent(response.deviceCode)}`
     });
   } catch (error) {
     uni.reLaunch({
-      url: `/pages/common/result?status=danger&title=${encodeURIComponent("取货申请失败")}&detail=${encodeURIComponent(getErrorMessage(error))}&actionText=${encodeURIComponent("重新尝试")}&backUrl=${encodeURIComponent(`/pages/special/device-detail?deviceCode=${deviceCode.value}`)}`
+      url: `/pages/common/result?status=danger&title=${encodeURIComponent(scanMode.value ? "扫码开柜失败" : "手动开柜失败")}&detail=${encodeURIComponent(getErrorMessage(error))}&actionText=${encodeURIComponent("重新尝试")}&backUrl=${encodeURIComponent(`/pages/special/device-detail?deviceCode=${deviceCode.value}${scanMode.value ? "&scan=1" : ""}`)}`
     });
   } finally {
     submitting.value = false;
   }
 };
 
-const submitScanOpen = async () => {
-  if (!sessionStore.user) {
-    uni.showToast({
-      title: "请先登录",
-      icon: "none"
+const submit = () => {
+  if (!selectedItems.value.length) {
+    uni.showModal({
+      title: "请选择商品",
+      content: "正式开柜前需要先选择本次计划领取的商品。",
+      showCancel: false
     });
     return;
   }
 
-  submitting.value = true;
-  try {
-    await mobileApi.openCabinet({
-      phone: sessionStore.user.phone,
-      deviceCode: deviceCode.value,
-      doorNum: "1"
-    });
-
-    uni.reLaunch({
-      url: `/pages/common/result?status=success&title=${encodeURIComponent("开柜申请已提交")}&detail=${encodeURIComponent("扫码柜机已收到开门请求，本次将以柜机识别到的实际取货结果结算。")}`
-    });
-  } catch (error) {
-    uni.reLaunch({
-      url: `/pages/common/result?status=danger&title=${encodeURIComponent("开柜申请失败")}&detail=${encodeURIComponent(getErrorMessage(error))}&actionText=${encodeURIComponent("重新尝试")}&backUrl=${encodeURIComponent(`/pages/special/device-detail?deviceCode=${deviceCode.value}&scan=1`)}`
-    });
-  } finally {
-    submitting.value = false;
-  }
+  uni.showModal({
+    title: scanMode.value ? "确认扫码开柜" : "确认手动开柜",
+    content: scanMode.value
+      ? `即将按扫码流程开柜，已选择：${selectedSummary.value}。柜门关闭后会按平台实际识别结果结算。`
+      : `请确认你已经在柜机旁，并准备好立即取货和及时关门。已选择：${selectedSummary.value}。`,
+    confirmText: scanMode.value ? "确认开柜" : "继续开柜",
+    success: ({ confirm }) => {
+      if (confirm) {
+        void performOpen();
+      }
+    }
+  });
 };
 
 const goFeedback = () => {
@@ -176,7 +180,7 @@ onLoad((query) => {
 
         <view v-if="scanMode" class="scan-mode-banner">
           <text class="scan-mode-banner__title">已识别柜机编号 {{ deviceCode }}</text>
-          <text class="scan-mode-banner__body">扫码模式下可直接开柜，最终以柜机识别到的商品种类和数量为准。</text>
+          <text class="scan-mode-banner__body">扫码流程会跳过柜机选择，但仍需先选择本次计划领取的商品，最终以平台识别到的商品种类和数量为准。</text>
         </view>
 
         <view v-if="goodsList.length" class="goods-list">
@@ -204,8 +208,9 @@ onLoad((query) => {
         />
 
         <view class="action-stack">
-          <button v-if="scanMode" class="vm-button" :loading="submitting" @tap="submitScanOpen">扫码后直接开柜</button>
-          <button class="vm-button" :loading="submitting" @tap="submit">确认并申请开柜</button>
+          <button class="vm-button" :loading="submitting" @tap="submit">
+            {{ scanMode ? "确认货品并扫码开柜" : "确认货品并手动开柜" }}
+          </button>
           <button class="vm-button vm-button--ghost" @tap="goFeedback">反馈问题</button>
         </view>
       </view>

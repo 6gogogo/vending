@@ -13,9 +13,16 @@ export class AlertsController {
 
   @Get()
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant")
-  list(@Query("status") status?: AlertTask["status"]) {
-    return ok(this.alertsService.list(status));
+  @AllowedRoles("admin", "merchant", "special")
+  list(
+    @Query("status") status?: AlertTask["status"],
+    @Query("targetUserId") targetUserId?: string,
+    @Req() request?: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+  ) {
+    const actor = request?.authUser;
+    const resolvedTargetUserId =
+      actor?.role === "special" ? actor.id : targetUserId;
+    return ok(this.alertsService.list(status, resolvedTargetUserId));
   }
 
   @Patch(":id/resolve")

@@ -47,6 +47,37 @@ const activeWindows = computed(() =>
 const taskButtonText = (task: AlertTask) => (task.grade === "fault" ? "标记已知晓" : "手动完成");
 const activeAlerts = computed(() => alerts.value.filter((item) => item.status !== "resolved"));
 
+const maybeNotifyUserAlert = () => {
+  if (sessionStore.user?.role !== "special") {
+    return;
+  }
+
+  const mismatchAlert = alerts.value.find(
+    (item) =>
+      item.status === "open" &&
+      item.type === "callback" &&
+      item.title.includes("不一致") &&
+      item.targetUserId === sessionStore.user?.id
+  );
+
+  if (!mismatchAlert) {
+    return;
+  }
+
+  const storageKey = `mobile:user-alert:${mismatchAlert.id}`;
+
+  if (uni.getStorageSync(storageKey)) {
+    return;
+  }
+
+  uni.setStorageSync(storageKey, "1");
+  uni.showModal({
+    title: "领取结果需要确认",
+    content: mismatchAlert.previewDetail || mismatchAlert.detail,
+    showCancel: false
+  });
+};
+
 const load = async () => {
   await sessionStore.bootstrap();
 
@@ -60,12 +91,15 @@ const load = async () => {
 
   try {
     if (sessionStore.user.role === "special") {
-      const [quota, recordResponse] = await Promise.all([
+      const [quota, recordResponse, alertResponse] = await Promise.all([
         mobileApi.getQuotaSummary(sessionStore.user.phone),
-        mobileApi.listRecords(sessionStore.user.id, sessionStore.user.role)
+        mobileApi.listRecords(sessionStore.user.id, sessionStore.user.role),
+        mobileApi.alerts("open", sessionStore.user.id)
       ]);
       sessionStore.setQuota(quota);
       records.value = recordResponse;
+      alerts.value = alertResponse;
+      maybeNotifyUserAlert();
       return;
     }
 

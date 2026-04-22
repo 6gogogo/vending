@@ -164,7 +164,7 @@ const sendCode = async () => {
 
   busy.value = true;
   try {
-    const response = await mobileApi.requestCode(phone.value.trim());
+    const response = await mobileApi.requestCode(phone.value.trim(), "register");
     previewCode.value = response.previewCode ?? "";
     showOperationSuccess();
   } catch (error) {

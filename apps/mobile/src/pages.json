@@ -44,6 +44,18 @@
       }
     },
     {
+      "path": "pages/common/opening",
+      "style": {
+        "navigationBarTitleText": "开门中"
+      }
+    },
+    {
+      "path": "pages/common/door-closed",
+      "style": {
+        "navigationBarTitleText": "闭门确认"
+      }
+    },
+    {
       "path": "pages/tabs/primary",
       "style": {
         "navigationBarTitleText": "主入口"

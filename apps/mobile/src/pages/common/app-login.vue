@@ -40,16 +40,32 @@ const bootstrap = async () => {
 const sendCode = async () => {
   busy.value = true;
   try {
-    const response = await mobileApi.requestCode(phone.value);
+    const response = await mobileApi.requestCode(phone.value, "app-login");
     previewCode.value = response.previewCode ?? "";
     uni.showToast({
       title: "验证码已发送",
       icon: "none"
     });
   } catch (error) {
-    uni.showToast({
-      title: getErrorMessage(error),
-      icon: "none"
+    const message = getErrorMessage(error);
+    const shouldRegister = message.includes("请注册");
+    const shouldWaitReview = message.includes("请等待审核");
+
+    uni.showModal({
+      title: shouldWaitReview ? "请等待审核" : shouldRegister ? "请注册" : "获取验证码失败",
+      content: shouldWaitReview
+        ? "当前手机号资料还在审核中，审核通过前不能获取登录验证码。"
+        : shouldRegister
+          ? "当前手机号未登记或未通过审核，请先注册后再登录。"
+          : message,
+      showCancel: !shouldWaitReview,
+      cancelText: "关闭",
+      confirmText: shouldRegister ? "去注册" : "我知道了",
+      success: ({ confirm }) => {
+        if (confirm && shouldRegister) {
+          goRegister();
+        }
+      }
     });
   } finally {
     busy.value = false;

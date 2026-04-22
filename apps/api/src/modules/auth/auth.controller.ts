@@ -10,8 +10,14 @@ export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
   @Post("request-code")
-  async requestCode(@Body() body: { phone: string }) {
-    return ok(await this.authService.requestCode(body.phone));
+  async requestCode(
+    @Body()
+    body: {
+      phone: string;
+      scene?: "app-login" | "register" | "general";
+    }
+  ) {
+    return ok(await this.authService.requestCode(body.phone, body.scene));
   }
 
   @Post("mobile-login")

@@ -248,6 +248,49 @@ export class InventoryOrdersService {
   }
 
   handleRefundCallback(payload: SmartVmRefundPayload) {
+    const event = this.findEventByPlatformOrderNo(payload.orderNo);
+
+    if (!event) {
+      this.store.logOperation({
+        category: "inventory",
+        type: "refund-callback",
+        status: "warning",
+        actor: {
+          type: "system",
+          name: "退款回调"
+        },
+        primarySubject: {
+          type: "device",
+          id: payload.deviceCode,
+          label: payload.deviceCode
+        },
+        secondarySubject: {
+          type: "event",
+          id: payload.orderNo,
+          label: payload.orderNo
+        },
+        description: `订单 ${payload.orderNo} 收到退款回调，但本地未找到对应事件。`,
+        detail: `退款单号 ${payload.refundNo}，交易号 ${payload.transactionId}，退款金额 ${payload.amount}。系统已接受回调并保留原始记录。`,
+        relatedOrderNo: payload.orderNo,
+        metadata: {
+          amount: payload.amount,
+          transactionId: payload.transactionId,
+          refundNo: payload.refundNo,
+          deviceCode: payload.deviceCode,
+          matchedLocalOrder: false,
+          undoState: "not_undoable"
+        }
+      });
+
+      return {
+        accepted: true,
+        matchedLocalOrder: false,
+        orderNo: payload.orderNo,
+        transactionId: payload.transactionId,
+        refundNo: payload.refundNo
+      };
+    }
+
     return this.markRefund(payload.orderNo, payload.transactionId, payload.amount, {
       source: "callback",
       refundNo: payload.refundNo

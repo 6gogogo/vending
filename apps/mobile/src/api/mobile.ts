@@ -1,6 +1,7 @@
 import type {
   AlertTask,
   AppLoginResult,
+  CabinetEventRecord,
   CabinetOpenRequest,
   CabinetOpenResult,
   DeviceMonitoringDetail,
@@ -26,7 +27,7 @@ import type {
 import { mobileClient } from "./client";
 
 export const mobileApi = {
-  requestCode(phone: string) {
+  requestCode(phone: string, scene: "app-login" | "register" | "general" = "general") {
     return mobileClient.post<{
       phone: string;
       expiresInSeconds: number;
@@ -34,7 +35,7 @@ export const mobileApi = {
       previewCode?: string;
     }>(
       "/auth/request-code",
-      { phone }
+      { phone, scene }
     );
   },
   mobileLogin(phone: string, code: string, requestedRole?: UserRole) {
@@ -102,6 +103,9 @@ export const mobileApi = {
   openCabinet(payload: CabinetOpenRequest) {
     return mobileClient.post<CabinetOpenResult>("/cabinet-events/open", payload);
   },
+  getCabinetEvent(eventId: string) {
+    return mobileClient.get<CabinetEventRecord>(`/cabinet-events/event/${eventId}`);
+  },
   listRecords(userId: string, role?: UserRole) {
     return mobileClient.get<InventoryMovement[]>("/inventory-orders", {
       query: { userId, role }
@@ -125,9 +129,9 @@ export const mobileApi = {
   }) {
     return mobileClient.post<AlertTask>("/alerts/feedback", payload);
   },
-  alerts(status?: AlertTask["status"]) {
+  alerts(status?: AlertTask["status"], targetUserId?: string) {
     return mobileClient.get<AlertTask[]>("/alerts", {
-      query: { status }
+      query: { status, targetUserId }
     });
   },
   resolveAlert(id: string, note?: string) {

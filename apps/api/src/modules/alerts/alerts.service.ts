@@ -8,12 +8,20 @@ import { InMemoryStoreService } from "../../common/store/in-memory-store.service
 export class AlertsService {
   constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
 
-  list(status?: AlertTask["status"]) {
+  list(status?: AlertTask["status"], targetUserId?: string) {
     this.refreshOperationalTasks();
 
-    const alerts = status
-      ? this.store.alerts.filter((alert) => alert.status === status)
-      : this.store.alerts;
+    const alerts = this.store.alerts.filter((alert) => {
+      if (status && alert.status !== status) {
+        return false;
+      }
+
+      if (targetUserId && alert.targetUserId !== targetUserId) {
+        return false;
+      }
+
+      return true;
+    });
 
     const statusWeight: Record<AlertTask["status"], number> = {
       open: 0,

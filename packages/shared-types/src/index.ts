@@ -341,9 +341,12 @@ export interface CabinetOpenRequest {
   doorNum?: string;
   payStyle?: string;
   category?: GoodsCategory;
+  openMode?: "manual" | "scan";
   intentItems?: Array<{
     goodsId: string;
     quantity: number;
+    goodsName?: string;
+    category?: GoodsCategory;
   }>;
 }
 
@@ -353,11 +356,36 @@ export interface CabinetOpenResult {
   deviceCode: string;
   doorNum: string;
   role: UserRole;
+  openMode?: "manual" | "scan";
   remainingQuota?: Partial<Record<string, number>>;
   acceptedIntentItems?: Array<{
     goodsId: string;
     quantity: number;
+    goodsName?: string;
   }>;
+}
+
+export interface CabinetIntentItem {
+  goodsId: string;
+  goodsName: string;
+  category: GoodsCategory;
+  quantity: number;
+}
+
+export interface CabinetSettlementComparisonItem {
+  goodsId: string;
+  goodsName: string;
+  quantity: number;
+}
+
+export interface CabinetSettlementComparison {
+  matched: boolean;
+  comparedAt: string;
+  summary: string;
+  intendedItems: CabinetSettlementComparisonItem[];
+  settledItems: CabinetSettlementComparisonItem[];
+  missingItems: CabinetSettlementComparisonItem[];
+  extraItems: CabinetSettlementComparisonItem[];
 }
 
 export interface CabinetEventRecord {
@@ -368,10 +396,13 @@ export interface CabinetEventRecord {
   role: UserRole;
   deviceCode: string;
   doorNum: string;
+  openMode?: "manual" | "scan";
   status: CabinetEventStatus;
   createdAt: string;
   updatedAt: string;
   amount: number;
+  intentItems?: CabinetIntentItem[];
+  settlementComparison?: CabinetSettlementComparison;
   paymentNotifyUrl?: string;
   paymentNotifyStatus?: "pending" | "success" | "failed";
   paymentNotifyMessage?: string;

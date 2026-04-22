@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type {
   CabinetOpenRequest,
@@ -20,6 +20,16 @@ export class CabinetEventsController {
   @Get()
   list(@Query("userId") userId?: string) {
     return ok(this.cabinetEventsService.list(userId));
+  }
+
+  @Get("event/:eventId")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin", "merchant", "special")
+  detail(
+    @Param("eventId") eventId: string,
+    @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+  ) {
+    return ok(this.cabinetEventsService.getDetail(eventId, request.authUser));
   }
 
   @Get("callback-logs")

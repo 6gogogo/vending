@@ -27,7 +27,11 @@ export class AuthService {
     private readonly verificationCodeService: VerificationCodeService
   ) {}
 
-  async requestCode(phone: string) {
+  async requestCode(phone: string, scene: "app-login" | "register" | "general" = "general") {
+    if (scene === "app-login") {
+      this.assertCanRequestAppLoginCode(phone);
+    }
+
     return this.verificationCodeService.requestCode(phone);
   }
 
@@ -328,5 +332,21 @@ export class AuthService {
     }
 
     return profile.name || "待完善资料用户";
+  }
+
+  private assertCanRequestAppLoginCode(phone: string) {
+    const existingUser = this.store.users.find((entry) => entry.phone === phone && entry.status === "active");
+
+    if (existingUser?.mobileProfileCompleted) {
+      return;
+    }
+
+    const existingApplication = this.registrationApplicationsService.findLatestByPhone(phone);
+
+    if (existingApplication?.status === "pending") {
+      throw new BadRequestException("请等待审核");
+    }
+
+    throw new BadRequestException("请注册");
   }
 }
