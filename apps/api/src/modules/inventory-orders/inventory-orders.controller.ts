@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Post, Query, UseGuards } from "@nestjs/common";
 
 import type { SmartVmRefundPayload } from "@vm/shared-types";
 
@@ -31,6 +31,7 @@ export class InventoryOrdersController {
   }
 
   @Post("callbacks/refund")
+  @HttpCode(200)
   refundCallback(@Body() body: SmartVmRefundPayload & Record<string, unknown>) {
     this.inventoryOrdersService.logRefundCallback(body);
 
@@ -43,6 +44,7 @@ export class InventoryOrdersController {
   }
 
   @Post("refund")
+  @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   async refund(

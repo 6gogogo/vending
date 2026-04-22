@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type {
   CabinetOpenRequest,
@@ -49,35 +49,41 @@ export class CabinetEventsController {
   }
 
   @Post("open")
+  @HttpCode(200)
   async open(@Body() body: CabinetOpenRequest) {
     return ok(await this.cabinetEventsService.openCabinet(body));
   }
 
   @Post("callbacks/door-status")
+  @HttpCode(200)
   doorStatus(@Body() body: SmartVmDoorStatusPayload & Record<string, unknown>) {
     this.cabinetEventsService.handleDoorStatus(body);
     return ack();
   }
 
   @Post("callbacks/settlement")
+  @HttpCode(200)
   settlement(@Body() body: SmartVmSettlementPayload & Record<string, unknown>) {
     this.cabinetEventsService.handleSettlement(body);
     return ack();
   }
 
   @Post("callbacks/adjustment")
+  @HttpCode(200)
   adjustment(@Body() body: SmartVmAdjustmentPayload & Record<string, unknown>) {
     this.cabinetEventsService.handleAdjustment(body);
     return ack();
   }
 
   @Post("callbacks/payment-success")
+  @HttpCode(200)
   async paymentSuccess(@Body() body: SmartVmPaymentPayload & Record<string, unknown>) {
     await this.cabinetEventsService.handlePaymentSuccess(body);
     return ack();
   }
 
   @Post("payment-success")
+  @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   async notifyPaymentSuccess(
