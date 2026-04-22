@@ -32,6 +32,10 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       {
         to: "/data-monitor",
         label: "数据监控"
+      },
+      {
+        to: "/warehouse",
+        label: "本地仓库"
       }
     ]
   },
@@ -90,6 +94,10 @@ const isActive = (target: string) => {
     return route.path.startsWith("/data-monitor");
   }
 
+  if (target === "/warehouse") {
+    return route.path.startsWith("/warehouse");
+  }
+
   if (target === "/users") {
     return route.path.startsWith("/users");
   }
@@ -112,6 +120,7 @@ const isActive = (target: string) => {
       <div class="workbench__brand-panel admin-panel">
         <span class="admin-kicker">公益智助柜</span>
         <h1 class="workbench__brand">后台管理台</h1>
+        <p class="workbench__brand-copy">面向街道与政府服务场景，按人员、货物、柜机和日志组织日常值守工作。</p>
       </div>
 
       <nav class="workbench__nav">
@@ -132,7 +141,7 @@ const isActive = (target: string) => {
       <div class="workbench__status admin-panel">
         <p class="admin-kicker">当前模块</p>
         <h2 class="workbench__status-title">{{ currentGroup }}</h2>
-        <p class="admin-copy">{{ sessionStore.user?.name ?? "管理员" }}</p>
+        <p class="admin-copy workbench__status-copy">{{ sessionStore.user?.name ?? "管理员" }}</p>
         <button class="admin-button admin-button--ghost" @click="logout">退出登录</button>
       </div>
     </aside>
@@ -142,8 +151,13 @@ const isActive = (target: string) => {
         <div>
           <span class="admin-kicker">{{ currentMeta.eyebrow }}</span>
           <h2 class="admin-page-title">{{ currentMeta.title }}</h2>
+          <p class="admin-subtitle workbench__header-copy">{{ currentMeta.description }}</p>
         </div>
-        <p class="admin-copy workbench__header-copy">{{ currentMeta.description }}</p>
+        <div class="workbench__header-side">
+          <span class="admin-kicker">工作视图</span>
+          <span class="workbench__header-value">{{ currentGroup }}</span>
+          <p class="admin-copy">界面保持克制、信息完整，便于街道和政务场景下的日常审阅与处置。</p>
+        </div>
       </header>
 
       <section class="workbench__content">

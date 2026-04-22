@@ -10,6 +10,7 @@ export class AlertsService {
 
   list(status?: AlertTask["status"], targetUserId?: string) {
     this.refreshOperationalTasks();
+    this.store.refreshAlertPresentation();
 
     const alerts = this.store.alerts.filter((alert) => {
       if (status && alert.status !== status) {
@@ -56,6 +57,7 @@ export class AlertsService {
     };
 
     this.store.alerts.unshift(alert);
+    this.store.decorateAlert(alert);
     this.store.logOperation({
       category: "alert",
       type: "create-alert",
@@ -100,6 +102,7 @@ export class AlertsService {
     alert.resolvedAt = new Date().toISOString();
     alert.resolvedByUserId = actorUserId;
     alert.resolutionNote = note;
+    this.store.decorateAlert(alert);
     this.store.logOperation({
       category: "alert",
       type: "resolve-alert",

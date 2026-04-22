@@ -479,9 +479,12 @@ export interface AlertTask {
   title: string;
   status: AlertStatus;
   deviceCode?: string;
+  deviceName?: string;
   targetUserId?: string;
+  targetUserName?: string;
   goodsId?: string;
   goodsName?: string;
+  goodsSummary?: string;
   dueAt: string;
   createdAt: string;
   detail: string;

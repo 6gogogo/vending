@@ -117,7 +117,12 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="记录" :title="title" :subtitle="subtitle">
+  <MobileShell
+    :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
+    eyebrow="记录"
+    :title="title"
+    :subtitle="subtitle"
+  >
     <GlassCard v-if="sessionStore.user?.role === 'admin'" tone="accent">
       <view class="segmented">
         <button class="segment" :class="{ 'segment--active': adminView === 'users' }" @tap="adminView = 'users'">人员</button>

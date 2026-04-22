@@ -66,10 +66,7 @@ export class InMemoryStoreService {
   readonly events: CabinetEventRecord[] = this.seed.events;
   readonly inventory: InventoryMovement[] = this.seed.inventory;
   readonly alerts: AlertTask[] = this.seed.alerts;
-  readonly logs: OperationLogRecord[] = this.seed.logs.map((entry) => ({
-    ...entry,
-    ...formatOperationLog(entry)
-  }));
+  readonly logs: OperationLogRecord[] = this.seed.logs.map((entry) => this.decorateStoredLog(entry));
 
   readonly verificationCodes = new Map<string, VerificationRecord>();
   readonly sessions = new Map<string, SessionRecord>();
@@ -108,6 +105,7 @@ export class InMemoryStoreService {
 
     this.ensureCompetitionTestDevice();
     this.syncDeviceStocksFromBatches();
+    this.refreshAlertPresentation();
   }
 
   createId(prefix: string) {
@@ -695,19 +693,264 @@ export class InMemoryStoreService {
     };
   }
 
+  refreshAlertPresentation() {
+    this.alerts.forEach((entry) => this.decorateAlert(entry));
+  }
+
+  decorateAlert(alert: AlertTask) {
+    const relatedEvent = this.findEventByReference(alert.relatedEventId);
+    const sourceLog = alert.sourceLogId
+      ? this.logs.find((entry) => entry.id === alert.sourceLogId)
+      : undefined;
+    const sourceMetadata = this.readMetadata(sourceLog?.metadata);
+    const targetUserId =
+      alert.targetUserId ??
+      this.readString(sourceMetadata.targetUserId) ??
+      relatedEvent?.userId;
+    const targetUserName =
+      this.getUserDisplayName(targetUserId) ??
+      this.readString(sourceMetadata.targetUserName);
+    const deviceCode =
+      alert.deviceCode ??
+      this.readString(sourceMetadata.deviceCode) ??
+      relatedEvent?.deviceCode;
+    const deviceName = deviceCode ? this.getDeviceDisplayName(deviceCode) : undefined;
+    const goodsSummary =
+      alert.goodsSummary ??
+      this.buildEventGoodsSummary(relatedEvent) ??
+      this.readString(sourceMetadata.goodsSummary) ??
+      alert.goodsName;
+    const previewParts = [
+      targetUserName ? `用户 ${targetUserName}` : undefined,
+      goodsSummary ? `商品 ${goodsSummary}` : undefined,
+      deviceName ? `柜机 ${deviceName}` : undefined
+    ].filter((entry): entry is string => Boolean(entry));
+    const previewLooksMachineLike =
+      !alert.previewDetail ||
+      /事件|订单|evt-|ord-|^log-/.test(alert.previewDetail);
+
+    if (!alert.targetUserId && targetUserId) {
+      alert.targetUserId = targetUserId;
+    }
+
+    if (!alert.deviceCode && deviceCode) {
+      alert.deviceCode = deviceCode;
+    }
+
+    alert.deviceName = deviceName;
+    alert.targetUserName = targetUserName;
+    alert.goodsSummary = goodsSummary;
+
+    if (previewLooksMachineLike && previewParts.length) {
+      alert.previewDetail = previewParts.join(" · ");
+    }
+
+    if (previewParts.length) {
+      const prefix = previewParts.join("；");
+
+      if (!alert.detail.startsWith(prefix) && !previewParts.some((entry) => alert.detail.includes(entry))) {
+        alert.detail = `${prefix}；${alert.detail}`;
+      }
+    }
+
+    return alert;
+  }
+
+  private readMetadata(metadata?: Record<string, unknown>) {
+    return (metadata ?? {}) as Record<string, unknown>;
+  }
+
+  private readString(value: unknown) {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private getUserDisplayName(userId?: string) {
+    if (!userId) {
+      return undefined;
+    }
+
+    return this.users.find((entry) => entry.id === userId)?.name;
+  }
+
+  private getDeviceDisplayName(deviceCode?: string) {
+    if (!deviceCode) {
+      return undefined;
+    }
+
+    return this.devices.find((entry) => entry.deviceCode === deviceCode)?.name ?? deviceCode;
+  }
+
+  private findEventByReference(eventId?: string, orderNo?: string) {
+    if (eventId) {
+      const matchedByEventId = this.events.find((entry) => entry.eventId === eventId);
+
+      if (matchedByEventId) {
+        return matchedByEventId;
+      }
+    }
+
+    if (!orderNo) {
+      return undefined;
+    }
+
+    return this.events.find(
+      (entry) =>
+        entry.orderNo === orderNo ||
+        entry.adjustmentOrderNo === orderNo ||
+        entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo)
+    );
+  }
+
+  private summarizeGoodsItems(items: Array<{ goodsName?: string; name?: string; quantity?: number }>) {
+    const summary = new Map<string, number>();
+
+    for (const item of items) {
+      const label = (item.goodsName ?? item.name ?? "").trim();
+
+      if (!label) {
+        continue;
+      }
+
+      summary.set(label, (summary.get(label) ?? 0) + (item.quantity ?? 0));
+    }
+
+    return Array.from(summary.entries())
+      .map(([label, quantity]) => `${label}${quantity > 0 ? ` x${quantity}` : ""}`)
+      .join("、");
+  }
+
+  private buildGoodsSummaryFromUnknown(value: unknown) {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    const normalizedItems = value
+      .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+      .map((entry) => ({
+        goodsName: this.readString(entry.goodsName) ?? this.readString(entry.name),
+        quantity: typeof entry.quantity === "number" ? entry.quantity : 0
+      }));
+
+    const summary = this.summarizeGoodsItems(normalizedItems);
+    return summary || undefined;
+  }
+
+  private buildEventGoodsSummary(event?: CabinetEventRecord) {
+    if (!event) {
+      return undefined;
+    }
+
+    const settledSummary = this.summarizeGoodsItems(event.goods);
+
+    if (settledSummary) {
+      return settledSummary;
+    }
+
+    const intentSummary = this.summarizeGoodsItems(event.intentItems ?? []);
+
+    if (intentSummary) {
+      return intentSummary;
+    }
+
+    const latestAdjustment = event.adjustments?.[0];
+    const adjustmentSummary = this.summarizeGoodsItems(latestAdjustment?.goods ?? []);
+    return adjustmentSummary || undefined;
+  }
+
+  private enrichOperationLogMetadata(
+    entry: OperationLogRecord | (OperationLogDraft & { id: string; occurredAt: string })
+  ) {
+    const metadata = {
+      ...this.readMetadata(entry.metadata)
+    };
+    const relatedEvent = this.findEventByReference(
+      entry.relatedEventId ?? (entry.secondarySubject?.type === "event" ? entry.secondarySubject.id : undefined),
+      entry.relatedOrderNo
+    );
+    const deviceCode =
+      this.readString(metadata.deviceCode) ??
+      (entry.primarySubject?.type === "device"
+        ? entry.primarySubject.id
+        : entry.secondarySubject?.type === "device"
+          ? entry.secondarySubject.id
+          : undefined) ??
+      relatedEvent?.deviceCode;
+    const targetUserId =
+      this.readString(metadata.targetUserId) ??
+      (entry.primarySubject?.type === "user"
+        ? entry.primarySubject.id
+        : entry.secondarySubject?.type === "user"
+          ? entry.secondarySubject.id
+          : undefined) ??
+      relatedEvent?.userId;
+    const goodsSummary =
+      this.readString(metadata.goodsSummary) ??
+      this.buildEventGoodsSummary(relatedEvent) ??
+      this.buildGoodsSummaryFromUnknown(metadata.intentItems) ??
+      this.buildGoodsSummaryFromUnknown(metadata.acceptedIntentItems) ??
+      this.buildGoodsSummaryFromUnknown(metadata.goods) ??
+      this.readString(metadata.goodsName);
+    const targetUserName =
+      this.readString(metadata.targetUserName) ??
+      this.getUserDisplayName(targetUserId);
+    const deviceName =
+      this.readString(metadata.deviceName) ??
+      this.getDeviceDisplayName(deviceCode);
+
+    if (deviceCode) {
+      metadata.deviceCode = deviceCode;
+    }
+
+    if (deviceName) {
+      metadata.deviceName = deviceName;
+    }
+
+    if (targetUserId) {
+      metadata.targetUserId = targetUserId;
+    }
+
+    if (targetUserName) {
+      metadata.targetUserName = targetUserName;
+    }
+
+    if (goodsSummary) {
+      metadata.goodsSummary = goodsSummary;
+    }
+
+    if (relatedEvent?.eventId) {
+      metadata.relatedEventId = relatedEvent.eventId;
+    }
+
+    if (relatedEvent?.orderNo) {
+      metadata.relatedOrderNo = relatedEvent.orderNo;
+    }
+
+    return metadata;
+  }
+
+  private decorateStoredLog(
+    entry: OperationLogRecord | (OperationLogDraft & { id: string; occurredAt: string })
+  ) {
+    const metadata = this.enrichOperationLogMetadata(entry);
+    const normalizedEntry = {
+      ...entry,
+      metadata
+    } as OperationLogRecord;
+
+    return {
+      ...normalizedEntry,
+      ...formatOperationLog(normalizedEntry)
+    };
+  }
+
   logOperation(entry: OperationLogDraft) {
     const occurredAt = entry.occurredAt ?? new Date().toISOString();
     const id = entry.id ?? this.createId("log");
-    const record: OperationLogRecord = {
-      id,
-      occurredAt,
+    const record = this.decorateStoredLog({
       ...entry,
-      ...formatOperationLog({
-        ...entry,
-        id,
-        occurredAt
-      } as OperationLogRecord)
-    };
+      id,
+      occurredAt
+    });
 
     record.metadata = {
       undoState: "not_undoable",
@@ -779,10 +1022,7 @@ export class InMemoryStoreService {
     this.replaceArray(this.alerts, state.alerts);
     this.replaceArray(
       this.logs,
-      state.logs.map((entry) => ({
-        ...entry,
-        ...formatOperationLog(entry)
-      }))
+      state.logs.map((entry) => this.decorateStoredLog(entry))
     );
 
     this.verificationCodes.clear();
@@ -805,6 +1045,8 @@ export class InMemoryStoreService {
     for (const [key, value] of state.deviceRuntime) {
       this.deviceRuntime.set(key, value);
     }
+
+    this.refreshAlertPresentation();
   }
 
   private replaceArray<T>(target: T[], source: T[]) {

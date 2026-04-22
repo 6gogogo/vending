@@ -46,7 +46,12 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="设置" title="账号与设置" :subtitle="subtitle">
+  <MobileShell
+    :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
+    eyebrow="设置"
+    title="账号与设置"
+    :subtitle="subtitle"
+  >
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="info-list">

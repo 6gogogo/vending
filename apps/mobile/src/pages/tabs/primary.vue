@@ -46,6 +46,56 @@ const activeWindows = computed(() =>
 
 const taskButtonText = (task: AlertTask) => (task.grade === "fault" ? "标记已知晓" : "手动完成");
 const activeAlerts = computed(() => alerts.value.filter((item) => item.status !== "resolved"));
+const pageSubtitle = computed(() => {
+  if (sessionStore.user?.role === "special") {
+    return "先确认今日资格，再去最近柜机领取；如果遇到异常，也可以直接反馈。";
+  }
+
+  if (sessionStore.user?.role === "merchant") {
+    return "把模板、补货和异常处理放在同一入口里，方便边走边完成操作。";
+  }
+
+  return "把待办、审批和柜机入口集中在首页，适合移动端快速处理关键事项。";
+});
+
+const heroSupport = computed(() => {
+  if (sessionStore.user?.role === "special") {
+    return {
+      title: "服务提醒",
+      lines: [
+        activeWindows.value.length ? `可领取时段：${activeWindows.value.join("、")}` : "当前暂无开放时段，系统会按业务时间自动刷新资格。",
+        permissions.value.length ? "建议先确认今天还能领什么，再去最近柜机，能少走冤枉路。" : "当前没有可领取额度时，不需要重复提交，等待时段刷新即可。",
+        activeAlerts.value.length ? `你有 ${activeAlerts.value.length} 条待确认提醒，可在下方查看。` : "如果识别结果异常或柜机有问题，可以直接联系工作人员。"
+      ]
+    };
+  }
+
+  if (sessionStore.user?.role === "merchant") {
+    return {
+      title: "今日重点",
+      lines: [
+        `当前维护模板 ${templates.value.length} 个，补货总量 ${merchantSummary.value.donatedUnits} 件。`,
+        merchantSummary.value.pendingAlerts
+          ? `有 ${merchantSummary.value.pendingAlerts} 条待处理异常，建议先核对。`
+          : "当前异常压力较低，可以直接安排补货与模板维护。",
+        "遵循“模板 -> 补货 -> 去向”的顺序，操作会更稳。"
+      ]
+    };
+  }
+
+  return {
+    title: "处理重点",
+    lines: [
+      pendingApplications.value.length
+        ? `当前有 ${pendingApplications.value.length} 条待审申请，建议优先处理。`
+        : "当前没有待审申请，可优先巡检柜机和日志。",
+      activeAlerts.value.length
+        ? `待处理事件 ${activeAlerts.value.length} 条，移动端适合快速查看和确认。`
+        : "当前没有新的待办事件，可继续查看柜机与人员日志。",
+      "移动端优先解决现场决策，复杂批量操作可继续交给 PC 端。"
+    ]
+  };
+});
 
 const maybeNotifyUserAlert = () => {
   if (sessionStore.user?.role !== "special") {
@@ -220,15 +270,47 @@ onShow(() => {
 
 <template>
   <MobileShell
+    :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
     :eyebrow="roleLabelMap[sessionStore.user?.role ?? 'special']"
     :title="sessionStore.user?.name ?? '公益智助柜'"
-    subtitle="当前页作为底部菜单的主入口，按不同身份展示最核心的操作。"
+    :subtitle="pageSubtitle"
   >
+    <template #hero-side>
+      <GlassCard tone="quiet" compact>
+        <view class="hero-support">
+          <text class="hero-support__title">{{ heroSupport.title }}</text>
+          <text v-for="line in heroSupport.lines" :key="line" class="hero-support__body">{{ line }}</text>
+        </view>
+      </GlassCard>
+    </template>
+
+    <template #hero-actions>
+      <view class="hero-action-grid">
+        <template v-if="sessionStore.user?.role === 'special'">
+          <button class="vm-button" @tap="goNearby">就近找柜机</button>
+          <button class="vm-button vm-button--ghost" @tap="goScanPickup">扫码开门</button>
+        </template>
+        <template v-else-if="sessionStore.user?.role === 'merchant'">
+          <button class="vm-button" @tap="navigate('/pages/merchant/restock')">立即登记补货</button>
+          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">管理商品属性</button>
+        </template>
+        <template v-else>
+          <button class="vm-button" @tap="navigate('/pages/admin/reviews')">处理待审申请</button>
+          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/admin/devices')">查看柜机状态</button>
+        </template>
+      </view>
+    </template>
+
     <GlassCard tone="accent" v-if="sessionStore.user?.role === 'special'">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">验证领取资格</text>
-          <text class="vm-subtitle">先确认当前时段和剩余货品额度，再去附近柜机发起领取。</text>
+          <text class="section-heading__title">今日资格与提醒</text>
+          <text class="vm-subtitle">把最关心的可领信息、开放时段和异常兜底放在前面，判断会更轻松。</text>
+        </view>
+        <view class="metric-grid">
+          <ServiceMetric label="可领物资" :value="permissions.length" hint="当前时段内允许领取的种类" tone="accent" />
+          <ServiceMetric label="开放时段" :value="activeWindows.length" hint="仅在开放时段内可领取" />
+          <ServiceMetric label="提醒事项" :value="activeAlerts.length" hint="识别差异或核对提醒会在这里显示" tone="warning" />
         </view>
         <view class="info-list">
           <view class="info-item">
@@ -374,6 +456,7 @@ onShow(() => {
 </template>
 
 <style scoped>
+.hero-support,
 .section-heading,
 .info-item,
 .simple-list__main {
@@ -388,10 +471,23 @@ onShow(() => {
   color: var(--vm-text);
 }
 
+.hero-support__title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.hero-support__body {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+  line-height: 1.6;
+}
+
 .metric-grid,
 .action-grid,
 .simple-list,
-.info-list {
+.info-list,
+.hero-action-grid {
   display: grid;
   gap: 16rpx;
 }

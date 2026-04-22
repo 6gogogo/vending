@@ -28,10 +28,10 @@ withDefaults(
 .stat-tile {
   display: grid;
   gap: 6px;
-  min-height: 110px;
-  padding: 12px 14px;
+  min-height: 104px;
+  padding: 14px 16px;
   border: 1px solid var(--admin-line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--admin-panel);
 }
 
@@ -45,7 +45,7 @@ withDefaults(
 
 .stat-tile__value {
   font-family: var(--admin-code-font);
-  font-size: 1.75rem;
+  font-size: 1.68rem;
   line-height: 1.1;
   color: var(--admin-text);
 }
@@ -63,17 +63,17 @@ withDefaults(
 }
 
 .stat-tile--accent {
-  border-color: #aebfe1;
-  background: var(--admin-accent-soft);
+  border-color: #c7d5e8;
+  background: #f3f7fc;
 }
 
 .stat-tile--success {
-  border-color: #b9dec6;
-  background: #edf8f1;
+  border-color: #c4decf;
+  background: #f1f8f4;
 }
 
 .stat-tile--warning {
-  border-color: #efcf8d;
-  background: #fff7e8;
+  border-color: #e4d2a7;
+  background: #faf6ed;
 }
 </style>

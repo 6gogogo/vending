@@ -6,6 +6,7 @@ import type { DeviceRecord, DeviceStatus } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
@@ -59,6 +60,9 @@ const mappableDevices = computed(() =>
 const highlightedDevice = computed(() =>
   devices.value.find((device) => device.deviceCode === highlightedDeviceCode.value)
 );
+const onlineDeviceCount = computed(() =>
+  devices.value.filter((device) => device.status === "online").length
+);
 
 const goodsOptions = computed(() => {
   const options = new Map<string, { goodsId: string; goodsName: string }>();
@@ -93,6 +97,38 @@ const goodsOptions = computed(() => {
 const selectedGoodsName = computed(
   () => goodsOptions.value.find((item) => item.goodsId === selectedGoodsId.value)?.goodsName ?? ""
 );
+const heroSupport = computed(() => {
+  if (sessionStore.user?.role === "special") {
+    return {
+      title: "就近建议",
+      lines: [
+        distanceEnabled.value ? "已按距离排序，优先看排在前面的柜机，路程会更省。" : "未开启定位时仍可查看列表，但建议允许定位后再找最近柜机。",
+        selectedGoodsName.value ? `当前正在查找：${selectedGoodsName.value}` : "你也可以先选择想领的物资，再让系统定位最近柜机。",
+        highlightedDevice.value ? `当前高亮：${highlightedDevice.value.name}` : "点击地图大头钉或列表卡片，可以锁定想去的柜机。"
+      ]
+    };
+  }
+
+  if (sessionStore.user?.role === "merchant") {
+    return {
+      title: "操作建议",
+      lines: [
+        "优先查看在线柜机，再进入补货，能减少来回切换。",
+        selectedGoodsName.value ? `当前筛选物资：${selectedGoodsName.value}` : "可按物资名称快速查找适合补货的柜机。",
+        highlightedDevice.value ? `当前高亮：${highlightedDevice.value.name}` : "选中柜机后可直接进入补货登记。"
+      ]
+    };
+  }
+
+  return {
+    title: "巡检建议",
+    lines: [
+      "移动端适合现场巡检，先看地图位置，再快速进入柜机详情。",
+      distanceEnabled.value ? "当前列表已带距离信息，便于就近排查。" : "未开启定位时仍可巡检，但路线规划会弱一些。",
+      highlightedDevice.value ? `当前高亮：${highlightedDevice.value.name}` : "点击列表卡片可把对应柜机在地图上高亮。"
+    ]
+  };
+});
 
 const markerEntries = computed(() =>
   mappableDevices.value.map((device, index) => ({
@@ -353,12 +389,36 @@ onShow(() => {
 
 <template>
   <MobileShell
+    :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
     eyebrow="附近柜机"
     :title="roleLabelMap[sessionStore.user?.role ?? 'special']"
     :subtitle="subtitle"
   >
+    <template #hero-side>
+      <GlassCard tone="quiet" compact>
+        <view class="hero-support">
+          <text class="hero-support__title">{{ heroSupport.title }}</text>
+          <text v-for="line in heroSupport.lines" :key="line" class="hero-support__body">{{ line }}</text>
+        </view>
+      </GlassCard>
+    </template>
+
+    <template #hero-actions>
+      <view class="hero-action-grid">
+        <button class="vm-button" @tap="focusNearestDevice">定位最近柜机</button>
+        <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--ghost" @tap="scanAndOpen">扫码开门</button>
+        <button v-else class="vm-button vm-button--ghost" @tap="mapExpanded = true">放大地图</button>
+      </view>
+    </template>
+
     <GlassCard tone="quiet">
       <view class="vm-stack">
+        <view class="metric-grid">
+          <ServiceMetric label="柜机总数" :value="devices.length" hint="当前列表中的柜机数量" tone="accent" />
+          <ServiceMetric label="在线柜机" :value="onlineDeviceCount" hint="优先选择在线柜机或在线巡检" />
+          <ServiceMetric label="地图点位" :value="mappableDevices.length" hint="已具备经纬度的柜机数量" />
+        </view>
+
         <view v-if="mappableDevices.length" class="nearby-map-card">
           <view class="nearby-location-banner">
             <text class="nearby-map-card__title">我的位置</text>
@@ -523,12 +583,19 @@ onShow(() => {
 </template>
 
 <style scoped>
+.hero-support,
 .nearby-map-card,
 .device-list,
 .goods-list,
 .action-grid,
 .nearby-map-card__search,
 .nearby-location-banner {
+  display: grid;
+  gap: 16rpx;
+}
+
+.hero-action-grid,
+.metric-grid {
   display: grid;
   gap: 16rpx;
 }
@@ -542,12 +609,14 @@ onShow(() => {
   gap: 16rpx;
 }
 
+.hero-support__title,
 .nearby-map-card__title {
   font-size: 28rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
+.hero-support__body,
 .nearby-map-card__hint,
 .device-card__meta,
 .goods-item__meta,
@@ -555,6 +624,7 @@ onShow(() => {
 .nearby-location-banner__value {
   font-size: 22rpx;
   color: var(--vm-text-soft);
+  line-height: 1.6;
 }
 
 .nearby-location-banner {

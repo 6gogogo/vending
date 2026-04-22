@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
 import { mobileApi } from "../../api/mobile";
@@ -20,6 +20,14 @@ const summary = ref({
 });
 const templateCount = ref(0);
 const recentLogs = ref<Array<{ id: string; description: string; occurredAt: string }>>([]);
+
+const focusText = computed(() => {
+  if (summary.value.pendingAlerts > 0) {
+    return `当前有 ${summary.value.pendingAlerts} 条待处理反馈或预警，建议先核对异常，再安排补货。`;
+  }
+
+  return "当前异常压力较低，可以优先维护模板、登记补货并回看货物流向。";
+});
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -71,17 +79,41 @@ onShow(() => {
 
 <template>
   <MobileShell eyebrow="爱心商户" :title="sessionStore.user?.name ?? '爱心商户'" :subtitle="appCopy.merchantWelcome">
+    <template #hero-side>
+      <GlassCard tone="quiet" compact>
+        <view class="hero-support">
+          <text class="hero-support__title">今日优先建议</text>
+          <text class="hero-support__body">{{ focusText }}</text>
+          <text class="hero-support__body">模板维护完整后，补货登记会更快，也更方便追踪货物去向。</text>
+        </view>
+      </GlassCard>
+    </template>
+
+    <template #hero-actions>
+      <view class="hero-action-grid">
+        <button class="vm-button" @tap="navigate('/pages/merchant/restock')">立即登记补货</button>
+        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/traces')">查看货物去向</button>
+      </view>
+    </template>
+
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日运营概览</text>
-          <text class="vm-subtitle">关注补货量、待处理问题和模板维护情况。</text>
+          <text class="vm-subtitle">先看补货量、异常与模板情况，再进入具体操作，判断会更快。</text>
         </view>
 
         <view class="metric-grid">
           <ServiceMetric label="累计补货件数" :value="summary.donatedUnits" hint="当前账号历史累计" />
           <ServiceMetric label="待处理反馈/预警" :value="summary.pendingAlerts" hint="优先处理异常与到期问题" tone="warning" />
           <ServiceMetric label="模板数量" :value="templateCount" hint="常用货品模板总数" />
+        </view>
+
+        <view class="ops-banner">
+          <text class="ops-banner__title">{{ loading ? "正在刷新运营数据" : "当前工作重点" }}</text>
+          <text class="ops-banner__body">
+            {{ loading ? "请稍候，系统正在同步补货概览和最近流向。" : focusText }}
+          </text>
         </view>
       </view>
     </GlassCard>
@@ -90,23 +122,27 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">常用操作</text>
-          <text class="vm-subtitle">先建模板，再按模板补货，最后查看货物流向。</text>
+          <text class="vm-subtitle">遵循“模板 -> 补货 -> 去向”的顺序，能减少反复修改和遗漏。</text>
         </view>
 
         <view class="menu-grid">
           <button class="menu-card" @tap="navigate('/pages/merchant/templates')">
+            <text class="menu-card__tag">准备</text>
             <text class="menu-card__title">货品模板</text>
             <text class="menu-card__desc">维护名称、分类、默认数量与保质天数</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/merchant/restock')">
+            <text class="menu-card__tag">执行</text>
             <text class="menu-card__title">按模板补货</text>
             <text class="menu-card__desc">选择柜机、数量、生产日期快速登记</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/merchant/traces')">
+            <text class="menu-card__tag">追踪</text>
             <text class="menu-card__title">货物去向</text>
             <text class="menu-card__desc">查看自己补货批次、剩余量和日志去向</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/common/feedback')">
+            <text class="menu-card__tag">反馈</text>
             <text class="menu-card__title">提交反馈</text>
             <text class="menu-card__desc">反馈机器故障、服务问题或其他情况</text>
           </button>
@@ -118,13 +154,13 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">最近货物流动</text>
-          <text class="vm-subtitle">补货与异常处理会同步写入日志，便于追踪货物去向。</text>
+          <text class="vm-subtitle">最近的补货与异常处理会同步写入日志，便于追踪去向和责任。</text>
         </view>
 
         <view v-if="recentLogs.length" class="log-list">
           <view v-for="entry in recentLogs" :key="entry.id" class="log-item">
             <text class="log-item__desc">{{ entry.description }}</text>
-            <text class="log-item__time">{{ entry.occurredAt.slice(0, 16).replace('T', ' ') }}</text>
+            <text class="log-item__time">{{ entry.occurredAt.slice(0, 16).replace("T", " ") }}</text>
           </view>
         </view>
         <EmptyState v-else :title="loading ? '正在加载日志' : '还没有补货日志'" description="完成首次补货后，这里会展示最近的货物流动记录。" />
@@ -134,18 +170,34 @@ onShow(() => {
 </template>
 
 <style scoped>
+.hero-support,
 .section-heading {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
 }
 
-.section-heading__title {
+.hero-support__title,
+.section-heading__title,
+.menu-card__title,
+.ops-banner__title {
   font-size: 30rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
+.hero-support__body,
+.menu-card__desc,
+.ops-banner__body,
+.menu-card__tag,
+.log-item__time {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+  line-height: 1.6;
+  text-align: left;
+}
+
+.hero-action-grid,
 .metric-grid,
 .menu-grid,
 .log-list {
@@ -153,38 +205,25 @@ onShow(() => {
   gap: 18rpx;
 }
 
-.menu-card {
+.ops-banner,
+.menu-card,
+.log-item {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 10rpx;
-  min-height: 116rpx;
   padding: 24rpx;
   border-radius: 24rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.14);
+  border: 1rpx solid var(--vm-line);
   background: rgba(255, 255, 255, 0.62);
 }
 
-.menu-card__title {
-  font-size: 30rpx;
-  font-weight: 700;
-  color: var(--vm-text);
+.menu-card {
+  min-height: 132rpx;
 }
 
-.menu-card__desc,
-.log-item__time {
-  font-size: 22rpx;
-  color: var(--vm-text-soft);
-  text-align: left;
-}
-
-.log-item {
-  display: grid;
-  gap: 10rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+.menu-card__tag {
+  color: var(--vm-accent-strong);
 }
 
 .log-item__desc {

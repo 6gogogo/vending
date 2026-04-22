@@ -5,6 +5,16 @@ import { RouterLink, useRoute } from "vue-router";
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 import { formatDate, formatDateTime, formatDateTimeSeconds, formatNowInBeijing } from "../utils/datetime";
+import {
+  buildAlertContextSummary,
+  buildAlertIdentitySummary,
+  buildAlertReferenceSummary,
+  buildLogContextSummary,
+  buildLogReferenceSummary,
+  buildLogSubjectSummary,
+  formatActorTypeLabel,
+  formatLogCategoryLabel
+} from "../utils/business-context";
 
 const route = useRoute();
 
@@ -55,6 +65,9 @@ const pendingTasks = computed(() => detail.value?.pendingTasks ?? []);
 const recentEvents = computed(() => detail.value?.recentEvents ?? []);
 const recentLogs = computed(() => detail.value?.recentLogs ?? []);
 const businessDayServedUsers = computed(() => detail.value?.businessDayServedUsers ?? []);
+const servedUserNameMap = computed(
+  () => new Map(businessDayServedUsers.value.map((item) => [item.userId, item.userName]))
+);
 const stockChangeMap = computed(
   () => new Map((detail.value?.stockChanges ?? []).map((item) => [item.goodsId, item]))
 );
@@ -311,6 +324,32 @@ const taskActionLabel = (task: NonNullable<typeof pendingTasks.value>[number]) =
 
 const taskGradeLabel = (grade: "fault" | "feedback" | "warning") =>
   grade === "fault" ? "故障" : grade === "feedback" ? "反馈" : "预警";
+
+const taskContextSummary = (task: NonNullable<typeof pendingTasks.value>[number]) =>
+  buildAlertContextSummary(task) || "未关联到明确的商品、人员或柜机";
+
+const taskIdentitySummary = (task: NonNullable<typeof pendingTasks.value>[number]) =>
+  buildAlertIdentitySummary(task);
+
+const taskReferenceSummary = (task: NonNullable<typeof pendingTasks.value>[number]) =>
+  buildAlertReferenceSummary(task);
+
+const logContextSummary = (log: NonNullable<typeof recentLogs.value>[number]) =>
+  buildLogContextSummary(log) || buildLogSubjectSummary(log) || "未识别到明确业务对象";
+
+const logReferenceSummary = (log: NonNullable<typeof recentLogs.value>[number]) =>
+  buildLogReferenceSummary(log);
+
+const logSubjectSummary = (log: NonNullable<typeof recentLogs.value>[number]) =>
+  buildLogSubjectSummary(log);
+
+const resolveEventUserLabel = (event: NonNullable<typeof recentEvents.value>[number]) =>
+  servedUserNameMap.value.get(event.userId) ?? event.userId;
+
+const summarizeEventGoods = (event: NonNullable<typeof recentEvents.value>[number]) =>
+  event.goods.length
+    ? event.goods.map((goods) => `${goods.goodsName} ×${goods.quantity}`).join("；")
+    : "未记录结算货品";
 
 const shouldShowPaymentAction = (
   event: NonNullable<typeof recentEvents.value>[number],
@@ -880,10 +919,13 @@ onUnmounted(() => {
               <div v-for="task in pendingTasks" :key="task.id" class="admin-list__row">
                 <div class="admin-list__main">
                   <span class="admin-list__title">{{ task.title }}</span>
+                  <span class="admin-context-main">{{ taskContextSummary(task) }}</span>
                   <span class="admin-list__meta">
                     {{ taskGradeLabel(task.grade) }} · {{ task.status === "acknowledged" ? "已知晓" : "待处理" }} · {{ formatDateTime(task.dueAt) }}
                   </span>
-                  <span class="admin-table__subtext">{{ task.detail }}</span>
+                  <span class="admin-table__subtext">{{ task.previewDetail || task.detail }}</span>
+                  <span v-if="taskIdentitySummary(task)" class="admin-context-meta admin-code">{{ taskIdentitySummary(task) }}</span>
+                  <span v-if="taskReferenceSummary(task)" class="admin-context-meta admin-code">{{ taskReferenceSummary(task) }}</span>
                 </div>
                 <div class="device-task-actions">
                   <button
@@ -916,10 +958,11 @@ onUnmounted(() => {
               <article v-for="event in recentEvents" :key="event.eventId" class="device-event-card">
                 <div class="device-event-card__head">
                   <div class="device-event-card__title-wrap">
-                    <span class="admin-table__strong">事件 {{ event.eventId }}</span>
+                    <span class="admin-table__strong">{{ summarizeEventGoods(event) }}</span>
                     <span class="admin-table__subtext">
-                      {{ formatEventStatus(event.status) }} · {{ formatDateTime(event.updatedAt) }}
+                      用户 {{ resolveEventUserLabel(event) }} · {{ formatUserRole(event.role) }} · {{ formatEventStatus(event.status) }} · {{ formatDateTime(event.updatedAt) }}
                     </span>
+                    <span class="admin-context-meta admin-code">事件 {{ event.eventId }}</span>
                   </div>
                   <RouterLink class="admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">
                     查看关联日志
@@ -931,13 +974,9 @@ onUnmounted(() => {
                     <span class="admin-pill admin-pill--neutral">原始订单</span>
                   </div>
                   <div class="device-event-order-row__main">
-                    <span class="admin-table__strong">{{ event.orderNo }}</span>
+                    <span class="admin-table__strong">原始订单 {{ event.orderNo }}</span>
                     <span class="admin-table__subtext">
-                      {{
-                        event.goods.length
-                          ? event.goods.map((goods) => `${goods.goodsName} / ${goods.goodsId} ×${goods.quantity}`).join("；")
-                          : "未记录结算货品"
-                      }}
+                      用户 {{ resolveEventUserLabel(event) }} · {{ summarizeEventGoods(event) }}
                     </span>
                     <span class="admin-table__subtext">{{ formatOrderSyncStatus(event, "original") }}</span>
                     <span v-if="event.paymentNotifyMessage" class="admin-table__subtext">{{ event.paymentNotifyMessage }}</span>
@@ -980,11 +1019,11 @@ onUnmounted(() => {
                     <span class="admin-pill admin-pill--warning">补扣单</span>
                   </div>
                   <div class="device-event-order-row__main">
-                    <span class="admin-table__strong">{{ adjustment.orderNo }}</span>
+                    <span class="admin-table__strong">补扣单 {{ adjustment.orderNo }}</span>
                     <span class="admin-table__subtext">
                       {{
                         adjustment.goods?.length
-                          ? adjustment.goods.map((goods) => `${goods.goodsName} / ${goods.goodsId} ×${goods.quantity}`).join("；")
+                          ? `用户 ${resolveEventUserLabel(event)} · ${adjustment.goods.map((goods) => `${goods.goodsName} ×${goods.quantity}`).join("；")}`
                           : "未记录补扣货品"
                       }}
                     </span>
@@ -1154,6 +1193,7 @@ onUnmounted(() => {
                 <tr>
                   <th>时间</th>
                   <th>动作</th>
+                  <th>业务对象</th>
                   <th>状态</th>
                   <th>详情</th>
                 </tr>
@@ -1163,7 +1203,12 @@ onUnmounted(() => {
                   <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
                   <td>
                     <span class="admin-table__strong">{{ log.description }}</span>
-                    <span class="admin-table__subtext">{{ log.detail }}</span>
+                    <span class="admin-table__subtext">{{ log.actor.name }} · {{ formatActorTypeLabel(log.actor.type) }} · {{ formatLogCategoryLabel(log.category) }} · {{ log.type }}</span>
+                  </td>
+                  <td>
+                    <span class="admin-context-main">{{ logContextSummary(log) }}</span>
+                    <span v-if="logSubjectSummary(log)" class="admin-context-meta">{{ logSubjectSummary(log) }}</span>
+                    <span v-if="logReferenceSummary(log)" class="admin-context-meta admin-code">{{ logReferenceSummary(log) }}</span>
                   </td>
                   <td>
                     <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
@@ -1171,6 +1216,7 @@ onUnmounted(() => {
                     </span>
                   </td>
                   <td>
+                    <span class="admin-table__subtext">{{ log.detail }}</span>
                     <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
                   </td>
                 </tr>

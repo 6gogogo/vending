@@ -7,6 +7,7 @@ import type { GoodsCategory } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
@@ -44,6 +45,20 @@ const selectedItems = computed(() =>
 
 const selectedSummary = computed(() =>
   selectedItems.value.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
+);
+
+const selectedTotal = computed(() =>
+  selectedItems.value.reduce((total, item) => total + item.quantity, 0)
+);
+
+const availableGoodsCount = computed(() =>
+  goodsList.value.filter((item) => (item.stock ?? 0) > 0).length
+);
+
+const openGuideText = computed(() =>
+  scanMode.value
+    ? "当前通过扫码识别柜机，确认货品后可直接发起开柜，最终结算会以平台识别结果为准。"
+    : "建议站在柜机旁再操作，先选好计划领取的货品，取货后及时关门。"
 );
 
 const load = async () => {
@@ -171,16 +186,33 @@ onLoad((query) => {
 
 <template>
   <MobileShell eyebrow="柜机详情" :title="deviceName" :subtitle="location || '请先确认柜机位置和货品信息'">
+    <template #hero-side>
+      <GlassCard tone="quiet" compact>
+        <view class="hero-support">
+          <text class="hero-support__title">开柜前提醒</text>
+          <text class="hero-support__body">{{ openGuideText }}</text>
+          <text class="hero-support__body">如果识别结果异常或柜门无法关闭，可以直接走反馈通道，工作人员会继续协助处理。</text>
+        </view>
+      </GlassCard>
+    </template>
+
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">意向货品</text>
-          <text class="vm-subtitle">{{ scanMode ? "当前来自扫码开门，可直接申请开柜；如果需要，也可以继续选择意向货品作为参考。" : "先选择意向领取货品，系统会按你的当前权限和实际结算结果处理。" }}</text>
+          <text class="section-heading__title">本次领取计划</text>
+          <text class="vm-subtitle">先选想领取的货品，再确认开柜，会比直接开门更稳妥。</text>
         </view>
 
-        <view v-if="scanMode" class="scan-mode-banner">
-          <text class="scan-mode-banner__title">已识别柜机编号 {{ deviceCode }}</text>
-          <text class="scan-mode-banner__body">扫码流程会跳过柜机选择，但仍需先选择本次计划领取的商品，最终以平台识别到的商品种类和数量为准。</text>
+        <view class="overview-grid">
+          <ServiceMetric label="已选种类" :value="selectedItems.length" hint="已加入本次计划的货品种类" tone="accent" />
+          <ServiceMetric label="已选件数" :value="selectedTotal" hint="会按你的实时资格限制上限" />
+          <ServiceMetric label="可选货品" :value="availableGoodsCount" hint="当前柜机仍有库存的货品种类" />
+        </view>
+
+        <view class="selection-banner">
+          <text class="selection-banner__label">{{ scanMode ? "扫码模式" : "手动模式" }}</text>
+          <text class="selection-banner__value">{{ selectedSummary || "暂未选择货品" }}</text>
+          <text class="selection-banner__hint">正式结算仍以柜门关闭后的平台识别结果为准。</text>
         </view>
 
         <view v-if="goodsList.length" class="goods-list">
@@ -211,7 +243,7 @@ onLoad((query) => {
           <button class="vm-button" :loading="submitting" @tap="submit">
             {{ scanMode ? "确认货品并扫码开柜" : "确认货品并手动开柜" }}
           </button>
-          <button class="vm-button vm-button--ghost" @tap="goFeedback">反馈问题</button>
+          <button class="vm-button vm-button--ghost" @tap="goFeedback">反馈这台柜机的问题</button>
         </view>
       </view>
     </GlassCard>
@@ -219,6 +251,7 @@ onLoad((query) => {
 </template>
 
 <style scoped>
+.hero-support,
 .section-heading,
 .goods-item__main {
   display: flex;
@@ -226,6 +259,7 @@ onLoad((query) => {
   gap: 10rpx;
 }
 
+.hero-support__title,
 .section-heading__title,
 .goods-item__name {
   font-size: 30rpx;
@@ -233,11 +267,23 @@ onLoad((query) => {
   color: var(--vm-text);
 }
 
-.goods-list {
+.hero-support__body,
+.goods-item__meta,
+.goods-item__hint,
+.selection-banner__hint {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+  line-height: 1.6;
+}
+
+.overview-grid,
+.goods-list,
+.action-stack {
   display: grid;
   gap: 16rpx;
 }
 
+.selection-banner,
 .goods-item {
   display: flex;
   justify-content: space-between;
@@ -245,14 +291,24 @@ onLoad((query) => {
   gap: 18rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1rpx solid var(--vm-line);
 }
 
-.goods-item__meta,
-.goods-item__hint {
+.selection-banner {
+  display: grid;
+}
+
+.selection-banner__label {
   font-size: 22rpx;
-  color: var(--vm-text-soft);
+  color: var(--vm-accent-strong);
+}
+
+.selection-banner__value {
+  font-size: 28rpx;
+  color: var(--vm-text);
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .stepper {
@@ -262,43 +318,19 @@ onLoad((query) => {
 }
 
 .stepper__button {
-  width: 72rpx;
-  min-height: 72rpx;
-  border-radius: 18rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.2);
-  background: rgba(255, 252, 246, 0.92);
+  width: 76rpx;
+  min-height: 76rpx;
+  border-radius: 22rpx;
+  border: 1rpx solid var(--vm-line-strong);
+  background: rgba(255, 255, 252, 0.92);
   font-size: 34rpx;
-}
-
-.stepper__value {
-  min-width: 40rpx;
-  text-align: center;
-  font-size: 30rpx;
-  font-weight: 700;
-}
-
-.action-stack {
-  display: grid;
-  gap: 16rpx;
-}
-
-.scan-mode-banner {
-  display: grid;
-  gap: 8rpx;
-  padding: 20rpx 22rpx;
-  border-radius: 20rpx;
-  background: rgba(255, 250, 240, 0.85);
-  border: 1rpx solid rgba(159, 127, 94, 0.18);
-}
-
-.scan-mode-banner__title {
-  font-size: 26rpx;
-  font-weight: 700;
   color: var(--vm-text);
 }
 
-.scan-mode-banner__body {
-  font-size: 22rpx;
-  color: var(--vm-text-soft);
+.stepper__value {
+  min-width: 48rpx;
+  text-align: center;
+  font-size: 30rpx;
+  font-weight: 700;
 }
 </style>

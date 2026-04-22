@@ -7,6 +7,16 @@ import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
+import {
+  buildAlertContextSummary,
+  buildAlertIdentitySummary,
+  buildAlertReferenceSummary,
+  buildLogContextSummary,
+  buildLogReferenceSummary,
+  buildLogSubjectSummary,
+  formatActorTypeLabel,
+  formatLogCategoryLabel
+} from "../utils/business-context";
 
 type BucketKey = "completeUsers" | "partialUsers" | "unservedUsers";
 
@@ -51,6 +61,14 @@ const resolveLogLink = (log: OperationLogRecord) => `/logs/${log.id}`;
 const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.actor);
 const formatLogStatus = (status: OperationLogRecord["status"]) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
+const taskContextSummary = (task: NonNullable<typeof pendingTasks.value>[number]) =>
+  buildAlertContextSummary(task) || "未关联到明确的商品、人员或柜机";
+const taskIdentitySummary = (task: NonNullable<typeof pendingTasks.value>[number]) => buildAlertIdentitySummary(task);
+const taskReferenceSummary = (task: NonNullable<typeof pendingTasks.value>[number]) => buildAlertReferenceSummary(task);
+const logContextSummary = (log: OperationLogRecord) =>
+  buildLogContextSummary(log) || buildLogSubjectSummary(log) || "未识别到明确业务对象";
+const logReferenceSummary = (log: OperationLogRecord) => buildLogReferenceSummary(log);
+const logSubjectSummary = (log: OperationLogRecord) => buildLogSubjectSummary(log);
 
 const taskActionLabel = (task: NonNullable<typeof pendingTasks.value>[number]) =>
   task.grade === "fault" ? "标记已知晓" : "手动完成";
@@ -233,8 +251,7 @@ onUnmounted(() => {
             <tr>
               <th>到期时间</th>
               <th>任务</th>
-              <th>柜机</th>
-              <th>人员</th>
+              <th>业务对象</th>
               <th>处理</th>
             </tr>
           </thead>
@@ -247,16 +264,17 @@ onUnmounted(() => {
                 <span class="admin-table__subtext">{{ task.previewDetail || task.detail }}</span>
               </td>
               <td>
-                <RouterLink v-if="task.deviceCode" class="admin-link" :to="`/operations/${task.deviceCode}`">
-                  {{ task.deviceCode }}
-                </RouterLink>
-                <span v-else>-</span>
-              </td>
-              <td>
-                <RouterLink v-if="task.targetUserId" class="admin-link" :to="`/users/${task.targetUserId}`">
-                  {{ task.targetUserId }}
-                </RouterLink>
-                <span v-else>-</span>
+                <span class="admin-context-main">{{ taskContextSummary(task) }}</span>
+                <span v-if="taskIdentitySummary(task)" class="admin-context-meta admin-code">{{ taskIdentitySummary(task) }}</span>
+                <span v-if="taskReferenceSummary(task)" class="admin-context-meta admin-code">{{ taskReferenceSummary(task) }}</span>
+                <div class="dashboard-task-links">
+                  <RouterLink v-if="task.deviceCode" class="admin-link" :to="`/operations/${task.deviceCode}`">
+                    柜机
+                  </RouterLink>
+                  <RouterLink v-if="task.targetUserId" class="admin-link" :to="`/users/${task.targetUserId}`">
+                    人员
+                  </RouterLink>
+                </div>
               </td>
               <td class="dashboard-task-cell">
                 <div class="dashboard-task-actions">
@@ -338,8 +356,7 @@ onUnmounted(() => {
             <tr>
               <th>时间</th>
               <th>动作</th>
-              <th>动作人</th>
-              <th>主体</th>
+              <th>业务对象</th>
               <th>状态</th>
               <th>详情</th>
             </tr>
@@ -348,33 +365,36 @@ onUnmounted(() => {
             <tr v-for="log in summaryLogs" :key="log.id">
               <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
               <td>
-                <RouterLink class="admin-link" :to="resolveLogLink(log)">{{ log.description }}</RouterLink>
-                <span class="admin-table__subtext">{{ log.detail }}</span>
+                <div class="admin-context-main">
+                  <RouterLink class="admin-link" :to="resolveLogLink(log)">{{ log.description }}</RouterLink>
+                </div>
+                <div class="dashboard-log-actor">
+                  <RouterLink v-if="resolveActorRoute(log)" class="admin-link" :to="resolveActorRoute(log)!">
+                    {{ log.actor.name }}
+                  </RouterLink>
+                  <span v-else>{{ log.actor.name }}</span>
+                  <span class="admin-table__subtext">{{ formatActorTypeLabel(log.actor.type) }} · {{ formatLogCategoryLabel(log.category) }} · {{ log.type }}</span>
+                </div>
               </td>
               <td>
-                <RouterLink v-if="resolveActorRoute(log)" class="admin-link" :to="resolveActorRoute(log)!">
-                  {{ log.actor.name }}
-                </RouterLink>
-                <span v-else>{{ log.actor.name }}</span>
-                <span class="admin-table__subtext">{{ log.actor.type }} · {{ log.type }}</span>
-              </td>
-              <td>
+                <span class="admin-context-main">{{ logContextSummary(log) }}</span>
+                <span v-if="logSubjectSummary(log)" class="admin-context-meta">{{ logSubjectSummary(log) }}</span>
+                <span v-if="logReferenceSummary(log)" class="admin-context-meta admin-code">{{ logReferenceSummary(log) }}</span>
                 <div class="admin-inline-links">
                   <RouterLink
                     v-if="resolveSubjectLink(log.primarySubject)"
                     class="admin-link"
                     :to="resolveSubjectLink(log.primarySubject)!"
                   >
-                    {{ log.primarySubject?.label }}
+                    主体一
                   </RouterLink>
                   <RouterLink
                     v-if="resolveSubjectLink(log.secondarySubject)"
                     class="admin-link"
                     :to="resolveSubjectLink(log.secondarySubject)!"
                   >
-                    {{ log.secondarySubject?.label }}
+                    主体二
                   </RouterLink>
-                  <span v-if="!log.primarySubject && !log.secondarySubject">-</span>
                 </div>
               </td>
               <td>
@@ -383,6 +403,7 @@ onUnmounted(() => {
                 </span>
               </td>
               <td>
+                <span class="admin-table__subtext">{{ log.detail }}</span>
                 <RouterLink class="admin-link" :to="resolveLogLink(log)">详情</RouterLink>
               </td>
             </tr>
@@ -485,6 +506,19 @@ onUnmounted(() => {
 .dashboard-task-actions {
   display: grid;
   gap: 8px;
+}
+
+.dashboard-task-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.dashboard-log-actor {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .dashboard-drawer-backdrop {

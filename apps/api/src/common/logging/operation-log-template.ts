@@ -67,15 +67,73 @@ const pickQuantity = (entry: OperationLogDraft) => {
   return undefined;
 };
 
+const readMetadataString = (entry: OperationLogDraft, key: string) => {
+  const value = entry.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+};
+
+const pickRelatedUserLabel = (entry: OperationLogDraft) => {
+  if (entry.primarySubject?.type === "user") {
+    return subjectLabel(entry.primarySubject, "相关人员");
+  }
+
+  if (entry.secondarySubject?.type === "user") {
+    return subjectLabel(entry.secondarySubject, "相关人员");
+  }
+
+  return readMetadataString(entry, "targetUserName") ?? readMetadataString(entry, "targetUserId");
+};
+
+const pickGoodsSummary = (entry: OperationLogDraft) => {
+  const metadataSummary = readMetadataString(entry, "goodsSummary");
+
+  if (metadataSummary) {
+    return metadataSummary;
+  }
+
+  const quantity = pickQuantity(entry);
+  const goodsName = readMetadataString(entry, "goodsName");
+
+  if (goodsName) {
+    return quantity ? `${goodsName} x${quantity}` : goodsName;
+  }
+
+  if (entry.primarySubject?.type === "goods") {
+    return subjectLabel(entry.primarySubject, "货品");
+  }
+
+  if (entry.secondarySubject?.type === "goods") {
+    return subjectLabel(entry.secondarySubject, "货品");
+  }
+
+  return undefined;
+};
+
+const pickEventReference = (entry: OperationLogDraft) => {
+  if (entry.secondarySubject?.type === "event") {
+    return subjectLabel(entry.secondarySubject, "关联事件");
+  }
+
+  return (
+    readMetadataString(entry, "relatedOrderNo") ??
+    entry.relatedOrderNo ??
+    readMetadataString(entry, "relatedEventId") ??
+    entry.relatedEventId
+  );
+};
+
 const baseDetail = (parts: Array<string | undefined>) => parts.filter(Boolean).join("；");
 
 export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogRecord, "description" | "detail"> => {
   const actor = actorLabel(entry.actor);
   const device = pickDeviceLabel(entry);
   const goods = pickGoodsLabel(entry);
+  const goodsSummary = pickGoodsSummary(entry);
   const quantity = pickQuantity(entry);
   const primary = subjectLabel(entry.primarySubject);
   const secondary = subjectLabel(entry.secondarySubject);
+  const relatedUser = pickRelatedUserLabel(entry);
+  const eventReference = pickEventReference(entry);
   const result = statusLabelMap[entry.status];
 
   switch (entry.type) {
@@ -116,7 +174,14 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
     case "remote-open-device":
       return {
         description: `${actor}向${device}下发了远程开门指令。`,
-        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `关联事件 ${secondary}`, `状态 ${result}`])
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
+          `状态 ${result}`
+        ])
       };
     case "manual-refresh-device":
       return {
@@ -126,31 +191,49 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
     case "door-status-callback":
       return {
         description: `系统更新了${device}的门状态，结果为${String(entry.metadata?.status ?? result)}。`,
-        detail: baseDetail([`柜机 ${device}`, `关联事件 ${secondary}`, `回调状态 ${String(entry.metadata?.status ?? entry.status)}`, `状态 ${result}`])
+        detail: baseDetail([
+          `柜机 ${device}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
+          `回调状态 ${String(entry.metadata?.status ?? entry.status)}`,
+          `状态 ${result}`
+        ])
       };
     case "open-cabinet":
       return {
-        description: `${actor}向${device}发起了开柜请求。`,
-        detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `关联人员 ${secondary}`, `状态 ${result}`])
+        description: `${actor}向${device}发起了开柜请求${goodsSummary ? `，计划处理${goodsSummary}` : ""}。`,
+        detail: baseDetail([
+          `动作人 ${actor}`,
+          `柜机 ${device}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
+          `状态 ${result}`
+        ])
       };
     case "settlement-callback":
       return {
-        description: `系统收到了${device}的结算商品推送，订单${secondary}已入库。`,
+        description: `系统收到了${device}的结算结果${goodsSummary ? `，涉及${goodsSummary}` : ""}。`,
         detail: baseDetail([
           `来源 平台结算商品推送`,
           `柜机 ${device}`,
-          `关联事件 ${secondary}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
           `金额 ${String(entry.metadata?.amount ?? 0)}`,
           `状态 ${result}`
         ])
       };
     case "adjustment-callback":
       return {
-        description: `系统收到了${device}的补扣推送，当前结果为${result}。`,
+        description: `系统收到了${device}的补扣结果${goodsSummary ? `，涉及${goodsSummary}` : ""}。`,
         detail: baseDetail([
           `来源 平台补扣商品推送`,
           `柜机 ${device}`,
-          `关联事件 ${secondary}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
           `补扣金额 ${String(entry.metadata?.amount ?? 0)}`,
           `状态 ${result}`
         ])
@@ -161,7 +244,9 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         detail: baseDetail([
           `来源 外部支付成功通知`,
           `柜机 ${device}`,
-          `关联事件 ${secondary}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
           typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
           `状态 ${result}`
         ])
@@ -171,7 +256,9 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         description: `系统向${device}回写了付款成功结果。`,
         detail: baseDetail([
           `柜机 ${device}`,
-          `关联事件 ${secondary}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
           typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
           typeof entry.metadata?.targetUrl === "string" ? `目标 ${entry.metadata.targetUrl}` : undefined,
           `状态 ${result}`
@@ -183,7 +270,9 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         detail: baseDetail([
           `动作人 ${actor}`,
           `柜机 ${device}`,
-          `关联事件 ${secondary}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
           typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
           typeof entry.metadata?.targetUrl === "string" ? `目标 ${entry.metadata.targetUrl}` : undefined,
           `状态 ${result}`
@@ -195,7 +284,9 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         detail: baseDetail([
           `动作人 ${actor}`,
           `柜机 ${device}`,
-          `关联事件 ${secondary}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
           `退款金额 ${String(entry.metadata?.amount ?? 0)}`,
           `同步范围 已调用平台退款接口`,
           `状态 ${result}`
@@ -207,7 +298,9 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         detail: baseDetail([
           `来源 平台退款回调`,
           `柜机 ${device}`,
-          `关联事件 ${secondary}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          eventReference ? `关联单据 ${eventReference}` : undefined,
           typeof entry.metadata?.refundNo === "string" ? `退款单号 ${entry.metadata.refundNo}` : undefined,
           `退款金额 ${String(entry.metadata?.amount ?? 0)}`,
           `状态 ${result}`
@@ -216,7 +309,13 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
     case "create-alert":
       return {
         description: `系统为${device}创建了${primary}。`,
-        detail: baseDetail([`柜机 ${device}`, `预警 ${primary}`, `状态 ${result}`])
+        detail: baseDetail([
+          `柜机 ${device}`,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
+          `预警 ${primary}`,
+          `状态 ${result}`
+        ])
       };
     case "resolve-alert":
       return {
@@ -227,6 +326,8 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         detail: baseDetail([
           `动作人 ${actor}`,
           entry.secondarySubject ? `柜机 ${secondary}` : undefined,
+          relatedUser ? `关联人员 ${relatedUser}` : undefined,
+          goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           `预警 ${primary}`,
           typeof entry.metadata?.note === "string" && entry.metadata.note
             ? `处理说明 ${entry.metadata.note}`

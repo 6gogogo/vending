@@ -1,29 +1,44 @@
 :root,
 page {
-  --vm-bg: #f6efe3;
-  --vm-bg-soft: #fff7ed;
-  --vm-surface: rgba(255, 252, 246, 0.96);
-  --vm-surface-strong: #fffaf2;
-  --vm-line: rgba(133, 95, 54, 0.14);
-  --vm-line-strong: rgba(133, 95, 54, 0.24);
-  --vm-text: #2b1d0f;
-  --vm-muted: #7a6650;
-  --vm-text-soft: #7a6650;
-  --vm-accent: #2f8f66;
-  --vm-accent-strong: #21694b;
-  --vm-warning: #b7721e;
-  --vm-danger: #a84734;
-  --vm-shadow: 0 28rpx 90rpx rgba(117, 74, 26, 0.12);
+  --vm-bg: #f3f9f6;
+  --vm-bg-soft: #edf7f2;
+  --vm-surface: rgba(255, 255, 252, 0.96);
+  --vm-surface-strong: #fffefb;
+  --vm-surface-soft: rgba(248, 252, 249, 0.92);
+  --vm-line: rgba(20, 69, 58, 0.1);
+  --vm-line-strong: rgba(20, 69, 58, 0.18);
+  --vm-text: #18312b;
+  --vm-muted: #5e756e;
+  --vm-text-soft: #6f867f;
+  --vm-accent: #0d9488;
+  --vm-accent-strong: #0f766e;
+  --vm-warning: #c97a18;
+  --vm-danger: #c45442;
+  --vm-shadow: 0 26rpx 76rpx rgba(18, 73, 61, 0.1);
+  --vm-button-shadow: 0 18rpx 48rpx rgba(13, 148, 136, 0.18);
+  --vm-page-gradient:
+    radial-gradient(circle at 0% 0%, rgba(255, 214, 146, 0.22), transparent 28%),
+    radial-gradient(circle at 100% 0%, rgba(20, 184, 166, 0.16), transparent 24%),
+    linear-gradient(180deg, #fbfdfc 0%, #f2f8f5 52%, #edf4f1 100%);
+  --vm-card-bg: linear-gradient(180deg, rgba(255, 255, 252, 0.98), rgba(248, 252, 249, 0.94));
+  --vm-card-accent-bg: linear-gradient(180deg, #eefcf8, #e6f6f0);
+  --vm-card-warning-bg: linear-gradient(180deg, #fff8ed, #fff0dc);
+  --vm-card-quiet-bg: linear-gradient(180deg, rgba(248, 252, 249, 0.96), rgba(244, 248, 245, 0.92));
+  --vm-card-highlight: linear-gradient(90deg, rgba(13, 148, 136, 0.26), rgba(249, 115, 22, 0.16));
+  --vm-hero-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(240, 248, 244, 0.95));
+  --vm-hero-border: rgba(20, 69, 58, 0.12);
+  --vm-hero-shadow: 0 30rpx 90rpx rgba(18, 73, 61, 0.12);
+  --vm-pill-bg: rgba(13, 148, 136, 0.11);
+  --vm-pill-text: #0f766e;
+  --vm-font-number: "Space Grotesk", "Noto Sans SC", sans-serif;
   font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--vm-text);
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 206, 148, 0.28), transparent 26%),
-    radial-gradient(circle at 100% 0%, rgba(84, 165, 120, 0.22), transparent 24%),
-    linear-gradient(180deg, #fbf5ea 0%, #f6efe3 54%, #f3ead9 100%);
+  background: var(--vm-page-gradient);
 }
 
 page {
   min-height: 100%;
+  background: var(--vm-page-gradient);
 }
 
 view,
@@ -38,6 +53,7 @@ button {
   padding: 0;
   line-height: inherit;
   background: transparent;
+  font: inherit;
 }
 
 button::after {
@@ -51,15 +67,17 @@ input {
 .vm-page {
   min-height: 100vh;
   padding: 34rpx 24rpx calc(56rpx + env(safe-area-inset-bottom));
+  background: transparent;
 }
 
 .vm-card {
   position: relative;
   border: 1rpx solid var(--vm-line);
   border-radius: 34rpx;
-  background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(255, 247, 236, 0.94));
+  background: var(--vm-card-bg);
   box-shadow: var(--vm-shadow);
   overflow: hidden;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
 
 .vm-card::before {
@@ -68,19 +86,27 @@ input {
   inset: 0 auto auto 0;
   width: 100%;
   height: 2rpx;
-  background: linear-gradient(90deg, rgba(47, 143, 102, 0.3), rgba(255, 184, 108, 0.14));
+  background: var(--vm-card-highlight);
 }
 
 .vm-card--accent {
-  background: linear-gradient(180deg, #f1fbf4, #eef8f1);
+  background: var(--vm-card-accent-bg);
 }
 
 .vm-card--warning {
-  background: linear-gradient(180deg, #fff8ee, #fff2dd);
+  background: var(--vm-card-warning-bg);
 }
 
 .vm-card--quiet {
-  background: linear-gradient(180deg, rgba(255, 250, 242, 0.88), rgba(252, 245, 234, 0.84));
+  background: var(--vm-card-quiet-bg);
+}
+
+.vm-card--regular {
+  padding: 28rpx;
+}
+
+.vm-card--compact {
+  padding: 22rpx;
 }
 
 .vm-stack {
@@ -108,8 +134,9 @@ input {
 }
 
 .vm-pill {
-  background: rgba(47, 143, 102, 0.11);
-  color: var(--vm-accent-strong);
+  background: var(--vm-pill-bg);
+  color: var(--vm-pill-text);
+  border: 1rpx solid rgba(13, 148, 136, 0.08);
 }
 
 .vm-status {
@@ -130,6 +157,12 @@ input {
   border-color: rgba(183, 114, 30, 0.2);
 }
 
+.vm-status--danger {
+  background: rgba(196, 84, 66, 0.1);
+  color: var(--vm-danger);
+  border-color: rgba(196, 84, 66, 0.18);
+}
+
 .vm-status--muted {
   background: rgba(133, 95, 54, 0.08);
   color: var(--vm-muted);
@@ -137,20 +170,20 @@ input {
 }
 
 .vm-title {
-  font-size: 56rpx;
-  line-height: 1.08;
+  font-size: 54rpx;
+  line-height: 1.06;
   letter-spacing: -0.03em;
   font-weight: 800;
 }
 
 .vm-subtitle {
   color: var(--vm-muted);
-  font-size: 26rpx;
-  line-height: 1.62;
+  font-size: 25rpx;
+  line-height: 1.64;
 }
 
 .vm-number {
-  font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+  font-family: var(--vm-font-number);
 }
 
 .vm-button {
@@ -162,17 +195,18 @@ input {
   padding: 0 28rpx;
   border-radius: 28rpx;
   border: 1rpx solid transparent;
-  background: linear-gradient(135deg, #2f8f66, #6cb98d);
+  background: linear-gradient(135deg, var(--vm-accent-strong), var(--vm-accent));
   color: #fffdfa;
   font-size: 30rpx;
   font-weight: 700;
-  box-shadow: 0 18rpx 48rpx rgba(47, 143, 102, 0.2);
+  box-shadow: var(--vm-button-shadow);
   transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+  cursor: pointer;
 }
 
 .vm-button:active {
   transform: translateY(2rpx);
-  box-shadow: 0 10rpx 28rpx rgba(47, 143, 102, 0.16);
+  box-shadow: 0 10rpx 28rpx rgba(21, 78, 68, 0.14);
 }
 
 .vm-button[disabled] {
@@ -180,14 +214,14 @@ input {
 }
 
 .vm-button--ghost {
-  background: rgba(255, 252, 246, 0.92);
+  background: rgba(255, 255, 252, 0.8);
   color: var(--vm-text);
   border-color: var(--vm-line-strong);
   box-shadow: none;
 }
 
 .vm-button--soft {
-  background: rgba(47, 143, 102, 0.1);
+  background: rgba(13, 148, 136, 0.1);
   color: var(--vm-accent-strong);
   box-shadow: none;
 }
@@ -212,7 +246,7 @@ input {
   padding: 0 24rpx;
   border: 1rpx solid var(--vm-line-strong);
   border-radius: 24rpx;
-  background: rgba(255, 252, 246, 0.92);
+  background: rgba(255, 255, 252, 0.9);
   color: var(--vm-text);
   font-size: 28rpx;
 }
@@ -293,7 +327,8 @@ input {
 @media (prefers-reduced-motion: reduce) {
   .vm-fade-up,
   .vm-slide-in,
-  .vm-button {
+  .vm-button,
+  .vm-card {
     animation: none;
     transition: none;
   }

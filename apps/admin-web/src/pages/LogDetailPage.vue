@@ -6,6 +6,14 @@ import type { CallbackLogRecord, OperationLogRecord, SystemAuditLogEntry } from 
 import { adminApi } from "../api/admin";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTimeSeconds } from "../utils/datetime";
+import {
+  buildLogContextSummary,
+  buildLogReferenceSummary,
+  buildLogSubjectSummary,
+  formatActorTypeLabel,
+  formatLogCategoryLabel,
+  formatSubjectTypeLabel
+} from "../utils/business-context";
 
 const route = useRoute();
 const log = ref<OperationLogRecord>();
@@ -91,6 +99,30 @@ const aiDiagnosisLink = computed(() => {
   }
 
   return `/ai?${query.toString()}`;
+});
+
+const businessContext = computed(() => {
+  if (!log.value) {
+    return "";
+  }
+
+  return buildLogContextSummary(log.value) || buildLogSubjectSummary(log.value) || "未识别到明确业务对象";
+});
+
+const referenceSummary = computed(() => {
+  if (!log.value) {
+    return "";
+  }
+
+  return buildLogReferenceSummary(log.value);
+});
+
+const subjectSummary = computed(() => {
+  if (!log.value) {
+    return "";
+  }
+
+  return buildLogSubjectSummary(log.value);
 });
 
 const stringifyForSearch = (value: unknown) => {
@@ -196,7 +228,14 @@ onMounted(load);
                 {{ log.actor.name }}
               </RouterLink>
               <span v-else>{{ log.actor.name }}</span>
-              <span class="admin-table__subtext">{{ log.actor.type }} · {{ log.type }}</span>
+              <span class="admin-table__subtext">{{ formatActorTypeLabel(log.actor.type) }} · {{ formatLogCategoryLabel(log.category) }} · {{ log.type }}</span>
+            </span>
+          </div>
+          <div class="admin-kv__row">
+            <span class="admin-kv__label">业务对象</span>
+            <span class="admin-kv__value">
+              <span class="log-detail__summary">{{ businessContext }}</span>
+              <span v-if="subjectSummary" class="admin-table__subtext">{{ subjectSummary }}</span>
             </span>
           </div>
           <div class="admin-kv__row">
@@ -213,12 +252,9 @@ onMounted(load);
               <pre class="log-detail__pre">{{ formatJsonBlock(log.metadata) }}</pre>
             </span>
           </div>
-          <div v-if="log.relatedOrderNo || log.relatedEventId" class="admin-kv__row">
+          <div v-if="referenceSummary" class="admin-kv__row">
             <span class="admin-kv__label">关联业务编号</span>
-            <span class="admin-kv__value admin-code">
-              {{ log.relatedOrderNo ? `订单 ${log.relatedOrderNo}` : "" }}
-              {{ log.relatedEventId ? ` · 事件 ${log.relatedEventId}` : "" }}
-            </span>
+            <span class="admin-kv__value admin-code">{{ referenceSummary }}</span>
           </div>
         </div>
       </article>
@@ -235,7 +271,7 @@ onMounted(load);
             <div v-if="log.primarySubject" class="admin-list__row">
               <div class="admin-list__main">
                 <span class="admin-list__title">主体一</span>
-                <span class="admin-list__meta">{{ log.primarySubject.type }} · {{ log.primarySubject.id }}</span>
+                <span class="admin-list__meta">{{ formatSubjectTypeLabel(log.primarySubject.type) }} · {{ log.primarySubject.id }}</span>
               </div>
               <RouterLink v-if="resolveSubjectLink(log.primarySubject)" class="admin-link" :to="resolveSubjectLink(log.primarySubject)!">
                 {{ log.primarySubject.label }}
@@ -244,7 +280,7 @@ onMounted(load);
             <div v-if="log.secondarySubject" class="admin-list__row">
               <div class="admin-list__main">
                 <span class="admin-list__title">主体二</span>
-                <span class="admin-list__meta">{{ log.secondarySubject.type }} · {{ log.secondarySubject.id }}</span>
+                <span class="admin-list__meta">{{ formatSubjectTypeLabel(log.secondarySubject.type) }} · {{ log.secondarySubject.id }}</span>
               </div>
               <RouterLink v-if="resolveSubjectLink(log.secondarySubject)" class="admin-link" :to="resolveSubjectLink(log.secondarySubject)!">
                 {{ log.secondarySubject.label }}
@@ -377,5 +413,11 @@ onMounted(load);
 .log-detail__trace-grid {
   display: grid;
   gap: 8px;
+}
+
+.log-detail__summary {
+  display: block;
+  font-weight: 700;
+  line-height: 1.5;
 }
 </style>

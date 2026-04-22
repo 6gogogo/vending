@@ -6,6 +6,7 @@ import type { DeviceStatus, DeviceRecord, InventoryMovement } from "@vm/shared-t
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { appCopy } from "../../constants/copy";
 import { categoryLabelMap } from "../../constants/labels";
@@ -51,6 +52,22 @@ const serviceWindows = computed(() =>
   )
 );
 
+const availableUnits = computed(() =>
+  permissionList.value.reduce((total, item) => total + item.quantity, 0)
+);
+
+const onlineDeviceCount = computed(() =>
+  devices.value.filter((device) => device.status === "online").length
+);
+
+const guidanceText = computed(() => {
+  if (permissionList.value.length) {
+    return "先确认今天还能领什么，再去最近的柜机操作；如果机器异常，可直接反馈给工作人员。";
+  }
+
+  return "当前没有可领取额度也不需要重复操作，系统会按服务时间和资格自动刷新。";
+});
+
 const load = async () => {
   await sessionStore.bootstrap();
 
@@ -94,6 +111,12 @@ const goHistory = () => {
   });
 };
 
+const goNearbyTab = () => {
+  uni.switchTab({
+    url: "/pages/tabs/nearby"
+  });
+};
+
 const goFeedback = (deviceCode?: string) => {
   uni.navigateTo({
     url: deviceCode ? `/pages/common/feedback?deviceCode=${deviceCode}` : "/pages/common/feedback"
@@ -109,22 +132,43 @@ onShow(() => {
 
 <template>
   <MobileShell eyebrow="普通用户" :title="`${sessionStore.user?.name ?? '访客'}，您好`" :subtitle="appCopy.specialWelcome">
-    <template #hero-extra>
+    <template #hero-side>
       <GlassCard tone="quiet" compact>
-        <view class="hero-panel">
-          <text class="hero-panel__title">今日服务时间</text>
-          <text class="vm-subtitle">
-            {{ serviceWindows.length ? serviceWindows.join("、") : "当前暂无可领取时段，请稍后再试" }}
+        <view class="hero-support">
+          <text class="hero-support__title">今日服务提醒</text>
+          <text class="hero-support__body">
+            {{ serviceWindows.length ? `可领取时段：${serviceWindows.join("、")}` : "当前暂无开放时段，系统会按业务时间自动刷新资格。" }}
           </text>
+          <text class="hero-support__body">{{ guidanceText }}</text>
         </view>
       </GlassCard>
+    </template>
+
+    <template #hero-actions>
+      <view class="hero-action-grid">
+        <button class="vm-button" @tap="goNearbyTab">就近找柜机</button>
+        <button class="vm-button vm-button--ghost" @tap="goHistory">查看服务记录</button>
+      </view>
     </template>
 
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">我的领取权限</text>
-          <text class="vm-subtitle">展示当前业务日和时段内可领取的货品与剩余数量。</text>
+          <text class="section-heading__title">今日可领取概览</text>
+          <text class="vm-subtitle">把关键资格和路线信息放在最前面，先看清楚再去操作，会更省心。</text>
+        </view>
+
+        <view class="overview-grid">
+          <ServiceMetric label="可领物资" :value="permissionList.length" hint="按当前时段和资格自动计算" tone="accent" />
+          <ServiceMetric label="可领总件数" :value="availableUnits" hint="同类物资数量会合并显示" />
+          <ServiceMetric label="在线柜机" :value="onlineDeviceCount" hint="优先选择在线柜机，减少白跑" />
+        </view>
+
+        <view class="care-note">
+          <text class="care-note__title">服务说明</text>
+          <text class="care-note__body">
+            如果定位失败、柜门异常或识别结果与你实际领取不一致，可以直接反馈，工作人员会继续协助核对。
+          </text>
         </view>
 
         <view v-if="permissionList.length" class="permission-list">
@@ -138,11 +182,12 @@ onShow(() => {
             <text class="vm-status vm-status--success">今日可领 {{ item.quantity }} 件</text>
           </view>
         </view>
-        <EmptyState v-else title="当前无可领取额度" description="系统会按服务时间段和个人策略自动刷新权限。" />
+        <EmptyState v-else title="当前无可领取额度" description="系统会按服务时间段和个人策略自动刷新权限，不需要重复提交。" />
 
-        <view class="action-row">
+        <view class="action-grid">
+          <button class="vm-button" @tap="goNearbyTab">查看地图与就近推荐</button>
           <button class="vm-button vm-button--ghost" @tap="goHistory">查看服务记录</button>
-          <button class="vm-button vm-button--soft" @tap="goFeedback()">提交反馈</button>
+          <button class="vm-button vm-button--soft action-grid__full" @tap="goFeedback()">遇到问题，联系工作人员</button>
         </view>
       </view>
     </GlassCard>
@@ -150,7 +195,7 @@ onShow(() => {
     <view class="vm-section">
       <view class="section-heading">
         <text class="section-heading__title">附近柜机</text>
-        <text class="vm-subtitle">可查看位置、物资信息和服务时间，确认意向货品后再发起取货。</text>
+        <text class="vm-subtitle">先看位置与库存，再决定去哪一台柜机，能减少往返和等待。</text>
       </view>
 
       <view v-if="devices.length" class="device-list">
@@ -179,9 +224,9 @@ onShow(() => {
               </view>
             </view>
 
-            <view class="action-row">
+            <view class="action-grid">
               <button class="vm-button" @tap="openDeviceDetail(device.deviceCode)">选择货品并取货</button>
-              <button class="vm-button vm-button--ghost" @tap="goFeedback(device.deviceCode)">反馈</button>
+              <button class="vm-button vm-button--ghost" @tap="goFeedback(device.deviceCode)">反馈这台柜机</button>
             </view>
           </view>
         </GlassCard>
@@ -198,7 +243,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">最近服务记录</text>
-          <text class="vm-subtitle">展示最近三次领取结果，完整记录可进入服务记录页查看。</text>
+          <text class="vm-subtitle">只展示最近三次结果，完整记录可继续进入服务记录页查看。</text>
         </view>
 
         <view v-if="records.length" class="permission-list">
@@ -217,7 +262,7 @@ onShow(() => {
 </template>
 
 <style scoped>
-.hero-panel,
+.hero-support,
 .section-heading,
 .permission-item__main,
 .device-header__main,
@@ -227,60 +272,75 @@ onShow(() => {
   gap: 10rpx;
 }
 
-.hero-panel__title,
+.hero-support__title,
 .section-heading__title,
 .permission-item__title,
 .device-header__title,
-.goods-item__name {
+.goods-item__name,
+.care-note__title {
   font-size: 30rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
+.hero-support__body,
 .permission-item__meta,
 .device-meta,
-.goods-item__meta {
+.goods-item__meta,
+.care-note__body {
   font-size: 22rpx;
   color: var(--vm-text-soft);
+  line-height: 1.6;
 }
 
+.overview-grid,
 .permission-list,
 .device-list,
-.goods-list {
+.goods-list,
+.hero-action-grid {
   display: grid;
   gap: 16rpx;
 }
 
 .permission-item,
-.goods-item {
+.goods-item,
+.care-note {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 18rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1rpx solid var(--vm-line);
+}
+
+.care-note {
+  display: grid;
+  align-items: start;
 }
 
 .device-header,
-.device-meta,
-.action-row {
+.device-meta {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16rpx;
 }
 
-.device-meta,
-.action-row {
+.device-meta {
   align-items: center;
   flex-wrap: wrap;
 }
 
-.action-row {
+.action-grid {
   display: grid;
+  gap: 16rpx;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.action-grid__full {
+  grid-column: 1 / -1;
 }
 
 .goods-item__tag {

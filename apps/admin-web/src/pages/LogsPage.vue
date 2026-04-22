@@ -7,6 +7,13 @@ import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
+import {
+  buildLogContextSummary,
+  buildLogReferenceSummary,
+  buildLogSubjectSummary,
+  formatActorTypeLabel,
+  formatLogCategoryLabel
+} from "../utils/business-context";
 
 const route = useRoute();
 const router = useRouter();
@@ -25,6 +32,10 @@ const dateFrom = ref("");
 const dateTo = ref("");
 
 const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.actor);
+const logContextSummary = (log: OperationLogRecord) =>
+  buildLogContextSummary(log) || buildLogSubjectSummary(log) || "未识别到明确业务对象";
+const logReferenceSummary = (log: OperationLogRecord) => buildLogReferenceSummary(log);
+const logSubjectSummary = (log: OperationLogRecord) => buildLogSubjectSummary(log);
 
 const formatLogStatus = (value: OperationLogRecord["status"]) =>
   value === "success" ? "成功" : value === "warning" ? "预警" : value === "failed" ? "失败" : "待处理";
@@ -170,6 +181,10 @@ onMounted(async () => {
         </div>
       </div>
 
+      <div class="admin-note">
+        日志列表默认优先展示商品、服务对象和柜机信息，订单号、事件号与主体编号保留在追溯信息中。
+      </div>
+
       <div class="logs-filters admin-panel admin-panel-block">
         <label class="admin-field">
           <span class="admin-field__label">分类</span>
@@ -211,7 +226,7 @@ onMounted(async () => {
         </label>
         <label class="admin-field">
           <span class="admin-field__label">主体编号</span>
-          <input v-model="subjectId" class="admin-input" placeholder="例如 CAB-1001 / special-001 / evt-001" />
+          <input v-model="subjectId" class="admin-input" placeholder="例如 CAB-1001 / special-001 / goods-1001" />
         </label>
         <label class="admin-field">
           <span class="admin-field__label">起始业务日</span>
@@ -240,8 +255,7 @@ onMounted(async () => {
             <tr>
               <th>时间</th>
               <th>动作</th>
-              <th>动作人</th>
-              <th>主体</th>
+              <th>业务对象</th>
               <th>状态</th>
               <th>撤销</th>
               <th>详情</th>
@@ -251,33 +265,36 @@ onMounted(async () => {
             <tr v-for="log in logs" :key="log.id">
               <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
               <td>
-                <RouterLink class="admin-link" :to="`/logs/${log.id}`">{{ log.description }}</RouterLink>
-                <span class="admin-table__subtext">{{ log.detail }}</span>
+                <div class="admin-context-main">
+                  <RouterLink class="admin-link" :to="`/logs/${log.id}`">{{ log.description }}</RouterLink>
+                </div>
+                <div class="logs-actor-line">
+                  <RouterLink v-if="resolveActorRoute(log)" class="admin-link" :to="resolveActorRoute(log)!">
+                    {{ log.actor.name }}
+                  </RouterLink>
+                  <span v-else>{{ log.actor.name }}</span>
+                  <span class="admin-table__subtext">{{ formatActorTypeLabel(log.actor.type) }} · {{ formatLogCategoryLabel(log.category) }} · {{ log.type }}</span>
+                </div>
               </td>
               <td>
-                <RouterLink v-if="resolveActorRoute(log)" class="admin-link" :to="resolveActorRoute(log)!">
-                  {{ log.actor.name }}
-                </RouterLink>
-                <span v-else>{{ log.actor.name }}</span>
-                <span class="admin-table__subtext">{{ log.actor.type }} · {{ log.category }}</span>
-              </td>
-              <td>
+                <span class="admin-context-main">{{ logContextSummary(log) }}</span>
+                <span v-if="logSubjectSummary(log)" class="admin-context-meta">{{ logSubjectSummary(log) }}</span>
+                <span v-if="logReferenceSummary(log)" class="admin-context-meta admin-code">{{ logReferenceSummary(log) }}</span>
                 <div class="admin-inline-links">
                   <RouterLink
                     v-if="resolveSubjectLink(log.primarySubject)"
                     class="admin-link"
                     :to="resolveSubjectLink(log.primarySubject)!"
                   >
-                    {{ log.primarySubject?.label }}
+                    主体一
                   </RouterLink>
                   <RouterLink
                     v-if="resolveSubjectLink(log.secondarySubject)"
                     class="admin-link"
                     :to="resolveSubjectLink(log.secondarySubject)!"
                   >
-                    {{ log.secondarySubject?.label }}
+                    主体二
                   </RouterLink>
-                  <span v-if="!log.primarySubject && !log.secondarySubject">-</span>
                 </div>
               </td>
               <td>
@@ -298,6 +315,7 @@ onMounted(async () => {
                 <span v-else class="admin-table__subtext">{{ undoStateLabel(log) }}</span>
               </td>
               <td>
+                <span class="admin-table__subtext">{{ log.detail }}</span>
                 <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
               </td>
             </tr>
@@ -323,6 +341,12 @@ onMounted(async () => {
   display: grid;
   gap: 8px;
   align-self: end;
+}
+
+.logs-actor-line {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 @media (max-width: 1024px) {
