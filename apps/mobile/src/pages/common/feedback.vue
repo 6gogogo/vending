@@ -162,7 +162,7 @@ onLoad((query) => {
   gap: 16rpx;
   padding: 20rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--vm-surface-soft);
 }
 
 .tip-line__label {
@@ -190,7 +190,7 @@ onLoad((query) => {
   padding: 0 24rpx;
   border-radius: 24rpx;
   border: 1rpx solid var(--vm-line-strong);
-  background: rgba(255, 255, 252, 0.92);
+  background: var(--vm-surface-strong);
 }
 
 .picker-field__value {
@@ -212,8 +212,9 @@ onLoad((query) => {
   padding: 24rpx;
   border-radius: 24rpx;
   border: 1rpx solid var(--vm-line-strong);
-  background: rgba(255, 252, 246, 0.92);
+  background: var(--vm-surface-strong);
   font-size: 28rpx;
   color: var(--vm-text);
 }
 </style>
+

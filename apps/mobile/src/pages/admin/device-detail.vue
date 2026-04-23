@@ -283,7 +283,7 @@ onLoad((query) => {
   gap: 12rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line);
 }
 
@@ -304,3 +304,4 @@ onLoad((query) => {
   text-align: left;
 }
 </style>
+

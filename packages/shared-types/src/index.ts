@@ -275,6 +275,8 @@ export interface RegionRecord {
   name: string;
   status: PolicyStatus;
   sortOrder: number;
+  longitude?: number;
+  latitude?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -478,6 +480,8 @@ export interface AlertTask {
   grade: AlertGrade;
   title: string;
   status: AlertStatus;
+  feedbackSource?: "app";
+  feedbackType?: "机器故障" | "服务问题" | "其他";
   deviceCode?: string;
   deviceName?: string;
   targetUserId?: string;
@@ -683,6 +687,7 @@ export interface GoodsOverviewSnapshot {
     outOfStockDevices: number;
     nearestExpiryAt?: string;
     deviceDistribution: GoodsOverviewItem[];
+    batches: GoodsBatchRecord[];
   }>;
   recentLogs: OperationLogRecord[];
 }
@@ -712,6 +717,7 @@ export interface WarehouseInventoryItem {
   totalStock: number;
   nearestExpiryAt?: string;
   batchCount: number;
+  batches: GoodsBatchRecord[];
 }
 
 export interface InventoryTransferRecord {
@@ -763,6 +769,7 @@ export interface WarehouseInventorySnapshot {
   totalStock: number;
   goodsKinds: number;
   items: WarehouseInventoryItem[];
+  availableBatches: GoodsBatchRecord[];
   transfers: InventoryTransferRecord[];
   stocktakes: StocktakeRecord[];
   recentLogs: OperationLogRecord[];
@@ -925,6 +932,8 @@ export interface DataMonitorTimeBucketBar {
 export interface DataMonitorRegionBreakdown {
   regionId?: string;
   regionName: string;
+  longitude?: number;
+  latitude?: number;
   servedUsers: number;
   pickupUnits: number;
   pickupTimes: number;
@@ -1086,6 +1095,17 @@ export interface AiSupportAssistantReply {
   suggestedSteps: string[];
   followUpQuestions: string[];
   escalationTip: string;
+}
+
+export interface AiAdminCustomQueryReply {
+  meta: AiInsightMeta;
+  question: string;
+  dateKey: string;
+  range: DataMonitorRange;
+  answer: string;
+  keyObservations: string[];
+  recommendedActions: string[];
+  followUpQuestions: string[];
 }
 
 export interface AiPolicyOptimizationSuggestion {
@@ -1495,6 +1515,8 @@ export const seedRegions: RegionRecord[] = [
     name: "扬名街道",
     status: "active",
     sortOrder: 1,
+    longitude: 120.290613,
+    latitude: 31.547971,
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z"
   },
@@ -1503,14 +1525,8 @@ export const seedRegions: RegionRecord[] = [
     name: "清名桥片区",
     status: "active",
     sortOrder: 2,
-    createdAt: "2026-04-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z"
-  },
-  {
-    id: "region-other",
-    name: "其他",
-    status: "active",
-    sortOrder: 99,
+    longitude: 120.305254,
+    latitude: 31.561337,
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z"
   }

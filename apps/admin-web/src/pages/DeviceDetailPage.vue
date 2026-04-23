@@ -589,12 +589,17 @@ const resolveTask = async (taskId: string) => {
   }
 };
 
-const saveLocation = async (payload: { longitude: number; latitude: number; location: string }) => {
+const saveLocation = async (payload: {
+  longitude: number;
+  latitude: number;
+  location: string;
+  address: string;
+}) => {
   updatingLocation.value = true;
   try {
     await adminApi.updateDeviceLocation(String(route.params.deviceCode), {
       location: payload.location,
-      address: payload.location,
+      address: payload.address,
       longitude: payload.longitude,
       latitude: payload.latitude
     });
@@ -1237,6 +1242,7 @@ onUnmounted(() => {
           :initial-longitude="detail.device.longitude"
           :initial-latitude="detail.device.latitude"
           :initial-location="detail.device.location"
+          :initial-address="detail.device.address"
           @close="mapPickerVisible = false"
           @confirm="saveLocation"
         />

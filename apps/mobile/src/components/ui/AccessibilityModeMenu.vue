@@ -79,7 +79,7 @@ const openMenu = () => {
   height: 50rpx;
   border-radius: 50%;
   border: 1rpx solid var(--vm-line-strong);
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--vm-surface-strong);
 }
 
 .accessibility-menu__line {

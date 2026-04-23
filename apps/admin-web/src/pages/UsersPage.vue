@@ -7,8 +7,6 @@ import { adminApi } from "../api/admin";
 import { formatDateTime } from "../utils/datetime";
 
 type DrawerMode = "" | "create-user" | "edit-user" | "create-policy" | "edit-policy";
-
-const OTHER_REGION_VALUE = "__other__";
 const weekdayOptions = [
   { label: "周一", value: 1 },
   { label: "周二", value: 2 },
@@ -60,11 +58,13 @@ const batchPolicyIds = ref<string[]>([]);
 const batchMode = ref<"bind" | "unbind" | "replace">("bind");
 const regionDraftName = ref("");
 const regionDraftSortOrder = ref<number | undefined>(undefined);
+const regionDraftLongitude = ref<number | undefined>(undefined);
+const regionDraftLatitude = ref<number | undefined>(undefined);
 const rejectReasons = ref<Record<string, string>>({});
 const userForm = ref<UserFormState>({ role: "special", phone: "", name: "", status: "active", regionId: "", regionName: "", tagsText: "" });
 const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: "", quantity: 1 }] });
 
-const regionOptions = computed(() => [...regions.value.filter((item) => item.status === "active"), { id: OTHER_REGION_VALUE, name: "其他", status: "active", sortOrder: 9999 }]);
+const regionOptions = computed(() => regions.value.filter((item) => item.status === "active"));
 const goodsCatalogMap = computed(() => new Map(goodsCatalog.value.map((item) => [item.goodsId, item])));
 const filteredUsers = computed(() => {
   const query = keyword.value.trim();
@@ -120,13 +120,23 @@ const resetUserForm = () => {
   userForm.value = { role: "special", phone: "", name: "", status: "active", regionId: "", regionName: "", tagsText: "" };
 };
 const fillUserForm = (user: UserRecord) => {
-  userForm.value = { role: user.role, phone: user.phone, name: user.name, status: user.status, regionId: user.regionId || (user.regionName ? OTHER_REGION_VALUE : ""), regionName: user.regionId ? "" : user.regionName ?? "", tagsText: user.tags.join("，") };
+  const matchedRegion =
+    regions.value.find((item) => item.id === user.regionId) ??
+    regions.value.find((item) => item.name === (user.regionName ?? user.neighborhood));
+  userForm.value = {
+    role: user.role,
+    phone: user.phone,
+    name: user.name,
+    status: user.status,
+    regionId: matchedRegion?.id ?? "",
+    regionName: matchedRegion?.name ?? "",
+    tagsText: user.tags.join("，")
+  };
 };
 const resetPolicyForm = () => {
   policyForm.value = { name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }] };
 };
 const resolveRegionPayload = (state: UserFormState) => {
-  if (state.regionId === OTHER_REGION_VALUE) return { regionId: undefined, regionName: state.regionName.trim() || undefined };
   if (!state.regionId) return { regionId: undefined, regionName: undefined };
   const region = regions.value.find((item) => item.id === state.regionId);
   return { regionId: region?.id, regionName: region?.name };
@@ -193,11 +203,6 @@ const closeDrawer = () => {
 };
 
 const submitUserForm = async () => {
-  if (userForm.value.regionId === OTHER_REGION_VALUE && !userForm.value.regionName.trim()) {
-    window.alert("操作失败：选择“其他”时必须填写具体地区内容");
-    return;
-  }
-
   const regionPayload = resolveRegionPayload(userForm.value);
   saving.value = true;
   try {
@@ -231,14 +236,28 @@ const createRegionDirect = async () => {
     return;
   }
 
+  if (
+    regionDraftLongitude.value === undefined ||
+    Number.isNaN(regionDraftLongitude.value) ||
+    regionDraftLatitude.value === undefined ||
+    Number.isNaN(regionDraftLatitude.value)
+  ) {
+    window.alert("操作失败：请填写有效的地区经纬度");
+    return;
+  }
+
   creatingRegion.value = true;
   try {
     const region = await adminApi.createRegion({
       name,
-      sortOrder: regionDraftSortOrder.value
+      sortOrder: regionDraftSortOrder.value,
+      longitude: regionDraftLongitude.value,
+      latitude: regionDraftLatitude.value
     });
     regionDraftName.value = "";
     regionDraftSortOrder.value = undefined;
+    regionDraftLongitude.value = undefined;
+    regionDraftLatitude.value = undefined;
     await load();
     userForm.value.regionId = region.id;
     userForm.value.regionName = "";
@@ -386,6 +405,20 @@ onMounted(load);
               type="number"
               min="1"
               placeholder="排序"
+            />
+            <input
+              v-model.number="regionDraftLongitude"
+              class="admin-input admin-code"
+              type="number"
+              step="0.000001"
+              placeholder="经度"
+            />
+            <input
+              v-model.number="regionDraftLatitude"
+              class="admin-input admin-code"
+              type="number"
+              step="0.000001"
+              placeholder="纬度"
             />
             <button class="admin-button admin-button--ghost" :disabled="creatingRegion || !regionDraftName.trim()" @click="createRegionDirect">
               {{ creatingRegion ? "新增中" : "新增地区" }}
@@ -574,13 +607,9 @@ onMounted(load);
             <select v-model="userForm.regionId" class="admin-select">
               <option value="">未分配区域</option>
               <option v-for="region in regionOptions" :key="region.id" :value="region.id">
-                {{ region.id === OTHER_REGION_VALUE ? "其他（需填写）" : region.name }}
+                {{ region.name }}
               </option>
             </select>
-          </label>
-          <label v-if="userForm.regionId === OTHER_REGION_VALUE" class="admin-field">
-            <span class="admin-field__label">其他地区内容</span>
-            <input v-model="userForm.regionName" class="admin-input" placeholder="必填，请输入具体地区名称" />
           </label>
           <label class="admin-field">
             <span class="admin-field__label">标签</span>
@@ -588,7 +617,7 @@ onMounted(load);
           </label>
           <button
             class="admin-button"
-            :disabled="saving || !userForm.name || !userForm.phone || (userForm.regionId === OTHER_REGION_VALUE && !userForm.regionName.trim())"
+            :disabled="saving || !userForm.name || !userForm.phone"
             @click="submitUserForm"
           >
             {{ saving ? "保存中" : "保存人员信息" }}
@@ -719,7 +748,7 @@ onMounted(load);
 }
 
 .users-region-create {
-  grid-template-columns: minmax(0, 1fr) 92px auto;
+  grid-template-columns: minmax(0, 1fr) 92px 120px 120px auto;
 }
 
 .users-drawer-backdrop {

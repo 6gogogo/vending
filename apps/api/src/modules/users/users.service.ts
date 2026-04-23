@@ -910,10 +910,7 @@ export class UsersService {
       };
     }
 
-    return {
-      regionId: undefined,
-      regionName: normalizedName
-    };
+    throw new BadRequestException("请选择已配置区域。");
   }
 
   private getAdminActor(actorUserId?: string) {

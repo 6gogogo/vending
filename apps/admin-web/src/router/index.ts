@@ -187,7 +187,32 @@ router.beforeEach(async (to) => {
         return "/login";
       }
 
-      sessionStore.markValidated(sessionStore.token);
+      const parsed = (await response.json()) as {
+        code: number;
+        message: string;
+        data?: {
+          token: string;
+          user: {
+            id: string;
+            role: "admin";
+            name: string;
+            phone: string;
+            tags: string[];
+          };
+          auth: {
+            username: string;
+            usesDefaultPassword: boolean;
+            passwordUpdatedAt: string;
+          };
+        };
+      };
+
+      if (parsed.code !== 200 || !parsed.data) {
+        sessionStore.clearSession();
+        return "/login";
+      }
+
+      sessionStore.setSession(parsed.data);
     } catch {
       sessionStore.clearSession();
       return "/login";

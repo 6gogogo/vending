@@ -38,29 +38,40 @@ export const loadAmap = () => {
     return window.__vmAmapLoaderPromise__;
   }
 
-  window.__vmAmapLoaderPromise__ = loadPublicConfig().then(({ amapWebKey }) => new Promise((resolve, reject) => {
-    if (!amapWebKey) {
-      reject(new Error("后端未配置 AMAP_WEB_KEY"));
-      return;
-    }
+  window.__vmAmapLoaderPromise__ = loadPublicConfig()
+    .then(
+      ({ amapWebKey }) =>
+        new Promise((resolve, reject) => {
+          if (!amapWebKey) {
+            reject(new Error("后端未配置 AMAP_WEB_KEY"));
+            return;
+          }
 
-    const existing = document.querySelector<HTMLScriptElement>("script[data-vm-amap='true']");
+          const existing = document.querySelector<HTMLScriptElement>("script[data-vm-amap='true']");
 
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.AMap));
-      existing.addEventListener("error", () => reject(new Error("高德地图脚本加载失败")));
-      return;
-    }
+          if (existing) {
+            existing.addEventListener("load", () => resolve(window.AMap));
+            existing.addEventListener("error", () =>
+              reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY 与当前域名白名单"))
+            );
+            return;
+          }
 
-    const script = document.createElement("script");
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${amapWebKey}&plugin=AMap.PlaceSearch,AMap.AutoComplete,AMap.Geocoder`;
-    script.async = true;
-    script.defer = true;
-    script.dataset.vmAmap = "true";
-    script.onload = () => resolve(window.AMap);
-    script.onerror = () => reject(new Error("高德地图脚本加载失败"));
-    document.head.appendChild(script);
-  }));
+          const script = document.createElement("script");
+          script.src = `https://webapi.amap.com/maps?v=2.0&key=${amapWebKey}&plugin=AMap.PlaceSearch,AMap.AutoComplete,AMap.Geocoder`;
+          script.async = true;
+          script.defer = true;
+          script.dataset.vmAmap = "true";
+          script.onload = () => resolve(window.AMap);
+          script.onerror = () =>
+            reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY 与当前域名白名单"));
+          document.head.appendChild(script);
+        })
+    )
+    .catch((error) => {
+      window.__vmAmapLoaderPromise__ = undefined;
+      throw error;
+    });
 
   return window.__vmAmapLoaderPromise__;
 };

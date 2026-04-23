@@ -11,10 +11,12 @@ import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { getErrorMessage } from "../../utils/error-message";
 import { getReceivableLimit } from "../../utils/receivable-goods";
 
 const sessionStore = useSessionStore();
+const uiPreferencesStore = useUiPreferencesStore();
 const FAR_DISTANCE_WARNING_METERS = 500;
 const loading = ref(false);
 const submitting = ref(false);
@@ -22,6 +24,9 @@ const deviceCode = ref("");
 const scanMode = ref(false);
 const deviceName = ref("柜机详情");
 const location = ref("");
+const deviceAddress = ref("");
+const deviceLongitude = ref<number>();
+const deviceLatitude = ref<number>();
 const manualDistanceMeters = ref<number>();
 const manualDistanceState = ref<"scan" | "near" | "far" | "unknown">("unknown");
 const goodsList = ref<Array<{
@@ -35,6 +40,8 @@ const goodsList = ref<Array<{
   expiresAt?: string;
 }>>([]);
 const selectedMap = reactive<Record<string, number>>({});
+
+uiPreferencesStore.hydrate();
 
 const selectedItems = computed(() =>
   goodsList.value
@@ -57,6 +64,13 @@ const selectedTotal = computed(() =>
 
 const availableGoodsCount = computed(() =>
   goodsList.value.filter((item) => (item.stock ?? 0) > 0).length
+);
+const accessibilityEnabled = computed(() => uiPreferencesStore.isAccessibilityEnabled(sessionStore.user?.role));
+const hasNavigationTarget = computed(
+  () => typeof deviceLongitude.value === "number" && typeof deviceLatitude.value === "number"
+);
+const navigationAddress = computed(
+  () => deviceAddress.value || location.value || deviceName.value || "柜机位置"
 );
 
 const distanceBanner = computed(() => {
@@ -123,6 +137,9 @@ const load = async () => {
 
     deviceName.value = device.name;
     location.value = device.location;
+    deviceAddress.value = device.address ?? "";
+    deviceLongitude.value = device.longitude;
+    deviceLatitude.value = device.latitude;
     sessionStore.setQuota(quota);
     goodsList.value = goods.filter(
       (item) => getReceivableLimit(quota, item.goodsId) > 0 && (item.stock ?? 0) > 0
@@ -301,6 +318,32 @@ const goFeedback = () => {
   });
 };
 
+const openNavigation = () => {
+  if (!hasNavigationTarget.value) {
+    uni.showModal({
+      title: "暂无导航坐标",
+      content: "这台柜机还没有设置经纬度，暂时无法打开导航。",
+      showCancel: false
+    });
+    return;
+  }
+
+  uni.openLocation({
+    longitude: deviceLongitude.value as number,
+    latitude: deviceLatitude.value as number,
+    name: deviceName.value || "柜机位置",
+    address: navigationAddress.value,
+    scale: 18,
+    fail: (error) => {
+      uni.showModal({
+        title: "无法打开导航",
+        content: `系统未能打开地图能力：${getErrorMessage(error)}`,
+        showCancel: false
+      });
+    }
+  });
+};
+
 const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters === undefined) {
     return "未知距离";
@@ -325,28 +368,28 @@ onLoad((query) => {
 </script>
 
 <template>
-  <MobileShell eyebrow="柜机详情" :title="deviceName" :subtitle="location || '请先确认柜机位置和货品信息'">
+  <MobileShell eyebrow="柜机详情" :title="deviceName" :subtitle="location || deviceAddress || '请先确认柜机位置和货品信息'">
     <GlassCard tone="accent">
       <view class="vm-stack">
-        <view class="section-heading">
+        <view v-if="!accessibilityEnabled" class="section-heading">
           <text class="section-heading__title">本次领取计划</text>
           <text class="vm-subtitle">请先选择本次要领取的货品，再确认开柜。</text>
         </view>
 
-        <view class="overview-grid">
+        <view v-if="!accessibilityEnabled" class="overview-grid">
           <ServiceMetric label="已选种类" :value="selectedItems.length" hint="已加入本次计划的货品种类" tone="accent" />
           <ServiceMetric label="已选件数" :value="selectedTotal" hint="会按你的实时资格限制上限" />
           <ServiceMetric label="可选货品" :value="availableGoodsCount" hint="当前柜机仍有库存的货品种类" />
         </view>
 
-        <view class="selection-banner">
+        <view v-if="!accessibilityEnabled" class="selection-banner">
           <text class="selection-banner__label">{{ scanMode ? "扫码模式" : "手动模式" }}</text>
           <text class="selection-banner__value">{{ selectedSummary || "暂未选择货品" }}</text>
           <text class="selection-banner__hint">{{ openGuideText }}</text>
           <text class="selection-banner__hint">正式结算仍以柜门关闭后的平台识别结果为准。</text>
         </view>
 
-        <view class="distance-banner" :class="`distance-banner--${distanceBanner.tone}`">
+        <view v-if="!accessibilityEnabled" class="distance-banner" :class="`distance-banner--${distanceBanner.tone}`">
           <text class="distance-banner__title">{{ distanceBanner.title }}</text>
           <text v-for="line in distanceBanner.lines" :key="line" class="distance-banner__body">{{ line }}</text>
         </view>
@@ -356,9 +399,13 @@ onLoad((query) => {
             <view class="goods-item__main">
               <text class="goods-item__name">{{ goods.name }}</text>
               <text class="goods-item__meta">
-                {{ categoryLabelMap[goods.category] }} · 现有 {{ goods.stock ?? 0 }} 件 · 可领 {{ getRemaining(goods.goodsId) }} 件
+                {{
+                  accessibilityEnabled
+                    ? `今日可领 ${getRemaining(goods.goodsId)} 件`
+                    : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 可领 ${getRemaining(goods.goodsId)} 件`
+                }}
               </text>
-              <text v-if="goods.expiresAt" class="goods-item__hint">
+              <text v-if="!accessibilityEnabled && goods.expiresAt" class="goods-item__hint">
                 批次到期 {{ goods.expiresAt.slice(5, 16).replace("T", " ") }}
               </text>
             </view>
@@ -372,14 +419,17 @@ onLoad((query) => {
         <EmptyState
           v-else
           :title="loading ? '正在加载货品信息' : '当前没有你今天可领取的货品'"
-          :description="loading ? '请稍候，系统正在同步柜机商品列表。' : '本页只展示你今天仍可领取且柜内有库存的货品。'"
+          :description="loading ? '请稍候，系统正在同步柜机商品列表。' : accessibilityEnabled ? '' : '本页只展示你今天仍可领取且柜内有库存的货品。'"
         />
 
         <view class="action-stack">
           <button class="vm-button" :loading="submitting" @tap="submit">
             {{ scanMode ? "确认货品并扫码开柜" : "确认货品并手动开柜" }}
           </button>
-          <button class="vm-button vm-button--ghost" @tap="goFeedback">反馈这台柜机的问题</button>
+          <button v-if="!accessibilityEnabled && hasNavigationTarget" class="vm-button vm-button--ghost" @tap="openNavigation">
+            导航到此柜机
+          </button>
+          <button v-if="!accessibilityEnabled" class="vm-button vm-button--ghost" @tap="goFeedback">反馈这台柜机的问题</button>
         </view>
       </view>
     </GlassCard>
@@ -426,7 +476,7 @@ onLoad((query) => {
   gap: 18rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line);
 }
 
@@ -453,18 +503,18 @@ onLoad((query) => {
 }
 
 .distance-banner--accent {
-  background: rgba(239, 246, 255, 0.92);
-  border-color: rgba(29, 111, 220, 0.18);
+  background: var(--vm-info-bg);
+  border-color: var(--vm-info-line);
 }
 
 .distance-banner--warning {
-  background: rgba(255, 247, 237, 0.96);
-  border-color: rgba(200, 130, 29, 0.22);
+  background: var(--vm-warning-bg);
+  border-color: var(--vm-warning-line);
 }
 
 .distance-banner--success {
-  background: rgba(240, 253, 244, 0.96);
-  border-color: rgba(47, 143, 102, 0.2);
+  background: var(--vm-success-bg);
+  border-color: var(--vm-success-line);
 }
 
 .distance-banner__title {
@@ -484,7 +534,7 @@ onLoad((query) => {
   min-height: 76rpx;
   border-radius: 22rpx;
   border: 1rpx solid var(--vm-line-strong);
-  background: rgba(255, 255, 252, 0.92);
+  background: var(--vm-surface-strong);
   font-size: 34rpx;
   color: var(--vm-text);
 }
@@ -495,4 +545,35 @@ onLoad((query) => {
   font-size: 30rpx;
   font-weight: 700;
 }
+
+.vm-page--accessible .goods-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.vm-page--accessible .goods-item__name {
+  font-size: 38rpx;
+}
+
+.vm-page--accessible .goods-item__meta {
+  font-size: 28rpx;
+  color: var(--vm-text);
+}
+
+.vm-page--accessible .stepper {
+  justify-content: space-between;
+}
+
+.vm-page--accessible .stepper__button {
+  width: 120rpx;
+  min-height: 100rpx;
+  border-width: 3rpx;
+  font-size: 42rpx;
+}
+
+.vm-page--accessible .stepper__value {
+  min-width: 96rpx;
+  font-size: 40rpx;
+}
 </style>
+

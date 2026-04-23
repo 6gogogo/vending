@@ -21,7 +21,6 @@ const submitting = ref(false);
 const lookupBusy = ref(false);
 const regions = ref<RegionRecord[]>([]);
 const selectedRegionId = ref("");
-const customRegionName = ref("");
 const lookup = ref<RegistrationPhoneLookup>();
 const lastLookupPhone = ref("");
 const { remainingSeconds, isCoolingDown, startCooldown } = useSmsCooldown(60);
@@ -45,16 +44,13 @@ const roleOptions = [
   { value: "admin" as const, label: "管理员" }
 ];
 
-const regionOptions = computed(() => [
-  ...regions.value.map((item) => ({
+const activeRegions = computed(() => regions.value.filter((item) => item.status === "active"));
+const regionOptions = computed(() =>
+  activeRegions.value.map((item) => ({
     value: item.id,
     label: item.name
-  })),
-  {
-    value: "other",
-    label: "其他"
-  }
-]);
+  }))
+);
 
 const fixedRole = computed(() => lookup.value?.fixedRole);
 const effectiveRole = computed<UserRole>(() => fixedRole.value ?? requestedRole.value);
@@ -89,44 +85,25 @@ const applyProfile = (profile?: RegistrationApplicationProfile) => {
   const regionId = profile?.regionId ?? "";
   const regionName = profile?.regionName ?? profile?.neighborhood ?? "";
   const matched = regionId
-    ? regions.value.find((item) => item.id === regionId)
-    : regions.value.find((item) => item.name === regionName);
+    ? activeRegions.value.find((item) => item.id === regionId)
+    : activeRegions.value.find((item) => item.name === regionName);
 
   if (matched) {
     selectedRegionId.value = matched.id;
-    customRegionName.value = "";
     form.regionId = matched.id;
     form.regionName = matched.name;
     form.neighborhood = matched.name;
     return;
   }
 
-  if (regionName) {
-    selectedRegionId.value = "other";
-    customRegionName.value = regionName;
-    form.regionId = "";
-    form.regionName = regionName;
-    form.neighborhood = regionName;
-    return;
-  }
-
   selectedRegionId.value = "";
-  customRegionName.value = "";
   form.regionId = "";
   form.regionName = "";
   form.neighborhood = "";
 };
 
 const syncRegionFields = () => {
-  if (selectedRegionId.value === "other") {
-    const regionName = customRegionName.value.trim();
-    form.regionId = "";
-    form.regionName = regionName;
-    form.neighborhood = regionName;
-    return;
-  }
-
-  const matched = regions.value.find((item) => item.id === selectedRegionId.value);
+  const matched = activeRegions.value.find((item) => item.id === selectedRegionId.value);
   form.regionId = matched?.id ?? "";
   form.regionName = matched?.name ?? "";
   form.neighborhood = matched?.name ?? "";
@@ -205,8 +182,8 @@ const validateForm = () => {
     throw new Error("请选择区域");
   }
 
-  if (selectedRegionId.value === "other" && !customRegionName.value.trim()) {
-    throw new Error("请输入自定义区域");
+  if (!form.regionId) {
+    throw new Error("请选择已配置区域");
   }
 
   if (effectiveRole.value === "merchant") {
@@ -318,15 +295,6 @@ watch(
   }
 );
 
-watch(
-  () => customRegionName.value,
-  () => {
-    if (selectedRegionId.value === "other") {
-      syncRegionFields();
-    }
-  }
-);
-
 onLoad(async (query) => {
   await loadRegions();
 
@@ -407,11 +375,6 @@ onLoad(async (query) => {
               {{ selectedRegionLabel }}
             </view>
           </picker>
-        </view>
-
-        <view v-if="selectedRegionId === 'other'" class="vm-field">
-          <text class="vm-field__label">自定义区域</text>
-          <input v-model="customRegionName" class="vm-field__input" placeholder="请输入区域名称" />
         </view>
 
         <template v-if="effectiveRole === 'merchant'">

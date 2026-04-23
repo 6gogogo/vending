@@ -297,15 +297,15 @@ onLoad((query) => {
 .filter-chip {
   min-height: 80rpx;
   border-radius: 22rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.18);
-  background: rgba(255, 252, 246, 0.88);
+  border: 1rpx solid var(--vm-line-strong);
+  background: var(--vm-surface-soft);
   font-size: 26rpx;
 }
 
 .filter-chip--active {
-  border-color: rgba(47, 143, 102, 0.35);
-  background: rgba(241, 251, 244, 0.98);
-  color: var(--vm-accent-strong);
+  border-color: var(--vm-info-line);
+  background: var(--vm-info-bg);
+  color: var(--vm-info);
 }
 
 .picker-value {
@@ -318,8 +318,8 @@ onLoad((query) => {
   gap: 10rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .list-item__meta {
@@ -327,3 +327,4 @@ onLoad((query) => {
   color: var(--vm-text-soft);
 }
 </style>
+

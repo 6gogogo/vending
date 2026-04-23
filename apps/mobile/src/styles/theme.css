@@ -1,35 +1,51 @@
 :root,
 page {
-  --vm-bg: #f3f9f6;
-  --vm-bg-soft: #edf7f2;
-  --vm-surface: rgba(255, 255, 252, 0.96);
-  --vm-surface-strong: #fffefb;
-  --vm-surface-soft: rgba(248, 252, 249, 0.92);
-  --vm-line: rgba(20, 69, 58, 0.1);
-  --vm-line-strong: rgba(20, 69, 58, 0.18);
-  --vm-text: #18312b;
-  --vm-muted: #5e756e;
-  --vm-text-soft: #6f867f;
-  --vm-accent: #0d9488;
-  --vm-accent-strong: #0f766e;
-  --vm-warning: #c97a18;
-  --vm-danger: #c45442;
-  --vm-shadow: 0 26rpx 76rpx rgba(18, 73, 61, 0.1);
-  --vm-button-shadow: 0 18rpx 48rpx rgba(13, 148, 136, 0.18);
-  --vm-page-gradient:
-    radial-gradient(circle at 0% 0%, rgba(255, 214, 146, 0.22), transparent 28%),
-    radial-gradient(circle at 100% 0%, rgba(20, 184, 166, 0.16), transparent 24%),
-    linear-gradient(180deg, #fbfdfc 0%, #f2f8f5 52%, #edf4f1 100%);
-  --vm-card-bg: linear-gradient(180deg, rgba(255, 255, 252, 0.98), rgba(248, 252, 249, 0.94));
-  --vm-card-accent-bg: linear-gradient(180deg, #eefcf8, #e6f6f0);
-  --vm-card-warning-bg: linear-gradient(180deg, #fff8ed, #fff0dc);
-  --vm-card-quiet-bg: linear-gradient(180deg, rgba(248, 252, 249, 0.96), rgba(244, 248, 245, 0.92));
-  --vm-card-highlight: linear-gradient(90deg, rgba(13, 148, 136, 0.26), rgba(249, 115, 22, 0.16));
-  --vm-hero-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(240, 248, 244, 0.95));
-  --vm-hero-border: rgba(20, 69, 58, 0.12);
-  --vm-hero-shadow: 0 30rpx 90rpx rgba(18, 73, 61, 0.12);
-  --vm-pill-bg: rgba(13, 148, 136, 0.11);
-  --vm-pill-text: #0f766e;
+  --vm-bg: #f5f7fb;
+  --vm-bg-soft: #eef2f8;
+  --vm-surface: rgba(255, 255, 255, 0.96);
+  --vm-surface-strong: #ffffff;
+  --vm-surface-soft: rgba(247, 249, 253, 0.94);
+  --vm-line: rgba(20, 58, 102, 0.1);
+  --vm-line-strong: rgba(20, 58, 102, 0.18);
+  --vm-text: #17293f;
+  --vm-muted: #5e6f86;
+  --vm-text-soft: #72839a;
+  --vm-accent: #2f7d5b;
+  --vm-accent-strong: #245f45;
+  --vm-accent-soft: rgba(47, 125, 91, 0.12);
+  --vm-accent-line: rgba(47, 125, 91, 0.22);
+  --vm-highlight: #245f45;
+  --vm-highlight-soft: #eaf4ee;
+  --vm-info: #3a78d8;
+  --vm-focus-ring: rgba(45, 95, 147, 0.22);
+  --vm-success: #2f8a57;
+  --vm-success-soft: rgba(47, 138, 87, 0.1);
+  --vm-success-line: rgba(47, 138, 87, 0.2);
+  --vm-warning: #b86a20;
+  --vm-warning-soft: rgba(184, 106, 32, 0.12);
+  --vm-warning-line: rgba(184, 106, 32, 0.22);
+  --vm-danger: #c44f43;
+  --vm-danger-soft: rgba(196, 79, 67, 0.1);
+  --vm-danger-line: rgba(196, 79, 67, 0.18);
+  --vm-accent-bg: #eef7f1;
+  --vm-info-bg: #eef4fb;
+  --vm-info-line: rgba(58, 120, 216, 0.22);
+  --vm-success-bg: #eef8f2;
+  --vm-warning-bg: #fff4e6;
+  --vm-danger-bg: #fff0ee;
+  --vm-shadow: 0 26rpx 76rpx rgba(45, 95, 147, 0.1);
+  --vm-button-shadow: 0 18rpx 42rpx rgba(47, 125, 91, 0.14);
+  --vm-page-gradient: #f7f9fc;
+  --vm-card-bg: #ffffff;
+  --vm-card-accent-bg: var(--vm-accent-bg);
+  --vm-card-warning-bg: var(--vm-warning-bg);
+  --vm-card-quiet-bg: #f4f7fb;
+  --vm-card-highlight: var(--vm-accent);
+  --vm-hero-bg: #ffffff;
+  --vm-hero-border: rgba(20, 58, 102, 0.12);
+  --vm-hero-shadow: 0 30rpx 90rpx rgba(20, 58, 102, 0.12);
+  --vm-pill-bg: var(--vm-accent-soft);
+  --vm-pill-text: var(--vm-accent-strong);
   --vm-font-number: "Space Grotesk", "Noto Sans SC", sans-serif;
   font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--vm-text);
@@ -71,119 +87,174 @@ input {
 }
 
 .vm-page--accessible {
-  --vm-bg: #f7fbff;
-  --vm-bg-soft: #eef5ff;
+  --vm-bg: #ffffff;
+  --vm-bg-soft: #f4f7fb;
   --vm-surface: #ffffff;
   --vm-surface-strong: #ffffff;
-  --vm-surface-soft: #f8fbff;
-  --vm-line: rgba(24, 74, 160, 0.22);
-  --vm-line-strong: rgba(24, 74, 160, 0.36);
-  --vm-text: #102235;
-  --vm-muted: #24476d;
-  --vm-text-soft: #24476d;
-  --vm-accent: #2f78e7;
-  --vm-accent-strong: #144aa0;
-  --vm-warning: #b86316;
+  --vm-surface-soft: #f4f7fb;
+  --vm-line: rgba(20, 58, 102, 0.22);
+  --vm-line-strong: rgba(20, 58, 102, 0.34);
+  --vm-text: #0f2238;
+  --vm-muted: #1f3b5a;
+  --vm-text-soft: #1f3b5a;
+  --vm-accent: #1f5c44;
+  --vm-accent-strong: #174333;
+  --vm-accent-soft: #eef8f2;
+  --vm-accent-line: rgba(31, 92, 68, 0.28);
+  --vm-highlight: #2d5f93;
+  --vm-highlight-soft: #edf4fc;
+  --vm-info: #2d5f93;
+  --vm-focus-ring: rgba(45, 95, 147, 0.3);
+  --vm-success: #1f7a4a;
+  --vm-success-soft: #eef8f1;
+  --vm-success-line: rgba(31, 122, 74, 0.36);
+  --vm-warning: #b86a20;
+  --vm-warning-soft: #fff4df;
+  --vm-warning-line: rgba(184, 99, 22, 0.32);
   --vm-danger: #b43a2d;
+  --vm-danger-soft: #fff0ee;
+  --vm-danger-line: rgba(180, 58, 45, 0.3);
+  --vm-accent-bg: #eef8f2;
+  --vm-info-bg: #edf4fc;
+  --vm-info-line: rgba(47, 120, 231, 0.34);
+  --vm-success-bg: #eef8f1;
+  --vm-warning-bg: #fff4df;
+  --vm-danger-bg: #fff0ee;
   --vm-shadow: none;
   --vm-button-shadow: none;
-  --vm-page-gradient: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
-  --vm-card-bg: linear-gradient(180deg, #ffffff, #f8fbff);
-  --vm-card-accent-bg: linear-gradient(180deg, #eef4ff, #f7fbff);
-  --vm-card-warning-bg: linear-gradient(180deg, #fff5e8, #fffaf4);
-  --vm-card-quiet-bg: linear-gradient(180deg, #ffffff, #f8fbff);
-  --vm-card-highlight: linear-gradient(90deg, #2f78e7, #69a2ff);
-  --vm-hero-bg: linear-gradient(180deg, #ffffff, #f8fbff);
-  --vm-hero-border: rgba(24, 74, 160, 0.28);
+  --vm-page-gradient: #ffffff;
+  --vm-card-bg: #ffffff;
+  --vm-card-accent-bg: var(--vm-accent-bg);
+  --vm-card-warning-bg: var(--vm-warning-bg);
+  --vm-card-quiet-bg: #f4f7fb;
+  --vm-card-highlight: var(--vm-accent);
+  --vm-hero-bg: #ffffff;
+  --vm-hero-border: rgba(20, 58, 102, 0.28);
   --vm-hero-shadow: none;
-  --vm-pill-bg: #2f78e7;
+  --vm-pill-bg: #143a66;
   --vm-pill-text: #ffffff;
 }
 
+.vm-page--accessible {
+  padding: 28rpx 18rpx calc(56rpx + env(safe-area-inset-bottom));
+  background: #ffffff;
+}
+
 .vm-page--accessible .vm-title {
-  font-size: 66rpx;
-  line-height: 1.16;
+  font-size: 74rpx;
+  line-height: 1.12;
   letter-spacing: -0.03em;
 }
 
 .vm-page--accessible .vm-subtitle,
 .vm-page--accessible .vm-empty__body,
 .vm-page--accessible .vm-section__hint {
-  font-size: 30rpx;
-  line-height: 1.8;
+  font-size: 34rpx;
+  line-height: 1.76;
   color: var(--vm-text);
 }
 
 .vm-page--accessible .vm-pill,
 .vm-page--accessible .vm-status {
-  padding: 14rpx 22rpx;
-  font-size: 26rpx;
-  font-weight: 700;
+  padding: 16rpx 24rpx;
+  font-size: 28rpx;
+  font-weight: 800;
+  border-width: 3rpx;
 }
 
 .vm-page--accessible .vm-card {
   border-width: 4rpx;
-  border-radius: 30rpx;
+  border-radius: 32rpx;
   box-shadow: none;
+  overflow: visible;
 }
 
 .vm-page--accessible .vm-card::before {
-  height: 10rpx;
+  height: 14rpx;
+  border-radius: 32rpx 32rpx 0 0;
+}
+
+.vm-page--accessible .vm-card--accent {
+  background: var(--vm-info-bg);
+  border-color: var(--vm-info-line);
+}
+
+.vm-page--accessible .vm-card--accent::before {
+  background: var(--vm-info);
+}
+
+.vm-page--accessible .vm-card--warning {
+  background: var(--vm-warning-bg);
+  border-color: var(--vm-warning-line);
+}
+
+.vm-page--accessible .vm-card--warning::before {
+  background: var(--vm-warning);
+}
+
+.vm-page--accessible .vm-card--quiet {
+  background: var(--vm-card-quiet-bg);
+  border-color: rgba(20, 58, 102, 0.18);
+}
+
+.vm-page--accessible .vm-card--quiet::before {
+  background: var(--vm-accent);
 }
 
 .vm-page--accessible .vm-button {
-  min-height: 120rpx;
-  padding: 0 30rpx;
-  border-width: 3rpx;
-  font-size: 36rpx;
-  border-radius: 30rpx;
-  justify-content: center;
-  text-align: center;
+  min-height: 132rpx;
+  padding: 0 34rpx;
+  border-width: 4rpx;
+  font-size: 40rpx;
+  border-radius: 34rpx;
+  justify-content: flex-start;
+  text-align: left;
+  gap: 18rpx;
 }
 
 .vm-page--accessible .vm-button--ghost {
-  background: #ffffff;
+  background: #f4f7fb;
   color: var(--vm-accent-strong);
-  border-color: rgba(20, 74, 160, 0.4);
+  border-color: var(--vm-accent-line);
 }
 
 .vm-page--accessible .vm-button--soft {
-  background: #fff3e5;
-  color: var(--vm-warning);
-  border-color: rgba(184, 99, 22, 0.24);
+  background: var(--vm-info-bg);
+  color: var(--vm-info);
+  border-color: var(--vm-info-line);
 }
 
 .vm-page--accessible .vm-button--warning {
-  background: linear-gradient(135deg, #cc7a2b, #e59a4b);
+  background: var(--vm-warning);
 }
 
 .vm-page--accessible .vm-field__label {
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
 .vm-page--accessible .vm-field__input {
-  min-height: 118rpx;
-  padding: 0 28rpx;
-  border-width: 3rpx;
-  border-radius: 28rpx;
+  min-height: 126rpx;
+  padding: 0 30rpx;
+  border-width: 4rpx;
+  border-radius: 30rpx;
+  background: #ffffff;
+  font-size: 36rpx;
+}
+
+.vm-page--accessible .vm-textarea {
+  min-height: 280rpx;
+  padding: 28rpx 30rpx;
+  border-width: 4rpx;
+  border-radius: 30rpx;
   background: #ffffff;
   font-size: 34rpx;
 }
 
-.vm-page--accessible .vm-textarea {
-  min-height: 240rpx;
-  padding: 24rpx 28rpx;
-  border-width: 3rpx;
-  border-radius: 28rpx;
-  background: #ffffff;
-  font-size: 32rpx;
-}
-
 .vm-page--accessible .vm-empty__title,
 .vm-page--accessible .vm-section__title {
-  font-size: 38rpx;
+  font-size: 42rpx;
 }
 
 .vm-page--accessible .menu-icon--sm {
@@ -204,7 +275,12 @@ input {
 .vm-page--accessible .vm-stack,
 .vm-page--accessible .vm-grid,
 .vm-page--accessible .vm-section {
-  gap: 24rpx;
+  gap: 28rpx;
+}
+
+.vm-page--accessible .vm-section__header {
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .vm-card {
@@ -273,7 +349,7 @@ input {
 .vm-pill {
   background: var(--vm-pill-bg);
   color: var(--vm-pill-text);
-  border: 1rpx solid rgba(13, 148, 136, 0.08);
+  border: 1rpx solid var(--vm-accent-line);
 }
 
 .vm-status {
@@ -283,27 +359,27 @@ input {
 
 .vm-status--success,
 .vm-status--online {
-  background: rgba(47, 143, 102, 0.1);
-  color: var(--vm-accent-strong);
-  border-color: rgba(47, 143, 102, 0.18);
+  background: var(--vm-success-soft);
+  color: var(--vm-success);
+  border-color: var(--vm-success-line);
 }
 
 .vm-status--warning {
-  background: rgba(183, 114, 30, 0.12);
+  background: var(--vm-warning-soft);
   color: var(--vm-warning);
-  border-color: rgba(183, 114, 30, 0.2);
+  border-color: var(--vm-warning-line);
 }
 
 .vm-status--danger {
-  background: rgba(196, 84, 66, 0.1);
+  background: var(--vm-danger-soft);
   color: var(--vm-danger);
-  border-color: rgba(196, 84, 66, 0.18);
+  border-color: var(--vm-danger-line);
 }
 
 .vm-status--muted {
-  background: rgba(133, 95, 54, 0.08);
+  background: rgba(20, 58, 102, 0.05);
   color: var(--vm-muted);
-  border-color: rgba(133, 95, 54, 0.14);
+  border-color: rgba(20, 58, 102, 0.12);
 }
 
 .vm-title {
@@ -332,8 +408,8 @@ input {
   padding: 0 28rpx;
   border-radius: 28rpx;
   border: 1rpx solid transparent;
-  background: linear-gradient(135deg, var(--vm-accent-strong), var(--vm-accent));
-  color: #fffdfa;
+  background: var(--vm-accent);
+  color: #ffffff;
   font-size: 30rpx;
   font-weight: 700;
   box-shadow: var(--vm-button-shadow);
@@ -343,7 +419,7 @@ input {
 
 .vm-button:active {
   transform: translateY(2rpx);
-  box-shadow: 0 10rpx 28rpx rgba(21, 78, 68, 0.14);
+  box-shadow: 0 10rpx 28rpx rgba(47, 125, 91, 0.16);
 }
 
 .vm-button[disabled] {
@@ -351,21 +427,22 @@ input {
 }
 
 .vm-button--ghost {
-  background: rgba(255, 255, 252, 0.8);
+  background: rgba(255, 255, 255, 0.82);
   color: var(--vm-text);
   border-color: var(--vm-line-strong);
   box-shadow: none;
 }
 
 .vm-button--soft {
-  background: rgba(13, 148, 136, 0.1);
-  color: var(--vm-accent-strong);
+  background: rgba(58, 120, 216, 0.1);
+  color: var(--vm-info);
+  border-color: var(--vm-info-line);
   box-shadow: none;
 }
 
 .vm-button--warning {
-  background: linear-gradient(135deg, #d68c33, #f0b15f);
-  box-shadow: 0 18rpx 48rpx rgba(214, 140, 51, 0.18);
+  background: var(--vm-warning);
+  box-shadow: 0 18rpx 42rpx rgba(184, 106, 32, 0.14);
 }
 
 .vm-field {
@@ -383,7 +460,7 @@ input {
   padding: 0 24rpx;
   border: 1rpx solid var(--vm-line-strong);
   border-radius: 24rpx;
-  background: rgba(255, 255, 252, 0.9);
+  background: var(--vm-surface-strong);
   color: var(--vm-text);
   font-size: 28rpx;
 }

@@ -241,7 +241,7 @@ onShow(() => {
   padding: 24rpx;
   border-radius: 24rpx;
   border: 1rpx solid var(--vm-line);
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--vm-surface-soft);
 }
 
 .menu-card {
@@ -257,3 +257,4 @@ onShow(() => {
   color: var(--vm-text);
 }
 </style>
+

@@ -147,10 +147,11 @@ onLoad((query) => {
   min-height: 88rpx;
   padding: 0 24rpx;
   border-radius: 24rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.14);
-  background: rgba(255, 255, 255, 0.62);
+  border: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
   text-align: left;
   font-size: 26rpx;
   color: var(--vm-text);
 }
 </style>
+

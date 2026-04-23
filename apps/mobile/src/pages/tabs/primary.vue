@@ -183,9 +183,49 @@ const heroSupport = computed(() => {
   };
 });
 
+const resolveFeedbackNoticeContent = (task: AlertTask) => {
+  const feedbackType =
+    task.feedbackType ??
+    task.detail.match(/反馈类型：([^。；]+)/)?.[1]?.trim();
+
+  return feedbackType
+    ? `${feedbackType}反馈已被处理，感谢您的反馈`
+    : "您的反馈已被处理，感谢您的反馈";
+};
+
+const maybeNotifyResolvedFeedback = () => {
+  if (!sessionStore.user) {
+    return false;
+  }
+
+  const resolvedFeedback = alerts.value
+    .filter(
+      (item) =>
+        item.status === "resolved" &&
+        item.type === "user_feedback" &&
+        item.targetUserId === sessionStore.user?.id &&
+        (item.feedbackSource === "app" || item.feedbackSource === undefined)
+    )
+    .slice()
+    .sort((left, right) => (right.resolvedAt ?? "").localeCompare(left.resolvedAt ?? ""))
+    .find((item) => !uni.getStorageSync(`mobile:resolved-feedback:${item.id}`));
+
+  if (!resolvedFeedback) {
+    return false;
+  }
+
+  uni.setStorageSync(`mobile:resolved-feedback:${resolvedFeedback.id}`, "1");
+  uni.showModal({
+    title: "反馈处理完成",
+    content: resolveFeedbackNoticeContent(resolvedFeedback),
+    showCancel: false
+  });
+  return true;
+};
+
 const maybeNotifyUserAlert = () => {
   if (sessionStore.user?.role !== "special") {
-    return;
+    return false;
   }
 
   const mismatchAlert = alerts.value.find(
@@ -197,13 +237,13 @@ const maybeNotifyUserAlert = () => {
   );
 
   if (!mismatchAlert) {
-    return;
+    return false;
   }
 
   const storageKey = `mobile:user-alert:${mismatchAlert.id}`;
 
   if (uni.getStorageSync(storageKey)) {
-    return;
+    return false;
   }
 
   uni.setStorageSync(storageKey, "1");
@@ -212,6 +252,7 @@ const maybeNotifyUserAlert = () => {
     content: mismatchAlert.previewDetail || mismatchAlert.detail,
     showCancel: false
   });
+  return true;
 };
 
 const load = async () => {
@@ -233,12 +274,14 @@ const load = async () => {
       const [quota, recordResponse, alertResponse] = await Promise.all([
         mobileApi.getQuotaSummary(sessionStore.user.phone),
         mobileApi.listRecords(sessionStore.user.id, sessionStore.user.role),
-        mobileApi.alerts("open", sessionStore.user.id)
+        mobileApi.alerts(undefined, sessionStore.user.id)
       ]);
       sessionStore.setQuota(quota);
       records.value = recordResponse;
       alerts.value = alertResponse;
-      maybeNotifyUserAlert();
+      if (!maybeNotifyResolvedFeedback()) {
+        maybeNotifyUserAlert();
+      }
       return;
     }
 
@@ -246,10 +289,11 @@ const load = async () => {
       adminAiReport.value = null;
       adminAiError.value = "";
       adminAiLoading.value = false;
-      const [templateResponse, summaryResponse, traceResponse] = await Promise.all([
+      const [templateResponse, summaryResponse, traceResponse, alertResponse] = await Promise.all([
         mobileApi.merchantTemplates(),
         mobileApi.merchantSummary(sessionStore.user.id),
-        mobileApi.merchantRestockTraces()
+        mobileApi.merchantRestockTraces(),
+        mobileApi.alerts(undefined, sessionStore.user.id)
       ]);
       templates.value = templateResponse;
       merchantSummary.value = {
@@ -258,6 +302,8 @@ const load = async () => {
         pendingAlerts: summaryResponse.pendingAlerts
       };
       records.value = traceResponse.records;
+      alerts.value = alertResponse;
+      maybeNotifyResolvedFeedback();
       return;
     }
 
@@ -284,6 +330,7 @@ const load = async () => {
     ]);
     pendingApplications.value = applicationResponse;
     alerts.value = alertResponse;
+    maybeNotifyResolvedFeedback();
     await adminAiPromise;
   } catch (error) {
     showOperationFailure(error);
@@ -696,8 +743,8 @@ onShow(() => {
 .compact-reminder {
   padding: 18rpx 20rpx;
   border-radius: 20rpx;
-  border: 1rpx solid rgba(13, 148, 136, 0.16);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1rpx solid var(--vm-info-line);
+  background: var(--vm-surface-soft);
 }
 
 .compact-reminder__label {
@@ -726,8 +773,8 @@ onShow(() => {
   gap: 10rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .simple-list__row,
@@ -782,16 +829,16 @@ onShow(() => {
   min-height: 82rpx;
   padding: 0 20rpx;
   border-radius: 22rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.16);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1rpx solid var(--vm-line-strong);
+  background: var(--vm-surface-soft);
   font-size: 24rpx;
   color: var(--vm-text);
 }
 
 .task-filter-chip--active {
-  border-color: rgba(29, 111, 220, 0.24);
-  background: rgba(239, 246, 255, 0.98);
-  color: var(--vm-accent-strong);
+  border-color: var(--vm-info-line);
+  background: var(--vm-info-bg);
+  color: var(--vm-info);
 }
 
 .ai-summary-card {
@@ -799,8 +846,8 @@ onShow(() => {
   gap: 16rpx;
   padding: 24rpx;
   border-radius: 26rpx;
-  background: rgba(239, 246, 255, 0.76);
-  border: 1rpx solid rgba(29, 111, 220, 0.14);
+  background: var(--vm-info-bg);
+  border: 1rpx solid var(--vm-info-line);
 }
 
 .ai-summary-card__title,
@@ -815,3 +862,4 @@ onShow(() => {
   font-weight: 700;
 }
 </style>
+

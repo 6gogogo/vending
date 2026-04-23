@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, reactive, ref } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 
+import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 
 interface NavItem {
@@ -13,6 +14,14 @@ interface NavItem {
 const route = useRoute();
 const router = useRouter();
 const sessionStore = useAdminSessionStore();
+const showPasswordPanel = ref(false);
+const passwordBusy = ref(false);
+const passwordMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
+const passwordForm = reactive({
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: ""
+});
 
 const navSections: Array<{ title: string; items: NavItem[] }> = [
   {
@@ -90,6 +99,60 @@ const logout = async () => {
   await router.replace("/login");
 };
 
+const togglePasswordPanel = () => {
+  showPasswordPanel.value = !showPasswordPanel.value;
+  passwordMessage.value = null;
+
+  if (!showPasswordPanel.value) {
+    passwordForm.currentPassword = "";
+    passwordForm.newPassword = "";
+    passwordForm.confirmPassword = "";
+  }
+};
+
+const submitPasswordChange = async () => {
+  passwordMessage.value = null;
+
+  if (!passwordForm.currentPassword || !passwordForm.newPassword) {
+    passwordMessage.value = {
+      type: "error",
+      text: "请先填写当前密码和新密码。"
+    };
+    return;
+  }
+
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    passwordMessage.value = {
+      type: "error",
+      text: "两次输入的新密码不一致。"
+    };
+    return;
+  }
+
+  passwordBusy.value = true;
+  try {
+    const response = await adminApi.changeAdminPassword({
+      currentPassword: passwordForm.currentPassword,
+      newPassword: passwordForm.newPassword
+    });
+    sessionStore.setSession(response);
+    passwordMessage.value = {
+      type: "success",
+      text: "密码已更新。"
+    };
+    passwordForm.currentPassword = "";
+    passwordForm.newPassword = "";
+    passwordForm.confirmPassword = "";
+  } catch (error) {
+    passwordMessage.value = {
+      type: "error",
+      text: error instanceof Error ? error.message : "修改密码失败。"
+    };
+  } finally {
+    passwordBusy.value = false;
+  }
+};
+
 const isActive = (target: string) => {
   if (target === "/operations") {
     return route.path.startsWith("/operations");
@@ -156,6 +219,49 @@ const isActive = (target: string) => {
         <p class="admin-kicker">当前模块</p>
         <h2 class="workbench__status-title">{{ currentGroup }}</h2>
         <p class="admin-copy workbench__status-copy">{{ sessionStore.user?.name ?? "管理员" }}</p>
+        <p class="admin-copy workbench__status-copy">登录账号：{{ sessionStore.auth?.username ?? "admin" }}</p>
+        <div v-if="sessionStore.auth?.usesDefaultPassword" class="admin-note workbench__password-warning">
+          当前仍在使用默认密码 `admin`，建议立即修改。
+        </div>
+        <button class="admin-button admin-button--ghost" @click="togglePasswordPanel">
+          {{ showPasswordPanel ? "收起改密" : "修改密码" }}
+        </button>
+        <div v-if="showPasswordPanel" class="workbench__password-panel">
+          <label class="admin-field">
+            <span class="admin-field__label">当前密码</span>
+            <input
+              v-model="passwordForm.currentPassword"
+              class="admin-input"
+              type="password"
+              placeholder="请输入当前密码"
+            />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">新密码</span>
+            <input
+              v-model="passwordForm.newPassword"
+              class="admin-input"
+              type="password"
+              placeholder="新密码至少 6 位"
+            />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">确认新密码</span>
+            <input
+              v-model="passwordForm.confirmPassword"
+              class="admin-input"
+              type="password"
+              placeholder="请再次输入新密码"
+              @keyup.enter="submitPasswordChange"
+            />
+          </label>
+          <div v-if="passwordMessage" class="admin-note" :class="{ 'workbench__password-note--error': passwordMessage.type === 'error' }">
+            {{ passwordMessage.text }}
+          </div>
+          <button class="admin-button" :disabled="passwordBusy" @click="submitPasswordChange">
+            {{ passwordBusy ? "保存中..." : "保存新密码" }}
+          </button>
+        </div>
         <button class="admin-button admin-button--ghost" @click="logout">退出登录</button>
       </div>
     </aside>
@@ -198,5 +304,20 @@ const isActive = (target: string) => {
   width: 16px;
   height: 16px;
   fill: currentColor;
+}
+
+.workbench__password-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.workbench__password-warning {
+  margin-top: 4px;
+}
+
+.workbench__password-note--error {
+  background: #fff1ef;
+  border-color: #e4b7b2;
+  color: #a5443f;
 }
 </style>

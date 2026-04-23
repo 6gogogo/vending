@@ -34,15 +34,15 @@ withDefaults(
 }
 
 .service-metric--neutral {
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--vm-surface-soft);
 }
 
 .service-metric--accent {
-  background: linear-gradient(180deg, rgba(243, 255, 248, 0.96), rgba(229, 246, 239, 0.92));
+  background: var(--vm-accent-bg);
 }
 
 .service-metric--warning {
-  background: linear-gradient(180deg, rgba(255, 250, 238, 0.98), rgba(255, 241, 215, 0.94));
+  background: var(--vm-warning-bg);
 }
 
 .service-metric__label {
@@ -60,5 +60,44 @@ withDefaults(
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.5;
+}
+
+.vm-page--accessible .service-metric {
+  min-height: 220rpx;
+  gap: 16rpx;
+  padding: 28rpx;
+  border-width: 4rpx;
+  border-radius: 30rpx;
+  box-shadow: none;
+}
+
+.vm-page--accessible .service-metric--neutral {
+  background: var(--vm-card-quiet-bg);
+}
+
+.vm-page--accessible .service-metric--accent {
+  background: var(--vm-info-bg);
+  border-color: var(--vm-info-line);
+}
+
+.vm-page--accessible .service-metric--warning {
+  background: var(--vm-warning-bg);
+  border-color: var(--vm-warning-line);
+}
+
+.vm-page--accessible .service-metric__label {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.vm-page--accessible .service-metric__value {
+  font-size: 64rpx;
+}
+
+.vm-page--accessible .service-metric__hint {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--vm-text);
 }
 </style>

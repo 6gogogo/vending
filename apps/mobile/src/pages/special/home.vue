@@ -10,12 +10,17 @@ import MobileShell from "../../layouts/MobileShell.vue";
 import { appCopy } from "../../constants/copy";
 import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { getErrorMessage } from "../../utils/error-message";
+import { getReceivableDeviceGoods } from "../../utils/receivable-goods";
 
 const sessionStore = useSessionStore();
+const uiPreferencesStore = useUiPreferencesStore();
 const devices = ref<DeviceRecord[]>([]);
 const records = ref<InventoryMovement[]>([]);
 const loading = ref(false);
+
+uiPreferencesStore.hydrate();
 
 const statusLabelMap: Record<DeviceStatus, string> = {
   online: "在线",
@@ -58,6 +63,17 @@ const guidanceText = computed(() => {
 
   return "当前没有可领取额度也不需要重复操作，系统会按服务时间和资格自动刷新。";
 });
+
+const accessibilityEnabled = computed(() => uiPreferencesStore.isAccessibilityEnabled(sessionStore.user?.role));
+const deviceEntries = computed(() =>
+  devices.value.map((device) => ({
+    device,
+    visibleGoods: getReceivableDeviceGoods(device, sessionStore.quota)
+  }))
+);
+const visibleDeviceEntries = computed(() =>
+  accessibilityEnabled.value ? deviceEntries.value.filter((entry) => entry.visibleGoods.length) : deviceEntries.value
+);
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -122,15 +138,19 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="普通用户" :title="`${sessionStore.user?.name ?? '访客'}，您好`" :subtitle="appCopy.specialWelcome">
-    <template #hero-actions>
+  <MobileShell
+    eyebrow="普通用户"
+    :title="`${sessionStore.user?.name ?? '访客'}，您好`"
+    :subtitle="accessibilityEnabled ? '只显示柜机名称、地点和可领取货物。' : appCopy.specialWelcome"
+  >
+    <template v-if="!accessibilityEnabled" #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="goNearbyTab">就近找柜机</button>
         <button class="vm-button vm-button--ghost" @tap="goHistory">查看服务记录</button>
       </view>
     </template>
 
-    <GlassCard tone="accent">
+    <GlassCard v-if="!accessibilityEnabled" tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日可领取概览</text>
@@ -174,51 +194,68 @@ onShow(() => {
     <view class="vm-section">
       <view class="section-heading">
         <text class="section-heading__title">附近柜机</text>
-        <text class="vm-subtitle">可先查看位置和库存，再决定前往哪一台柜机。</text>
+        <text class="vm-subtitle">
+          {{ accessibilityEnabled ? "仅保留柜机名称、地点和可领取货物。" : "可先查看位置和库存，再决定前往哪一台柜机。" }}
+        </text>
       </view>
 
-      <view v-if="devices.length" class="device-list">
-        <GlassCard v-for="device in devices" :key="device.deviceCode">
+      <view v-if="visibleDeviceEntries.length" class="device-list">
+        <GlassCard v-for="entry in visibleDeviceEntries" :key="entry.device.deviceCode">
           <view class="vm-stack">
             <view class="device-header">
               <view class="device-header__main">
-                <text class="device-header__title">{{ device.name }}</text>
-                <text class="vm-subtitle">{{ device.location }}</text>
+                <text class="device-header__title">{{ entry.device.name }}</text>
+                <text class="vm-subtitle">{{ entry.device.location }}</text>
               </view>
-              <text class="vm-status" :class="`vm-status--${statusToneMap[device.status]}`">{{ statusLabelMap[device.status] }}</text>
+              <text v-if="!accessibilityEnabled" class="vm-status" :class="`vm-status--${statusToneMap[entry.device.status]}`">
+                {{ statusLabelMap[entry.device.status] }}
+              </text>
             </view>
 
-            <view class="device-meta">
-              <text>柜机编号 {{ device.deviceCode }}</text>
-              <text>最近在线 {{ formatDateTime(device.lastSeenAt) }}</text>
+            <view v-if="!accessibilityEnabled" class="device-meta">
+              <text>柜机编号 {{ entry.device.deviceCode }}</text>
+              <text>最近在线 {{ formatDateTime(entry.device.lastSeenAt) }}</text>
             </view>
 
-            <view class="goods-list">
-              <view v-for="goods in device.doors[0]?.goods ?? []" :key="goods.goodsId" class="goods-item">
+            <view v-if="entry.visibleGoods.length" class="goods-list">
+              <view v-for="goods in entry.visibleGoods" :key="goods.goodsId" class="goods-item">
                 <view class="goods-item__main">
                   <text class="goods-item__name">{{ goods.name }}</text>
-                  <text class="goods-item__meta">{{ categoryLabelMap[goods.category] }} · 现有 {{ goods.stock }} 件</text>
+                  <text class="goods-item__meta">
+                    {{
+                      accessibilityEnabled
+                        ? `今日可领 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
+                        : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件`
+                    }}
+                  </text>
                 </view>
-                <text v-if="goods.expiresAt" class="goods-item__tag">至 {{ goods.expiresAt.slice(5, 10) }}</text>
+                <text v-if="!accessibilityEnabled && goods.expiresAt" class="goods-item__tag">至 {{ goods.expiresAt.slice(5, 10) }}</text>
               </view>
             </view>
+            <EmptyState
+              v-else
+              title="当前没有可领取货物"
+              :description="accessibilityEnabled ? '' : '这台柜机目前没有你今天可领取且柜内有库存的货品。'"
+            />
 
-            <view class="action-grid">
-              <button class="vm-button" @tap="openDeviceDetail(device.deviceCode)">选择货品并取货</button>
-              <button class="vm-button vm-button--ghost" @tap="goFeedback(device.deviceCode)">反馈这台柜机</button>
+            <view class="action-grid" :class="{ 'action-grid--single': accessibilityEnabled }">
+              <button class="vm-button" @tap="openDeviceDetail(entry.device.deviceCode)">选择货品并取货</button>
+              <button v-if="!accessibilityEnabled" class="vm-button vm-button--ghost" @tap="goFeedback(entry.device.deviceCode)">
+                反馈这台柜机
+              </button>
             </view>
           </view>
         </GlassCard>
       </view>
       <GlassCard v-else tone="quiet">
         <EmptyState
-          :title="loading ? '正在加载柜机信息' : '附近暂无可用柜机'"
-          :description="loading ? '请稍候，系统正在同步设备状态。' : '请联系工作人员确认设备接入状态。'"
+          :title="loading ? '正在加载柜机信息' : accessibilityEnabled ? '附近暂无可领取货物' : '附近暂无可用柜机'"
+          :description="loading ? '请稍候，系统正在同步设备状态。' : accessibilityEnabled ? '稍后再来查看，系统会按资格和库存自动刷新。' : '请联系工作人员确认设备接入状态。'"
         />
       </GlassCard>
     </view>
 
-    <GlassCard tone="quiet">
+    <GlassCard v-if="!accessibilityEnabled" tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">最近服务记录</text>
@@ -286,7 +323,7 @@ onShow(() => {
   gap: 18rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line);
 }
 
@@ -314,6 +351,10 @@ onShow(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.action-grid--single {
+  grid-template-columns: 1fr;
+}
+
 .action-grid__full {
   grid-column: 1 / -1;
 }
@@ -322,8 +363,23 @@ onShow(() => {
   flex-shrink: 0;
   padding: 10rpx 16rpx;
   border-radius: 999rpx;
-  background: rgba(240, 177, 52, 0.16);
-  color: #8a5b11;
+  background: var(--vm-highlight-soft);
+  color: var(--vm-warning);
   font-size: 22rpx;
 }
+
+.vm-page--accessible .device-header__title,
+.vm-page--accessible .goods-item__name {
+  font-size: 38rpx;
+}
+
+.vm-page--accessible .goods-item {
+  align-items: flex-start;
+}
+
+.vm-page--accessible .goods-item__meta {
+  font-size: 28rpx;
+  color: var(--vm-text);
+}
 </style>
+

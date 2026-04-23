@@ -23,12 +23,14 @@ export class WarehousesService {
   getInventory() {
     const warehouse = this.getDefaultWarehouse();
     const items = this.buildWarehouseItems(warehouse.code);
+    const availableBatches = this.listActiveGoodsBatches();
 
     return {
       warehouse,
       totalStock: items.reduce((sum, item) => sum + item.totalStock, 0),
       goodsKinds: items.length,
       items,
+      availableBatches,
       transfers: this.store.inventoryTransfers.slice(0, 20),
       stocktakes: this.store.stocktakes.slice(0, 20),
       recentLogs: this.store.logs
@@ -50,6 +52,7 @@ export class WarehousesService {
       toCode: string;
       goodsId: string;
       quantity: number;
+      sourceBatchId?: string;
       note?: string;
     },
     actorUserId?: string
@@ -67,9 +70,28 @@ export class WarehousesService {
 
     const goods = this.findGoods(payload.goodsId);
     const currentStock = this.store.getCurrentStock(from.code, goods.goodsId);
+    const activeSourceBatches = this.listActiveGoodsBatches(from.code, goods.goodsId);
 
     if (currentStock < payload.quantity) {
       throw new BadRequestException("调拨数量超过当前库存。");
+    }
+
+    if (!activeSourceBatches.length) {
+      throw new BadRequestException("当前货品没有可调拨的有效批次。");
+    }
+
+    const selectedBatch = payload.sourceBatchId
+      ? activeSourceBatches.find((entry) => entry.batchId === payload.sourceBatchId)
+      : activeSourceBatches.length === 1
+        ? activeSourceBatches[0]
+        : undefined;
+
+    if (payload.sourceBatchId && !selectedBatch) {
+      throw new BadRequestException("未找到对应来源批次，或该批次已无库存。");
+    }
+
+    if (!selectedBatch && activeSourceBatches.length > 1) {
+      throw new BadRequestException("当前货品存在多个保质期批次，请按批次选择后再调拨。");
     }
 
     if (to.type === "device") {
@@ -86,7 +108,9 @@ export class WarehousesService {
     const sourceBatches = new Map(
       this.store.getGoodsBatches(from.code, goods.goodsId).map((entry) => [entry.batchId, entry])
     );
-    const consumed = this.store.consumeGoodsBatches(from.code, goods.goodsId, payload.quantity);
+    const consumed = selectedBatch
+      ? this.consumeSpecificGoodsBatch(selectedBatch.batchId, payload.quantity)
+      : this.store.consumeGoodsBatches(from.code, goods.goodsId, payload.quantity);
 
     const movedBatches = consumed.consumed.map((entry) => {
       const sourceBatch = sourceBatches.get(entry.batchId);
@@ -153,6 +177,8 @@ export class WarehousesService {
         goodsId: goods.goodsId,
         goodsName: goods.name,
         quantity: consumed.actualQuantity,
+        sourceBatchId: selectedBatch?.batchId,
+        sourceBatchExpiresAt: selectedBatch?.expiresAt,
         note: payload.note ?? "",
         undoState: "not_undoable"
       }
@@ -334,19 +360,83 @@ export class WarehousesService {
     return goodsIds
       .map((goodsId) => {
         const goods = this.findGoods(goodsId);
+        const batches = this.listActiveGoodsBatches(warehouseCode, goodsId);
 
         return {
           goodsId: goods.goodsId,
           goodsName: goods.name,
           category: goods.category,
-          totalStock: this.store.getCurrentStock(warehouseCode, goods.goodsId),
-          nearestExpiryAt: this.store.getNearestExpiryAt(warehouseCode, goods.goodsId),
-          batchCount: this.store
-            .getGoodsBatches(warehouseCode, goods.goodsId)
-            .filter((entry) => entry.remainingQuantity > 0).length
+          totalStock: batches.reduce((sum, entry) => sum + entry.remainingQuantity, 0),
+          nearestExpiryAt: batches.find((entry) => entry.expiresAt)?.expiresAt,
+          batchCount: batches.length,
+          batches
         };
       })
       .sort((left, right) => left.goodsId.localeCompare(right.goodsId));
+  }
+
+  private listActiveGoodsBatches(deviceCode?: string, goodsId?: string) {
+    return this.store
+      .getGoodsBatches(deviceCode, goodsId)
+      .filter((entry) => entry.remainingQuantity > 0)
+      .map((entry) => this.decorateGoodsBatch(entry))
+      .sort((left, right) => this.compareGoodsBatchByExpiry(left, right));
+  }
+
+  private decorateGoodsBatch(entry: GoodsBatchRecord): GoodsBatchRecord {
+    return {
+      ...entry,
+      locationType: entry.locationType ?? (this.store.isWarehouseCode(entry.deviceCode) ? "warehouse" : "device"),
+      locationName: entry.locationName ?? this.store.getLocationName(entry.deviceCode)
+    };
+  }
+
+  private compareGoodsBatchByExpiry(left: GoodsBatchRecord, right: GoodsBatchRecord) {
+    const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
+    const rightExpiry = right.expiresAt ?? "9999-12-31T23:59:59.999Z";
+
+    if (leftExpiry !== rightExpiry) {
+      return leftExpiry.localeCompare(rightExpiry);
+    }
+
+    if (left.goodsId !== right.goodsId) {
+      return left.goodsId.localeCompare(right.goodsId);
+    }
+
+    if (left.deviceCode !== right.deviceCode) {
+      return left.deviceCode.localeCompare(right.deviceCode);
+    }
+
+    return left.createdAt.localeCompare(right.createdAt);
+  }
+
+  private consumeSpecificGoodsBatch(batchId: string, quantity: number) {
+    const batch = this.store.getGoodsBatches().find((entry) => entry.batchId === batchId);
+
+    if (!batch || batch.remainingQuantity <= 0) {
+      throw new BadRequestException("未找到对应来源批次，或该批次已无库存。");
+    }
+
+    if (batch.remainingQuantity < quantity) {
+      throw new BadRequestException("调拨数量超过所选批次当前库存。");
+    }
+
+    const removed = this.store.removeBatchQuantity(batchId, quantity);
+
+    if (!removed || removed.actualQuantity !== quantity) {
+      throw new BadRequestException("调拨数量超过所选批次当前库存。");
+    }
+
+    return {
+      actualQuantity: removed.actualQuantity,
+      consumed: [
+        {
+          batchId,
+          quantity: removed.actualQuantity
+        }
+      ],
+      shortage: 0
+    };
   }
 
   private resolveLocation(code: string) {

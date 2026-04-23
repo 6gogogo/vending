@@ -141,8 +141,8 @@ onShow(() => {
   min-height: 240rpx;
   padding: 24rpx;
   border-radius: 26rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
   text-align: left;
 }
 
@@ -202,3 +202,4 @@ onShow(() => {
   color: var(--vm-accent-strong);
 }
 </style>
+

@@ -8,32 +8,18 @@ import { useAdminSessionStore } from "../stores/session";
 const router = useRouter();
 const sessionStore = useAdminSessionStore();
 
-const phone = ref("13800000001");
-const code = ref("");
-const previewCode = ref("");
+const username = ref("admin");
+const password = ref("");
 const busy = ref(false);
 const errorMessage = ref("");
 
-const busyLabel = computed(() => (busy.value ? "处理中..." : "进入后台"));
-
-const sendCode = async () => {
-  busy.value = true;
-  errorMessage.value = "";
-  try {
-    const response = await adminApi.requestCode(phone.value);
-    previewCode.value = response.previewCode ?? "";
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "验证码发送失败。";
-  } finally {
-    busy.value = false;
-  }
-};
+const busyLabel = computed(() => (busy.value ? "登录中..." : "进入后台"));
 
 const submit = async () => {
   busy.value = true;
   errorMessage.value = "";
   try {
-    const response = await adminApi.adminLogin(phone.value, code.value);
+    const response = await adminApi.adminPasswordLogin(username.value, password.value);
     sessionStore.setSession(response);
     await router.replace("/dashboard");
   } catch (error) {
@@ -54,24 +40,25 @@ const submit = async () => {
       </div>
 
       <label class="admin-field">
-        <span class="admin-field__label">手机号</span>
-        <input v-model="phone" class="admin-input" placeholder="请输入管理员手机号" />
+        <span class="admin-field__label">账号</span>
+        <input v-model="username" class="admin-input" placeholder="请输入管理员账号" />
       </label>
 
-      <div class="login-panel__code-row">
-        <label class="admin-field">
-          <span class="admin-field__label">验证码</span>
-          <input v-model="code" class="admin-input" placeholder="请输入验证码" />
-        </label>
-        <button class="admin-button admin-button--ghost" :disabled="busy || !phone" @click="sendCode">
-          获取验证码
-        </button>
-      </div>
+      <label class="admin-field">
+        <span class="admin-field__label">密码</span>
+        <input
+          v-model="password"
+          class="admin-input"
+          type="password"
+          placeholder="请输入管理员密码"
+          @keyup.enter="submit"
+        />
+      </label>
 
-      <div v-if="previewCode" class="admin-note">测试环境验证码：{{ previewCode }}</div>
+      <div class="admin-note">空库或无管理员凭证时，系统会自动补建超级管理员：账号 `admin`，密码 `admin`。</div>
       <div v-if="errorMessage" class="admin-note login-panel__error">{{ errorMessage }}</div>
 
-      <button class="admin-button" :disabled="busy || !phone || !code" @click="submit">
+      <button class="admin-button" :disabled="busy || !username || !password" @click="submit">
         {{ busyLabel }}
       </button>
     </article>
@@ -104,22 +91,9 @@ const submit = async () => {
   font-size: 1.42rem;
 }
 
-.login-panel__code-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px;
-  gap: 10px;
-  align-items: end;
-}
-
 .login-panel__error {
   background: #fff1ef;
   border-color: #e4b7b2;
   color: #a5443f;
-}
-
-@media (max-width: 640px) {
-  .login-panel__code-row {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

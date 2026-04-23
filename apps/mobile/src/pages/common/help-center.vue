@@ -262,15 +262,19 @@ onShow(() => {
   min-height: 180rpx;
   padding: 24rpx;
   border-radius: 28rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.14);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
   text-align: left;
 }
 
 .topic-chip--active {
-  border-color: rgba(29, 111, 220, 0.26);
-  background: rgba(239, 246, 255, 0.98);
-  box-shadow: 0 16rpx 36rpx rgba(29, 111, 220, 0.1);
+  border-color: var(--vm-info-line);
+  background: var(--vm-info-bg);
+  box-shadow: 0 16rpx 36rpx rgba(20, 58, 102, 0.08);
+}
+
+.topic-chip--active .topic-chip__title {
+  color: var(--vm-info);
 }
 
 .topic-chip__title,
@@ -300,8 +304,8 @@ onShow(() => {
   gap: 10rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .step-card__index,
@@ -314,8 +318,8 @@ onShow(() => {
   min-height: 168rpx;
   padding: 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.86);
-  border: 1rpx solid rgba(159, 127, 94, 0.18);
+  background: var(--vm-surface-strong);
+  border: 1rpx solid var(--vm-line-strong);
   font-size: 26rpx;
   line-height: 1.7;
   color: var(--vm-text);
@@ -339,6 +343,7 @@ onShow(() => {
 }
 
 .chat-item--assistant {
-  background: rgba(239, 246, 255, 0.9);
+  background: var(--vm-info-bg);
 }
 </style>
+

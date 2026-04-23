@@ -13,7 +13,24 @@ import { InMemoryStoreService } from "../../common/store/in-memory-store.service
 import { AccessRulesService } from "../access-rules/access-rules.service";
 import { RegistrationApplicationsService } from "../registration-applications/registration-applications.service";
 import { UsersService } from "../users/users.service";
+import { hashAdminPassword, verifyAdminPassword } from "./admin-password.utils";
 import { VerificationCodeService } from "./verification-code.service";
+
+interface AdminSessionResult {
+  token: string;
+  user: {
+    id: string;
+    role: "admin";
+    name: string;
+    phone: string;
+    tags: string[];
+  };
+  auth: {
+    username: string;
+    usesDefaultPassword: boolean;
+    passwordUpdatedAt: string;
+  };
+}
 
 @Injectable()
 export class AuthService {
@@ -244,7 +261,28 @@ export class AuthService {
       throw new UnauthorizedException("当前账号不是管理员，无法登录后台。");
     }
 
-    return response;
+    return this.createAdminSessionSnapshot(
+      this.usersService.findById(response.user.id),
+      response.token
+    );
+  }
+
+  async adminPasswordLogin(username: string, password: string): Promise<AdminSessionResult> {
+    const credential = this.store.findAdminCredentialByUsername(username);
+
+    if (!credential) {
+      throw new UnauthorizedException("账号或密码不正确。");
+    }
+
+    const user = this.store.users.find(
+      (entry) => entry.id === credential.userId && entry.role === "admin" && entry.status === "active"
+    );
+
+    if (!user || !verifyAdminPassword(password, credential.passwordSalt, credential.passwordHash)) {
+      throw new UnauthorizedException("账号或密码不正确。");
+    }
+
+    return this.createAdminSessionSnapshot(user);
   }
 
   getMobileSession(token?: string): MobileSessionSnapshot {
@@ -261,21 +299,98 @@ export class AuthService {
     return this.getMobileSession(token);
   }
 
-  getAdminSession(token?: string) {
+  getAdminSession(token?: string): AdminSessionResult {
     const user = this.store.getSessionUser(token);
 
     if (!user || user.role !== "admin") {
       throw new UnauthorizedException("当前登录态已失效，请重新登录。");
     }
 
+    return this.createAdminSessionSnapshot(user, token);
+  }
+
+  changeAdminPassword(token: string | undefined, currentPassword: string, newPassword: string): AdminSessionResult {
+    const user = this.store.getSessionUser(token);
+
+    if (!user || user.role !== "admin") {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
+    const credential = this.store.findAdminCredentialByUserId(user.id);
+
+    if (!credential) {
+      throw new UnauthorizedException("当前管理员账号未配置登录凭证。");
+    }
+
+    if (!verifyAdminPassword(currentPassword, credential.passwordSalt, credential.passwordHash)) {
+      throw new UnauthorizedException("当前密码不正确。");
+    }
+
+    const normalizedPassword = newPassword.trim();
+
+    if (normalizedPassword.length < 6) {
+      throw new BadRequestException("新密码至少需要 6 位。");
+    }
+
+    if (normalizedPassword === currentPassword.trim()) {
+      throw new BadRequestException("新密码不能与当前密码相同。");
+    }
+
+    const hashedPassword = hashAdminPassword(normalizedPassword);
+    const updatedCredential = this.store.upsertAdminCredential({
+      ...credential,
+      passwordSalt: hashedPassword.salt,
+      passwordHash: hashedPassword.hash,
+      usesDefaultPassword: false,
+      passwordUpdatedAt: new Date().toISOString()
+    });
+
+    this.store.logOperation({
+      category: "admin",
+      type: "change-admin-password",
+      status: "success",
+      actor: {
+        type: "admin",
+        id: user.id,
+        name: user.name,
+        role: user.role
+      },
+      primarySubject: {
+        type: "user",
+        id: user.id,
+        label: user.name
+      },
+      metadata: {
+        username: updatedCredential.username,
+        undoState: "not_undoable"
+      }
+    });
+
+    return this.createAdminSessionSnapshot(user, token, updatedCredential);
+  }
+
+  private createAdminSessionSnapshot(
+    user: UserRecord,
+    token = this.store.createSession(user),
+    credential = this.store.findAdminCredentialByUserId(user.id)
+  ): AdminSessionResult {
+    if (!credential) {
+      throw new UnauthorizedException("当前管理员账号未配置登录凭证。");
+    }
+
     return {
       token,
       user: {
         id: user.id,
-        role: user.role,
+        role: "admin",
         name: user.name,
         phone: user.phone,
         tags: user.tags
+      },
+      auth: {
+        username: credential.username,
+        usesDefaultPassword: credential.usesDefaultPassword,
+        passwordUpdatedAt: credential.passwordUpdatedAt
       }
     };
   }

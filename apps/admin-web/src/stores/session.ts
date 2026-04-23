@@ -10,9 +10,16 @@ interface AdminSessionUser {
   tags: string[];
 }
 
+interface AdminSessionAuth {
+  username: string;
+  usesDefaultPassword: boolean;
+  passwordUpdatedAt: string;
+}
+
 interface AdminSessionState {
   token?: string;
   user?: AdminSessionUser;
+  auth?: AdminSessionAuth;
   validatedToken?: string;
 }
 
@@ -44,9 +51,10 @@ export const useAdminSessionStore = defineStore("admin-session", {
     needsValidation: (state) => Boolean(state.token && state.token !== state.validatedToken)
   },
   actions: {
-    setSession(payload: { token: string; user: AdminSessionUser }) {
+    setSession(payload: { token: string; user: AdminSessionUser; auth: AdminSessionAuth }) {
       this.token = payload.token;
       this.user = payload.user;
+      this.auth = payload.auth;
       this.validatedToken = payload.token;
       this.persist();
     },
@@ -56,6 +64,7 @@ export const useAdminSessionStore = defineStore("admin-session", {
     clearSession() {
       this.token = undefined;
       this.user = undefined;
+      this.auth = undefined;
       this.validatedToken = undefined;
       this.persist();
     },
@@ -73,7 +82,8 @@ export const useAdminSessionStore = defineStore("admin-session", {
         storageKey,
         JSON.stringify({
           token: this.token,
-          user: this.user
+          user: this.user,
+          auth: this.auth
         })
       );
     }

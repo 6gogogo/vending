@@ -14,8 +14,12 @@ export class RegionsService {
       .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name));
   }
 
-  create(payload: { name: string; sortOrder?: number }, actorUserId?: string) {
+  create(
+    payload: { name: string; sortOrder?: number; longitude?: number; latitude?: number },
+    actorUserId?: string
+  ) {
     const name = payload.name.trim();
+    const coordinates = this.normalizeCoordinates(payload, true);
 
     if (!name) {
       throw new BadRequestException("区域名称不能为空。");
@@ -30,6 +34,8 @@ export class RegionsService {
       name,
       status: "active",
       sortOrder: payload.sortOrder ?? this.store.regions.length + 1,
+      longitude: coordinates.longitude,
+      latitude: coordinates.latitude,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -56,7 +62,7 @@ export class RegionsService {
 
   update(
     id: string,
-    payload: Partial<Pick<RegionRecord, "name" | "status" | "sortOrder">>,
+    payload: Partial<Pick<RegionRecord, "name" | "status" | "sortOrder" | "longitude" | "latitude">>,
     actorUserId?: string
   ) {
     const region = this.store.regions.find((entry) => entry.id === id);
@@ -87,6 +93,9 @@ export class RegionsService {
       region.sortOrder = payload.sortOrder;
     }
 
+    const coordinates = this.normalizeCoordinates(payload, false, region);
+    region.longitude = coordinates.longitude;
+    region.latitude = coordinates.latitude;
     region.updatedAt = new Date().toISOString();
 
     for (const user of this.store.users) {
@@ -121,6 +130,49 @@ export class RegionsService {
     });
 
     return region;
+  }
+
+  private normalizeCoordinates(
+    payload: { longitude?: number; latitude?: number },
+    requireBoth: boolean,
+    current?: Pick<RegionRecord, "longitude" | "latitude">
+  ) {
+    const hasLongitude = payload.longitude !== undefined;
+    const hasLatitude = payload.latitude !== undefined;
+
+    if (!hasLongitude && !hasLatitude) {
+      if (requireBoth && (current?.longitude === undefined || current?.latitude === undefined)) {
+        throw new BadRequestException("请填写地区经纬度。");
+      }
+
+      return {
+        longitude: current?.longitude,
+        latitude: current?.latitude
+      };
+    }
+
+    if (!hasLongitude || !hasLatitude) {
+      throw new BadRequestException("经纬度需要同时填写。");
+    }
+
+    return {
+      longitude: this.normalizeCoordinate(payload.longitude!, "经度", -180, 180),
+      latitude: this.normalizeCoordinate(payload.latitude!, "纬度", -90, 90)
+    };
+  }
+
+  private normalizeCoordinate(value: number, label: "经度" | "纬度", min: number, max: number) {
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+      throw new BadRequestException(`${label}格式不正确。`);
+    }
+
+    if (numericValue < min || numericValue > max) {
+      throw new BadRequestException(`${label}超出有效范围。`);
+    }
+
+    return Number(numericValue.toFixed(6));
   }
 
   private getActor(actorUserId?: string) {

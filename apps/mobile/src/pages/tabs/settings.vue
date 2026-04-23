@@ -168,8 +168,8 @@ onShow(() => {
   gap: 16rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .info-item__label {
@@ -195,8 +195,8 @@ onShow(() => {
   gap: 8rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .help-preview__summary {
@@ -205,3 +205,4 @@ onShow(() => {
   color: var(--vm-text-soft);
 }
 </style>
+

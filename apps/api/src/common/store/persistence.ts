@@ -27,6 +27,15 @@ export interface DraftSessionRecord {
   createdAt: string;
 }
 
+export interface AdminCredentialRecord {
+  userId: string;
+  username: string;
+  passwordSalt: string;
+  passwordHash: string;
+  usesDefaultPassword: boolean;
+  passwordUpdatedAt: string;
+}
+
 export interface PersistedStoreState {
   flags?: {
     skipCompetitionTestDevice?: boolean;
@@ -54,6 +63,7 @@ export interface PersistedStoreState {
   verificationCodes: Array<[string, VerificationRecord]>;
   sessions: Array<[string, SessionRecord]>;
   draftSessions: Array<[string, DraftSessionRecord]>;
+  adminCredentials: AdminCredentialRecord[];
   callbackLog: CallbackLogRecord[];
   deviceRuntime: Array<[string, DeviceRuntimeState]>;
 }
@@ -166,6 +176,7 @@ export const createSeededPersistedState = (): PersistedStoreState => {
     verificationCodes: [],
     sessions: [],
     draftSessions: [],
+    adminCredentials: [],
     callbackLog: [],
     deviceRuntime: seed.devices.map((device) => [
       device.deviceCode,
@@ -216,6 +227,7 @@ export const createEmptyPersistedState = (): PersistedStoreState => ({
   verificationCodes: [],
   sessions: [],
   draftSessions: [],
+  adminCredentials: [],
   callbackLog: [],
   deviceRuntime: []
 });
@@ -248,6 +260,7 @@ const normalizePersistedState = (raw: Partial<PersistedStoreState>): PersistedSt
     verificationCodes: raw.verificationCodes ?? seeded.verificationCodes,
     sessions: raw.sessions ?? seeded.sessions,
     draftSessions: raw.draftSessions ?? seeded.draftSessions,
+    adminCredentials: raw.adminCredentials ?? seeded.adminCredentials,
     callbackLog: (raw.callbackLog ?? seeded.callbackLog).slice(0, MAX_PERSISTED_CALLBACK_LOGS),
     deviceRuntime: raw.deviceRuntime ?? seeded.deviceRuntime
   };

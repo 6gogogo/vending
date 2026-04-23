@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type {
+  AiAdminCustomQueryReply,
   AiDeviceRestockRecommendation,
   AiEventDiagnosis,
   AiFeedbackDraft,
@@ -117,6 +118,30 @@ export class AiInsightsService {
     return this.buildSupportAssistantReply({
       ...payload,
       question
+    });
+  }
+
+  async adminCustomQuery(payload: {
+    question: string;
+    dateKey?: string;
+    range?: DataMonitorRange;
+    history?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    actorUserId?: string;
+  }) {
+    const question = payload.question.trim();
+
+    if (!question) {
+      throw new BadRequestException("请输入需要分析的问题。");
+    }
+
+    return this.buildAdminCustomQueryReply({
+      ...payload,
+      question,
+      dateKey: this.normalizeDateKey(payload.dateKey),
+      range: this.normalizeRange(payload.range)
     });
   }
 
@@ -780,6 +805,154 @@ export class AiInsightsService {
     return result;
   }
 
+  private async buildAdminCustomQueryReply(payload: {
+    question: string;
+    dateKey: string;
+    range: DataMonitorRange;
+    history?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    actorUserId?: string;
+  }): Promise<AiAdminCustomQueryReply> {
+    const dashboard = this.analyticsService.getDashboard();
+    const monitor = this.analyticsService.getDataMonitor({
+      date: payload.dateKey,
+      range: payload.range
+    });
+    const goodsOverview = this.goodsService.getOverview();
+    const warehouseInventory = this.warehousesService.getInventory();
+    const history = (payload.history ?? [])
+      .slice(-6)
+      .map((entry, index) => `${index + 1}. ${entry.role === "assistant" ? "助手" : "管理员"}：${entry.content}`);
+
+    const context = {
+      currentBusinessDateKey: dashboard.businessDateKey,
+      targetDateKey: payload.dateKey,
+      range: payload.range,
+      dashboardStats: dashboard.stats,
+      serviceOverview: {
+        totalUsers: dashboard.serviceOverview.totalUsers,
+        completeUsers: dashboard.serviceOverview.completeUsers.count,
+        partialUsers: dashboard.serviceOverview.partialUsers.count,
+        unservedUsers: dashboard.serviceOverview.unservedUsers.count
+      },
+      dataMonitor: {
+        rangeSummary: monitor.rangeSummary,
+        rangeSeries: monitor.rangeSeries,
+        regionBreakdown: monitor.regionBreakdown
+      },
+      registeredUserDistribution: this.buildRegisteredUserDistribution(),
+      goodsOverview: {
+        totalKinds: goodsOverview.totalKinds,
+        lowStockKinds: goodsOverview.lowStockKinds,
+        outOfStockKinds: goodsOverview.outOfStockKinds,
+        warehouseStockTotal: goodsOverview.warehouseStockTotal,
+        flaggedGoods: goodsOverview.flaggedGoods.slice(0, 24),
+        byGoods: goodsOverview.byGoods.slice(0, 18),
+        byDevice: goodsOverview.byDevice.slice(0, 18)
+      },
+      warehouseInventory: {
+        warehouse: warehouseInventory.warehouse,
+        totalStock: warehouseInventory.totalStock,
+        goodsKinds: warehouseInventory.goodsKinds,
+        items: warehouseInventory.items.slice(0, 20).map((entry) => ({
+          goodsId: entry.goodsId,
+          goodsName: entry.goodsName,
+          category: entry.category,
+          totalStock: entry.totalStock,
+          nearestExpiryAt: entry.nearestExpiryAt,
+          batchCount: entry.batchCount
+        }))
+      },
+      openAlerts: this.alertsService.list("open").slice(0, 16).map((entry) => this.toAlertSummary(entry)),
+      recentApprovedRegistrations: this.store.registrationApplications
+        .filter((entry) => entry.status === "approved")
+        .slice()
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, 12)
+        .map((entry) => ({
+          applicationId: entry.id,
+          requestedRole: entry.requestedRole,
+          regionId: entry.profile.regionId,
+          regionName: entry.profile.regionName ?? entry.profile.neighborhood,
+          approvedAt: entry.updatedAt
+        }))
+    };
+
+    const generated = await this.openAiCompatibleService.completeJson<{
+      answer?: unknown;
+      keyObservations?: unknown;
+      recommendedActions?: unknown;
+      followUpQuestions?: unknown;
+    }>({
+      task: "admin-custom-query",
+      systemPrompt:
+        "你是社区公益智助柜 PC 后台的运营分析助手。你只能基于提供的数据回答管理员的自由问询。先给明确结论，再给可执行建议；如果数据不足，请直接指出缺少什么数据。不要编造系统里没有的信息。只返回 JSON。",
+      userPrompt: [
+        `参考业务日：${payload.dateKey}`,
+        `观察范围：${payload.range}`,
+        history.length ? `最近对话：\n${history.join("\n")}` : "最近对话：无",
+        "分析上下文：",
+        JSON.stringify(context, null, 2),
+        "请严格输出以下 JSON 结构：",
+        JSON.stringify(
+          {
+            answer: "先用 2-4 句话直接回答管理员问题",
+            keyObservations: ["关键观察 1", "关键观察 2"],
+            recommendedActions: ["建议动作 1", "建议动作 2"],
+            followUpQuestions: ["如果还要继续追问，可以补充问什么"]
+          },
+          null,
+          2
+        ),
+        `管理员问题：${payload.question}`
+      ].join("\n"),
+      maxTokens: 1800
+    });
+
+    const result: AiAdminCustomQueryReply = {
+      meta: {
+        generatedAt: new Date().toISOString(),
+        provider: "openai-compatible",
+        model: generated.model
+      },
+      question: payload.question,
+      dateKey: payload.dateKey,
+      range: payload.range,
+      answer: this.readString(
+        generated.data.answer,
+        "已根据当前区域分布、服务表现和库存情况生成分析结论，请结合数据监控页面继续核对。"
+      ),
+      keyObservations: this.readStringArray(generated.data.keyObservations, [
+        "请优先关注已注册人数集中但近几日服务量偏低、缺货偏高的区域。"
+      ]),
+      recommendedActions: this.readStringArray(generated.data.recommendedActions, [
+        "建议先按区域热度、已注册人数和仓库可用量做小范围调度试运行。"
+      ]),
+      followUpQuestions: this.readStringArray(generated.data.followUpQuestions, [
+        "可以继续追问某个区域、某类货品或某几台柜机的具体调度建议。"
+      ])
+    };
+
+    this.store.logOperation({
+      category: "admin",
+      type: "ai-admin-custom-query",
+      status: "success",
+      actor: this.getAdminActor(payload.actorUserId),
+      detail: `AI 完成了管理员自定义问询：${payload.question}`,
+      description: "AI 已生成管理端自定义运营分析建议。",
+      metadata: {
+        aiTask: "admin-custom-query",
+        dateKey: payload.dateKey,
+        range: payload.range,
+        undoState: "not_undoable"
+      }
+    });
+
+    return result;
+  }
+
   private async buildSupportAssistantReply(payload: {
     question: string;
     scene?: string;
@@ -906,6 +1079,118 @@ export class AiInsightsService {
     };
   }
 
+  private buildRegisteredUserDistribution() {
+    const regionById = new Map(this.store.regions.map((entry) => [entry.id, entry]));
+    const regionByName = new Map(this.store.regions.map((entry) => [entry.name, entry]));
+    const buckets = new Map<
+      string,
+      {
+        regionId?: string;
+        regionName: string;
+        sortOrder: number;
+        longitude?: number;
+        latitude?: number;
+        totalUsers: number;
+        activeUsers: number;
+        registeredUsers: number;
+        preRegisteredUsers: number;
+        specialUsers: number;
+        merchantUsers: number;
+        adminUsers: number;
+        pendingApplications: number;
+        rejectedApplications: number;
+      }
+    >();
+
+    const ensureBucket = (regionId?: string, regionName?: string) => {
+      const matchedRegion =
+        (regionId ? regionById.get(regionId) : undefined) ??
+        (regionName ? regionByName.get(regionName) : undefined);
+      const normalizedRegionId = matchedRegion?.id ?? regionId;
+      const normalizedRegionName = matchedRegion?.name ?? regionName ?? "未分配区域";
+      const key = normalizedRegionId ?? `name:${normalizedRegionName}`;
+      const existing = buckets.get(key);
+
+      if (existing) {
+        return existing;
+      }
+
+      const created = {
+        regionId: normalizedRegionId,
+        regionName: normalizedRegionName,
+        sortOrder: matchedRegion?.sortOrder ?? 9999,
+        longitude: matchedRegion?.longitude,
+        latitude: matchedRegion?.latitude,
+        totalUsers: 0,
+        activeUsers: 0,
+        registeredUsers: 0,
+        preRegisteredUsers: 0,
+        specialUsers: 0,
+        merchantUsers: 0,
+        adminUsers: 0,
+        pendingApplications: 0,
+        rejectedApplications: 0
+      };
+
+      buckets.set(key, created);
+      return created;
+    };
+
+    this.store.regions
+      .slice()
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name))
+      .forEach((entry) => {
+        ensureBucket(entry.id, entry.name);
+      });
+
+    this.store.users.forEach((entry) => {
+      const bucket = ensureBucket(entry.regionId, entry.regionName ?? entry.neighborhood);
+      bucket.totalUsers += 1;
+
+      if (entry.status === "active") {
+        bucket.activeUsers += 1;
+      }
+
+      if (entry.mobileProfileCompleted) {
+        bucket.registeredUsers += 1;
+      } else {
+        bucket.preRegisteredUsers += 1;
+      }
+
+      if (entry.role === "special") {
+        bucket.specialUsers += 1;
+      } else if (entry.role === "merchant") {
+        bucket.merchantUsers += 1;
+      } else {
+        bucket.adminUsers += 1;
+      }
+    });
+
+    this.store.registrationApplications.forEach((entry) => {
+      if (!["pending", "rejected"].includes(entry.status)) {
+        return;
+      }
+
+      const bucket = ensureBucket(entry.profile.regionId, entry.profile.regionName ?? entry.profile.neighborhood);
+
+      if (entry.status === "pending") {
+        bucket.pendingApplications += 1;
+      } else {
+        bucket.rejectedApplications += 1;
+      }
+    });
+
+    return Array.from(buckets.values())
+      .sort(
+        (left, right) =>
+          right.registeredUsers - left.registeredUsers ||
+          right.totalUsers - left.totalUsers ||
+          left.sortOrder - right.sortOrder ||
+          left.regionName.localeCompare(right.regionName)
+      )
+      .map(({ sortOrder: _sortOrder, ...entry }) => entry);
+  }
+
   private findEventByOrderNo(orderNo: string) {
     return this.store.events.find(
       (entry) =>
@@ -996,8 +1281,10 @@ export class AiInsightsService {
     return created;
   }
 
-  private getAdminActor() {
-    const admin = this.store.users.find((entry) => entry.role === "admin");
+  private getAdminActor(actorUserId?: string) {
+    const admin =
+      this.store.users.find((entry) => entry.id === actorUserId && entry.role === "admin") ??
+      this.store.users.find((entry) => entry.role === "admin");
 
     if (admin) {
       return {

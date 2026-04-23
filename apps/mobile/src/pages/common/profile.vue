@@ -177,8 +177,9 @@ onShow(() => {
   padding: 24rpx;
   border-radius: 24rpx;
   border: 1rpx solid var(--vm-line-strong);
-  background: rgba(255, 252, 246, 0.92);
+  background: var(--vm-surface-strong);
   font-size: 28rpx;
   color: var(--vm-text);
 }
 </style>
+

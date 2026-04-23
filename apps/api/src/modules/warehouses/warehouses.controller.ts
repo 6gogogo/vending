@@ -29,6 +29,7 @@ export class WarehousesController {
       toCode: string;
       goodsId: string;
       quantity: number;
+      sourceBatchId?: string;
       note?: string;
     },
     @Req() request: { authUser?: { id: string } }

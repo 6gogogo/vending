@@ -179,13 +179,13 @@
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "公益智助柜",
-    "navigationBarBackgroundColor": "#f6efe3",
-    "backgroundColor": "#f6efe3"
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f7f9fc"
   },
   "tabBar": {
-    "color": "#836d4d",
-    "selectedColor": "#2f8f66",
-    "backgroundColor": "#fffaf1",
+    "color": "#72839a",
+    "selectedColor": "#245f45",
+    "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
       {

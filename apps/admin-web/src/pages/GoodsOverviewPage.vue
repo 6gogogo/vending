@@ -4,6 +4,7 @@ import { RouterLink } from "vue-router";
 import type {
   DeviceRecord,
   GoodsAlertPolicy,
+  GoodsBatchRecord,
   GoodsCategory,
   GoodsCategoryRecord,
   GoodsOverviewItem,
@@ -90,6 +91,7 @@ const transferForm = reactive({
   fromCode: "WAREHOUSE-LOCAL",
   toCode: "",
   goodsId: "",
+  sourceBatchId: "",
   quantity: 1,
   note: ""
 });
@@ -152,27 +154,50 @@ const sourceGoodsOptions = computed(() => {
     return [];
   }
 
-  if (transferForm.fromCode === warehouseSnapshot.value?.warehouse.code) {
-    return (warehouseSnapshot.value?.items ?? []).map((item) => ({
-      goodsId: item.goodsId,
-      goodsName: item.goodsName,
-      currentStock: item.totalStock
-    }));
+  const grouped = new Map<
+    string,
+    { goodsId: string; goodsName: string; currentStock: number; batchCount: number; nearestExpiryAt?: string }
+  >();
+
+  for (const batch of (warehouseSnapshot.value?.availableBatches ?? []).filter(
+    (entry) => entry.deviceCode === transferForm.fromCode
+  )) {
+    const existing = grouped.get(batch.goodsId);
+
+    if (existing) {
+      existing.currentStock += batch.remainingQuantity;
+      existing.batchCount += 1;
+      existing.nearestExpiryAt = sortExpiry(existing.nearestExpiryAt, batch.expiresAt);
+      continue;
+    }
+
+    grouped.set(batch.goodsId, {
+      goodsId: batch.goodsId,
+      goodsName: resolveGoodsName(batch.goodsId),
+      currentStock: batch.remainingQuantity,
+      batchCount: 1,
+      nearestExpiryAt: batch.expiresAt
+    });
   }
 
-  const device = devices.value.find((item) => item.deviceCode === transferForm.fromCode);
-  return (
-    device?.doors.flatMap((door) =>
-      door.goods.map((goods) => ({
-        goodsId: goods.goodsId,
-        goodsName: goods.name,
-        currentStock: goods.stock
-      }))
-    ) ?? []
-  );
+  return [...grouped.values()].sort((left, right) => left.goodsId.localeCompare(right.goodsId));
 });
 
+const sourceBatchOptions = computed(() =>
+  (warehouseSnapshot.value?.availableBatches ?? [])
+    .filter(
+      (entry) =>
+        entry.deviceCode === transferForm.fromCode && entry.goodsId === transferForm.goodsId
+    )
+    .sort(compareBatchByExpiry)
+);
+
+const selectedBatch = computed(() =>
+  sourceBatchOptions.value.find((entry) => entry.batchId === transferForm.sourceBatchId)
+);
+
 const formatDate = (value?: string) => (value ? value.slice(0, 10) : "-");
+const formatBatchDate = (value?: string) => (value ? formatDate(value) : "未设保质期");
 
 const formatStockHint = (
   item: Pick<GoodsOverviewItem, "stock" | "thresholdEnabled" | "lowStockThreshold" | "nearestExpiryAt" | "status">
@@ -291,6 +316,10 @@ const load = async () => {
     }
     transferForm.toCode = transferForm.toCode || deviceResponse[0]?.deviceCode || "";
     transferForm.goodsId = transferForm.goodsId || sourceGoodsOptions.value[0]?.goodsId || "";
+    transferForm.sourceBatchId =
+      sourceBatchOptions.value.find((entry) => entry.batchId === transferForm.sourceBatchId)?.batchId ??
+      sourceBatchOptions.value[0]?.batchId ??
+      "";
   } catch (error) {
     showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
   } finally {
@@ -553,8 +582,13 @@ const applyPolicies = async () => {
 };
 
 const submitTransfer = async () => {
-  if (!transferForm.fromCode || !transferForm.toCode || !transferForm.goodsId) {
-    showMessage("error", "操作失败：请先选择完整的调拨信息");
+  if (
+    !transferForm.fromCode ||
+    !transferForm.toCode ||
+    !transferForm.goodsId ||
+    !transferForm.sourceBatchId
+  ) {
+    showMessage("error", "操作失败：请先选择完整的调拨信息和来源批次");
     return;
   }
 
@@ -565,6 +599,7 @@ const submitTransfer = async () => {
       toCode: transferForm.toCode,
       goodsId: transferForm.goodsId,
       quantity: transferForm.quantity,
+      sourceBatchId: transferForm.sourceBatchId,
       note: transferForm.note || undefined
     });
     transferForm.note = "";
@@ -624,10 +659,58 @@ watch(
   () => transferForm.fromCode,
   () => {
     transferForm.goodsId = sourceGoodsOptions.value[0]?.goodsId || "";
+    transferForm.sourceBatchId = sourceBatchOptions.value[0]?.batchId || "";
   }
 );
 
+watch(
+  () => transferForm.goodsId,
+  () => {
+    transferForm.sourceBatchId = sourceBatchOptions.value[0]?.batchId || "";
+  }
+);
+
+watch(
+  selectedBatch,
+  (value) => {
+    if (!value) {
+      transferForm.quantity = 1;
+      return;
+    }
+
+    transferForm.quantity = Math.max(1, Math.min(transferForm.quantity || 1, value.remainingQuantity));
+  },
+  { immediate: true }
+);
+
 onMounted(load);
+
+function compareBatchByExpiry(left: GoodsBatchRecord, right: GoodsBatchRecord) {
+  const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
+  const rightExpiry = right.expiresAt ?? "9999-12-31T23:59:59.999Z";
+
+  if (leftExpiry !== rightExpiry) {
+    return leftExpiry.localeCompare(rightExpiry);
+  }
+
+  return left.createdAt.localeCompare(right.createdAt);
+}
+
+function sortExpiry(current?: string, next?: string) {
+  if (!current) {
+    return next;
+  }
+
+  if (!next) {
+    return current;
+  }
+
+  return current.localeCompare(next) <= 0 ? current : next;
+}
+
+function resolveGoodsName(goodsId: string) {
+  return catalog.value.find((item) => item.goodsId === goodsId)?.name ?? goodsId;
+}
 </script>
 
 <template>
@@ -789,7 +872,7 @@ onMounted(load);
               <th>仓库在库</th>
               <th>缺货柜机</th>
               <th>低库存柜机</th>
-              <th>最短保质期</th>
+              <th>批次明细</th>
               <th>分布</th>
             </tr>
           </thead>
@@ -807,7 +890,23 @@ onMounted(load);
               <td class="admin-code">{{ item.warehouseStock }}</td>
               <td class="admin-code">{{ item.outOfStockDevices }}</td>
               <td class="admin-code">{{ item.lowStockDevices }}</td>
-              <td class="admin-code">{{ formatDate(item.nearestExpiryAt) }}</td>
+              <td>
+                <div class="goods-distribution-list">
+                  <div
+                    v-for="batch in item.batches.slice(0, 5)"
+                    :key="batch.batchId"
+                    class="goods-distribution-item"
+                  >
+                    <span class="admin-table__strong">
+                      {{ batch.locationName || batch.deviceCode }} / {{ formatBatchDate(batch.expiresAt) }}
+                    </span>
+                    <span class="admin-table__subtext">剩余 {{ batch.remainingQuantity }} 件</span>
+                  </div>
+                  <span v-if="item.batches.length > 5" class="admin-table__subtext">
+                    其余 {{ item.batches.length - 5 }} 批请进详情查看
+                  </span>
+                </div>
+              </td>
               <td>
                 <div class="goods-distribution-list">
                   <div
@@ -963,17 +1062,36 @@ onMounted(load);
           <label class="admin-field">
             <span class="admin-field__label">货品</span>
             <select v-model="transferForm.goodsId" class="admin-select">
-              <option v-for="item in sourceGoodsOptions" :key="item.goodsId" :value="item.goodsId">{{ item.goodsName }} / 当前 {{ item.currentStock }}</option>
+              <option v-for="item in sourceGoodsOptions" :key="item.goodsId" :value="item.goodsId">
+                {{ item.goodsName }} / 当前 {{ item.currentStock }} / {{ item.batchCount }} 批 / 最早 {{ formatBatchDate(item.nearestExpiryAt) }}
+              </option>
+            </select>
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">来源批次</span>
+            <select v-model="transferForm.sourceBatchId" class="admin-select">
+              <option v-for="item in sourceBatchOptions" :key="item.batchId" :value="item.batchId">
+                {{ formatBatchDate(item.expiresAt) }} / 剩余 {{ item.remainingQuantity }} / {{ item.locationName || item.deviceCode }}
+              </option>
             </select>
           </label>
           <label class="admin-field">
             <span class="admin-field__label">数量</span>
-            <input v-model.number="transferForm.quantity" class="admin-input" type="number" min="1" />
+            <input
+              v-model.number="transferForm.quantity"
+              class="admin-input"
+              type="number"
+              min="1"
+              :max="selectedBatch?.remainingQuantity || undefined"
+            />
           </label>
           <label class="admin-field">
             <span class="admin-field__label">备注</span>
             <input v-model="transferForm.note" class="admin-input" placeholder="例如 上午调拨" />
           </label>
+          <div v-if="selectedBatch" class="admin-note">
+            当前选择批次：保质期 {{ formatBatchDate(selectedBatch.expiresAt) }}，可调拨 {{ selectedBatch.remainingQuantity }} 件。
+          </div>
           <div class="admin-note">货物调拨和仓库流转只维护本地库存台账，不会在平台创建调拨、补货或退货订单。</div>
           <button class="admin-button" :disabled="saving" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
         </div>
@@ -994,6 +1112,7 @@ onMounted(load);
                 <th>货品</th>
                 <th>来源</th>
                 <th>去向</th>
+                <th>批次</th>
                 <th>数量</th>
               </tr>
             </thead>
@@ -1003,6 +1122,18 @@ onMounted(load);
                 <td>{{ item.goodsName }}</td>
                 <td>{{ item.fromName }}</td>
                 <td>{{ item.toName }}</td>
+                <td>
+                  <div class="goods-distribution-list">
+                    <div
+                      v-for="batch in item.batches"
+                      :key="`${item.id}-${batch.sourceBatchId}`"
+                      class="goods-distribution-item"
+                    >
+                      <span class="admin-table__strong">{{ formatBatchDate(batch.expiresAt) }}</span>
+                      <span class="admin-table__subtext">{{ batch.quantity }} 件</span>
+                    </div>
+                  </div>
+                </td>
                 <td class="admin-code">{{ item.quantity }}</td>
               </tr>
             </tbody>

@@ -30,8 +30,18 @@ import {
   type WarehouseRecord
 } from "@vm/shared-types";
 
+import { hashAdminPassword } from "../../modules/auth/admin-password.utils";
 import { formatOperationLog } from "../logging/operation-log-template";
-import { createSeededPersistedState, readPersistedState, type DraftSessionRecord, type PersistedStoreState, type SessionRecord, type VerificationRecord, writePersistedState } from "./persistence";
+import {
+  createSeededPersistedState,
+  readPersistedState,
+  type AdminCredentialRecord,
+  type DraftSessionRecord,
+  type PersistedStoreState,
+  type SessionRecord,
+  type VerificationRecord,
+  writePersistedState
+} from "./persistence";
 
 interface BatchConsumptionEntry {
   batchId: string;
@@ -40,6 +50,11 @@ interface BatchConsumptionEntry {
 
 const MAX_CALLBACK_LOGS = 1000;
 const NEGATIVE_STOCK_BALANCE_NOTE = "库存透支调整";
+const DEFAULT_SUPER_ADMIN_USERNAME = "admin";
+const DEFAULT_SUPER_ADMIN_PASSWORD = "admin";
+const DEFAULT_SUPER_ADMIN_PHONE = "13800000001";
+const DEFAULT_SUPER_ADMIN_NAME = "超级管理员";
+const DEFAULT_SUPER_ADMIN_REGION_NAME = "系统管理";
 
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
@@ -73,6 +88,7 @@ export class InMemoryStoreService {
   readonly verificationCodes = new Map<string, VerificationRecord>();
   readonly sessions = new Map<string, SessionRecord>();
   readonly draftSessions = new Map<string, DraftSessionRecord>();
+  readonly adminCredentials: AdminCredentialRecord[] = [];
   readonly callbackLog: CallbackLogRecord[] = [];
   readonly deviceRuntime = new Map<string, DeviceRuntimeState>(
     this.seed.devices.map((device) => [
@@ -99,6 +115,7 @@ export class InMemoryStoreService {
   constructor() {
     const persisted = readPersistedState();
     this.persistenceFlags = persisted?.flags;
+    let shouldPersist = false;
 
     if (persisted) {
       this.hydrate(persisted);
@@ -106,15 +123,55 @@ export class InMemoryStoreService {
       this.persist();
     }
 
+    shouldPersist = this.normalizeRegionsState() || shouldPersist;
+    shouldPersist = this.ensureBootstrapAdmin() || shouldPersist;
+
     if (!persisted?.flags?.skipCompetitionTestDevice) {
       this.ensureCompetitionTestDevice();
     }
     this.syncDeviceStocksFromBatches();
     this.refreshAlertPresentation();
+
+    if (shouldPersist) {
+      this.persist();
+    }
   }
 
   createId(prefix: string) {
     return `${this.normalizePrefix(prefix)}-${this.createCompactSuffix()}`;
+  }
+
+  private normalizeRegionsState() {
+    let changed = false;
+    const seedRegionMap = new Map(this.seed.regions.map((entry) => [entry.id, entry]));
+    const nextRegions: RegionRecord[] = [];
+
+    for (const region of this.regions) {
+      if (region.id === "region-other" || region.name.trim() === "其他") {
+        changed = true;
+        continue;
+      }
+
+      const seededRegion = seedRegionMap.get(region.id);
+
+      if (seededRegion?.longitude !== undefined && region.longitude === undefined) {
+        region.longitude = seededRegion.longitude;
+        changed = true;
+      }
+
+      if (seededRegion?.latitude !== undefined && region.latitude === undefined) {
+        region.latitude = seededRegion.latitude;
+        changed = true;
+      }
+
+      nextRegions.push(region);
+    }
+
+    if (nextRegions.length !== this.regions.length) {
+      this.regions.splice(0, this.regions.length, ...nextRegions);
+    }
+
+    return changed;
   }
 
   createReference(prefix: string) {
@@ -211,6 +268,40 @@ export class InMemoryStoreService {
     }
 
     return this.draftSessions.get(token);
+  }
+
+  findAdminCredentialByUsername(username: string) {
+    const normalizedUsername = username.trim().toLowerCase();
+
+    if (!normalizedUsername) {
+      return undefined;
+    }
+
+    return this.adminCredentials.find((entry) => {
+      if (entry.username.trim().toLowerCase() !== normalizedUsername) {
+        return false;
+      }
+
+      return this.users.some(
+        (user) => user.id === entry.userId && user.role === "admin" && user.status === "active"
+      );
+    });
+  }
+
+  findAdminCredentialByUserId(userId: string) {
+    return this.adminCredentials.find((entry) => entry.userId === userId);
+  }
+
+  upsertAdminCredential(record: AdminCredentialRecord) {
+    const existing = this.findAdminCredentialByUserId(record.userId);
+
+    if (existing) {
+      Object.assign(existing, record);
+      return existing;
+    }
+
+    this.adminCredentials.unshift(record);
+    return record;
   }
 
   updateDraftSession(
@@ -1099,6 +1190,7 @@ export class InMemoryStoreService {
       verificationCodes: Array.from(this.verificationCodes.entries()).map(([key, value]) => [key, structuredClone(value)]),
       sessions: Array.from(this.sessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
       draftSessions: Array.from(this.draftSessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
+      adminCredentials: structuredClone(this.adminCredentials),
       callbackLog: structuredClone(this.callbackLog),
       deviceRuntime: Array.from(this.deviceRuntime.entries()).map(([key, value]) => [key, structuredClone(value)])
     };
@@ -1111,6 +1203,7 @@ export class InMemoryStoreService {
   resetToSeed() {
     this.persistenceFlags = undefined;
     this.hydrate(createSeededPersistedState());
+    this.ensureBootstrapAdmin();
     this.persist();
   }
 
@@ -1154,6 +1247,7 @@ export class InMemoryStoreService {
       this.draftSessions.set(key, value);
     }
 
+    this.replaceArray(this.adminCredentials, state.adminCredentials);
     this.replaceArray(this.callbackLog, state.callbackLog);
     this.deviceRuntime.clear();
     for (const [key, value] of state.deviceRuntime) {
@@ -1173,5 +1267,42 @@ export class InMemoryStoreService {
         target.splice(index, 1);
       }
     }
+  }
+
+  private ensureBootstrapAdmin() {
+    let changed = false;
+    let adminUser = this.users.find((entry) => entry.role === "admin" && entry.status === "active");
+
+    if (!adminUser) {
+      adminUser = {
+        id: "admin-root",
+        role: "admin",
+        phone: DEFAULT_SUPER_ADMIN_PHONE,
+        name: DEFAULT_SUPER_ADMIN_NAME,
+        status: "active",
+        regionName: DEFAULT_SUPER_ADMIN_REGION_NAME,
+        neighborhood: DEFAULT_SUPER_ADMIN_REGION_NAME,
+        tags: ["super-admin"],
+        mobileProfileCompleted: false
+      };
+      this.users.unshift(adminUser);
+      changed = true;
+    }
+
+    if (!this.findAdminCredentialByUserId(adminUser.id)) {
+      const hashedPassword = hashAdminPassword(DEFAULT_SUPER_ADMIN_PASSWORD);
+
+      this.adminCredentials.unshift({
+        userId: adminUser.id,
+        username: DEFAULT_SUPER_ADMIN_USERNAME,
+        passwordSalt: hashedPassword.salt,
+        passwordHash: hashedPassword.hash,
+        usesDefaultPassword: true,
+        passwordUpdatedAt: new Date().toISOString()
+      });
+      changed = true;
+    }
+
+    return changed;
   }
 }

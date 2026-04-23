@@ -150,6 +150,8 @@ export class AlertsService {
 
     return this.create({
       type: "user_feedback",
+      feedbackSource: "app",
+      feedbackType: payload.feedbackType,
       title: payload.title ?? (previewDetail ? `${titleBase}，备注为${previewDetail}` : titleBase),
       detail: [
         `反馈人：${actorLabel}`,

@@ -64,16 +64,19 @@ const showUtilityBar = computed(
 </script>
 
 <template>
-  <view class="vm-page shell" :class="[`shell--${resolvedMode}`, { 'vm-page--accessible': accessibilityEnabled }]">
+  <view
+    class="vm-page shell"
+    :class="[`shell--${resolvedMode}`, { 'vm-page--accessible': accessibilityEnabled, 'shell--accessible': accessibilityEnabled }]"
+  >
     <view class="shell__shape shell__shape--sun" />
     <view class="shell__shape shell__shape--leaf" />
     <view class="shell__body">
-      <view v-if="showUtilityBar" class="shell__utility vm-fade-up">
+      <view v-if="showUtilityBar" class="shell__utility vm-fade-up" :class="{ 'shell__utility--accessible': accessibilityEnabled }">
         <view class="shell__utility-left">
           <slot name="header-left" />
           <view v-if="accessibilityEnabled" class="shell__elder-mark">
             <view class="shell__elder-dot" />
-            <text class="shell__elder-text">敬老版</text>
+            <text class="shell__elder-text">关怀版</text>
           </view>
         </view>
         <view v-if="props.headerStyle === 'panel' && $slots['header-right']" class="shell__utility-right">
@@ -82,15 +85,8 @@ const showUtilityBar = computed(
       </view>
 
       <template v-if="props.headerStyle === 'panel'">
-        <view class="shell__hero vm-fade-up">
-          <view class="shell__hero-main">
-            <view v-if="accessibilityEnabled" class="shell__care-banner">
-              <view class="shell__care-badge">
-                <text class="shell__care-badge-mark">关怀版</text>
-                <text class="shell__care-badge-title">无障碍模式已开启</text>
-              </view>
-              <text class="shell__care-text">大字显示 · 高对比界面 · 更大按钮和输入框</text>
-            </view>
+        <view class="shell__hero vm-fade-up" :class="{ 'shell__hero--accessible': accessibilityEnabled }">
+          <view class="shell__hero-main" :class="{ 'shell__hero-main--accessible': accessibilityEnabled }">
             <slot name="hero-badge">
               <text class="vm-pill">{{ eyebrow }}</text>
             </slot>
@@ -106,7 +102,7 @@ const showUtilityBar = computed(
           </view>
         </view>
       </template>
-      <view v-else class="shell__compact vm-fade-up">
+      <view v-else class="shell__compact vm-fade-up" :class="{ 'shell__compact--accessible': accessibilityEnabled }">
         <view class="shell__compact-main">
           <text class="shell__compact-eyebrow">{{ eyebrow }}</text>
           <text class="shell__compact-title">{{ title }}</text>
@@ -122,7 +118,7 @@ const showUtilityBar = computed(
         <slot name="hero-actions" />
       </view>
 
-      <view class="shell__content vm-stack">
+      <view class="shell__content vm-stack" :class="{ 'shell__content--accessible': accessibilityEnabled }">
         <slot />
       </view>
     </view>
@@ -136,6 +132,34 @@ const showUtilityBar = computed(
   background: var(--vm-page-gradient);
 }
 
+.shell--care {
+  --vm-bg: #f7f9fc;
+  --vm-bg-soft: #eef2f7;
+  --vm-surface: rgba(255, 255, 255, 0.96);
+  --vm-surface-strong: #ffffff;
+  --vm-surface-soft: rgba(248, 250, 253, 0.94);
+  --vm-line: rgba(20, 58, 102, 0.1);
+  --vm-line-strong: rgba(20, 58, 102, 0.18);
+  --vm-text: #1b2d43;
+  --vm-muted: #6a7688;
+  --vm-text-soft: #7f8998;
+  --vm-accent: #2f7d5b;
+  --vm-accent-strong: #245f45;
+  --vm-shadow: 0 26rpx 76rpx rgba(45, 95, 147, 0.1);
+  --vm-button-shadow: 0 18rpx 42rpx rgba(47, 125, 91, 0.14);
+  --vm-page-gradient: #f7f9fc;
+  --vm-card-bg: #ffffff;
+  --vm-card-accent-bg: var(--vm-accent-bg);
+  --vm-card-warning-bg: var(--vm-warning-bg);
+  --vm-card-quiet-bg: #f4f7fb;
+  --vm-card-highlight: var(--vm-accent);
+  --vm-hero-bg: #ffffff;
+  --vm-hero-border: rgba(20, 58, 102, 0.12);
+  --vm-hero-shadow: 0 30rpx 90rpx rgba(45, 95, 147, 0.11);
+  --vm-pill-bg: var(--vm-accent-soft);
+  --vm-pill-text: var(--vm-accent-strong);
+}
+
 .shell--ops {
   --vm-bg: #f3f7fc;
   --vm-bg-soft: #eef4fb;
@@ -147,26 +171,23 @@ const showUtilityBar = computed(
   --vm-text: #15293b;
   --vm-muted: #5b7187;
   --vm-text-soft: #6d8196;
-  --vm-accent: #1d6fdc;
-  --vm-accent-strong: #1958b4;
+  --vm-accent: #2f7d5b;
+  --vm-accent-strong: #245f45;
   --vm-warning: #c8821d;
   --vm-danger: #c45442;
   --vm-shadow: 0 26rpx 76rpx rgba(28, 59, 95, 0.1);
-  --vm-button-shadow: 0 18rpx 48rpx rgba(29, 111, 220, 0.16);
-  --vm-page-gradient:
-    radial-gradient(circle at 100% 0%, rgba(29, 111, 220, 0.15), transparent 24%),
-    radial-gradient(circle at 0% 12%, rgba(86, 167, 255, 0.1), transparent 28%),
-    linear-gradient(180deg, #f8fbff 0%, #f2f6fb 52%, #edf2f8 100%);
-  --vm-card-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 253, 0.94));
-  --vm-card-accent-bg: linear-gradient(180deg, #eff6ff, #e7f0fc);
-  --vm-card-warning-bg: linear-gradient(180deg, #fff8ee, #fff0dc);
-  --vm-card-quiet-bg: linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(242, 247, 252, 0.92));
-  --vm-card-highlight: linear-gradient(90deg, rgba(29, 111, 220, 0.22), rgba(86, 167, 255, 0.12));
-  --vm-hero-bg: linear-gradient(140deg, rgba(255, 255, 255, 0.99), rgba(239, 246, 255, 0.94));
+  --vm-button-shadow: 0 18rpx 42rpx rgba(47, 125, 91, 0.14);
+  --vm-page-gradient: #f5f8fb;
+  --vm-card-bg: #ffffff;
+  --vm-card-accent-bg: var(--vm-accent-bg);
+  --vm-card-warning-bg: var(--vm-warning-bg);
+  --vm-card-quiet-bg: #f2f6fb;
+  --vm-card-highlight: var(--vm-accent);
+  --vm-hero-bg: #ffffff;
   --vm-hero-border: rgba(30, 65, 102, 0.12);
   --vm-hero-shadow: 0 30rpx 90rpx rgba(28, 59, 95, 0.12);
-  --vm-pill-bg: rgba(29, 111, 220, 0.1);
-  --vm-pill-text: #1958b4;
+  --vm-pill-bg: var(--vm-accent-soft);
+  --vm-pill-text: var(--vm-accent-strong);
 }
 
 .shell__body {
@@ -212,17 +233,14 @@ const showUtilityBar = computed(
   width: 44rpx;
   height: 44rpx;
   border-radius: 50%;
-  background:
-    radial-gradient(circle at 35% 35%, #fef3c7 0 26%, transparent 27%),
-    radial-gradient(circle at 65% 35%, #fde68a 0 26%, transparent 27%),
-    linear-gradient(135deg, #5aa0ff, #2f78e7);
-  box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.42);
+  background: var(--vm-accent);
+  box-shadow: inset 0 0 0 8rpx rgba(255, 255, 255, 0.18);
 }
 
 .shell__elder-text {
   font-size: 30rpx;
   font-weight: 800;
-  color: #2f78e7;
+  color: var(--vm-accent-strong);
 }
 
 .shell__compact {
@@ -238,6 +256,10 @@ const showUtilityBar = computed(
   display: flex;
   flex-direction: column;
   gap: 10rpx;
+}
+
+.shell__compact-access {
+  display: none;
 }
 
 .shell__compact-side {
@@ -281,33 +303,7 @@ const showUtilityBar = computed(
 
 .shell__hero::before,
 .shell__hero::after {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-}
-
-.shell__hero::before {
-  inset: 0;
-  background:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.08), transparent 42%),
-    radial-gradient(circle at 100% 0%, rgba(13, 148, 136, 0.08), transparent 28%);
-}
-
-.shell__hero::after {
-  top: 14rpx;
-  right: 18rpx;
-  width: 180rpx;
-  height: 120rpx;
-  border-radius: 999rpx;
-  opacity: 0.28;
-  background:
-    repeating-linear-gradient(
-      135deg,
-      rgba(13, 148, 136, 0.18) 0,
-      rgba(13, 148, 136, 0.18) 4rpx,
-      transparent 4rpx,
-      transparent 14rpx
-    );
+  display: none;
 }
 
 .shell__hero-main {
@@ -323,8 +319,8 @@ const showUtilityBar = computed(
   gap: 12rpx;
   padding: 18rpx 20rpx;
   border-radius: 26rpx;
-  border: 2rpx solid rgba(47, 120, 231, 0.22);
-  background: linear-gradient(180deg, rgba(235, 244, 255, 0.96), rgba(245, 249, 255, 0.96));
+  border: 2rpx solid rgba(20, 58, 102, 0.22);
+  background: #f4f7fb;
 }
 
 .shell__care-badge {
@@ -338,7 +334,7 @@ const showUtilityBar = computed(
 .shell__care-badge-mark {
   padding: 8rpx 16rpx;
   border-radius: 999rpx;
-  background: #2f78e7;
+  background: var(--vm-accent);
   color: #ffffff;
   font-size: 22rpx;
   font-weight: 800;
@@ -348,13 +344,65 @@ const showUtilityBar = computed(
 .shell__care-badge-title {
   font-size: 24rpx;
   font-weight: 700;
-  color: #144aa0;
+  color: var(--vm-accent-strong);
 }
 
 .shell__care-text {
   font-size: 24rpx;
   line-height: 1.6;
-  color: #24476d;
+  color: var(--vm-muted);
+}
+
+.shell__accessible-lanes {
+  display: none;
+}
+
+.shell__compact-access-mark {
+  font-size: 24rpx;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--vm-accent-strong);
+}
+
+.shell__compact-access-body {
+  font-size: 26rpx;
+  line-height: 1.55;
+  color: var(--vm-text);
+}
+
+.shell__accessible-lane {
+  display: grid;
+  gap: 8rpx;
+  padding: 18rpx 18rpx 16rpx;
+  border-radius: 24rpx;
+  border: 4rpx solid transparent;
+}
+
+.shell__accessible-lane--contrast {
+  background: #edf4fc;
+  border-color: rgba(45, 95, 147, 0.22);
+}
+
+.shell__accessible-lane--action {
+  background: #eef7f1;
+  border-color: rgba(47, 125, 91, 0.22);
+}
+
+.shell__accessible-lane--group {
+  background: #f4f7fb;
+  border-color: rgba(31, 122, 74, 0.22);
+}
+
+.shell__accessible-lane-title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.shell__accessible-lane-body {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--vm-muted);
 }
 
 .shell__title-group {
@@ -399,7 +447,7 @@ const showUtilityBar = computed(
   right: -120rpx;
   width: 360rpx;
   height: 360rpx;
-  background: radial-gradient(circle, rgba(255, 202, 96, 0.38), rgba(255, 202, 96, 0));
+  background: rgba(47, 125, 91, 0.1);
 }
 
 .shell__shape--leaf {
@@ -407,32 +455,89 @@ const showUtilityBar = computed(
   left: -120rpx;
   width: 280rpx;
   height: 280rpx;
-  background: radial-gradient(circle, rgba(61, 168, 116, 0.16), rgba(61, 168, 116, 0));
+  background: rgba(58, 120, 216, 0.08);
 }
 
 .shell--ops .shell__shape--sun {
-  background: radial-gradient(circle, rgba(86, 167, 255, 0.3), rgba(86, 167, 255, 0));
+  background: rgba(58, 120, 216, 0.1);
 }
 
 .shell--ops .shell__shape--leaf {
-  background: radial-gradient(circle, rgba(29, 111, 220, 0.14), rgba(29, 111, 220, 0));
+  background: rgba(20, 58, 102, 0.08);
 }
 
-.shell--ops .shell__hero::before {
-  background:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.08), transparent 42%),
-    radial-gradient(circle at 100% 0%, rgba(29, 111, 220, 0.08), transparent 30%);
+.shell--accessible .shell__body {
+  gap: 30rpx;
 }
 
-.shell--ops .shell__hero::after {
-  background:
-    repeating-linear-gradient(
-      135deg,
-      rgba(29, 111, 220, 0.16) 0,
-      rgba(29, 111, 220, 0.16) 4rpx,
-      transparent 4rpx,
-      transparent 14rpx
-    );
+.shell--accessible .shell__utility {
+  display: grid;
+  gap: 18rpx;
+}
+
+.shell--accessible .shell__utility-left {
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14rpx;
+  padding: 18rpx 20rpx;
+  border: 4rpx solid rgba(20, 58, 102, 0.16);
+  border-radius: 28rpx;
+  background: #ffffff;
+}
+
+.shell--accessible .shell__utility-right {
+  width: 100%;
+}
+
+.shell--accessible .shell__utility-right :deep(.accessibility-menu) {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.shell--accessible .shell__compact {
+  display: grid;
+  gap: 20rpx;
+  padding: 28rpx 26rpx;
+  border: 4rpx solid var(--vm-hero-border);
+  border-radius: 32rpx;
+  background: var(--vm-hero-bg);
+}
+
+.shell--accessible .shell__compact-side {
+  padding-top: 0;
+}
+
+.shell--accessible .shell__compact-access {
+  display: grid;
+  gap: 8rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 24rpx;
+  border: 4rpx solid rgba(20, 58, 102, 0.18);
+  background: #f4f7fb;
+}
+
+.shell--accessible .shell__hero {
+  grid-template-columns: 1fr;
+  gap: 24rpx;
+  padding: 32rpx 28rpx 30rpx;
+}
+
+.shell--accessible .shell__hero-main {
+  gap: 18rpx;
+}
+
+.shell--accessible .shell__accessible-lanes {
+  display: grid;
+  gap: 14rpx;
+}
+
+.shell--accessible .shell__content {
+  gap: 28rpx;
+}
+
+.shell--accessible .shell__subtitle {
+  max-width: none;
 }
 
 .vm-page--accessible .shell__hero {
@@ -482,25 +587,43 @@ const showUtilityBar = computed(
 }
 
 .vm-page--accessible .shell__care-banner {
-  gap: 16rpx;
-  padding: 24rpx 24rpx;
+  gap: 18rpx;
+  padding: 26rpx 24rpx;
   border-width: 4rpx;
-  border-color: rgba(47, 120, 231, 0.34);
+  border-color: rgba(20, 58, 102, 0.32);
 }
 
 .vm-page--accessible .shell__care-badge-mark {
-  padding: 10rpx 18rpx;
-  font-size: 26rpx;
+  padding: 12rpx 20rpx;
+  font-size: 28rpx;
 }
 
 .vm-page--accessible .shell__care-badge-title {
-  font-size: 30rpx;
+  font-size: 32rpx;
 }
 
 .vm-page--accessible .shell__care-text {
+  font-size: 30rpx;
+  line-height: 1.72;
+  color: #1f3855;
+}
+
+.vm-page--accessible .shell__accessible-lane-title {
+  font-size: 30rpx;
+}
+
+.vm-page--accessible .shell__accessible-lane-body {
+  font-size: 26rpx;
+  line-height: 1.68;
+  color: var(--vm-text);
+}
+
+.vm-page--accessible .shell__compact-access-mark {
   font-size: 28rpx;
-  line-height: 1.7;
-  color: #1e3a5f;
+}
+
+.vm-page--accessible .shell__compact-access-body {
+  font-size: 28rpx;
 }
 
 .vm-page--accessible .shell__shape {
@@ -511,6 +634,10 @@ const showUtilityBar = computed(
   .shell__hero {
     grid-template-columns: minmax(0, 1.4fr) minmax(220rpx, 0.8fr);
     align-items: start;
+  }
+
+  .shell--accessible .shell__accessible-lanes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>

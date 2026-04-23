@@ -8,6 +8,7 @@ const MAX_LOG_DEPTH = 4;
 const MAX_LOG_STRING_LENGTH = 4_000;
 const MAX_LOG_ARRAY_ITEMS = 20;
 const MAX_LOG_OBJECT_KEYS = 40;
+const SENSITIVE_LOG_KEYS = new Set(["password", "currentpassword", "newpassword", "confirmpassword", "code", "token"]);
 
 @Injectable()
 export class PersistenceInterceptor implements NestInterceptor {
@@ -161,6 +162,11 @@ export class PersistenceInterceptor implements NestInterceptor {
           if (index >= MAX_LOG_OBJECT_KEYS) {
             normalizedObject.__truncated__ = `${entries.length - MAX_LOG_OBJECT_KEYS} more keys`;
             break;
+          }
+
+          if (SENSITIVE_LOG_KEYS.has(key.toLowerCase())) {
+            normalizedObject[key] = "[redacted]";
+            continue;
           }
 
           normalizedObject[key] = this.normalizeForLogValue(nestedValue, depth + 1);

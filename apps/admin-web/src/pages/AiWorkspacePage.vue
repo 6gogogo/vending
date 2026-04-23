@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import type {
+  AiAdminCustomQueryReply,
   AiEventDiagnosis,
   AiFeedbackDraft,
   AiOperationsReport,
@@ -17,10 +18,11 @@ import type {
 import { adminApi } from "../api/admin";
 import { formatDateTime, getTodayDateKeyInBeijing } from "../utils/datetime";
 
-type WorkspaceTab = "report" | "diagnosis" | "restock" | "feedback" | "policy";
+type WorkspaceTab = "report" | "custom" | "diagnosis" | "restock" | "feedback" | "policy";
 type WorkspaceResultPayload =
   | AiEventDiagnosis
   | AiOperationsReport
+  | AiAdminCustomQueryReply
   | AiRestockLayoutSuggestion
   | AiFeedbackDraft
   | AiPolicyOptimizationSuggestion;
@@ -67,6 +69,12 @@ const tabOptions: WorkspaceTabOption[] = [
     label: "运维日报",
     hint: "汇总待办、缺货、临期和反馈。",
     icon: "M4 6.75A2.75 2.75 0 0 1 6.75 4h10.5A2.75 2.75 0 0 1 20 6.75v10.5A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25zm4.5 2.25a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5zm0 4a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5zm0 4a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5z"
+  },
+  {
+    key: "custom",
+    label: "自定义问询",
+    hint: "围绕区域分布、库存和调度自由提问。",
+    icon: "M6.75 5A2.75 2.75 0 0 0 4 7.75v5.5A2.75 2.75 0 0 0 6.75 16H8.5l2.97 2.55a.75.75 0 0 0 .98 0L15.42 16h1.83A2.75 2.75 0 0 0 20 13.25v-5.5A2.75 2.75 0 0 0 17.25 5zm1.5 3.25a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5zm0 3a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5z"
   },
   {
     key: "diagnosis",
@@ -133,6 +141,11 @@ const diagnosisForm = ref({
 });
 const reportDateKey = ref(todayDateKey);
 const reportType = ref<AiOperationsReportType>("morning");
+const customForm = ref({
+  question: "",
+  dateKey: todayDateKey,
+  range: "7d" as DataMonitorRange
+});
 const restockDateKey = ref(todayDateKey);
 const restockRange = ref<DataMonitorRange>("7d");
 const feedbackAlertId = ref("");
@@ -146,6 +159,10 @@ const diagnosisError = ref("");
 const operationsReportResult = ref<AiOperationsReport>();
 const operationsReportLoading = ref(false);
 const operationsReportError = ref("");
+
+const customResult = ref<AiAdminCustomQueryReply>();
+const customLoading = ref(false);
+const customError = ref("");
 
 const restockResult = ref<AiRestockLayoutSuggestion>();
 const restockLoading = ref(false);
@@ -208,6 +225,14 @@ const statusCards = computed<StatusCard[]>(() => [
 ]);
 
 const assistantTips = computed(() => {
+  if (activeTab.value === "custom") {
+    return [
+      "尽量把问题问成“某时间范围 + 某类区域或人群 + 想要的决策建议”。",
+      "这类问询会同时参考已注册人员分布、区域经纬度、服务表现和库存情况。",
+      "如果想更细，可以继续追问某个区域、某类货品或某几台柜机。"
+    ];
+  }
+
   if (activeTab.value === "diagnosis") {
     return [
       "优先填事件编号，其次用订单号或日志编号辅助定位。",
@@ -260,6 +285,8 @@ const readTab = (value: string): WorkspaceTab =>
 
 const readErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : "AI 请求失败，请稍后重试。";
+const truncateText = (value: string, maxLength = 18) =>
+  value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 
 const ensureAiEnabled = () => {
   if (!isAiEnabled.value) {
@@ -333,6 +360,9 @@ const writeWorkspaceStorage = (storage: AiWorkspaceStorage) => {
 
 const applyHistoryPayload = (entry: AiWorkspaceHistoryEntry) => {
   switch (entry.tab) {
+    case "custom":
+      customResult.value = entry.payload as AiAdminCustomQueryReply;
+      break;
     case "diagnosis":
       diagnosisResult.value = entry.payload as AiEventDiagnosis;
       break;
@@ -354,6 +384,10 @@ const applyHistoryPayload = (entry: AiWorkspaceHistoryEntry) => {
 const restoreSavedResults = () => {
   const storage = readWorkspaceStorage();
   historyEntries.value = storage.history;
+
+  if (storage.lastResults.custom) {
+    customResult.value = storage.lastResults.custom.payload as AiAdminCustomQueryReply;
+  }
 
   if (storage.lastResults.diagnosis) {
     diagnosisResult.value = storage.lastResults.diagnosis.payload as AiEventDiagnosis;
@@ -621,6 +655,38 @@ const runOperationsReport = async () => {
     operationsReportError.value = readErrorMessage(error);
   } finally {
     operationsReportLoading.value = false;
+  }
+};
+
+const runCustomQuery = async () => {
+  customError.value = "";
+  customResult.value = undefined;
+
+  if (!customForm.value.question.trim()) {
+    customError.value = "请输入需要分析的问题。";
+    return;
+  }
+
+  try {
+    ensureAiEnabled();
+    customLoading.value = true;
+    const result = await adminApi.aiAdminCustomQuery({
+      question: customForm.value.question.trim(),
+      dateKey: customForm.value.dateKey,
+      range: customForm.value.range
+    });
+    customResult.value = result;
+    recordHistoryEntry({
+      tab: "custom",
+      title: `自定义问询 · ${truncateText(result.question)}`,
+      summary: result.answer,
+      generatedAt: result.meta.generatedAt,
+      payload: result
+    });
+  } catch (error) {
+    customError.value = readErrorMessage(error);
+  } finally {
+    customLoading.value = false;
   }
 };
 
@@ -1070,6 +1136,111 @@ onMounted(() => {
           <div v-else-if="!operationsReportError" class="admin-empty">
             <div class="admin-empty__title">选择业务日和报告类型后生成摘要</div>
             <div class="admin-empty__body">结果会自动整理待办、风险和当天建议动作。</div>
+          </div>
+        </form>
+
+        <form v-else-if="activeTab === 'custom'" class="ai-page__form" @submit.prevent="runCustomQuery">
+          <section class="ai-page__selector-block">
+            <div class="ai-page__selector-head">
+              <div>
+                <span class="admin-kicker">自由问询</span>
+                <h4 class="ai-page__selector-title">围绕区域分布、库存和调度直接提问</h4>
+              </div>
+              <span class="admin-copy">适合追问近几天表现、已注册人员分布和货品调度。</span>
+            </div>
+
+            <div class="admin-grid admin-grid--two">
+              <label class="admin-field">
+                <span class="admin-field__label">参考业务日</span>
+                <input v-model="customForm.dateKey" class="admin-input admin-code" type="date" />
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">观察范围</span>
+                <select v-model="customForm.range" class="admin-select">
+                  <option v-for="item in rangeOptions" :key="item.value" :value="item.value">
+                    {{ item.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <label class="admin-field">
+              <span class="admin-field__label">你的问题</span>
+              <textarea
+                v-model.trim="customForm.question"
+                class="admin-input ai-page__textarea"
+                rows="5"
+                placeholder="例如：根据这几天的表现（已注册人员分布），有什么对于货品调度的建议吗？"
+              />
+            </label>
+
+            <div class="admin-toolbar">
+              <button class="admin-button" :disabled="customLoading">
+                {{ customLoading ? "分析中" : "生成自定义分析" }}
+              </button>
+              <span class="admin-copy">AI 会综合区域经纬度、已注册人员分布、服务表现和库存情况回答。</span>
+            </div>
+          </section>
+
+          <div v-if="customError" class="admin-note ai-page__note ai-page__note--danger">{{ customError }}</div>
+
+          <div v-if="customResult" class="ai-page__result">
+            <div class="ai-page__meta">
+              <span class="admin-pill admin-pill--success">
+                {{ rangeOptions.find((item) => item.value === customResult.range)?.label ?? customResult.range }}
+              </span>
+              <span class="admin-copy">
+                {{ customResult.meta.model }} · {{ formatDateTime(customResult.meta.generatedAt) }}
+              </span>
+            </div>
+
+            <div class="admin-kv">
+              <div class="admin-kv__row">
+                <span class="admin-kv__label">参考业务日</span>
+                <span class="admin-kv__value admin-code">{{ customResult.dateKey }}</span>
+              </div>
+              <div class="admin-kv__row">
+                <span class="admin-kv__label">问题</span>
+                <span class="admin-kv__value">{{ customResult.question }}</span>
+              </div>
+              <div class="admin-kv__row">
+                <span class="admin-kv__label">分析结论</span>
+                <span class="admin-kv__value">{{ customResult.answer }}</span>
+              </div>
+            </div>
+
+            <div class="admin-grid admin-grid--two">
+              <div class="ai-page__list-block">
+                <span class="admin-field__label">关键观察</span>
+                <ul class="ai-page__list">
+                  <li v-for="(item, index) in customResult.keyObservations" :key="`custom-observation-${index}`">
+                    {{ item }}
+                  </li>
+                </ul>
+              </div>
+              <div class="ai-page__list-block">
+                <span class="admin-field__label">建议动作</span>
+                <ul class="ai-page__list">
+                  <li v-for="(item, index) in customResult.recommendedActions" :key="`custom-action-${index}`">
+                    {{ item }}
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="ai-page__list-block">
+              <span class="admin-field__label">可继续追问</span>
+              <ul class="ai-page__list">
+                <li v-for="(item, index) in customResult.followUpQuestions" :key="`custom-follow-up-${index}`">
+                  {{ item }}
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div v-else-if="!customError" class="admin-empty">
+            <div class="admin-empty__title">输入运营问题后生成自定义分析</div>
+            <div class="admin-empty__body">适合追问“近几天哪些区域该多补货”“注册分布对投放有什么影响”这类问题。</div>
           </div>
         </form>
 
@@ -1710,6 +1881,13 @@ onMounted(() => {
 .ai-page__choice-card--active {
   border-color: #94afd8;
   background: var(--admin-accent-soft);
+}
+
+.ai-page__textarea {
+  min-height: 132px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.6;
 }
 
 .ai-page__choice-title {

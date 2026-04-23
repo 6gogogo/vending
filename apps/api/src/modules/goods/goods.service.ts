@@ -3,6 +3,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import type {
   DeviceGoodsSetting,
   GoodsAlertPolicy,
+  GoodsBatchRecord,
   GoodsBatchSource,
   GoodsCatalogItem,
   GoodsCategoryRecord,
@@ -697,29 +698,22 @@ export class GoodsService {
         .filter((entry) => entry.status !== "inactive")
         .map((goods) => {
           const distribution = goodsByDevice.filter((item) => item.goodsId === goods.goodsId);
+          const batches = this.listActiveGoodsBatches(undefined, goods.goodsId);
+          const warehouseStock = batches
+            .filter((entry) => entry.locationType === "warehouse")
+            .reduce((sum, entry) => sum + entry.remainingQuantity, 0);
 
           return {
             goodsId: goods.goodsId,
             goodsName: goods.name,
             category: goods.category,
-            totalStock:
-              distribution.reduce((sum, item) => sum + item.stock, 0) +
-              this.store.warehouses.reduce(
-                (sum, warehouse) => sum + this.store.getCurrentStock(warehouse.code, goods.goodsId),
-                0
-              ),
-            warehouseStock: this.store.warehouses.reduce(
-              (sum, warehouse) => sum + this.store.getCurrentStock(warehouse.code, goods.goodsId),
-              0
-            ),
+            totalStock: batches.reduce((sum, entry) => sum + entry.remainingQuantity, 0),
+            warehouseStock,
             lowStockDevices: distribution.filter((item) => item.status === "low").length,
             outOfStockDevices: distribution.filter((item) => item.status === "empty").length,
-            nearestExpiryAt: distribution
-              .map((item) => item.nearestExpiryAt)
-              .filter((value): value is string => Boolean(value))
-              .sort((left, right) => left.localeCompare(right))
-              .at(0),
-            deviceDistribution: distribution.sort((left, right) => left.deviceCode.localeCompare(right.deviceCode))
+            nearestExpiryAt: batches.find((entry) => entry.expiresAt)?.expiresAt,
+            deviceDistribution: distribution.sort((left, right) => left.deviceCode.localeCompare(right.deviceCode)),
+            batches
           };
         })
         .sort((left, right) => left.goodsId.localeCompare(right.goodsId)),
@@ -748,6 +742,12 @@ export class GoodsService {
             <td>${item.lowStockDevices}</td>
             <td>${item.outOfStockDevices}</td>
             <td>${item.nearestExpiryAt?.slice(0, 10) ?? ""}</td>
+            <td>${item.batches
+              .map(
+                (batch) =>
+                  `${batch.locationName ?? batch.deviceCode}(${batch.deviceCode}) ${batch.expiresAt?.slice(0, 10) ?? "未设保质期"} 剩余 ${batch.remainingQuantity}`
+              )
+              .join("；")}</td>
             <td>${this.findCatalogItem(item.goodsId).packageForm ?? ""}</td>
             <td>${this.findCatalogItem(item.goodsId).specification ?? ""}</td>
             <td>${this.findCatalogItem(item.goodsId).manufacturer ?? ""}</td>
@@ -781,6 +781,7 @@ export class GoodsService {
     <th>低库存柜机数</th>
     <th>缺货柜机数</th>
     <th>最短保质期</th>
+    <th>批次明细</th>
     <th>包装形式</th>
     <th>商品规格</th>
     <th>厂家</th>
@@ -906,6 +907,37 @@ export class GoodsService {
             : "ok",
       nearestExpiryAt: this.store.getNearestExpiryAt(deviceCode, goodsId)
     };
+  }
+
+  private listActiveGoodsBatches(deviceCode?: string, goodsId?: string) {
+    return this.store
+      .getGoodsBatches(deviceCode, goodsId)
+      .filter((entry) => entry.remainingQuantity > 0)
+      .map((entry) => this.decorateGoodsBatch(entry))
+      .sort((left, right) => this.compareGoodsBatchByExpiry(left, right));
+  }
+
+  private decorateGoodsBatch(entry: GoodsBatchRecord): GoodsBatchRecord {
+    return {
+      ...entry,
+      locationType: entry.locationType ?? (this.store.isWarehouseCode(entry.deviceCode) ? "warehouse" : "device"),
+      locationName: entry.locationName ?? this.store.getLocationName(entry.deviceCode)
+    };
+  }
+
+  private compareGoodsBatchByExpiry(left: GoodsBatchRecord, right: GoodsBatchRecord) {
+    const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
+    const rightExpiry = right.expiresAt ?? "9999-12-31T23:59:59.999Z";
+
+    if (leftExpiry !== rightExpiry) {
+      return leftExpiry.localeCompare(rightExpiry);
+    }
+
+    if (left.deviceCode !== right.deviceCode) {
+      return left.deviceCode.localeCompare(right.deviceCode);
+    }
+
+    return left.createdAt.localeCompare(right.createdAt);
   }
 
   private findCatalogItem(goodsId: string) {

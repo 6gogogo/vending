@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Inject, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Inject, Patch, Post } from "@nestjs/common";
 
 import type { RegistrationApplicationProfile, UserRole } from "@vm/shared-types";
 
@@ -52,27 +52,44 @@ export class AuthController {
     return ok(await this.authService.adminLogin(body.phone, body.code));
   }
 
+  @Post("admin-password-login")
+  async adminPasswordLogin(@Body() body: { username: string; password: string }) {
+    return ok(await this.authService.adminPasswordLogin(body.username, body.password));
+  }
+
+  @Patch("admin-password")
+  async changeAdminPassword(
+    @Headers("authorization") authorization: string | undefined,
+    @Body() body: { currentPassword: string; newPassword: string }
+  ) {
+    return ok(
+      this.authService.changeAdminPassword(
+        this.extractBearerToken(authorization),
+        body.currentPassword,
+        body.newPassword
+      ),
+      "密码已更新。"
+    );
+  }
+
   @Get("session")
   session(@Headers("authorization") authorization?: string) {
-    const token = authorization?.startsWith("Bearer ")
-      ? authorization.slice("Bearer ".length)
-      : undefined;
-    return ok(this.authService.getAdminSession(token));
+    return ok(this.authService.getAdminSession(this.extractBearerToken(authorization)));
   }
 
   @Get("mobile-session")
   mobileSession(@Headers("authorization") authorization?: string) {
-    const token = authorization?.startsWith("Bearer ")
-      ? authorization.slice("Bearer ".length)
-      : undefined;
-    return ok(this.authService.getMobileSession(token));
+    return ok(this.authService.getMobileSession(this.extractBearerToken(authorization)));
   }
 
   @Get("app-session")
   appSession(@Headers("authorization") authorization?: string) {
-    const token = authorization?.startsWith("Bearer ")
+    return ok(this.authService.getAppSession(this.extractBearerToken(authorization)));
+  }
+
+  private extractBearerToken(authorization?: string) {
+    return authorization?.startsWith("Bearer ")
       ? authorization.slice("Bearer ".length)
       : undefined;
-    return ok(this.authService.getAppSession(token));
   }
 }

@@ -291,11 +291,15 @@ export class AnalyticsService {
   private buildRegionBreakdown(dateKeys: string[]): DataMonitorRegionBreakdown[] {
     const dateKeySet = new Set(dateKeys);
     const userMap = new Map(this.store.users.map((entry) => [entry.id, entry]));
+    const regionById = new Map(this.store.regions.map((entry) => [entry.id, entry]));
+    const regionByName = new Map(this.store.regions.map((entry) => [entry.name, entry]));
     const regions = new Map<
       string,
       {
         regionId?: string;
         regionName: string;
+        longitude?: number;
+        latitude?: number;
         servedUsers: Set<string>;
         pickupUnits: number;
         pickupTimes: number;
@@ -314,9 +318,13 @@ export class AnalyticsService {
         return existing;
       }
 
+      const matchedRegion =
+        (regionId ? regionById.get(regionId) : undefined) ?? regionByName.get(regionName);
       const created = {
-        regionId,
-        regionName,
+        regionId: matchedRegion?.id ?? regionId,
+        regionName: matchedRegion?.name ?? regionName,
+        longitude: matchedRegion?.longitude,
+        latitude: matchedRegion?.latitude,
         servedUsers: new Set<string>(),
         pickupUnits: 0,
         pickupTimes: 0,
@@ -385,6 +393,8 @@ export class AnalyticsService {
         return {
           regionId: entry.regionId,
           regionName: entry.regionName,
+          longitude: entry.longitude,
+          latitude: entry.latitude,
           servedUsers: entry.servedUsers.size,
           pickupUnits: entry.pickupUnits,
           pickupTimes: entry.pickupTimes,

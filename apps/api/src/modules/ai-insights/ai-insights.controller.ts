@@ -97,6 +97,32 @@ export class AiInsightsController {
     );
   }
 
+  @Post("admin-custom-query")
+  async adminCustomQuery(
+    @Body()
+    body: {
+      question: string;
+      dateKey?: string;
+      range?: DataMonitorRange;
+      history?: Array<{
+        role: "user" | "assistant";
+        content: string;
+      }>;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(
+      await this.aiInsightsService.adminCustomQuery({
+        question: body.question,
+        dateKey: body.dateKey,
+        range: body.range,
+        history: body.history,
+        actorUserId: request.authUser?.id
+      }),
+      "分析完成"
+    );
+  }
+
   @Get("policy-optimization")
   async policyOptimization(
     @Query("dateKey") dateKey?: string,

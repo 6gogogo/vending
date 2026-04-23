@@ -2,7 +2,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 
-import type { DeviceMonitoringDetail, DeviceRecord, WarehouseInventorySnapshot } from "@vm/shared-types";
+import type {
+  DeviceMonitoringDetail,
+  DeviceRecord,
+  GoodsBatchRecord,
+  WarehouseInventorySnapshot
+} from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
@@ -21,6 +26,7 @@ const transferForm = ref({
   fromCode: "WAREHOUSE-LOCAL",
   toCode: "",
   goodsId: "",
+  sourceBatchId: "",
   quantity: 1,
   note: ""
 });
@@ -55,26 +61,47 @@ const sourceGoodsOptions = computed(() => {
     return [];
   }
 
-  if (transferForm.value.fromCode === snapshot.value?.warehouse.code) {
-    return snapshot.value.items.map((item) => ({
-      goodsId: item.goodsId,
-      goodsName: item.goodsName,
-      currentStock: item.totalStock
-    }));
+  const grouped = new Map<
+    string,
+    { goodsId: string; goodsName: string; currentStock: number; batchCount: number; nearestExpiryAt?: string }
+  >();
+
+  for (const batch of (snapshot.value?.availableBatches ?? []).filter(
+    (entry) => entry.deviceCode === transferForm.value.fromCode
+  )) {
+    const existing = grouped.get(batch.goodsId);
+
+    if (existing) {
+      existing.currentStock += batch.remainingQuantity;
+      existing.batchCount += 1;
+      existing.nearestExpiryAt = sortExpiry(existing.nearestExpiryAt, batch.expiresAt);
+      continue;
+    }
+
+    grouped.set(batch.goodsId, {
+      goodsId: batch.goodsId,
+      goodsName: resolveGoodsName(batch.goodsId),
+      currentStock: batch.remainingQuantity,
+      batchCount: 1,
+      nearestExpiryAt: batch.expiresAt
+    });
   }
 
-  const device = devices.value.find((item) => item.deviceCode === transferForm.value.fromCode);
-
-  return (
-    device?.doors.flatMap((door) =>
-      door.goods.map((goods) => ({
-        goodsId: goods.goodsId,
-        goodsName: goods.name,
-        currentStock: goods.stock
-      }))
-    ) ?? []
-  );
+  return [...grouped.values()].sort((left, right) => left.goodsId.localeCompare(right.goodsId));
 });
+
+const sourceBatchOptions = computed(() =>
+  (snapshot.value?.availableBatches ?? [])
+    .filter(
+      (entry) =>
+        entry.deviceCode === transferForm.value.fromCode && entry.goodsId === transferForm.value.goodsId
+    )
+    .sort(compareBatchByExpiry)
+);
+
+const selectedBatch = computed(() =>
+  sourceBatchOptions.value.find((entry) => entry.batchId === transferForm.value.sourceBatchId)
+);
 
 const loadStocktakeDevice = async (deviceCode: string) => {
   if (!deviceCode) {
@@ -106,6 +133,10 @@ const load = async () => {
     transferForm.value.toCode = transferForm.value.toCode || deviceResponse[0]?.deviceCode || "";
     transferForm.value.goodsId =
       transferForm.value.goodsId || sourceGoodsOptions.value[0]?.goodsId || "";
+    transferForm.value.sourceBatchId =
+      sourceBatchOptions.value.find((entry) => entry.batchId === transferForm.value.sourceBatchId)?.batchId ??
+      sourceBatchOptions.value[0]?.batchId ??
+      "";
     stocktakeForm.value.deviceCode = stocktakeForm.value.deviceCode || deviceResponse[0]?.deviceCode || "";
 
     if (stocktakeForm.value.deviceCode) {
@@ -122,10 +153,15 @@ const load = async () => {
 };
 
 const submitTransfer = async () => {
-  if (!transferForm.value.fromCode || !transferForm.value.toCode || !transferForm.value.goodsId) {
+  if (
+    !transferForm.value.fromCode ||
+    !transferForm.value.toCode ||
+    !transferForm.value.goodsId ||
+    !transferForm.value.sourceBatchId
+  ) {
     message.value = {
       type: "error",
-      text: "操作失败：请先选择完整的调拨信息"
+      text: "操作失败：请先选择完整的调拨信息和来源批次"
     };
     return;
   }
@@ -137,6 +173,7 @@ const submitTransfer = async () => {
       toCode: transferForm.value.toCode,
       goodsId: transferForm.value.goodsId,
       quantity: transferForm.value.quantity,
+      sourceBatchId: transferForm.value.sourceBatchId,
       note: transferForm.value.note || undefined
     });
     message.value = {
@@ -223,7 +260,31 @@ watch(
   () => transferForm.value.fromCode,
   () => {
     transferForm.value.goodsId = sourceGoodsOptions.value[0]?.goodsId || "";
+    transferForm.value.sourceBatchId = sourceBatchOptions.value[0]?.batchId || "";
   }
+);
+
+watch(
+  () => transferForm.value.goodsId,
+  () => {
+    transferForm.value.sourceBatchId = sourceBatchOptions.value[0]?.batchId || "";
+  }
+);
+
+watch(
+  selectedBatch,
+  (value) => {
+    if (!value) {
+      transferForm.value.quantity = 1;
+      return;
+    }
+
+    transferForm.value.quantity = Math.max(
+      1,
+      Math.min(transferForm.value.quantity || 1, value.remainingQuantity)
+    );
+  },
+  { immediate: true }
 );
 
 watch(
@@ -234,6 +295,43 @@ watch(
 );
 
 onMounted(load);
+
+function compareBatchByExpiry(left: GoodsBatchRecord, right: GoodsBatchRecord) {
+  const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
+  const rightExpiry = right.expiresAt ?? "9999-12-31T23:59:59.999Z";
+
+  if (leftExpiry !== rightExpiry) {
+    return leftExpiry.localeCompare(rightExpiry);
+  }
+
+  return left.createdAt.localeCompare(right.createdAt);
+}
+
+function sortExpiry(current?: string, next?: string) {
+  if (!current) {
+    return next;
+  }
+
+  if (!next) {
+    return current;
+  }
+
+  return current.localeCompare(next) <= 0 ? current : next;
+}
+
+function resolveGoodsName(goodsId: string) {
+  return (
+    snapshot.value?.items.find((item) => item.goodsId === goodsId)?.goodsName ??
+    devices.value
+      .flatMap((item) => item.doors.flatMap((door) => door.goods))
+      .find((goods) => goods.goodsId === goodsId)?.name ??
+    goodsId
+  );
+}
+
+function formatBatchDate(value?: string) {
+  return value ? formatDate(value) : "未设保质期";
+}
 </script>
 
 <template>
@@ -263,7 +361,7 @@ onMounted(load);
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">仓库库存</span>
-            <h3 class="admin-panel__title">查看仓库当前在库量和最短保质期</h3>
+            <h3 class="admin-panel__title">查看仓库当前在库量和保质期批次</h3>
           </div>
         </div>
 
@@ -273,7 +371,7 @@ onMounted(load);
               <th>货品</th>
               <th>库存</th>
               <th>批次数</th>
-              <th>最短保质期</th>
+              <th>批次明细</th>
               <th>详情</th>
             </tr>
           </thead>
@@ -287,7 +385,17 @@ onMounted(load);
               </td>
               <td class="admin-code">{{ item.totalStock }}</td>
               <td class="admin-code">{{ item.batchCount }}</td>
-              <td class="admin-code">{{ formatDate(item.nearestExpiryAt) }}</td>
+              <td>
+                <div class="warehouse-batch-list">
+                  <div v-for="batch in item.batches.slice(0, 4)" :key="batch.batchId" class="warehouse-batch-item">
+                    <span class="admin-table__strong">{{ formatBatchDate(batch.expiresAt) }}</span>
+                    <span class="admin-table__subtext">剩余 {{ batch.remainingQuantity }} 件</span>
+                  </div>
+                  <span v-if="item.batches.length > 4" class="admin-table__subtext">
+                    其余 {{ item.batches.length - 4 }} 批请进详情查看
+                  </span>
+                </div>
+              </td>
               <td><RouterLink class="admin-link" :to="`/goods/${item.goodsId}`">详情</RouterLink></td>
             </tr>
           </tbody>
@@ -328,18 +436,35 @@ onMounted(load);
               <span class="admin-field__label">货品</span>
               <select v-model="transferForm.goodsId" class="admin-select">
                 <option v-for="item in sourceGoodsOptions" :key="item.goodsId" :value="item.goodsId">
-                  {{ item.goodsName }} / 当前 {{ item.currentStock }}
+                  {{ item.goodsName }} / 当前 {{ item.currentStock }} / {{ item.batchCount }} 批 / 最早 {{ formatBatchDate(item.nearestExpiryAt) }}
+                </option>
+              </select>
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">来源批次</span>
+              <select v-model="transferForm.sourceBatchId" class="admin-select">
+                <option v-for="item in sourceBatchOptions" :key="item.batchId" :value="item.batchId">
+                  {{ formatBatchDate(item.expiresAt) }} / 剩余 {{ item.remainingQuantity }} / {{ item.locationName || item.deviceCode }}
                 </option>
               </select>
             </label>
             <label class="admin-field">
               <span class="admin-field__label">数量</span>
-              <input v-model.number="transferForm.quantity" class="admin-input" type="number" min="1" />
+              <input
+                v-model.number="transferForm.quantity"
+                class="admin-input"
+                type="number"
+                min="1"
+                :max="selectedBatch?.remainingQuantity || undefined"
+              />
             </label>
             <label class="admin-field">
               <span class="admin-field__label">备注</span>
               <input v-model="transferForm.note" class="admin-input" placeholder="例如 上午调拨" />
             </label>
+            <div v-if="selectedBatch" class="admin-note">
+              当前选择批次：保质期 {{ formatBatchDate(selectedBatch.expiresAt) }}，可调拨 {{ selectedBatch.remainingQuantity }} 件。
+            </div>
             <button class="admin-button" :disabled="saving" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
           </div>
         </article>
@@ -387,7 +512,7 @@ onMounted(load);
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">最近调拨</span>
-            <h3 class="admin-panel__title">记录来源、去向和数量</h3>
+            <h3 class="admin-panel__title">记录来源、去向、批次和数量</h3>
           </div>
         </div>
 
@@ -398,6 +523,7 @@ onMounted(load);
               <th>货品</th>
               <th>来源</th>
               <th>去向</th>
+              <th>批次</th>
               <th>数量</th>
             </tr>
           </thead>
@@ -407,6 +533,18 @@ onMounted(load);
               <td>{{ item.goodsName }}</td>
               <td>{{ item.fromName }}</td>
               <td>{{ item.toName }}</td>
+              <td>
+                <div class="warehouse-batch-list">
+                  <div
+                    v-for="batch in item.batches"
+                    :key="`${item.id}-${batch.sourceBatchId}`"
+                    class="warehouse-batch-item"
+                  >
+                    <span class="admin-table__strong">{{ formatBatchDate(batch.expiresAt) }}</span>
+                    <span class="admin-table__subtext">{{ batch.quantity }} 件</span>
+                  </div>
+                </div>
+              </td>
               <td class="admin-code">{{ item.quantity }}</td>
             </tr>
           </tbody>
@@ -461,6 +599,16 @@ onMounted(load);
 .warehouse-stocktake-list {
   display: grid;
   gap: 10px;
+}
+
+.warehouse-batch-list {
+  display: grid;
+  gap: 6px;
+}
+
+.warehouse-batch-item {
+  display: grid;
+  gap: 2px;
 }
 
 .warehouse-stocktake-item {

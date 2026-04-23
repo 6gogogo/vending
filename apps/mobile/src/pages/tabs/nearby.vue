@@ -9,6 +9,7 @@ import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { getErrorMessage } from "../../utils/error-message";
 import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils/receivable-goods";
 import { syncRoleTabBar } from "../../utils/role-routing";
@@ -18,6 +19,7 @@ const DEFAULT_MARKER_ICON = "https://a.amap.com/jsapi_demos/static/demo-center/i
 const ACTIVE_MARKER_ICON = "https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-red.png";
 
 const sessionStore = useSessionStore();
+const uiPreferencesStore = useUiPreferencesStore();
 const devices = ref<DeviceRecord[]>([]);
 const loading = ref(false);
 const distanceEnabled = ref(false);
@@ -26,6 +28,8 @@ const selectedGoodsId = ref("");
 const highlightedDeviceCode = ref("");
 const currentLocation = ref<{ longitude: number; latitude: number }>();
 const locationMessage = ref("正在读取当前位置");
+
+uiPreferencesStore.hydrate();
 
 const statusLabelMap: Record<DeviceStatus, string> = {
   online: "在线",
@@ -39,9 +43,12 @@ const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
   maintenance: "warning"
 };
 
+const accessibilityEnabled = computed(() => uiPreferencesStore.isAccessibilityEnabled(sessionStore.user?.role));
+const isAccessibleSpecial = computed(() => sessionStore.user?.role === "special" && accessibilityEnabled.value);
+
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return "查看附近柜机位置和当前可领取的货品，再进入领取。";
+    return isAccessibleSpecial.value ? "只显示柜机名称、地点和可领取货物。" : "查看附近柜机位置和当前可领取的货品，再进入领取。";
   }
 
   if (sessionStore.user?.role === "merchant") {
@@ -61,8 +68,11 @@ const deviceEntries = computed(() =>
           : device.doors.flatMap((door) => door.goods)
     }))
 );
+const visibleDeviceEntries = computed(() =>
+  isAccessibleSpecial.value ? deviceEntries.value.filter((entry) => entry.visibleGoods.length) : deviceEntries.value
+);
 
-const visibleDevices = computed(() => deviceEntries.value.map((entry) => entry.device));
+const visibleDevices = computed(() => visibleDeviceEntries.value.map((entry) => entry.device));
 
 const mappableDevices = computed(() =>
   visibleDevices.value.filter(
@@ -184,11 +194,11 @@ const mapMarkers = computed(() =>
       zIndex: highlighted ? 30 : 10,
       callout: {
         content: `${device.name}\n${distanceText}`,
-        color: highlighted ? "#ffffff" : "#213547",
+        color: highlighted ? "#ffffff" : "#17293f",
         fontSize: 12,
         borderRadius: 8,
         padding: 6,
-        bgColor: highlighted ? "#d35b4f" : "#fffaf0",
+        bgColor: highlighted ? "#143a66" : "#ffffff",
         display: highlighted ? "ALWAYS" : "BYCLICK",
         textAlign: "center"
       }
@@ -417,7 +427,7 @@ onShow(() => {
   >
     <GlassCard tone="quiet">
       <view class="vm-stack">
-        <view v-if="mappableDevices.length" class="nearby-map-card">
+        <view v-if="mappableDevices.length && !isAccessibleSpecial" class="nearby-map-card">
           <map
             class="nearby-map nearby-map--compact"
             :longitude="mapCenter.longitude"
@@ -470,29 +480,31 @@ onShow(() => {
           </view>
         </view>
 
-        <view v-if="deviceEntries.length" class="device-list">
+        <view v-if="visibleDeviceEntries.length" class="device-list">
           <view
-            v-for="entry in deviceEntries"
+            v-for="entry in visibleDeviceEntries"
             :key="entry.device.deviceCode"
             class="device-card"
-            :class="{ 'device-card--active': entry.device.deviceCode === highlightedDeviceCode }"
-            @tap="focusDevice(entry.device.deviceCode)"
+            :class="{ 'device-card--active': !isAccessibleSpecial && entry.device.deviceCode === highlightedDeviceCode }"
+            @tap="!isAccessibleSpecial && focusDevice(entry.device.deviceCode)"
           >
             <view class="device-card__head">
               <view class="device-card__main">
                 <text class="device-card__title">{{ entry.device.name }}</text>
                 <text class="device-card__meta">{{ entry.device.location }}</text>
-                <text class="device-card__meta">
+                <text v-if="!isAccessibleSpecial" class="device-card__meta">
                   柜机编号 {{ entry.device.deviceCode }} · 最近在线 {{ entry.device.lastSeenAt.slice(0, 16).replace("T", " ") }}
                 </text>
-                <text class="device-card__meta">
+                <text v-if="!isAccessibleSpecial" class="device-card__meta">
                   {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按默认顺序显示" }}
                 </text>
-                <text v-if="sessionStore.user?.role === 'special'" class="device-card__highlight">
+                <text v-if="sessionStore.user?.role === 'special' && !isAccessibleSpecial" class="device-card__highlight">
                   仅展示你当前还能领取且柜内有货的物资
                 </text>
               </view>
-              <text class="vm-status" :class="`vm-status--${statusToneMap[entry.device.status]}`">{{ statusLabelMap[entry.device.status] }}</text>
+              <text v-if="!isAccessibleSpecial" class="vm-status" :class="`vm-status--${statusToneMap[entry.device.status]}`">
+                {{ statusLabelMap[entry.device.status] }}
+              </text>
             </view>
 
             <view v-if="entry.visibleGoods.length" class="goods-list">
@@ -502,52 +514,56 @@ onShow(() => {
                   <text class="goods-item__meta">
                     {{
                       sessionStore.user?.role === "special"
-                        ? `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 今日可领 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
+                        ? isAccessibleSpecial
+                          ? `今日可领 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
+                          : `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 今日可领 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
                         : `${categoryLabelMap[goods.category]} · 当前 ${goods.stock} 件`
                     }}
                   </text>
                 </view>
-                <text v-if="goods.expiresAt" class="goods-item__meta">
+                <text v-if="goods.expiresAt && !isAccessibleSpecial" class="goods-item__meta">
                   至 {{ goods.expiresAt.slice(5, 10) }}
                 </text>
               </view>
             </view>
             <view v-else-if="sessionStore.user?.role === 'special'" class="device-card__empty">
               <text class="device-card__empty-title">当前这台柜机没有你今天可领取的货品</text>
-              <text class="device-card__empty-body">柜机会继续显示，方便你确认位置；这里只隐藏暂时不能领取的其他货品。</text>
+              <text v-if="!isAccessibleSpecial" class="device-card__empty-body">
+                柜机会继续显示，方便你确认位置；这里只隐藏暂时不能领取的其他货品。
+              </text>
             </view>
 
-            <view class="action-grid">
+            <view class="action-grid" :class="{ 'action-grid--single': isAccessibleSpecial }">
               <button class="vm-button" @tap.stop="openDevice(entry.device.deviceCode)">
                 {{
                   sessionStore.user?.role === "special"
                     ? "进入领取"
                     : sessionStore.user?.role === "merchant"
                       ? "去补货"
-                      : "查看详情"
+                  : "查看详情"
                 }}
               </button>
-              <button class="vm-button vm-button--ghost" @tap.stop="goFeedback(entry.device.deviceCode)">反馈</button>
+              <button v-if="!isAccessibleSpecial" class="vm-button vm-button--ghost" @tap.stop="goFeedback(entry.device.deviceCode)">反馈</button>
             </view>
           </view>
         </view>
 
         <EmptyState
           v-else
-          :title="loading ? '正在同步柜机' : '当前没有可展示柜机'"
-          :description="loading ? '请稍候，系统正在拉取设备信息。' : '请确认后端是否已经接入柜机数据。'"
+          :title="loading ? '正在同步柜机' : isAccessibleSpecial ? '当前没有可领取货物' : '当前没有可展示柜机'"
+          :description="loading ? '请稍候，系统正在拉取设备信息。' : isAccessibleSpecial ? '系统会按你的资格和库存自动刷新。' : '请确认后端是否已经接入柜机数据。'"
         />
       </view>
     </GlassCard>
 
-    <GlassCard tone="quiet">
+    <GlassCard v-if="!isAccessibleSpecial" tone="quiet">
       <view class="vm-stack nearby-advice">
         <text class="nearby-advice__title">{{ heroSupport.title }}</text>
         <text v-for="line in heroSupport.lines" :key="line" class="nearby-advice__body">{{ line }}</text>
       </view>
     </GlassCard>
 
-    <view v-if="mapExpanded" class="nearby-map-overlay" @tap.self="mapExpanded = false">
+    <view v-if="mapExpanded && !isAccessibleSpecial" class="nearby-map-overlay" @tap.self="mapExpanded = false">
       <view class="nearby-map-overlay__panel">
         <view class="nearby-map-overlay__head">
           <view>
@@ -641,8 +657,8 @@ onShow(() => {
   gap: 8rpx;
   padding: 18rpx 20rpx;
   border-radius: 20rpx;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1rpx dashed rgba(159, 127, 94, 0.2);
+  background: var(--vm-surface-soft);
+  border: 1rpx dashed var(--vm-line-strong);
 }
 
 .device-card__empty-title {
@@ -660,8 +676,8 @@ onShow(() => {
 .nearby-location-banner {
   padding: 18rpx 20rpx;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1rpx solid rgba(159, 127, 94, 0.14);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .nearby-map-card__picker {
@@ -670,8 +686,8 @@ onShow(() => {
   align-items: center;
   padding: 0 24rpx;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1rpx solid rgba(159, 127, 94, 0.16);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line-strong);
   color: var(--vm-text);
   font-size: 24rpx;
 }
@@ -708,8 +724,8 @@ onShow(() => {
   gap: 6rpx;
   padding: 16rpx 18rpx;
   border-radius: 20rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .nearby-map-card__focus-title {
@@ -722,13 +738,17 @@ onShow(() => {
   gap: 16rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
+}
+
+.action-grid--single {
+  grid-template-columns: 1fr;
 }
 
 .device-card--active {
-  border-color: rgba(62, 110, 73, 0.35);
-  box-shadow: 0 0 0 4rpx rgba(62, 110, 73, 0.08);
+  border-color: var(--vm-info-line);
+  box-shadow: 0 0 0 4rpx var(--vm-focus-ring);
 }
 
 .device-card__head,
@@ -751,6 +771,20 @@ onShow(() => {
   color: var(--vm-text);
 }
 
+.vm-page--accessible .device-card__title {
+  font-size: 38rpx;
+}
+
+.vm-page--accessible .device-card__meta,
+.vm-page--accessible .goods-item__meta {
+  font-size: 28rpx;
+  color: var(--vm-text);
+}
+
+.vm-page--accessible .goods-item {
+  align-items: flex-start;
+}
+
 .nearby-map-overlay {
   position: fixed;
   inset: 0;
@@ -768,7 +802,8 @@ onShow(() => {
   gap: 20rpx;
   padding: 24rpx;
   border-radius: 28rpx;
-  background: #fffaf0;
+  background: var(--vm-surface-strong);
   overflow: auto;
 }
 </style>
+

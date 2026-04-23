@@ -150,8 +150,8 @@ onUnload(() => {
   gap: 8rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1rpx solid rgba(159, 127, 94, 0.12);
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
 }
 
 .status-box__label {
@@ -165,3 +165,4 @@ onUnload(() => {
   line-height: 1.5;
 }
 </style>
+

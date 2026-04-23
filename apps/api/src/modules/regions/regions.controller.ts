@@ -18,7 +18,7 @@ export class RegionsController {
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   create(
-    @Body() body: { name: string; sortOrder?: number },
+    @Body() body: { name: string; sortOrder?: number; longitude?: number; latitude?: number },
     @Req() request: { authUser?: { id: string } }
   ) {
     return ok(this.regionsService.create(body, request.authUser?.id), "操作成功");
@@ -34,6 +34,8 @@ export class RegionsController {
       name?: string;
       status?: "active" | "inactive";
       sortOrder?: number;
+      longitude?: number;
+      latitude?: number;
     },
     @Req() request: { authUser?: { id: string } }
   ) {

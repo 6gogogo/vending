@@ -1,4 +1,5 @@
 import type {
+  AiAdminCustomQueryReply,
   AiEventDiagnosis,
   AiFeedbackDraft,
   AiOperationsReport,
@@ -46,6 +47,11 @@ interface AdminLoginResponse {
     phone: string;
     tags: string[];
   };
+  auth: {
+    username: string;
+    usesDefaultPassword: boolean;
+    passwordUpdatedAt: string;
+  };
 }
 
 export const adminApi = {
@@ -62,6 +68,12 @@ export const adminApi = {
   },
   adminLogin(phone: string, code: string) {
     return adminClient.post<AdminLoginResponse>("/auth/admin-login", { phone, code });
+  },
+  adminPasswordLogin(username: string, password: string) {
+    return adminClient.post<AdminLoginResponse>("/auth/admin-password-login", { username, password });
+  },
+  changeAdminPassword(payload: { currentPassword: string; newPassword: string }) {
+    return adminClient.patch<AdminLoginResponse>("/auth/admin-password", payload);
   },
   session() {
     return adminClient.get<AdminLoginResponse>("/auth/session");
@@ -90,7 +102,12 @@ export const adminApi = {
   regions() {
     return adminClient.get<RegionRecord[]>("/regions");
   },
-  createRegion(payload: { name: string; sortOrder?: number }) {
+  createRegion(payload: {
+    name: string;
+    sortOrder?: number;
+    longitude?: number;
+    latitude?: number;
+  }) {
     return adminClient.post<RegionRecord>("/regions", payload);
   },
   updateRegion(
@@ -99,6 +116,8 @@ export const adminApi = {
       name: string;
       status: "active" | "inactive";
       sortOrder: number;
+      longitude: number;
+      latitude: number;
     }>
   ) {
     return adminClient.patch<RegionRecord>(`/regions/${id}`, payload);
@@ -483,6 +502,17 @@ export const adminApi = {
       query
     });
   },
+  aiAdminCustomQuery(payload: {
+    question: string;
+    dateKey?: string;
+    range?: DataMonitorRange;
+    history?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+  }) {
+    return adminClient.post<AiAdminCustomQueryReply>("/ai-insights/admin-custom-query", payload);
+  },
   warehouses() {
     return adminClient.get<WarehouseRecord[]>("/warehouses");
   },
@@ -494,6 +524,7 @@ export const adminApi = {
     toCode: string;
     goodsId: string;
     quantity: number;
+    sourceBatchId?: string;
     note?: string;
   }) {
     return adminClient.post("/inventory-transfers", payload);

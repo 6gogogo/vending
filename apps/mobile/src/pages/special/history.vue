@@ -155,7 +155,7 @@ onShow(load);
   margin-top: 10rpx;
   border-radius: 999rpx;
   background: var(--vm-accent);
-  box-shadow: 0 0 0 10rpx rgba(61, 168, 116, 0.12);
+  box-shadow: 0 0 0 10rpx var(--vm-focus-ring);
 }
 
 .timeline__body {
@@ -163,7 +163,7 @@ onShow(load);
   flex-direction: column;
   gap: 10rpx;
   padding-bottom: 22rpx;
-  border-bottom: 1rpx solid rgba(159, 127, 94, 0.12);
+  border-bottom: 1rpx solid var(--vm-line);
 }
 
 .timeline__head {

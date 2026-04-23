@@ -342,8 +342,8 @@ watch(
   gap: 16rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.18);
-  background: rgba(255, 252, 246, 0.88);
+  border: 1rpx solid var(--vm-line-strong);
+  background: var(--vm-surface-soft);
   text-align: left;
 }
 
@@ -367,6 +367,7 @@ watch(
   width: 180rpx;
   height: 180rpx;
   border-radius: 24rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.18);
+  border: 1rpx solid var(--vm-line-strong);
 }
 </style>
+

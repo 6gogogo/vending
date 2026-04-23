@@ -271,12 +271,12 @@ onLoad((query) => {
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
   border: 1rpx solid var(--vm-line);
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--vm-surface-soft);
 }
 
 .template-item--active {
-  border-color: rgba(29, 111, 220, 0.28);
-  background: rgba(245, 250, 255, 0.96);
+  border-color: var(--vm-info-line);
+  background: var(--vm-info-bg);
 }
 
 .picker-value {
@@ -289,3 +289,4 @@ onLoad((query) => {
   align-items: start;
 }
 </style>
+

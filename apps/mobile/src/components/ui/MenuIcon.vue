@@ -177,13 +177,13 @@ withDefaults(
 }
 
 .menu-icon--accent {
-  background: linear-gradient(180deg, rgba(13, 148, 136, 0.18), rgba(13, 148, 136, 0.08));
-  border: 1rpx solid rgba(13, 148, 136, 0.18);
+  background: var(--vm-accent-soft);
+  border: 1rpx solid var(--vm-accent-line);
   color: var(--vm-accent-strong);
 }
 
 .menu-icon--neutral {
-  background: rgba(255, 255, 252, 0.84);
+  background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line-strong);
   color: var(--vm-text);
 }
@@ -192,13 +192,34 @@ withDefaults(
   --menu-icon-fill: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.14);
   border: 1rpx solid rgba(255, 255, 255, 0.26);
-  color: #fffdfa;
+  color: #ffffff;
 }
 
 .menu-icon--warning {
-  background: rgba(201, 122, 24, 0.1);
-  border: 1rpx solid rgba(201, 122, 24, 0.16);
+  background: var(--vm-warning-soft);
+  border: 1rpx solid var(--vm-warning-line);
   color: var(--vm-warning);
+}
+
+.vm-page--accessible .menu-icon--accent,
+.vm-page--accessible .menu-icon--neutral,
+.vm-page--accessible .menu-icon--warning {
+  border-width: 3rpx;
+}
+
+.vm-page--accessible .menu-icon--accent {
+  background: var(--vm-info-bg);
+  border-color: var(--vm-info-line);
+  color: var(--vm-info);
+}
+
+.vm-page--accessible .menu-icon--neutral {
+  background: #ffffff;
+  border-color: var(--vm-line-strong);
+}
+
+.vm-page--accessible .menu-icon--warning {
+  background: var(--vm-warning-bg);
 }
 
 .menu-icon__outline,
@@ -410,7 +431,7 @@ withDefaults(
 }
 
 .restock__plus {
-  background: #fffdfa;
+  background: #ffffff;
   z-index: 1;
 }
 
@@ -640,8 +661,8 @@ withDefaults(
   left: 18%;
   top: 21%;
   border-radius: 16%;
-  background: #16a34a;
-  border-color: #15803d;
+  background: var(--vm-accent-strong);
+  border-color: var(--vm-accent);
 }
 
 .logout__door {
@@ -651,7 +672,7 @@ withDefaults(
   top: 36%;
   border-radius: 8rpx;
   background: transparent;
-  border-color: #fffdfa;
+  border-color: #ffffff;
 }
 
 .logout__head {
@@ -659,7 +680,7 @@ withDefaults(
   height: 8%;
   left: 31%;
   top: 34%;
-  background: #fffdfa;
+  background: #ffffff;
 }
 
 .logout__torso,
@@ -667,7 +688,7 @@ withDefaults(
 .logout__leg {
   height: 4rpx;
   transform-origin: right center;
-  background: #fffdfa;
+  background: #ffffff;
 }
 
 .logout__torso {
@@ -703,7 +724,7 @@ withDefaults(
 .logout__arrow {
   height: 4rpx;
   right: 18%;
-  background: #fffdfa;
+  background: #ffffff;
   transform-origin: right center;
 }
 

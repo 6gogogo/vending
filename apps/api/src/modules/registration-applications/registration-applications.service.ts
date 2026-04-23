@@ -116,6 +116,7 @@ export class RegistrationApplicationsService {
     profile: RegistrationApplicationProfile;
   }) {
     const phone = payload.phone.trim();
+    const normalizedProfile = this.normalizeProfile(payload.profile);
     await this.ensureVerifiedCode(phone, payload.code);
 
     const existingUser = this.store.users.find((entry) => entry.phone === phone);
@@ -126,13 +127,13 @@ export class RegistrationApplicationsService {
     }
 
     if (existingUser) {
-      return this.completeExistingImportedUser(existingUser, payload.profile);
+      return this.completeExistingImportedUser(existingUser, normalizedProfile);
     }
 
     return this.upsertPendingApplication(existingApplication, {
       phone,
       requestedRole: payload.requestedRole ?? existingApplication?.requestedRole ?? "special",
-      profile: payload.profile
+      profile: normalizedProfile
     });
   }
 
@@ -146,6 +147,7 @@ export class RegistrationApplicationsService {
     }
   ) {
     const application = this.detail(id);
+    const normalizedProfile = this.normalizeProfile(payload.profile);
 
     if (!["pending", "rejected"].includes(application.status)) {
       throw new BadRequestException("当前申请已结束，不能继续修改。");
@@ -161,13 +163,13 @@ export class RegistrationApplicationsService {
     }
 
     if (existingUser) {
-      return this.completeExistingImportedUser(existingUser, payload.profile);
+      return this.completeExistingImportedUser(existingUser, normalizedProfile);
     }
 
     return this.upsertPendingApplication(application, {
       phone,
       requestedRole: payload.requestedRole ?? application.requestedRole,
-      profile: payload.profile
+      profile: normalizedProfile
     });
   }
 
@@ -188,6 +190,8 @@ export class RegistrationApplicationsService {
       throw new BadRequestException("已登记用户无需创建新的审核申请。");
     }
 
+    const normalizedProfile = this.normalizeProfile(payload.profile);
+
     const existing =
       (draft.applicationId ? this.store.registrationApplications.find((entry) => entry.id === draft.applicationId) : undefined) ??
       this.findLatestByPhone(draft.phone);
@@ -195,7 +199,7 @@ export class RegistrationApplicationsService {
     return this.upsertPendingApplication(existing, {
       phone: draft.phone,
       requestedRole: payload.requestedRole ?? draft.requestedRole ?? "special",
-      profile: payload.profile
+      profile: normalizedProfile
     });
   }
 
@@ -232,13 +236,15 @@ export class RegistrationApplicationsService {
       return application;
     }
 
+    const normalizedProfile = this.normalizeProfile(application.profile);
+    application.profile = normalizedProfile;
     const linkedUser =
       (application.linkedUserId
         ? this.store.users.find((entry) => entry.id === application.linkedUserId)
         : undefined) ?? this.store.users.find((entry) => entry.phone === application.phone);
     const user = linkedUser ?? this.createUserFromApplication(application);
 
-    this.applyProfileToUser(user, application.profile, application.requestedRole);
+    this.applyProfileToUser(user, normalizedProfile, application.requestedRole);
     user.status = "active";
     user.mobileProfileCompleted = true;
     application.linkedUserId = user.id;
@@ -438,6 +444,54 @@ export class RegistrationApplicationsService {
       organization: user.profile?.organization,
       title: user.profile?.title
     };
+  }
+
+  private normalizeProfile(profile: RegistrationApplicationProfile): RegistrationApplicationProfile {
+    const region = this.resolveConfiguredRegion(profile.regionId, profile.regionName ?? profile.neighborhood);
+
+    return {
+      ...profile,
+      name: profile.name.trim(),
+      neighborhood: region.name,
+      regionId: region.id,
+      regionName: region.name,
+      note: profile.note?.trim() || undefined,
+      merchantName: profile.merchantName?.trim() || undefined,
+      contactName: profile.contactName?.trim() || undefined,
+      address: profile.address?.trim() || undefined,
+      organization: profile.organization?.trim() || undefined,
+      title: profile.title?.trim() || undefined
+    };
+  }
+
+  private resolveConfiguredRegion(regionId?: string, regionName?: string) {
+    const activeRegions = this.store.regions.filter((entry) => entry.status === "active");
+
+    if (regionId) {
+      const matchedById = activeRegions.find((entry) => entry.id === regionId);
+
+      if (matchedById) {
+        return {
+          id: matchedById.id,
+          name: matchedById.name
+        };
+      }
+    }
+
+    const normalizedName = regionName?.trim();
+
+    if (normalizedName) {
+      const matchedByName = activeRegions.find((entry) => entry.name === normalizedName);
+
+      if (matchedByName) {
+        return {
+          id: matchedByName.id,
+          name: matchedByName.name
+        };
+      }
+    }
+
+    throw new BadRequestException("请选择已配置区域。");
   }
 
   private resolveUserName(role: UserRole, profile: RegistrationApplicationProfile) {
