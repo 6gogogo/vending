@@ -10,6 +10,7 @@ import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
+import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils/receivable-goods";
 import { syncRoleTabBar } from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
 
@@ -27,8 +28,8 @@ const currentLocation = ref<{ longitude: number; latitude: number }>();
 const locationMessage = ref("正在读取当前位置");
 
 const statusLabelMap: Record<DeviceStatus, string> = {
-  online: "在线可用",
-  offline: "离线待检",
+  online: "在线",
+  offline: "离线",
   maintenance: "维护中"
 };
 
@@ -40,7 +41,7 @@ const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return "查看附近柜机位置、货品与服务时间，再进入领取。";
+    return "查看附近柜机位置和当前可领取的货品，再进入领取。";
   }
 
   if (sessionStore.user?.role === "merchant") {
@@ -50,32 +51,35 @@ const subtitle = computed(() => {
   return "查看所有柜机状态、货品概要与详情入口。";
 });
 
+const deviceEntries = computed(() =>
+  devices.value
+    .map((device) => ({
+      device,
+      visibleGoods:
+        sessionStore.user?.role === "special"
+          ? getReceivableDeviceGoods(device, sessionStore.quota)
+          : device.doors.flatMap((door) => door.goods)
+    }))
+);
+
+const visibleDevices = computed(() => deviceEntries.value.map((entry) => entry.device));
+
 const mappableDevices = computed(() =>
-  devices.value.filter(
+  visibleDevices.value.filter(
     (device) => device.longitude !== undefined && device.latitude !== undefined
   )
 );
 
 const highlightedDevice = computed(() =>
-  devices.value.find((device) => device.deviceCode === highlightedDeviceCode.value)
+  visibleDevices.value.find((device) => device.deviceCode === highlightedDeviceCode.value)
 );
 
 const goodsOptions = computed(() => {
-  const options = new Map<string, { goodsId: string; goodsName: string }>();
-
   if (sessionStore.user?.role === "special") {
-    for (const window of sessionStore.quota?.activeWindows ?? []) {
-      for (const goods of window.goodsLimits) {
-        options.set(goods.goodsId, {
-          goodsId: goods.goodsId,
-          goodsName: goods.goodsName
-        });
-      }
-    }
-
-    return Array.from(options.values());
+    return getReceivableGoodsOptions(sessionStore.quota, devices.value);
   }
 
+  const options = new Map<string, { goodsId: string; goodsName: string }>();
   for (const device of devices.value) {
     for (const door of device.doors) {
       for (const goods of door.goods) {
@@ -233,14 +237,31 @@ const load = async () => {
       locationMessage.value = "未获得定位权限，已按默认顺序展示柜机";
     }
 
-    devices.value = await mobileApi.listDevices(query);
+    const [deviceResponse, quotaResponse] = await Promise.all([
+      mobileApi.listDevices(query),
+      sessionStore.user.role === "special"
+        ? mobileApi.getQuotaSummary(sessionStore.user.phone)
+        : Promise.resolve(undefined)
+    ]);
 
-    if (!highlightedDeviceCode.value && devices.value.length) {
-      highlightedDeviceCode.value = devices.value[0].deviceCode;
+    devices.value = deviceResponse;
+
+    if (quotaResponse) {
+      sessionStore.setQuota(quotaResponse);
+    }
+
+    const nextHighlighted = deviceEntries.value.find(
+      (entry) => entry.device.deviceCode === highlightedDeviceCode.value
+    );
+
+    if (!nextHighlighted && deviceEntries.value.length) {
+      highlightedDeviceCode.value = deviceEntries.value[0].device.deviceCode;
     }
 
     if (!selectedGoodsId.value && goodsOptions.value.length) {
       selectedGoodsId.value = goodsOptions.value[0].goodsId;
+    } else if (!goodsOptions.value.some((item) => item.goodsId === selectedGoodsId.value)) {
+      selectedGoodsId.value = goodsOptions.value[0]?.goodsId ?? "";
     }
   } catch (error) {
     uni.showToast({
@@ -254,10 +275,13 @@ const load = async () => {
 
 const openDevice = (deviceCode: string) => {
   highlightedDeviceCode.value = deviceCode;
+  const targetDevice = visibleDevices.value.find((device) => device.deviceCode === deviceCode);
+  const distanceQuery =
+    typeof targetDevice?.distanceMeters === "number" ? `&distanceMeters=${targetDevice.distanceMeters}` : "";
 
   if (sessionStore.user?.role === "special") {
     uni.navigateTo({
-      url: `/pages/special/device-detail?deviceCode=${deviceCode}`
+      url: `/pages/special/device-detail?deviceCode=${deviceCode}${distanceQuery}`
     });
     return;
   }
@@ -279,7 +303,7 @@ const focusDevice = (deviceCode: string) => {
 };
 
 const focusNearestDevice = () => {
-  const nearest = devices.value[0];
+  const nearest = visibleDevices.value[0];
 
   if (!nearest) {
     return;
@@ -305,9 +329,10 @@ const focusNearestGoods = () => {
   }
 
   const matched = devices.value.find((device) =>
-    device.doors.some((door) =>
-      door.goods.some((goods) => goods.goodsId === goodsId)
-    )
+    (sessionStore.user?.role === "special"
+      ? getReceivableDeviceGoods(device, sessionStore.quota)
+      : device.doors.flatMap((door) => door.goods)
+    ).some((goods) => goods.goodsId === goodsId)
   );
 
   if (!matched) {
@@ -445,34 +470,41 @@ onShow(() => {
           </view>
         </view>
 
-        <view v-if="devices.length" class="device-list">
+        <view v-if="deviceEntries.length" class="device-list">
           <view
-            v-for="device in devices"
-            :key="device.deviceCode"
+            v-for="entry in deviceEntries"
+            :key="entry.device.deviceCode"
             class="device-card"
-            :class="{ 'device-card--active': device.deviceCode === highlightedDeviceCode }"
-            @tap="focusDevice(device.deviceCode)"
+            :class="{ 'device-card--active': entry.device.deviceCode === highlightedDeviceCode }"
+            @tap="focusDevice(entry.device.deviceCode)"
           >
             <view class="device-card__head">
               <view class="device-card__main">
-                <text class="device-card__title">{{ device.name }}</text>
-                <text class="device-card__meta">{{ device.location }}</text>
+                <text class="device-card__title">{{ entry.device.name }}</text>
+                <text class="device-card__meta">{{ entry.device.location }}</text>
                 <text class="device-card__meta">
-                  柜机编号 {{ device.deviceCode }} · 最近在线 {{ device.lastSeenAt.slice(0, 16).replace("T", " ") }}
+                  柜机编号 {{ entry.device.deviceCode }} · 最近在线 {{ entry.device.lastSeenAt.slice(0, 16).replace("T", " ") }}
                 </text>
                 <text class="device-card__meta">
-                  {{ distanceEnabled ? `距离 ${formatDistance(device.distanceMeters)}` : "未开启定位，按默认顺序显示" }}
+                  {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按默认顺序显示" }}
+                </text>
+                <text v-if="sessionStore.user?.role === 'special'" class="device-card__highlight">
+                  仅展示你当前还能领取且柜内有货的物资
                 </text>
               </view>
-              <text class="vm-status" :class="`vm-status--${statusToneMap[device.status]}`">{{ statusLabelMap[device.status] }}</text>
+              <text class="vm-status" :class="`vm-status--${statusToneMap[entry.device.status]}`">{{ statusLabelMap[entry.device.status] }}</text>
             </view>
 
-            <view class="goods-list">
-              <view v-for="goods in device.doors[0]?.goods ?? []" :key="goods.goodsId" class="goods-item">
+            <view v-if="entry.visibleGoods.length" class="goods-list">
+              <view v-for="goods in entry.visibleGoods" :key="goods.goodsId" class="goods-item">
                 <view class="goods-item__main">
                   <text>{{ goods.name }}</text>
                   <text class="goods-item__meta">
-                    {{ categoryLabelMap[goods.category] }} · 当前 {{ goods.stock }} 件
+                    {{
+                      sessionStore.user?.role === "special"
+                        ? `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 今日可领 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
+                        : `${categoryLabelMap[goods.category]} · 当前 ${goods.stock} 件`
+                    }}
                   </text>
                 </view>
                 <text v-if="goods.expiresAt" class="goods-item__meta">
@@ -480,9 +512,13 @@ onShow(() => {
                 </text>
               </view>
             </view>
+            <view v-else-if="sessionStore.user?.role === 'special'" class="device-card__empty">
+              <text class="device-card__empty-title">当前这台柜机没有你今天可领取的货品</text>
+              <text class="device-card__empty-body">柜机会继续显示，方便你确认位置；这里只隐藏暂时不能领取的其他货品。</text>
+            </view>
 
             <view class="action-grid">
-              <button class="vm-button" @tap.stop="openDevice(device.deviceCode)">
+              <button class="vm-button" @tap.stop="openDevice(entry.device.deviceCode)">
                 {{
                   sessionStore.user?.role === "special"
                     ? "进入领取"
@@ -491,7 +527,7 @@ onShow(() => {
                       : "查看详情"
                 }}
               </button>
-              <button class="vm-button vm-button--ghost" @tap.stop="goFeedback(device.deviceCode)">反馈</button>
+              <button class="vm-button vm-button--ghost" @tap.stop="goFeedback(entry.device.deviceCode)">反馈</button>
             </view>
           </view>
         </view>
@@ -593,6 +629,32 @@ onShow(() => {
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.6;
+}
+
+.device-card__highlight {
+  font-size: 22rpx;
+  color: var(--vm-accent-strong);
+}
+
+.device-card__empty {
+  display: grid;
+  gap: 8rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 20rpx;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1rpx dashed rgba(159, 127, 94, 0.2);
+}
+
+.device-card__empty-title {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.device-card__empty-body {
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--vm-text-soft);
 }
 
 .nearby-location-banner {

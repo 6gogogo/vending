@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
-import type { InventoryMovement, OperationLogRecord, UserRecord } from "@vm/shared-types";
+import type { InventoryMovement, OperationLogRecord, RegistrationApplication, UserRecord } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -9,7 +9,7 @@ import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
-import { showOperationFailure } from "../../utils/operation-feedback";
+import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import { syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
@@ -36,8 +36,10 @@ const merchantDailySummary = ref<Array<{
 }>>([]);
 const merchantCumulativeHelpTimes = ref(0);
 const adminUsers = ref<UserRecord[]>([]);
+const pendingApplications = ref<RegistrationApplication[]>([]);
 const adminLogs = ref<OperationLogRecord[]>([]);
-const adminView = ref<"users" | "logs">("users");
+const rejectReasons = reactive<Record<string, string>>({});
+const adminView = ref<"users" | "reviews" | "logs">("users");
 
 const title = computed(() => {
   if (sessionStore.user?.role === "special") {
@@ -60,7 +62,7 @@ const subtitle = computed(() => {
     return "按日查看货物被领取的件数、帮助人数和累计帮助人次。";
   }
 
-  return "可切换查看人员信息和处理记录。";
+  return "可切换查看人员信息、审批申请和处理记录。";
 });
 
 const load = async () => {
@@ -89,8 +91,13 @@ const load = async () => {
       return;
     }
 
-    const [users, logs] = await Promise.all([mobileApi.users(), mobileApi.logs()]);
+    const [users, applications, logs] = await Promise.all([
+      mobileApi.users(),
+      mobileApi.registrationApplications("pending"),
+      mobileApi.logs()
+    ]);
     adminUsers.value = users;
+    pendingApplications.value = applications;
     adminLogs.value = logs;
   } catch (error) {
     showOperationFailure(error);
@@ -111,6 +118,19 @@ const openLog = (id: string) => {
   });
 };
 
+const reviewApplication = async (applicationId: string, decision: "approved" | "rejected") => {
+  try {
+    await mobileApi.reviewRegistration(applicationId, {
+      decision,
+      reason: decision === "rejected" ? rejectReasons[applicationId] : undefined
+    });
+    showOperationSuccess();
+    await load();
+  } catch (error) {
+    showOperationFailure(error);
+  }
+};
+
 onShow(() => {
   load();
 });
@@ -126,6 +146,7 @@ onShow(() => {
     <GlassCard v-if="sessionStore.user?.role === 'admin'" tone="accent">
       <view class="segmented">
         <button class="segment" :class="{ 'segment--active': adminView === 'users' }" @tap="adminView = 'users'">人员</button>
+        <button class="segment" :class="{ 'segment--active': adminView === 'reviews' }" @tap="adminView = 'reviews'">审批</button>
         <button class="segment" :class="{ 'segment--active': adminView === 'logs' }" @tap="adminView = 'logs'">日志</button>
       </view>
     </GlassCard>
@@ -188,6 +209,21 @@ onShow(() => {
           <EmptyState v-else :title="loading ? '正在加载人员' : '当前没有人员数据'" description="可稍后刷新，或等待新资料同步后再查看。" />
         </view>
 
+        <view v-else-if="adminView === 'reviews'">
+          <view v-if="pendingApplications.length" class="simple-list">
+            <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
+              <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
+              <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "普通用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }}</text>
+              <input v-model="rejectReasons[item.id]" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
+              <view class="action-row">
+                <button class="vm-button" @tap="reviewApplication(item.id, 'approved')">通过</button>
+                <button class="vm-button vm-button--ghost" @tap="reviewApplication(item.id, 'rejected')">驳回</button>
+              </view>
+            </view>
+          </view>
+          <EmptyState v-else :title="loading ? '正在加载审批申请' : '当前没有待审核申请'" description="新的注册申请进入系统后，这里会同步显示。" />
+        </view>
+
         <view v-else>
           <view v-if="adminLogs.length" class="simple-list">
             <button v-for="log in adminLogs" :key="log.id" class="simple-card simple-card--button" @tap="openLog(log.id)">
@@ -222,6 +258,12 @@ onShow(() => {
   border-color: rgba(47, 143, 102, 0.35);
   background: rgba(241, 251, 244, 0.98);
   color: var(--vm-accent-strong);
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
 }
 
 .simple-card,

@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Inject, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
-import type { AiOperationsReportType, AiProviderConfigPayload, DataMonitorRange } from "@vm/shared-types";
+import type { AiOperationsReportType, AiProviderConfigPayload, DataMonitorRange, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
@@ -14,6 +14,7 @@ export class AiInsightsController {
   constructor(@Inject(AiInsightsService) private readonly aiInsightsService: AiInsightsService) {}
 
   @Get("status")
+  @AllowedRoles("admin", "merchant", "special")
   status() {
     return ok(this.aiInsightsService.status());
   }
@@ -64,6 +65,36 @@ export class AiInsightsController {
     }
   ) {
     return ok(await this.aiInsightsService.feedbackDraft(body), "分析完成");
+  }
+
+  @Post("support-assistant")
+  @AllowedRoles("admin", "merchant", "special")
+  async supportAssistant(
+    @Body()
+    body: {
+      question: string;
+      scene?: string;
+      history?: Array<{
+        role: "user" | "assistant";
+        content: string;
+      }>;
+    },
+    @Req()
+    request: {
+      authUser?: { id: string; role: UserRole };
+      userRole?: UserRole;
+    }
+  ) {
+    return ok(
+      await this.aiInsightsService.supportAssistant({
+        question: body.question,
+        scene: body.scene,
+        history: body.history,
+        role: request.authUser?.role ?? request.userRole ?? "special",
+        actorUserId: request.authUser?.id
+      }),
+      "分析完成"
+    );
   }
 
   @Get("policy-optimization")

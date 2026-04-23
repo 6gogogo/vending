@@ -1,4 +1,4 @@
-import { BadGatewayException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadGatewayException, BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type { DeviceGoods, DeviceMonitoringDetail, DeviceRecord, DeviceStatus, GoodsCategory } from "@vm/shared-types";
 
@@ -62,6 +62,176 @@ export class DevicesService {
     }
 
     return device;
+  }
+
+  upsertDevice(
+    payload: {
+      deviceCode: string;
+      name: string;
+      location: string;
+      address?: string;
+      longitude?: number;
+      latitude?: number;
+      status?: DeviceStatus;
+      doorNum?: string;
+      doorLabel?: string;
+    },
+    actorUserId?: string
+  ) {
+    const deviceCode = payload.deviceCode.trim();
+    const name = payload.name.trim();
+    const location = payload.location.trim();
+    const address = payload.address?.trim() || location;
+    const doorNum = payload.doorNum?.trim() || "1";
+    const doorLabel = payload.doorLabel?.trim() || `门 ${doorNum}`;
+
+    if (!deviceCode) {
+      throw new BadRequestException("柜机编号不能为空。");
+    }
+
+    if (!name) {
+      throw new BadRequestException("柜机名称不能为空。");
+    }
+
+    if (!location) {
+      throw new BadRequestException("柜机位置不能为空。");
+    }
+
+    if (payload.longitude !== undefined && !Number.isFinite(payload.longitude)) {
+      throw new BadRequestException("柜机经度格式不正确。");
+    }
+
+    if (payload.latitude !== undefined && !Number.isFinite(payload.latitude)) {
+      throw new BadRequestException("柜机纬度格式不正确。");
+    }
+
+    const now = new Date().toISOString();
+    const existing = this.store.devices.find((entry) => entry.deviceCode === deviceCode);
+
+    if (existing) {
+      existing.name = name;
+      existing.location = location;
+      existing.address = address;
+      existing.longitude = payload.longitude;
+      existing.latitude = payload.latitude;
+      existing.status = payload.status ?? existing.status;
+      existing.lastSeenAt = now;
+
+      if (!existing.doors.some((door) => door.doorNum === doorNum)) {
+        existing.doors.push({
+          doorNum,
+          label: doorLabel,
+          goods: []
+        });
+      }
+
+      this.store.updateDeviceRuntime(deviceCode, {
+        deviceCode,
+        lastRefreshAt: now
+      });
+
+      this.store.logOperation({
+        category: "device",
+        type: "update-device",
+        status: "success",
+        actor: this.getAdminActor(actorUserId),
+        primarySubject: {
+          type: "device",
+          id: existing.deviceCode,
+          label: existing.name
+        },
+        description: `管理员更新了柜机 ${existing.name} 的基础信息。`,
+        detail: `设备 ${existing.deviceCode} 已更新为 ${existing.location}，状态 ${existing.status}。`,
+        metadata: {
+          deviceCode: existing.deviceCode
+        }
+      });
+
+      return {
+        ...this.decorateDevice(existing),
+        runtime: this.store.getDeviceRuntime(existing.deviceCode)
+      };
+    }
+
+    const created: DeviceRecord = {
+      deviceCode,
+      name,
+      location,
+      address,
+      longitude: payload.longitude,
+      latitude: payload.latitude,
+      status: payload.status ?? "online",
+      lastSeenAt: now,
+      doors: [
+        {
+          doorNum,
+          label: doorLabel,
+          goods: []
+        }
+      ]
+    };
+
+    this.store.devices.unshift(created);
+    this.store.updateDeviceRuntime(deviceCode, {
+      deviceCode,
+      doorState: "closed",
+      lastRefreshAt: now,
+      openedAfterLastCommand: true
+    });
+
+    this.store.logOperation({
+      category: "device",
+      type: "create-device",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: created.deviceCode,
+        label: created.name
+      },
+      description: `管理员新增了柜机 ${created.name}。`,
+      detail: `设备 ${created.deviceCode} 已创建，可在柜机详情页继续维护位置和货品。`,
+      metadata: {
+        deviceCode: created.deviceCode
+      }
+    });
+
+    return {
+      ...this.decorateDevice(created),
+      runtime: this.store.getDeviceRuntime(created.deviceCode)
+    };
+  }
+
+  removeDevice(deviceCode: string, actorUserId?: string) {
+    const existing = this.getByCode(deviceCode);
+    const removed = this.store.removeActiveDeviceState(deviceCode);
+
+    if (!removed) {
+      throw new NotFoundException("未找到对应柜机。");
+    }
+
+    this.store.logOperation({
+      category: "device",
+      type: "remove-device",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: existing.deviceCode,
+        label: existing.name
+      },
+      description: `管理员移除了柜机 ${existing.name}。`,
+      detail: `设备 ${existing.deviceCode} 已从当前运行柜机列表中删除，同时清理了库存批次、阈值设置与未完成预警。`,
+      metadata: {
+        deviceCode: existing.deviceCode,
+        undoState: "not_undoable"
+      }
+    });
+
+    return {
+      deviceCode: existing.deviceCode,
+      name: existing.name
+    };
   }
 
   monitoringDetail(deviceCode: string): DeviceMonitoringDetail {

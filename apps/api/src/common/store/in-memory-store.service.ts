@@ -47,6 +47,7 @@ type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "descrip
 @Injectable()
 export class InMemoryStoreService {
   private readonly seed = cloneSeedState();
+  private persistenceFlags: PersistedStoreState["flags"];
 
   readonly users: UserRecord[] = this.seed.users;
   readonly rules: CabinetAccessRule[] = this.seed.rules;
@@ -97,6 +98,7 @@ export class InMemoryStoreService {
 
   constructor() {
     const persisted = readPersistedState();
+    this.persistenceFlags = persisted?.flags;
 
     if (persisted) {
       this.hydrate(persisted);
@@ -104,7 +106,9 @@ export class InMemoryStoreService {
       this.persist();
     }
 
-    this.ensureCompetitionTestDevice();
+    if (!persisted?.flags?.skipCompetitionTestDevice) {
+      this.ensureCompetitionTestDevice();
+    }
     this.syncDeviceStocksFromBatches();
     this.refreshAlertPresentation();
   }
@@ -560,6 +564,37 @@ export class InMemoryStoreService {
     }
 
     return true;
+  }
+
+  removeActiveDeviceState(deviceCode: string) {
+    const targetIndex = this.devices.findIndex((entry) => entry.deviceCode === deviceCode);
+
+    if (targetIndex < 0) {
+      return undefined;
+    }
+
+    const [removed] = this.devices.splice(targetIndex, 1);
+
+    this.deviceRuntime.delete(deviceCode);
+    this.removeMatching(this.deviceGoodsSettings, (entry) => entry.deviceCode === deviceCode);
+    this.removeMatching(this.goodsBatches, (entry) => entry.deviceCode === deviceCode);
+    this.removeMatching(this.alerts, (entry) => entry.deviceCode === deviceCode);
+
+    this.goodsAlertPolicies.forEach((policy) => {
+      policy.applicableDeviceCodes = policy.applicableDeviceCodes.filter((code) => code !== deviceCode);
+    });
+
+    this.users.forEach((user) => {
+      if (!user.merchantProfile) {
+        return;
+      }
+
+      user.merchantProfile.defaultDeviceCodes = user.merchantProfile.defaultDeviceCodes.filter(
+        (code) => code !== deviceCode
+      );
+    });
+
+    return removed;
   }
 
   createGoodsBatch(payload: {
@@ -1040,6 +1075,7 @@ export class InMemoryStoreService {
 
   snapshot(): PersistedStoreState {
     return {
+      flags: this.persistenceFlags,
       users: structuredClone(this.users),
       rules: structuredClone(this.rules),
       devices: structuredClone(this.devices),
@@ -1073,6 +1109,7 @@ export class InMemoryStoreService {
   }
 
   resetToSeed() {
+    this.persistenceFlags = undefined;
     this.hydrate(createSeededPersistedState());
     this.persist();
   }
@@ -1128,5 +1165,13 @@ export class InMemoryStoreService {
 
   private replaceArray<T>(target: T[], source: T[]) {
     target.splice(0, target.length, ...structuredClone(source));
+  }
+
+  private removeMatching<T>(target: T[], matcher: (entry: T) => boolean) {
+    for (let index = target.length - 1; index >= 0; index -= 1) {
+      if (matcher(target[index])) {
+        target.splice(index, 1);
+      }
+    }
   }
 }

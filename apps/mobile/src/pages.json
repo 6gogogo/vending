@@ -38,6 +38,12 @@
       }
     },
     {
+      "path": "pages/common/help-center",
+      "style": {
+        "navigationBarTitleText": "遇到问题"
+      }
+    },
+    {
       "path": "pages/common/result",
       "style": {
         "navigationBarTitleText": "处理结果"

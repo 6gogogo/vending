@@ -12,7 +12,11 @@ import { useSessionStore } from "../../stores/session";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
-const devices = ref<DeviceRecord[]>([]);
+const deviceCards = ref<Array<{
+  device: DeviceRecord;
+  pendingCount: number;
+  todayPickupCount: number;
+}>>([]);
 
 const statusLabelMap: Record<DeviceStatus, string> = {
   online: "在线",
@@ -36,7 +40,37 @@ const load = async () => {
 
   loading.value = true;
   try {
-    devices.value = await mobileApi.listDevices();
+    const devices = await mobileApi.listDevices();
+    const monitoring = await Promise.all(
+      devices.map(async (device) => {
+        try {
+          const detail = await mobileApi.deviceMonitoring(device.deviceCode);
+          return {
+            device,
+            pendingCount: detail.pendingTasks.length,
+            todayPickupCount: detail.businessDayServedUsers.length
+          };
+        } catch {
+          return {
+            device,
+            pendingCount: 0,
+            todayPickupCount: 0
+          };
+        }
+      })
+    );
+
+    deviceCards.value = monitoring.sort((left, right) => {
+      if (left.pendingCount !== right.pendingCount) {
+        return right.pendingCount - left.pendingCount;
+      }
+
+      if (left.device.status !== right.device.status) {
+        return left.device.status === "online" ? -1 : 1;
+      }
+
+      return left.device.name.localeCompare(right.device.name, "zh-CN");
+    });
   } catch (error) {
     uni.showToast({
       title: getErrorMessage(error),
@@ -59,17 +93,32 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="柜机列表" title="柜机监控入口" subtitle="查看设备状态、关键货品数量、待处理任务和远程开门入口。">
+  <MobileShell eyebrow="柜机列表" title="柜机监控入口" subtitle="查看在线情况、待处理任务和今日领取数，点详情进入单柜机处理。">
     <GlassCard tone="quiet">
       <view class="vm-stack">
-        <view v-if="devices.length" class="device-list">
-          <button v-for="device in devices" :key="device.deviceCode" class="device-item" @tap="openDetail(device.deviceCode)">
-            <view class="device-item__main">
-              <text class="device-item__title">{{ device.name }}</text>
-              <text class="device-item__meta">{{ device.deviceCode }} · {{ device.location }}</text>
-              <text class="device-item__meta">货品 {{ device.doors[0]?.goods.length ?? 0 }} 种 · 最近在线 {{ device.lastSeenAt.slice(0, 16).replace('T', ' ') }}</text>
+        <view v-if="deviceCards.length" class="device-list">
+          <button
+            v-for="item in deviceCards"
+            :key="item.device.deviceCode"
+            class="device-item"
+            @tap="openDetail(item.device.deviceCode)"
+          >
+            <view v-if="item.pendingCount" class="device-item__dot" />
+            <view class="device-item__header">
+              <text class="device-item__title">{{ item.device.name }}</text>
+              <text class="vm-status" :class="`vm-status--${statusToneMap[item.device.status]}`">{{ statusLabelMap[item.device.status] }}</text>
             </view>
-            <text class="vm-status" :class="`vm-status--${statusToneMap[device.status]}`">{{ statusLabelMap[device.status] }}</text>
+            <view class="device-item__stats">
+              <view class="device-item__stat">
+                <text class="device-item__label">待处理</text>
+                <text class="device-item__value" :class="{ 'device-item__value--warning': item.pendingCount > 0 }">{{ item.pendingCount }}</text>
+              </view>
+              <view class="device-item__stat">
+                <text class="device-item__label">今日领取</text>
+                <text class="device-item__value">{{ item.todayPickupCount }}</text>
+              </view>
+            </view>
+            <text class="device-item__link">查看详情 ></text>
           </button>
         </view>
         <EmptyState v-else :title="loading ? '正在加载柜机' : '暂无柜机数据'" description="请稍后刷新，或先在后台接入柜机。" />
@@ -81,35 +130,75 @@ onShow(() => {
 <style scoped>
 .device-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16rpx;
 }
 
 .device-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  position: relative;
+  display: grid;
   gap: 16rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 24rpx;
+  min-height: 240rpx;
+  padding: 24rpx;
+  border-radius: 26rpx;
   background: rgba(255, 255, 255, 0.62);
   border: 1rpx solid rgba(159, 127, 94, 0.12);
-}
-
-.device-item__main {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
   text-align: left;
 }
 
+.device-item__dot {
+  position: absolute;
+  top: 18rpx;
+  right: 18rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 6rpx rgba(239, 68, 68, 0.12);
+}
+
+.device-item__header,
+.device-item__stats {
+  display: grid;
+  gap: 12rpx;
+}
+
+.device-item__header {
+  min-width: 0;
+}
+
+.device-item__stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.device-item__stat {
+  display: grid;
+  gap: 8rpx;
+}
+
 .device-item__title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.device-item__label,
+.device-item__link {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+}
+
+.device-item__value {
   font-size: 30rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
-.device-item__meta {
-  font-size: 22rpx;
-  color: var(--vm-text-soft);
+.device-item__value--warning {
+  color: var(--vm-danger);
+}
+
+.device-item__link {
+  color: var(--vm-accent-strong);
 }
 </style>

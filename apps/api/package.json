@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "data:init": "tsx src/scripts/init-data.ts",
+    "data:init:empty": "tsx src/scripts/init-empty-data.ts",
     "start:once": "tsx src/main.ts",
     "start:dev": "tsx watch src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

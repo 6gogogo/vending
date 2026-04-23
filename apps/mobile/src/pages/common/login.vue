@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onShow } from "@dcloudio/uni-app";
 
-import AccessibilityModePanel from "../../components/ui/AccessibilityModePanel.vue";
+import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
@@ -42,6 +42,13 @@ onShow(() => {
     title="欢迎使用公益智助柜"
     subtitle="先登录或注册，再根据账号身份进入对应功能；如遇到问题，可直接走反馈通道。"
   >
+    <template #header-right>
+      <AccessibilityModeMenu
+        :checked="uiPreferencesStore.specialAccessibilityMode"
+        @update:checked="uiPreferencesStore.setSpecialAccessibilityMode"
+      />
+    </template>
+
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
@@ -70,14 +77,6 @@ onShow(() => {
           </button>
         </view>
       </view>
-    </GlassCard>
-
-    <GlassCard tone="quiet">
-      <AccessibilityModePanel
-        :checked="uiPreferencesStore.specialAccessibilityMode"
-        description="切换后会进入关怀版，使用更大的文字、更高对比和更醒目的整屏按钮。"
-        @update:checked="uiPreferencesStore.setSpecialAccessibilityMode"
-      />
     </GlassCard>
 
     <GlassCard tone="quiet">

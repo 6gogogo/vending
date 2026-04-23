@@ -28,6 +28,9 @@ export interface DraftSessionRecord {
 }
 
 export interface PersistedStoreState {
+  flags?: {
+    skipCompetitionTestDevice?: boolean;
+  };
   users: UserRecord[];
   rules: CabinetAccessRule[];
   devices: DeviceRecord[];
@@ -186,10 +189,42 @@ export const createSeededPersistedState = (): PersistedStoreState => {
   };
 };
 
+export const createEmptyPersistedState = (): PersistedStoreState => ({
+  flags: {
+    skipCompetitionTestDevice: true
+  },
+  users: [],
+  rules: [],
+  devices: [],
+  goodsCatalog: [],
+  goodsCategories: [],
+  regions: [],
+  warehouses: [],
+  specialAccessPolicies: [],
+  goodsAlertPolicies: [],
+  registrationApplications: [],
+  merchantGoodsTemplates: [],
+  deviceGoodsSettings: [],
+  goodsBatches: [],
+  batchConsumptionTraces: [],
+  inventoryTransfers: [],
+  stocktakes: [],
+  events: [],
+  inventory: [],
+  alerts: [],
+  logs: [],
+  verificationCodes: [],
+  sessions: [],
+  draftSessions: [],
+  callbackLog: [],
+  deviceRuntime: []
+});
+
 const normalizePersistedState = (raw: Partial<PersistedStoreState>): PersistedStoreState => {
   const seeded = createSeededPersistedState();
 
   return {
+    flags: raw.flags,
     users: raw.users ?? seeded.users,
     rules: raw.rules ?? seeded.rules,
     devices: raw.devices ?? seeded.devices,

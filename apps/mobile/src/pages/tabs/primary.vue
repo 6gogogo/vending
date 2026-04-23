@@ -2,7 +2,13 @@
 import { computed, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
-import type { AlertTask, InventoryMovement, MerchantGoodsTemplate, RegistrationApplication } from "@vm/shared-types";
+import type {
+  AiOperationsReport,
+  AlertTask,
+  InventoryMovement,
+  MerchantGoodsTemplate,
+  RegistrationApplication
+} from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -12,9 +18,12 @@ import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { getErrorMessage } from "../../utils/error-message";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import { syncRoleTabBar } from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
+
+type AdminTaskFilter = "all" | "expiry" | "feedback" | "system";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
@@ -23,11 +32,21 @@ const templates = ref<MerchantGoodsTemplate[]>([]);
 const pendingApplications = ref<RegistrationApplication[]>([]);
 const alerts = ref<AlertTask[]>([]);
 const rejectReasons = reactive<Record<string, string>>({});
+const adminTaskFilter = ref<AdminTaskFilter>("all");
+const adminAiLoading = ref(false);
+const adminAiReport = ref<AiOperationsReport | null>(null);
+const adminAiError = ref("");
 const merchantSummary = ref({
   donatedUnits: 0,
   expiredUnits: 0,
   pendingAlerts: 0
 });
+
+const adminTaskLabelMap: Record<Exclude<AdminTaskFilter, "all">, string> = {
+  expiry: "临期",
+  feedback: "用户反馈",
+  system: "系统提示"
+};
 
 const permissions = computed(() =>
   Object.entries(sessionStore.quota?.remainingByGoods ?? {}).map(([goodsId, quantity]) => ({
@@ -47,6 +66,58 @@ const activeWindows = computed(() =>
 
 const taskButtonText = (task: AlertTask) => (task.grade === "fault" ? "标记已知晓" : "手动完成");
 const activeAlerts = computed(() => alerts.value.filter((item) => item.status !== "resolved"));
+const resolveAdminTaskFilter = (task: AlertTask): Exclude<AdminTaskFilter, "all"> => {
+  if (task.type === "expiry") {
+    return "expiry";
+  }
+
+  if (task.type === "user_feedback" || task.grade === "feedback") {
+    return "feedback";
+  }
+
+  return "system";
+};
+
+const adminTaskBuckets = computed(() => {
+  const counts: Record<Exclude<AdminTaskFilter, "all">, number> = {
+    expiry: 0,
+    feedback: 0,
+    system: 0
+  };
+
+  for (const task of activeAlerts.value) {
+    counts[resolveAdminTaskFilter(task)] += 1;
+  }
+
+  return [
+    {
+      key: "all" as const,
+      label: "全部",
+      count: activeAlerts.value.length
+    },
+    ...Object.entries(adminTaskLabelMap).map(([key, label]) => ({
+      key: key as Exclude<AdminTaskFilter, "all">,
+      label,
+      count: counts[key as Exclude<AdminTaskFilter, "all">]
+    }))
+  ];
+});
+
+const filteredActiveAlerts = computed(() => {
+  if (adminTaskFilter.value === "all") {
+    return activeAlerts.value;
+  }
+
+  return activeAlerts.value.filter((item) => resolveAdminTaskFilter(item) === adminTaskFilter.value);
+});
+
+const adminTaskOverviewText = computed(() =>
+  adminTaskBuckets.value
+    .filter((item) => item.key !== "all")
+    .map((item) => `${item.label}*${item.count}`)
+    .join("，")
+);
+
 const pageSubtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
     return "先确认今日资格，再去最近柜机领取；如果遇到异常，也可以直接反馈。";
@@ -56,7 +127,7 @@ const pageSubtitle = computed(() => {
     return "可在这里查看模板、登记补货和处理异常。";
   }
 
-  return "可在这里查看待办事件、注册审核和柜机入口。";
+  return "可在这里按分类处理待办、审核申请和查看柜机。";
 });
 
 const specialReminderText = computed(() => {
@@ -102,10 +173,12 @@ const heroSupport = computed(() => {
       pendingApplications.value.length
         ? `当前有 ${pendingApplications.value.length} 条待审申请，请先处理。`
         : "当前没有待审申请。",
-      activeAlerts.value.length
-        ? `待处理事件 ${activeAlerts.value.length} 条，请及时查看。`
+      adminTaskOverviewText.value
+        ? `待办分类：${adminTaskOverviewText.value}。`
         : "当前没有新的待办事件。",
-      "如需继续核对柜机、人员或日志，可从下方入口进入。"
+      adminAiReport.value
+        ? "AI 助手已生成安排建议，可先按建议分配处理顺序。"
+        : "如需继续核对柜机、人员或日志，可从下方入口进入。"
     ]
   };
 });
@@ -154,6 +227,9 @@ const load = async () => {
 
   try {
     if (sessionStore.user.role === "special") {
+      adminAiReport.value = null;
+      adminAiError.value = "";
+      adminAiLoading.value = false;
       const [quota, recordResponse, alertResponse] = await Promise.all([
         mobileApi.getQuotaSummary(sessionStore.user.phone),
         mobileApi.listRecords(sessionStore.user.id, sessionStore.user.role),
@@ -167,6 +243,9 @@ const load = async () => {
     }
 
     if (sessionStore.user.role === "merchant") {
+      adminAiReport.value = null;
+      adminAiError.value = "";
+      adminAiLoading.value = false;
       const [templateResponse, summaryResponse, traceResponse] = await Promise.all([
         mobileApi.merchantTemplates(),
         mobileApi.merchantSummary(sessionStore.user.id),
@@ -182,12 +261,30 @@ const load = async () => {
       return;
     }
 
+    adminAiLoading.value = true;
+    const adminAiPromise = mobileApi
+      .aiOperationsReport({
+        reportType: "daily"
+      })
+      .then((report) => {
+        adminAiReport.value = report;
+        adminAiError.value = "";
+      })
+      .catch((error) => {
+        adminAiReport.value = null;
+        adminAiError.value = getErrorMessage(error);
+      })
+      .finally(() => {
+        adminAiLoading.value = false;
+      });
+
     const [applicationResponse, alertResponse] = await Promise.all([
       mobileApi.registrationApplications("pending"),
       mobileApi.alerts()
     ]);
     pendingApplications.value = applicationResponse;
     alerts.value = alertResponse;
+    await adminAiPromise;
   } catch (error) {
     showOperationFailure(error);
   } finally {
@@ -240,6 +337,13 @@ const showTaskDetail = (task: AlertTask) => {
   });
 };
 
+const taskCategoryLabel = (task: AlertTask) => adminTaskLabelMap[resolveAdminTaskFilter(task)];
+
+const taskContextText = (task: AlertTask) =>
+  [task.deviceName ?? task.deviceCode, task.goodsSummary ?? task.goodsName, task.targetUserName]
+    .filter((item): item is string => Boolean(item))
+    .join(" · ");
+
 const resolveTask = (task: AlertTask) => {
   uni.showModal({
     title: "确认处理",
@@ -284,6 +388,7 @@ onShow(() => {
 <template>
   <MobileShell
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
+    :header-style="sessionStore.user?.role === 'special' ? 'panel' : 'compact'"
     :eyebrow="roleLabelMap[sessionStore.user?.role ?? 'special']"
     :title="sessionStore.user?.name ?? '公益智助柜'"
     :subtitle="pageSubtitle"
@@ -396,12 +501,23 @@ onShow(() => {
       <GlassCard tone="accent">
         <view class="vm-stack">
           <view class="section-heading">
-            <text class="section-heading__title">待办事件</text>
-            <text class="vm-subtitle">未完成事件会显示在这里，处理前请再次确认。</text>
+            <text class="section-heading__title">待办总览</text>
+            <text class="vm-subtitle">先看分类数量，再按轻重缓急安排处理。</text>
           </view>
           <view class="metric-grid">
             <ServiceMetric label="待处理事件" :value="activeAlerts.length" hint="优先处理故障、反馈和预警" tone="warning" />
             <ServiceMetric label="注册审批" :value="pendingApplications.length" hint="等待管理员审核" />
+          </view>
+          <view class="task-filter-grid">
+            <button
+              v-for="item in adminTaskBuckets"
+              :key="item.key"
+              class="task-filter-chip"
+              :class="{ 'task-filter-chip--active': adminTaskFilter === item.key }"
+              @tap="adminTaskFilter = item.key"
+            >
+              {{ item.label }}*{{ item.count }}
+            </button>
           </view>
         </view>
       </GlassCard>
@@ -409,13 +525,43 @@ onShow(() => {
       <GlassCard tone="quiet">
         <view class="vm-stack">
           <view class="section-heading">
-            <text class="section-heading__title">待处理事件</text>
-            <text class="vm-subtitle">可先查看详情，再确认处理。</text>
+            <text class="section-heading__title">AI 助手安排建议</text>
+            <text class="vm-subtitle">帮助你快速判断今天先处理什么。</text>
           </view>
-          <scroll-view v-if="activeAlerts.length" class="scroll-list" scroll-y>
+          <view v-if="adminAiReport" class="ai-summary-card">
+            <text class="ai-summary-card__title">{{ adminAiReport.summary }}</text>
+            <view class="ai-list">
+              <text
+                v-for="item in adminAiReport.recommendedActions.slice(0, 3)"
+                :key="item"
+                class="ai-list__item"
+              >
+                {{ item }}
+              </text>
+            </view>
+          </view>
+          <EmptyState
+            v-else
+            :title="adminAiLoading ? 'AI 正在整理安排建议' : 'AI 助手暂时不可用'"
+            :description="adminAiLoading ? '请稍候，系统正在结合待办和风险生成建议。' : adminAiError || '后台模型配置完成后，这里会给出处理顺序建议。'"
+          />
+        </view>
+      </GlassCard>
+
+      <GlassCard tone="quiet">
+        <view class="vm-stack">
+          <view class="section-heading">
+            <text class="section-heading__title">待处理事件</text>
+            <text class="vm-subtitle">支持按分类筛选，处理前先核对柜机、商品和用户信息。</text>
+          </view>
+          <scroll-view v-if="filteredActiveAlerts.length" class="scroll-list" scroll-y>
             <view class="simple-list">
-              <view v-for="task in activeAlerts" :key="task.id" class="simple-card">
-                <text class="simple-card__title">{{ task.title }}</text>
+              <view v-for="task in filteredActiveAlerts" :key="task.id" class="simple-card">
+                <view class="simple-card__header">
+                  <text class="simple-card__title">{{ task.title }}</text>
+                  <text class="vm-status vm-status--warning">{{ taskCategoryLabel(task) }}</text>
+                </view>
+                <text v-if="taskContextText(task)" class="simple-card__meta">{{ taskContextText(task) }}</text>
                 <text class="simple-card__meta">{{ task.previewDetail || task.detail }}</text>
                 <view class="inline-actions">
                   <button class="vm-inline-button" @tap="showTaskDetail(task)">详情</button>
@@ -424,7 +570,11 @@ onShow(() => {
               </view>
             </view>
           </scroll-view>
-          <EmptyState v-else :title="loading ? '正在加载待办事件' : '当前没有待处理事件'" description="新的故障、反馈和预警会出现在这里。" />
+          <EmptyState
+            v-else
+            :title="loading ? '正在加载待办事件' : adminTaskFilter === 'all' ? '当前没有待处理事件' : `当前没有${adminTaskBuckets.find((item) => item.key === adminTaskFilter)?.label || ''}`"
+            :description="adminTaskFilter === 'all' ? '新的故障、反馈和预警会出现在这里。' : '你可以切换其他分类继续查看。'"
+          />
         </view>
       </GlassCard>
 
@@ -522,7 +672,9 @@ onShow(() => {
 .action-grid,
 .simple-list,
 .info-list,
-.hero-action-grid {
+.hero-action-grid,
+.task-filter-grid,
+.ai-list {
   display: grid;
   gap: 16rpx;
 }
@@ -591,6 +743,13 @@ onShow(() => {
   color: var(--vm-text-soft);
 }
 
+.simple-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
 .info-item__value,
 .simple-card__title {
   font-size: 26rpx;
@@ -613,5 +772,46 @@ onShow(() => {
   color: var(--vm-accent-strong);
   font-size: 24rpx;
   padding: 0;
+}
+
+.task-filter-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.task-filter-chip {
+  min-height: 82rpx;
+  padding: 0 20rpx;
+  border-radius: 22rpx;
+  border: 1rpx solid rgba(159, 127, 94, 0.16);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 24rpx;
+  color: var(--vm-text);
+}
+
+.task-filter-chip--active {
+  border-color: rgba(29, 111, 220, 0.24);
+  background: rgba(239, 246, 255, 0.98);
+  color: var(--vm-accent-strong);
+}
+
+.ai-summary-card {
+  display: grid;
+  gap: 16rpx;
+  padding: 24rpx;
+  border-radius: 26rpx;
+  background: rgba(239, 246, 255, 0.76);
+  border: 1rpx solid rgba(29, 111, 220, 0.14);
+}
+
+.ai-summary-card__title,
+.ai-list__item {
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: var(--vm-text);
+}
+
+.ai-summary-card__title {
+  font-size: 26rpx;
+  font-weight: 700;
 }
 </style>

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
-import AccessibilityModePanel from "../../components/ui/AccessibilityModePanel.vue";
+import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
@@ -10,6 +10,7 @@ import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { syncRoleTabBar } from "../../utils/role-routing";
+import { getSupportGuideTopics } from "../../utils/support-guides";
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
@@ -27,6 +28,8 @@ const subtitle = computed(() => {
 
   return "可查看账号信息、提交反馈、切换无障碍模式或退出登录。";
 });
+
+const helpPreview = computed(() => getSupportGuideTopics(sessionStore.user?.role ?? "special").slice(0, 3));
 
 const bootstrap = async () => {
   await sessionStore.bootstrap();
@@ -62,6 +65,13 @@ onShow(() => {
     title="账号与设置"
     :subtitle="subtitle"
   >
+    <template v-if="sessionStore.user?.role === 'special'" #header-right>
+      <AccessibilityModeMenu
+        :checked="uiPreferencesStore.specialAccessibilityMode"
+        @update:checked="uiPreferencesStore.setSpecialAccessibilityMode"
+      />
+    </template>
+
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="info-list">
@@ -81,17 +91,15 @@ onShow(() => {
       </view>
     </GlassCard>
 
-    <GlassCard v-if="sessionStore.user?.role === 'special'" tone="quiet">
-      <AccessibilityModePanel
-        :checked="uiPreferencesStore.specialAccessibilityMode"
-        description="仅普通用户可切换。开启后将使用关怀版界面，采用大字、高对比和更大的操作按钮。"
-        @update:checked="uiPreferencesStore.setSpecialAccessibilityMode"
-      />
-    </GlassCard>
-
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="action-grid">
+          <button class="vm-button action-button" @tap="navigate('/pages/common/help-center')">
+            <view class="action-button__content">
+              <MenuIcon name="guide" size="sm" tone="contrast" />
+              <text>打开帮助中心</text>
+            </view>
+          </button>
           <button class="vm-button action-button" @tap="navigate('/pages/common/feedback')">
             <view class="action-button__content">
               <MenuIcon name="feedback" size="sm" tone="contrast" />
@@ -113,14 +121,36 @@ onShow(() => {
         </view>
       </view>
     </GlassCard>
+
+    <GlassCard tone="quiet">
+      <view class="vm-stack">
+        <view class="section-heading">
+          <text class="section-heading__title">遇到问题</text>
+          <text class="vm-subtitle">这里整理了常见流程、排查提示，也可以继续让 AI 帮你分析。</text>
+        </view>
+        <view class="help-preview">
+          <view v-for="item in helpPreview" :key="item.id" class="help-preview__card">
+            <text class="help-preview__title">{{ item.title }}</text>
+            <text class="help-preview__summary">{{ item.summary }}</text>
+          </view>
+        </view>
+        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/common/help-center')">查看完整指引并使用 AI 助手</button>
+      </view>
+    </GlassCard>
   </MobileShell>
 </template>
 
 <style scoped>
 .info-list,
-.action-grid {
+.action-grid,
+.help-preview {
   display: grid;
   gap: 16rpx;
+}
+
+.section-heading {
+  display: grid;
+  gap: 10rpx;
 }
 
 .action-button__content {
@@ -151,5 +181,27 @@ onShow(() => {
   font-size: 28rpx;
   color: var(--vm-text);
   font-weight: 700;
+}
+
+.section-heading__title,
+.help-preview__title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.help-preview__card {
+  display: grid;
+  gap: 8rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1rpx solid rgba(159, 127, 94, 0.12);
+}
+
+.help-preview__summary {
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--vm-text-soft);
 }
 </style>

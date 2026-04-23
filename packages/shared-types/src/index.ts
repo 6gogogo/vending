@@ -1078,6 +1078,16 @@ export interface AiFeedbackDraft {
   replyDraft: string;
 }
 
+export interface AiSupportAssistantReply {
+  meta: AiInsightMeta;
+  role: UserRole;
+  scene?: string;
+  answer: string;
+  suggestedSteps: string[];
+  followUpQuestions: string[];
+  escalationTip: string;
+}
+
 export interface AiPolicyOptimizationSuggestion {
   meta: AiInsightMeta;
   dateKey: string;

@@ -209,6 +209,22 @@ export const adminApi = {
   devices() {
     return adminClient.get<DeviceRecord[]>("/devices");
   },
+  upsertDevice(payload: {
+    deviceCode: string;
+    name: string;
+    location: string;
+    address?: string;
+    longitude?: number;
+    latitude?: number;
+    status?: DeviceRecord["status"];
+    doorNum?: string;
+    doorLabel?: string;
+  }) {
+    return adminClient.post<DeviceRecord>("/devices", payload);
+  },
+  removeDevice(deviceCode: string) {
+    return adminClient.delete<{ deviceCode: string; name: string }>(`/devices/${deviceCode}`);
+  },
   async uploadImage(file: File) {
     const sessionStore = useAdminSessionStore();
     const formData = new FormData();

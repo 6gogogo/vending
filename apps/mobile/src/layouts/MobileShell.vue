@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useSlots } from "vue";
 
 import { useSessionStore } from "../stores/session";
 import { useUiPreferencesStore } from "../stores/ui-preferences";
@@ -12,9 +12,11 @@ const props = withDefaults(
     title: string;
     subtitle: string;
     mode?: ShellMode;
+    headerStyle?: "compact" | "panel";
   }>(),
   {
-    mode: undefined
+    mode: undefined,
+    headerStyle: "compact"
   }
 );
 
@@ -35,6 +37,7 @@ const resolvedMode = computed<ShellMode>(() => {
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
+const slots = useSlots();
 
 uiPreferencesStore.hydrate();
 
@@ -51,6 +54,13 @@ const accessibilityEnabled = computed(() => {
 
   return uiPreferencesStore.specialAccessibilityMode && isGuestPage.value;
 });
+
+const showUtilityBar = computed(
+  () =>
+    accessibilityEnabled.value ||
+    Boolean(slots["header-left"]) ||
+    (props.headerStyle === "panel" && Boolean(slots["header-right"]))
+);
 </script>
 
 <template>
@@ -58,27 +68,53 @@ const accessibilityEnabled = computed(() => {
     <view class="shell__shape shell__shape--sun" />
     <view class="shell__shape shell__shape--leaf" />
     <view class="shell__body">
-      <view class="shell__hero vm-fade-up">
-        <view class="shell__hero-main">
-          <view v-if="accessibilityEnabled" class="shell__care-banner">
-            <view class="shell__care-badge">
-              <text class="shell__care-badge-mark">关怀版</text>
-              <text class="shell__care-badge-title">无障碍模式已开启</text>
+      <view v-if="showUtilityBar" class="shell__utility vm-fade-up">
+        <view class="shell__utility-left">
+          <slot name="header-left" />
+          <view v-if="accessibilityEnabled" class="shell__elder-mark">
+            <view class="shell__elder-dot" />
+            <text class="shell__elder-text">敬老版</text>
+          </view>
+        </view>
+        <view v-if="props.headerStyle === 'panel' && $slots['header-right']" class="shell__utility-right">
+          <slot name="header-right" />
+        </view>
+      </view>
+
+      <template v-if="props.headerStyle === 'panel'">
+        <view class="shell__hero vm-fade-up">
+          <view class="shell__hero-main">
+            <view v-if="accessibilityEnabled" class="shell__care-banner">
+              <view class="shell__care-badge">
+                <text class="shell__care-badge-mark">关怀版</text>
+                <text class="shell__care-badge-title">无障碍模式已开启</text>
+              </view>
+              <text class="shell__care-text">大字显示 · 高对比界面 · 更大按钮和输入框</text>
             </view>
-            <text class="shell__care-text">大字显示 · 高对比界面 · 更大按钮和输入框</text>
+            <slot name="hero-badge">
+              <text class="vm-pill">{{ eyebrow }}</text>
+            </slot>
+            <view class="shell__title-group">
+              <text class="shell__eyebrow">{{ eyebrow }}</text>
+              <text class="vm-title">{{ title }}</text>
+              <text class="vm-subtitle shell__subtitle">{{ subtitle }}</text>
+            </view>
+            <slot name="hero-extra" />
           </view>
-          <slot name="hero-badge">
-            <text class="vm-pill">{{ eyebrow }}</text>
-          </slot>
-          <view class="shell__title-group">
-            <text class="shell__eyebrow">{{ eyebrow }}</text>
-            <text class="vm-title">{{ title }}</text>
-            <text class="vm-subtitle shell__subtitle">{{ subtitle }}</text>
+          <view v-if="$slots['hero-side']" class="shell__hero-side">
+            <slot name="hero-side" />
           </view>
+        </view>
+      </template>
+      <view v-else class="shell__compact vm-fade-up">
+        <view class="shell__compact-main">
+          <text class="shell__compact-eyebrow">{{ eyebrow }}</text>
+          <text class="shell__compact-title">{{ title }}</text>
+          <text class="shell__compact-subtitle">{{ subtitle }}</text>
           <slot name="hero-extra" />
         </view>
-        <view v-if="$slots['hero-side']" class="shell__hero-side">
-          <slot name="hero-side" />
+        <view v-if="$slots['header-right']" class="shell__compact-side">
+          <slot name="header-right" />
         </view>
       </view>
 
@@ -138,7 +174,97 @@ const accessibilityEnabled = computed(() => {
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 28rpx;
+  gap: 24rpx;
+}
+
+.shell__utility {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  min-height: 72rpx;
+}
+
+.shell__utility-left,
+.shell__utility-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.shell__utility-left {
+  min-width: 0;
+  flex: 1;
+}
+
+.shell__utility-right {
+  justify-content: flex-end;
+}
+
+.shell__elder-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.shell__elder-dot {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, #fef3c7 0 26%, transparent 27%),
+    radial-gradient(circle at 65% 35%, #fde68a 0 26%, transparent 27%),
+    linear-gradient(135deg, #5aa0ff, #2f78e7);
+  box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.42);
+}
+
+.shell__elder-text {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: #2f78e7;
+}
+
+.shell__compact {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.shell__compact-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.shell__compact-side {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding-top: 34rpx;
+}
+
+.shell__compact-eyebrow {
+  font-size: 22rpx;
+  letter-spacing: 0.12em;
+  color: var(--vm-accent-strong);
+}
+
+.shell__compact-title {
+  font-size: 44rpx;
+  line-height: 1.18;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.shell__compact-subtitle {
+  font-size: 24rpx;
+  line-height: 1.65;
+  color: var(--vm-muted);
 }
 
 .shell__hero {
@@ -314,6 +440,30 @@ const accessibilityEnabled = computed(() => {
   border-width: 4rpx;
   border-radius: 30rpx;
   box-shadow: none;
+}
+
+.vm-page--accessible .shell__utility {
+  min-height: 84rpx;
+}
+
+.vm-page--accessible .shell__elder-dot {
+  width: 50rpx;
+  height: 50rpx;
+}
+
+.vm-page--accessible .shell__elder-text {
+  font-size: 34rpx;
+}
+
+.vm-page--accessible .shell__compact-title {
+  font-size: 54rpx;
+  line-height: 1.2;
+}
+
+.vm-page--accessible .shell__compact-subtitle {
+  font-size: 30rpx;
+  line-height: 1.75;
+  color: var(--vm-text);
 }
 
 .vm-page--accessible .shell__hero::before,

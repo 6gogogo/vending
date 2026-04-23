@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type {
   AiDeviceRestockRecommendation,
@@ -10,6 +10,7 @@ import type {
   AiOperationsReportType,
   AiPolicyOptimizationSuggestion,
   AiProviderConfigPayload,
+  AiSupportAssistantReply,
   AiProviderTestResult,
   AiRestockLayoutSuggestion,
   AlertTask,
@@ -95,6 +96,28 @@ export class AiInsightsService {
 
     const cacheKey = `feedback-draft:${alert.id}:${alert.status}`;
     return this.withCache(cacheKey, async () => this.buildFeedbackDraft(alert));
+  }
+
+  async supportAssistant(payload: {
+    question: string;
+    scene?: string;
+    history?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    role: "admin" | "merchant" | "special";
+    actorUserId?: string;
+  }) {
+    const question = payload.question.trim();
+
+    if (!question) {
+      throw new BadRequestException("请输入需要协助的问题。");
+    }
+
+    return this.buildSupportAssistantReply({
+      ...payload,
+      question
+    });
   }
 
   async policyOptimization(payload?: { dateKey?: string; range?: DataMonitorRange }) {
@@ -757,6 +780,96 @@ export class AiInsightsService {
     return result;
   }
 
+  private async buildSupportAssistantReply(payload: {
+    question: string;
+    scene?: string;
+    history?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    role: "admin" | "merchant" | "special";
+    actorUserId?: string;
+  }): Promise<AiSupportAssistantReply> {
+    const guideContext = this.getSupportGuideContext(payload.role, payload.scene);
+    const history = (payload.history ?? [])
+      .slice(-6)
+      .map((entry, index) => `${index + 1}. ${entry.role === "assistant" ? "助手" : "用户"}：${entry.content}`);
+
+    const generated = await this.openAiCompatibleService.completeJson<{
+      answer?: unknown;
+      suggestedSteps?: unknown;
+      followUpQuestions?: unknown;
+      escalationTip?: unknown;
+    }>({
+      task: "support-assistant",
+      systemPrompt:
+        "你是社区公益智助柜 APP 的问题排查助手。请优先基于提供的流程指引和角色职责回答，给出清楚、克制、可执行的中文建议。不要承诺已经完成任何操作，不要编造系统没有给出的能力。只返回 JSON。",
+      userPrompt: [
+        `当前提问角色：${this.getRoleLabel(payload.role)}`,
+        payload.scene ? `当前场景：${payload.scene}` : "当前场景：未指定",
+        "可参考的业务指引：",
+        JSON.stringify(guideContext, null, 2),
+        history.length ? `最近对话：\n${history.join("\n")}` : "最近对话：无",
+        "请严格输出以下 JSON 结构：",
+        JSON.stringify(
+          {
+            answer: "先给用户一个简明结论，再说明下一步怎么做",
+            suggestedSteps: ["步骤 1", "步骤 2"],
+            followUpQuestions: ["如果还需要继续追问，可以建议用户继续问什么"],
+            escalationTip: "什么时候应改走反馈、电话或人工处理"
+          },
+          null,
+          2
+        ),
+        `用户问题：${payload.question}`
+      ].join("\n"),
+      maxTokens: 1400
+    });
+
+    const result: AiSupportAssistantReply = {
+      meta: {
+        generatedAt: new Date().toISOString(),
+        provider: "openai-compatible",
+        model: generated.model
+      },
+      role: payload.role,
+      scene: payload.scene,
+      answer: this.readString(
+        generated.data.answer,
+        "我已经整理出处理方向。建议先按页面提示核对信息，再决定是否提交反馈或联系管理员。"
+      ),
+      suggestedSteps: this.readStringArray(generated.data.suggestedSteps, [
+        "先核对当前页面显示的账号、柜机和时间信息。",
+        "按照页面流程重新操作一次，确认是否仍然出现同样的问题。",
+        "如果仍未解决，请在设置里的“遇到问题”或反馈入口提交情况。"
+      ]),
+      followUpQuestions: this.readStringArray(generated.data.followUpQuestions, [
+        "如果方便，可以继续告诉我当前停留在哪个页面、看到了什么提示。"
+      ]),
+      escalationTip: this.readString(
+        generated.data.escalationTip,
+        "涉及柜门异常、连续验证码失败、审批结果不符或库存数据明显异常时，应及时转人工处理。"
+      )
+    };
+
+    this.store.logOperation({
+      category: payload.role === "admin" ? "admin" : "user",
+      type: "ai-support-assistant",
+      status: "success",
+      actor: this.getActorByRole(payload.role, payload.actorUserId),
+      detail: `AI 辅助回答了${this.getRoleLabel(payload.role)}的问题：${payload.question}`,
+      description: `AI 助手完成了${this.getRoleLabel(payload.role)}问题排查建议。`,
+      metadata: {
+        aiTask: "support-assistant",
+        role: payload.role,
+        scene: payload.scene,
+        undoState: "not_undoable"
+      }
+    });
+
+    return result;
+  }
+
   private resolveEventPayload(payload: { eventId?: string; orderNo?: string; logId?: string }) {
     let relatedLog: OperationLogRecord | undefined;
     let event: CabinetEventRecord | undefined;
@@ -898,6 +1011,123 @@ export class AiInsightsService {
     return {
       type: "system" as const,
       name: "系统"
+    };
+  }
+
+  private getActorByRole(role: "admin" | "merchant" | "special", actorUserId?: string) {
+    const user =
+      (actorUserId ? this.store.users.find((entry) => entry.id === actorUserId) : undefined) ??
+      this.store.users.find((entry) => entry.role === role);
+
+    if (user) {
+      return {
+        type: user.role,
+        id: user.id,
+        name: user.name,
+        role: user.role
+      } as const;
+    }
+
+    return {
+      type: "system" as const,
+      name: "系统"
+    };
+  }
+
+  private getRoleLabel(role: "admin" | "merchant" | "special") {
+    if (role === "admin") {
+      return "管理员";
+    }
+
+    if (role === "merchant") {
+      return "商户";
+    }
+
+    return "普通用户";
+  }
+
+  private getSupportGuideContext(role: "admin" | "merchant" | "special", scene?: string) {
+    const common = [
+      {
+        topic: "反馈与人工协助",
+        keyPoints: [
+          "遇到柜门打不开、识别异常、数据明显不一致时，优先记录页面提示，再走反馈入口。",
+          "描述问题时尽量带上柜机名称、时间、页面提示和已尝试过的操作。"
+        ]
+      }
+    ];
+
+    const roleSpecific =
+      role === "admin"
+        ? [
+            {
+              topic: "待办事件处理",
+              keyPoints: [
+                "先看事件分类和数量，再按临期、用户反馈、系统提示的优先级安排处理。",
+                "处理前先点详情核对柜机、商品、用户和时间信息，再决定是标记完成还是继续跟进。"
+              ]
+            },
+            {
+              topic: "柜机巡检",
+              keyPoints: [
+                "柜机列表卡片重点看在线状态、待处理数量和今日领取情况。",
+                "待处理数量不为 0 时应优先进入详情页排查。"
+              ]
+            },
+            {
+              topic: "人员审批与日志",
+              keyPoints: [
+                "审批前先核对姓名、手机号和申请身份，必要时补充驳回原因。",
+                "人员日志页可以继续查看人员资料、审批申请和操作日志。"
+              ]
+            }
+          ]
+        : role === "merchant"
+          ? [
+              {
+                topic: "商品属性与补货",
+                keyPoints: [
+                  "先维护商品属性，再登记补货，避免后续流向统计不清楚。",
+                  "补货时要核对柜机、数量和生产日期。"
+                ]
+              },
+              {
+                topic: "货物流向",
+                keyPoints: [
+                  "记录页会展示货物被领取情况和累计帮助数据。",
+                  "发现异常去向时，先核对最近补货记录和柜机状态。"
+                ]
+              }
+            ]
+          : [
+              {
+                topic: "登录与验证码",
+                keyPoints: [
+                  "验证码发送后有 60 秒冷却，期间无需重复点击。",
+                  "手机号和验证码都需要使用当前本人正在操作的号码。"
+                ]
+              },
+              {
+                topic: "验证领取",
+                keyPoints: [
+                  "先确认当天资格和开放时段，再去附近柜机或扫码开门。",
+                  "如遇识别不一致或领取异常，应先查看提醒，再决定是否反馈。"
+                ]
+              },
+              {
+                topic: "附近柜机",
+                keyPoints: [
+                  "附近柜机会优先展示地图，操作按钮集中在地图下方。",
+                  "如果定位不准，可先刷新位置或改为扫码进入。"
+                ]
+              }
+            ];
+
+    return {
+      role,
+      roleLabel: this.getRoleLabel(role),
+      scene,
+      guides: [...roleSpecific, ...common]
     };
   }
 

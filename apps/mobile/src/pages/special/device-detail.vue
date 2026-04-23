@@ -12,14 +12,18 @@ import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
+import { getReceivableLimit } from "../../utils/receivable-goods";
 
 const sessionStore = useSessionStore();
+const FAR_DISTANCE_WARNING_METERS = 500;
 const loading = ref(false);
 const submitting = ref(false);
 const deviceCode = ref("");
 const scanMode = ref(false);
 const deviceName = ref("柜机详情");
 const location = ref("");
+const manualDistanceMeters = ref<number>();
+const manualDistanceState = ref<"scan" | "near" | "far" | "unknown">("unknown");
 const goodsList = ref<Array<{
   goodsCode: string;
   goodsId: string;
@@ -55,6 +59,44 @@ const availableGoodsCount = computed(() =>
   goodsList.value.filter((item) => (item.stock ?? 0) > 0).length
 );
 
+const distanceBanner = computed(() => {
+  if (scanMode.value) {
+    return {
+      tone: "success",
+      title: "已通过扫码识别柜机",
+      lines: ["当前默认你已经站在柜机旁，可直接确认可领取货品后开柜。"]
+    };
+  }
+
+  if (manualDistanceState.value === "far") {
+    return {
+      tone: "warning",
+      title: "请先核对你与柜机的相对距离",
+      lines: [
+        `当前检测你距离这台柜机约 ${formatDistance(manualDistanceMeters.value)}，可能不是你身边的设备。`,
+        "请先确认柜机名称、位置和实际站位，避免误开其他柜机。"
+      ]
+    };
+  }
+
+  if (manualDistanceState.value === "near") {
+    return {
+      tone: "accent",
+      title: "已确认你就在柜机附近",
+      lines: [
+        `当前检测距离约 ${formatDistance(manualDistanceMeters.value)}，可以继续选择货品。`,
+        "本页只展示你今天仍可领取且柜内有库存的货品。"
+      ]
+    };
+  }
+
+  return {
+    tone: "warning",
+    title: "暂未确认你与柜机的相对距离",
+    lines: ["如果不是扫码进入，建议站到柜机旁后再继续操作。", "本页只展示你今天仍可领取且柜内有库存的货品。"]
+  };
+});
+
 const openGuideText = computed(() =>
   scanMode.value
     ? "当前通过扫码识别柜机，确认货品后可直接发起开柜，最终结算会以平台识别结果为准。"
@@ -81,8 +123,14 @@ const load = async () => {
 
     deviceName.value = device.name;
     location.value = device.location;
-    goodsList.value = goods;
     sessionStore.setQuota(quota);
+    goodsList.value = goods.filter(
+      (item) => getReceivableLimit(quota, item.goodsId) > 0 && (item.stock ?? 0) > 0
+    );
+    for (const key of Object.keys(selectedMap)) {
+      delete selectedMap[key];
+    }
+    await inspectRelativeDistance(device);
   } catch (error) {
     uni.showToast({
       title: getErrorMessage(error),
@@ -90,6 +138,82 @@ const load = async () => {
     });
   } finally {
     loading.value = false;
+  }
+};
+
+const calculateDistanceMeters = (
+  latitudeA: number,
+  longitudeA: number,
+  latitudeB: number,
+  longitudeB: number
+) => {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const earthRadius = 6371_000;
+  const latitudeDelta = toRadians(latitudeB - latitudeA);
+  const longitudeDelta = toRadians(longitudeB - longitudeA);
+  const sinLatitude = Math.sin(latitudeDelta / 2);
+  const sinLongitude = Math.sin(longitudeDelta / 2);
+  const a =
+    sinLatitude * sinLatitude +
+    Math.cos(toRadians(latitudeA)) * Math.cos(toRadians(latitudeB)) * sinLongitude * sinLongitude;
+
+  return Math.round(earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
+
+const inspectRelativeDistance = async (device: {
+  longitude?: number;
+  latitude?: number;
+  name: string;
+}) => {
+  if (scanMode.value) {
+    manualDistanceState.value = "scan";
+    return;
+  }
+
+  if (device.longitude === undefined || device.latitude === undefined) {
+    if (manualDistanceMeters.value !== undefined) {
+      manualDistanceState.value =
+        manualDistanceMeters.value > FAR_DISTANCE_WARNING_METERS ? "far" : "near";
+      return;
+    }
+
+    manualDistanceState.value = "unknown";
+    return;
+  }
+
+  try {
+    const currentLocation = await new Promise<UniApp.GetLocationSuccess>((resolve, reject) => {
+      uni.getLocation({
+        type: "gcj02",
+        success: resolve,
+        fail: reject
+      });
+    });
+
+    manualDistanceMeters.value = calculateDistanceMeters(
+      currentLocation.latitude,
+      currentLocation.longitude,
+      device.latitude,
+      device.longitude
+    );
+    manualDistanceState.value =
+      manualDistanceMeters.value > FAR_DISTANCE_WARNING_METERS ? "far" : "near";
+
+    if (manualDistanceState.value === "far") {
+      uni.showModal({
+        title: "距离提醒",
+        content: `系统检测你距离 ${device.name} 约 ${formatDistance(manualDistanceMeters.value)}。如果这不是你身边的柜机，请返回重新选择或改用扫码进入。`,
+        showCancel: false
+      });
+    }
+  } catch {
+    if (manualDistanceMeters.value !== undefined) {
+      manualDistanceState.value =
+        manualDistanceMeters.value > FAR_DISTANCE_WARNING_METERS ? "far" : "near";
+      return;
+    }
+
+    manualDistanceState.value = "unknown";
   }
 };
 
@@ -161,7 +285,7 @@ const submit = () => {
     title: scanMode.value ? "确认扫码开柜" : "确认手动开柜",
     content: scanMode.value
       ? `即将按扫码流程开柜，已选择：${selectedSummary.value}。柜门关闭后会按平台实际识别结果结算。`
-      : `请确认你已经在柜机旁，并准备好立即取货和及时关门。已选择：${selectedSummary.value}。`,
+      : `${manualDistanceState.value === "far" ? `当前检测你距离柜机约 ${formatDistance(manualDistanceMeters.value)}，请先确认不是误点了其他柜机。` : "请确认你已经在柜机旁，并准备好立即取货和及时关门。"}已选择：${selectedSummary.value}。`,
     confirmText: scanMode.value ? "确认开柜" : "继续开柜",
     success: ({ confirm }) => {
       if (confirm) {
@@ -177,9 +301,25 @@ const goFeedback = () => {
   });
 };
 
+const formatDistance = (distanceMeters?: number) => {
+  if (distanceMeters === undefined) {
+    return "未知距离";
+  }
+
+  if (distanceMeters < 1000) {
+    return `${distanceMeters} 米`;
+  }
+
+  return `${(distanceMeters / 1000).toFixed(1)} 公里`;
+};
+
 onLoad((query) => {
   deviceCode.value = typeof query.deviceCode === "string" ? query.deviceCode : "";
   scanMode.value = query.scan === "1";
+  manualDistanceMeters.value =
+    typeof query.distanceMeters === "string" && !Number.isNaN(Number(query.distanceMeters))
+      ? Number(query.distanceMeters)
+      : undefined;
   load();
 });
 </script>
@@ -206,6 +346,11 @@ onLoad((query) => {
           <text class="selection-banner__hint">正式结算仍以柜门关闭后的平台识别结果为准。</text>
         </view>
 
+        <view class="distance-banner" :class="`distance-banner--${distanceBanner.tone}`">
+          <text class="distance-banner__title">{{ distanceBanner.title }}</text>
+          <text v-for="line in distanceBanner.lines" :key="line" class="distance-banner__body">{{ line }}</text>
+        </view>
+
         <view v-if="goodsList.length" class="goods-list">
           <view v-for="goods in goodsList" :key="goods.goodsId" class="goods-item">
             <view class="goods-item__main">
@@ -226,8 +371,8 @@ onLoad((query) => {
         </view>
         <EmptyState
           v-else
-          :title="loading ? '正在加载货品信息' : '当前暂无可选货品'"
-          :description="loading ? '请稍候，系统正在同步柜机商品列表。' : '请联系工作人员确认柜机库存。'"
+          :title="loading ? '正在加载货品信息' : '当前没有你今天可领取的货品'"
+          :description="loading ? '请稍候，系统正在同步柜机商品列表。' : '本页只展示你今天仍可领取且柜内有库存的货品。'"
         />
 
         <view class="action-stack">
@@ -258,7 +403,8 @@ onLoad((query) => {
 
 .goods-item__meta,
 .goods-item__hint,
-.selection-banner__hint {
+.selection-banner__hint,
+.distance-banner__body {
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.6;
@@ -266,7 +412,8 @@ onLoad((query) => {
 
 .overview-grid,
 .goods-list,
-.action-stack {
+.action-stack,
+.distance-banner {
   display: grid;
   gap: 16rpx;
 }
@@ -297,6 +444,33 @@ onLoad((query) => {
   color: var(--vm-text);
   font-weight: 700;
   line-height: 1.5;
+}
+
+.distance-banner {
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-line);
+}
+
+.distance-banner--accent {
+  background: rgba(239, 246, 255, 0.92);
+  border-color: rgba(29, 111, 220, 0.18);
+}
+
+.distance-banner--warning {
+  background: rgba(255, 247, 237, 0.96);
+  border-color: rgba(200, 130, 29, 0.22);
+}
+
+.distance-banner--success {
+  background: rgba(240, 253, 244, 0.96);
+  border-color: rgba(47, 143, 102, 0.2);
+}
+
+.distance-banner__title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--vm-text);
 }
 
 .stepper {

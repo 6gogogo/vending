@@ -1,4 +1,7 @@
 import type {
+  AiOperationsReport,
+  AiProviderStatus,
+  AiSupportAssistantReply,
   AlertTask,
   AppLoginResult,
   CabinetEventRecord,
@@ -406,5 +409,23 @@ export const mobileApi = {
   },
   warehouseInventory() {
     return mobileClient.get<WarehouseInventorySnapshot>("/warehouse-inventory");
+  },
+  aiStatus() {
+    return mobileClient.get<AiProviderStatus>("/ai-insights/status");
+  },
+  aiOperationsReport(payload?: { dateKey?: string; reportType?: "morning" | "daily" }) {
+    return mobileClient.get<AiOperationsReport>("/ai-insights/operations-report", {
+      query: payload
+    });
+  },
+  aiSupportAssistant(payload: {
+    question: string;
+    scene?: string;
+    history?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+  }) {
+    return mobileClient.post<AiSupportAssistantReply>("/ai-insights/support-assistant", payload);
   }
 };

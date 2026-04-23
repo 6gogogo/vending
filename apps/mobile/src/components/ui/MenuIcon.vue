@@ -8,6 +8,7 @@ type MenuIconName =
   | "restock"
   | "trace"
   | "feedback"
+  | "guide"
   | "nearby"
   | "scan"
   | "settings"
@@ -91,6 +92,14 @@ withDefaults(
       <view class="menu-icon__fill feedback__tail" />
       <view class="menu-icon__line feedback__line feedback__line--1" />
       <view class="menu-icon__line feedback__line feedback__line--2" />
+    </template>
+
+    <template v-else-if="name === 'guide'">
+      <view class="menu-icon__outline guide__book" />
+      <view class="menu-icon__line guide__spine" />
+      <view class="menu-icon__line guide__line guide__line--1" />
+      <view class="menu-icon__line guide__line guide__line--2" />
+      <view class="menu-icon__fill guide__bookmark" />
     </template>
 
     <template v-else-if="name === 'nearby'">
@@ -485,6 +494,43 @@ withDefaults(
 
 .feedback__line--2 {
   top: 50%;
+}
+
+.guide__book {
+  width: 56%;
+  height: 62%;
+  left: 22%;
+  top: 18%;
+  border-radius: 16%;
+}
+
+.guide__spine {
+  width: 4rpx;
+  height: 46%;
+  left: 40%;
+  top: 26%;
+}
+
+.guide__line {
+  width: 18%;
+  height: 4rpx;
+  left: 49%;
+}
+
+.guide__line--1 {
+  top: 37%;
+}
+
+.guide__line--2 {
+  top: 49%;
+}
+
+.guide__bookmark {
+  width: 10%;
+  height: 18%;
+  left: 56%;
+  top: 18%;
+  border-radius: 0 0 8rpx 8rpx;
 }
 
 .nearby__pin {

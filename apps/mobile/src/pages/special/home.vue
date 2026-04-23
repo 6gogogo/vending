@@ -18,8 +18,8 @@ const records = ref<InventoryMovement[]>([]);
 const loading = ref(false);
 
 const statusLabelMap: Record<DeviceStatus, string> = {
-  online: "在线可用",
-  offline: "离线待检",
+  online: "在线",
+  offline: "离线",
   maintenance: "维护中"
 };
 

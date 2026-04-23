@@ -24,9 +24,40 @@ export class DevicesController {
     );
   }
 
+  @Post()
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  upsert(
+    @Body()
+    body: {
+      deviceCode: string;
+      name: string;
+      location: string;
+      address?: string;
+      longitude?: number;
+      latitude?: number;
+      status?: DeviceStatus;
+      doorNum?: string;
+      doorLabel?: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.devicesService.upsertDevice(body, request.authUser?.id), "操作成功");
+  }
+
   @Get(":deviceCode")
   detail(@Param("deviceCode") deviceCode: string) {
     return ok(this.devicesService.getByCode(deviceCode));
+  }
+
+  @Delete(":deviceCode")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  remove(
+    @Param("deviceCode") deviceCode: string,
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.devicesService.removeDevice(deviceCode, request.authUser?.id), "操作成功");
   }
 
   @Get(":deviceCode/monitoring")
