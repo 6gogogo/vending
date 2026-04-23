@@ -13,6 +13,7 @@ const sessionStore = useSessionStore();
 const submitting = ref(false);
 const deviceCode = ref("");
 const contactPhone = ref("");
+const phonePattern = /^1\d{10}$/;
 const form = reactive({
   feedbackType: "机器故障" as "机器故障" | "服务问题" | "其他",
   detail: ""
@@ -20,14 +21,45 @@ const form = reactive({
 
 const typeOptions = ["机器故障", "服务问题", "其他"] as const;
 const loggedIn = computed(() => Boolean(sessionStore.user));
+const selectedTypeIndex = computed(() =>
+  Math.max(typeOptions.findIndex((item) => item === form.feedbackType), 0)
+);
+const pageSubtitle = computed(() =>
+  loggedIn.value
+    ? "注册、登录后都可以直接提交反馈，问题会进入后台待处理池。"
+    : "登录前也可以提交反馈，但需要填写手机号，方便工作人员回访。"
+);
+
+const handleTypeChange = (index: number) => {
+  form.feedbackType = typeOptions[index] ?? typeOptions[0];
+};
 
 const submit = async () => {
+  const detail = form.detail.trim();
+  const phone = contactPhone.value.trim();
+
+  if (!detail) {
+    uni.showToast({
+      title: "请填写反馈内容",
+      icon: "none"
+    });
+    return;
+  }
+
+  if (!loggedIn.value && !phonePattern.test(phone)) {
+    uni.showToast({
+      title: "请填写 11 位手机号",
+      icon: "none"
+    });
+    return;
+  }
+
   submitting.value = true;
   try {
-    const detailSegments = [form.detail.trim()];
+    const detailSegments = [detail];
 
-    if (!loggedIn.value && contactPhone.value.trim()) {
-      detailSegments.push(`联系方式：${contactPhone.value.trim()}`);
+    if (!loggedIn.value) {
+      detailSegments.push(`联系方式：${phone}`);
     }
 
     await mobileApi.createFeedback({
@@ -75,7 +107,7 @@ onLoad((query) => {
 </script>
 
 <template>
-  <MobileShell eyebrow="反馈通道" title="提交反馈" subtitle="注册、登录前后都可以使用反馈通道，反馈会直接进入后台待处理池。">
+  <MobileShell eyebrow="反馈通道" title="提交反馈" :subtitle="pageSubtitle">
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view v-if="deviceCode" class="tip-line">
@@ -84,23 +116,25 @@ onLoad((query) => {
         </view>
 
         <view v-if="!loggedIn" class="vm-field">
-          <text class="vm-field__label">联系方式（选填）</text>
-          <input v-model="contactPhone" class="vm-field__input" placeholder="可填写手机号，方便工作人员联系" />
+          <text class="vm-field__label">手机号</text>
+          <input
+            v-model="contactPhone"
+            class="vm-field__input"
+            type="number"
+            maxlength="11"
+            placeholder="登录前反馈需填写手机号"
+          />
+          <text class="vm-field__hint">工作人员会按这个手机号回访反馈结果。</text>
         </view>
 
         <view class="vm-field">
           <text class="vm-field__label">反馈类型</text>
-          <view class="type-grid">
-            <button
-              v-for="item in typeOptions"
-              :key="item"
-              class="type-chip"
-              :class="{ 'type-chip--active': form.feedbackType === item }"
-              @tap="form.feedbackType = item"
-            >
-              {{ item }}
-            </button>
-          </view>
+          <picker :range="typeOptions" :value="selectedTypeIndex" @change="handleTypeChange(Number($event.detail.value))">
+            <view class="picker-field">
+              <text class="picker-field__value">{{ form.feedbackType }}</text>
+              <view class="picker-field__chevron" />
+            </view>
+          </picker>
         </view>
 
         <view class="vm-field">
@@ -141,24 +175,35 @@ onLoad((query) => {
   font-weight: 700;
 }
 
-.type-grid {
-  display: grid;
-  gap: 16rpx;
+.vm-field__hint {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+  line-height: 1.6;
 }
 
-.type-chip {
-  min-height: 88rpx;
-  border-radius: 22rpx;
-  border: 1rpx solid rgba(159, 127, 94, 0.2);
-  background: rgba(255, 252, 246, 0.88);
+.picker-field {
+  min-height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 0 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-line-strong);
+  background: rgba(255, 255, 252, 0.92);
+}
+
+.picker-field__value {
   font-size: 28rpx;
   color: var(--vm-text);
 }
 
-.type-chip--active {
-  border-color: rgba(47, 143, 102, 0.35);
-  background: rgba(241, 251, 244, 0.98);
-  color: var(--vm-accent-strong);
+.picker-field__chevron {
+  width: 18rpx;
+  height: 18rpx;
+  border-right: 3rpx solid var(--vm-text-soft);
+  border-bottom: 3rpx solid var(--vm-text-soft);
+  transform: rotate(45deg);
 }
 
 .vm-textarea {

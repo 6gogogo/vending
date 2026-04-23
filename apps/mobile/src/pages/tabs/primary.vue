@@ -7,6 +7,7 @@ import type { AlertTask, InventoryMovement, MerchantGoodsTemplate, RegistrationA
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
@@ -287,16 +288,46 @@ onShow(() => {
     <template #hero-actions>
       <view class="hero-action-grid">
         <template v-if="sessionStore.user?.role === 'special'">
-          <button class="vm-button" @tap="goNearby">就近找柜机</button>
-          <button class="vm-button vm-button--ghost" @tap="goScanPickup">扫码开门</button>
+          <button class="vm-button action-button" @tap="goNearby">
+            <view class="action-button__content">
+              <MenuIcon name="nearby" size="sm" tone="contrast" />
+              <text>就近找柜机</text>
+            </view>
+          </button>
+          <button class="vm-button vm-button--ghost action-button" @tap="goScanPickup">
+            <view class="action-button__content">
+              <MenuIcon name="scan" size="sm" tone="neutral" />
+              <text>扫码开门</text>
+            </view>
+          </button>
         </template>
         <template v-else-if="sessionStore.user?.role === 'merchant'">
-          <button class="vm-button" @tap="navigate('/pages/merchant/restock')">立即登记补货</button>
-          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">管理商品属性</button>
+          <button class="vm-button action-button" @tap="navigate('/pages/merchant/restock')">
+            <view class="action-button__content">
+              <MenuIcon name="restock" size="sm" tone="contrast" />
+              <text>立即登记补货</text>
+            </view>
+          </button>
+          <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/merchant/templates')">
+            <view class="action-button__content">
+              <MenuIcon name="template" size="sm" tone="neutral" />
+              <text>管理商品属性</text>
+            </view>
+          </button>
         </template>
         <template v-else>
-          <button class="vm-button" @tap="navigate('/pages/admin/reviews')">处理待审申请</button>
-          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/admin/devices')">查看柜机状态</button>
+          <button class="vm-button action-button" @tap="navigate('/pages/admin/reviews')">
+            <view class="action-button__content">
+              <MenuIcon name="review" size="sm" tone="contrast" />
+              <text>处理待审申请</text>
+            </view>
+          </button>
+          <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/admin/devices')">
+            <view class="action-button__content">
+              <MenuIcon name="device" size="sm" tone="neutral" />
+              <text>查看柜机状态</text>
+            </view>
+          </button>
         </template>
       </view>
     </template>
@@ -490,6 +521,14 @@ onShow(() => {
 .hero-action-grid {
   display: grid;
   gap: 16rpx;
+}
+
+.action-button__content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  width: 100%;
 }
 
 .simple-list__row,

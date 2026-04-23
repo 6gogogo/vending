@@ -39,6 +39,7 @@ interface BatchConsumptionEntry {
 }
 
 const MAX_CALLBACK_LOGS = 1000;
+const NEGATIVE_STOCK_BALANCE_NOTE = "库存透支调整";
 
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
@@ -616,10 +617,19 @@ export class InMemoryStoreService {
       });
     }
 
+    if (remaining > 0) {
+      const negativeBalanceBatch = this.recordNegativeStockBalance(deviceCode, goodsId, remaining);
+      consumed.push({
+        batchId: negativeBalanceBatch.batchId,
+        quantity: remaining
+      });
+      remaining = 0;
+    }
+
     this.syncDeviceStocksFromBatches(deviceCode);
 
     return {
-      actualQuantity: quantity - remaining,
+      actualQuantity: quantity,
       consumed,
       shortage: remaining
     };
@@ -630,10 +640,16 @@ export class InMemoryStoreService {
       const batch = this.goodsBatches.find((entry) => entry.batchId === item.batchId);
 
       if (batch) {
+        if (this.isNegativeStockBalanceBatch(batch)) {
+          batch.remainingQuantity = Math.min(0, batch.remainingQuantity + item.quantity);
+          continue;
+        }
+
         batch.remainingQuantity = Math.min(batch.quantity, batch.remainingQuantity + item.quantity);
       }
     }
 
+    this.cleanupNegativeStockBalanceBatches(deviceCode);
     this.syncDeviceStocksFromBatches(deviceCode);
   }
 
@@ -676,6 +692,50 @@ export class InMemoryStoreService {
           goods.stock = this.getCurrentStock(device.deviceCode, goods.goodsId);
           goods.expiresAt = this.getNearestExpiryAt(device.deviceCode, goods.goodsId);
         }
+      }
+    }
+  }
+
+  private isNegativeStockBalanceBatch(batch: GoodsBatchRecord) {
+    return batch.sourceType === "system" && batch.quantity === 0 && batch.note === NEGATIVE_STOCK_BALANCE_NOTE;
+  }
+
+  private recordNegativeStockBalance(deviceCode: string, goodsId: string, quantity: number) {
+    const existing = this.goodsBatches.find(
+      (entry) =>
+        entry.deviceCode === deviceCode &&
+        entry.goodsId === goodsId &&
+        this.isNegativeStockBalanceBatch(entry)
+    );
+
+    if (existing) {
+      existing.remainingQuantity -= quantity;
+      return existing;
+    }
+
+    const created = this.createGoodsBatch({
+      goodsId,
+      deviceCode,
+      quantity: 0,
+      sourceType: "system",
+      sourceUserName: "系统平衡",
+      note: NEGATIVE_STOCK_BALANCE_NOTE
+    });
+
+    created.remainingQuantity -= quantity;
+    return created;
+  }
+
+  private cleanupNegativeStockBalanceBatches(deviceCode: string) {
+    for (let index = this.goodsBatches.length - 1; index >= 0; index -= 1) {
+      const batch = this.goodsBatches[index];
+
+      if (
+        batch.deviceCode === deviceCode &&
+        this.isNegativeStockBalanceBatch(batch) &&
+        batch.remainingQuantity === 0
+      ) {
+        this.goodsBatches.splice(index, 1);
       }
     }
   }

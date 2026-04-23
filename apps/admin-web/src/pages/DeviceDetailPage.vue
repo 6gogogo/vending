@@ -1278,6 +1278,10 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.device-detail__aside > * {
+  min-width: 0;
+}
+
 .device-detail__main {
   overflow: hidden;
 }
@@ -1316,9 +1320,9 @@ onUnmounted(() => {
 }
 
 .device-event-card__head {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  justify-content: space-between;
   gap: 12px;
 }
 
@@ -1330,7 +1334,7 @@ onUnmounted(() => {
 
 .device-event-order-row {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) minmax(140px, 180px);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
   padding: 10px;
@@ -1357,6 +1361,7 @@ onUnmounted(() => {
 }
 
 .device-event-order-row__actions {
+  grid-column: 2;
   align-content: start;
   justify-items: start;
 }
@@ -1385,9 +1390,19 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
+.device-detail__aside :deep(.admin-link),
+.device-detail__aside :deep(.admin-table__strong),
+.device-detail__aside :deep(.admin-context-main),
+.device-detail__aside :deep(.admin-context-meta),
+.device-detail__aside :deep(.admin-list__title),
+.device-detail__aside :deep(.admin-code) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .device-detail__aside :deep(.admin-list__row) {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 104px);
   align-items: start;
   gap: 10px;
 }
@@ -1501,9 +1516,10 @@ onUnmounted(() => {
 
 .device-task-actions {
   display: grid;
-  justify-items: end;
+  justify-items: start;
   gap: 6px;
-  min-width: 112px;
+  min-width: 0;
+  width: 100%;
 }
 
 .device-map-backdrop {
@@ -1554,6 +1570,10 @@ onUnmounted(() => {
     grid-template-columns: 1fr;
   }
 
+  .device-detail__aside :deep(.admin-list__row) {
+    grid-template-columns: 1fr;
+  }
+
   .debug-grid {
     grid-template-columns: 1fr;
   }
@@ -1564,6 +1584,10 @@ onUnmounted(() => {
 
   .device-event-order-row {
     grid-template-columns: 1fr;
+  }
+
+  .device-event-order-row__actions {
+    grid-column: auto;
   }
 }
 

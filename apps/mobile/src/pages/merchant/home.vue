@@ -5,6 +5,7 @@ import { onShow } from "@dcloudio/uni-app";
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { appCopy } from "../../constants/copy";
@@ -127,23 +128,43 @@ onShow(() => {
 
         <view class="menu-grid">
           <button class="menu-card" @tap="navigate('/pages/merchant/templates')">
-            <text class="menu-card__tag">准备</text>
-            <text class="menu-card__title">货品模板</text>
+            <view class="menu-card__top">
+              <MenuIcon name="template" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">准备</text>
+                <text class="menu-card__title">货品模板</text>
+              </view>
+            </view>
             <text class="menu-card__desc">维护名称、分类、默认数量与保质天数</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/merchant/restock')">
-            <text class="menu-card__tag">执行</text>
-            <text class="menu-card__title">按模板补货</text>
+            <view class="menu-card__top">
+              <MenuIcon name="restock" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">执行</text>
+                <text class="menu-card__title">按模板补货</text>
+              </view>
+            </view>
             <text class="menu-card__desc">选择柜机、数量、生产日期快速登记</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/merchant/traces')">
-            <text class="menu-card__tag">追踪</text>
-            <text class="menu-card__title">货物去向</text>
+            <view class="menu-card__top">
+              <MenuIcon name="trace" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">追踪</text>
+                <text class="menu-card__title">货物去向</text>
+              </view>
+            </view>
             <text class="menu-card__desc">查看自己补货批次、剩余量和日志去向</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/common/feedback')">
-            <text class="menu-card__tag">反馈</text>
-            <text class="menu-card__title">提交反馈</text>
+            <view class="menu-card__top">
+              <MenuIcon name="feedback" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">反馈</text>
+                <text class="menu-card__title">提交反馈</text>
+              </view>
+            </view>
             <text class="menu-card__desc">反馈机器故障、服务问题或其他情况</text>
           </button>
         </view>
@@ -203,6 +224,24 @@ onShow(() => {
 .log-list {
   display: grid;
   gap: 18rpx;
+}
+
+.menu-card__top,
+.menu-card__title-group {
+  display: flex;
+}
+
+.menu-card__top {
+  width: 100%;
+  align-items: center;
+  gap: 18rpx;
+}
+
+.menu-card__title-group {
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6rpx;
 }
 
 .ops-banner,

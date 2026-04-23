@@ -2,6 +2,7 @@
 import { onShow } from "@dcloudio/uni-app";
 
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
@@ -44,9 +45,24 @@ onShow(() => {
         </view>
 
         <view class="entry-actions">
-          <button class="vm-button" @tap="navigate('/pages/common/app-login')">登录</button>
-          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/common/register')">注册</button>
-          <button class="vm-button vm-button--soft" @tap="navigate('/pages/common/feedback')">反馈通道</button>
+          <button class="vm-button action-button" @tap="navigate('/pages/common/app-login')">
+            <view class="action-button__content">
+              <MenuIcon name="scan" size="sm" tone="contrast" />
+              <text>登录</text>
+            </view>
+          </button>
+          <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/common/register')">
+            <view class="action-button__content">
+              <MenuIcon name="users" size="sm" tone="neutral" />
+              <text>注册</text>
+            </view>
+          </button>
+          <button class="vm-button vm-button--soft action-button" @tap="navigate('/pages/common/feedback')">
+            <view class="action-button__content">
+              <MenuIcon name="feedback" size="sm" tone="accent" />
+              <text>反馈通道</text>
+            </view>
+          </button>
         </view>
       </view>
     </GlassCard>
@@ -84,6 +100,14 @@ onShow(() => {
 .tips-list {
   display: grid;
   gap: 16rpx;
+}
+
+.action-button__content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  width: 100%;
 }
 
 .tips-list__item {

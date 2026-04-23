@@ -15,11 +15,11 @@
   --admin-success: #1f7a45;
   --admin-warning: #9a670e;
   --admin-danger: #b13a31;
-  --admin-nav-bg: #0f172a;
-  --admin-nav-panel: #111c30;
-  --admin-nav-line: #27364b;
-  --admin-nav-text: #e5edf7;
-  --admin-nav-muted: #97a7bc;
+  --admin-nav-bg: #f7f9fc;
+  --admin-nav-panel: #ffffff;
+  --admin-nav-line: #d8e0ea;
+  --admin-nav-text: #0f172a;
+  --admin-nav-muted: #526175;
   --admin-shadow: none;
   --admin-code-font: "Consolas", "SFMono-Regular", "Courier New", monospace;
   font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
@@ -155,14 +155,14 @@ a {
 }
 
 .workbench__nav-link:hover {
-  background: #15243a;
-  border-color: #324764;
+  background: var(--admin-panel-muted);
+  border-color: var(--admin-line-strong);
 }
 
 .workbench__nav-link--active {
-  background: #152849;
-  border-color: #355987;
-  color: #ffffff;
+  background: var(--admin-accent-soft);
+  border-color: #c7d5e8;
+  color: var(--admin-accent-strong);
 }
 
 .workbench__nav-link--active::before {
@@ -239,24 +239,24 @@ a {
 
 .workbench__brand-panel,
 .workbench__status {
-  border-color: var(--admin-nav-line);
+  border-color: var(--admin-line);
   background: var(--admin-nav-bg);
-  color: var(--admin-nav-text);
+  color: var(--admin-text);
 }
 
 .workbench__brand-panel .admin-kicker,
 .workbench__status .admin-kicker {
-  color: var(--admin-nav-muted);
+  color: var(--admin-muted);
 }
 
 .workbench__status .admin-button--ghost {
-  background: transparent;
-  border-color: var(--admin-nav-line);
-  color: var(--admin-nav-text);
+  background: var(--admin-panel);
+  border-color: var(--admin-line-strong);
+  color: var(--admin-text);
 }
 
 .workbench__status .admin-button--ghost:hover {
-  background: #15243a;
+  background: var(--admin-panel-muted);
 }
 
 .admin-copy,

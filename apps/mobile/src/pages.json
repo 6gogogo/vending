@@ -185,26 +185,26 @@
       {
         "pagePath": "pages/tabs/primary",
         "text": "主入口",
-        "iconPath": "static/tabs/blank.png",
-        "selectedIconPath": "static/tabs/blank.png"
+        "iconPath": "static/tabs/home.png",
+        "selectedIconPath": "static/tabs/home-active.png"
       },
       {
         "pagePath": "pages/tabs/nearby",
         "text": "柜机",
-        "iconPath": "static/tabs/blank.png",
-        "selectedIconPath": "static/tabs/blank.png"
+        "iconPath": "static/tabs/nearby.png",
+        "selectedIconPath": "static/tabs/nearby-active.png"
       },
       {
         "pagePath": "pages/tabs/records",
         "text": "记录",
-        "iconPath": "static/tabs/blank.png",
-        "selectedIconPath": "static/tabs/blank.png"
+        "iconPath": "static/tabs/records.png",
+        "selectedIconPath": "static/tabs/records-active.png"
       },
       {
         "pagePath": "pages/tabs/settings",
         "text": "设置",
-        "iconPath": "static/tabs/blank.png",
-        "selectedIconPath": "static/tabs/blank.png"
+        "iconPath": "static/tabs/settings-tab.png",
+        "selectedIconPath": "static/tabs/settings-tab-active.png"
       }
     ]
   }

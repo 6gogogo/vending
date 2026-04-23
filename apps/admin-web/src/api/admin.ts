@@ -4,7 +4,9 @@ import type {
   AiOperationsReport,
   AiOperationsReportType,
   AiPolicyOptimizationSuggestion,
+  AiProviderConfigPayload,
   AiProviderStatus,
+  AiProviderTestResult,
   AiRestockLayoutSuggestion,
   AlertTask,
   CallbackLogRecord,
@@ -437,6 +439,12 @@ export const adminApi = {
   },
   aiStatus() {
     return adminClient.get<AiProviderStatus>("/ai-insights/status");
+  },
+  saveAiConfig(payload: AiProviderConfigPayload) {
+    return adminClient.patch<AiProviderStatus>("/ai-insights/config", payload);
+  },
+  testAiConfig() {
+    return adminClient.post<AiProviderTestResult>("/ai-insights/test", {});
   },
   aiEventDiagnosis(payload: { eventId?: string; orderNo?: string; logId?: string }) {
     return adminClient.post<AiEventDiagnosis>("/ai-insights/event-diagnosis", payload);

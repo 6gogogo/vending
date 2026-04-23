@@ -367,7 +367,7 @@ onMounted(load);
                   <span class="admin-list__title">{{ item.goodsName }}</span>
                   <span class="admin-list__meta">系统库存 {{ item.systemQuantity }}</span>
                 </div>
-                <input v-model.number="item.actualQuantity" class="admin-input" type="number" min="0" />
+                <input v-model.number="item.actualQuantity" class="admin-input" type="number" />
               </div>
             </div>
             <label class="admin-field">

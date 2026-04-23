@@ -186,7 +186,7 @@ export class WarehousesService {
       ])
     );
 
-    const actualMap = new Map(payload.items.map((entry) => [entry.goodsId, Math.max(0, entry.actualQuantity)]));
+    const actualMap = new Map(payload.items.map((entry) => [entry.goodsId, entry.actualQuantity]));
     const items = goodsIds.map((goodsId) => {
       const goods = this.findGoods(goodsId);
       const systemQuantity = this.store.getCurrentStock(device.deviceCode, goodsId);

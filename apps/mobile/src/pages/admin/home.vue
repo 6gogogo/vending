@@ -4,6 +4,7 @@ import { onShow } from "@dcloudio/uni-app";
 
 import { mobileApi } from "../../api/mobile";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
@@ -121,23 +122,43 @@ onShow(() => {
 
         <view class="menu-grid">
           <button class="menu-card" @tap="navigate('/pages/admin/reviews')">
-            <text class="menu-card__tag">优先</text>
-            <text class="menu-card__title">审核工作台</text>
+            <view class="menu-card__top">
+              <MenuIcon name="review" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">优先</text>
+                <text class="menu-card__title">审核工作台</text>
+              </view>
+            </view>
             <text class="menu-card__desc">处理待审、驳回和已通过的移动端申请</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/admin/users')">
-            <text class="menu-card__tag">人员</text>
-            <text class="menu-card__title">人员管理</text>
+            <view class="menu-card__top">
+              <MenuIcon name="users" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">人员</text>
+                <text class="menu-card__title">人员管理</text>
+              </view>
+            </view>
             <text class="menu-card__desc">查看用户详情、修改基础信息和批量设置</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/admin/devices')">
-            <text class="menu-card__tag">巡检</text>
-            <text class="menu-card__title">柜机列表</text>
+            <view class="menu-card__top">
+              <MenuIcon name="device" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">巡检</text>
+                <text class="menu-card__title">柜机列表</text>
+              </view>
+            </view>
             <text class="menu-card__desc">查看状态、日志、今日服务和远程操作</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/admin/logs')">
-            <text class="menu-card__tag">追踪</text>
-            <text class="menu-card__title">日志记录</text>
+            <view class="menu-card__top">
+              <MenuIcon name="logs" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">追踪</text>
+                <text class="menu-card__title">日志记录</text>
+              </view>
+            </view>
             <text class="menu-card__desc">查看全量日志、详情以及可撤销操作</text>
           </button>
         </view>
@@ -178,6 +199,24 @@ onShow(() => {
 .menu-grid {
   display: grid;
   gap: 18rpx;
+}
+
+.menu-card__top,
+.menu-card__title-group {
+  display: flex;
+}
+
+.menu-card__top {
+  width: 100%;
+  align-items: center;
+  gap: 18rpx;
+}
+
+.menu-card__title-group {
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6rpx;
 }
 
 .ops-banner,

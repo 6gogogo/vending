@@ -6,7 +6,6 @@ import type { DeviceRecord, DeviceStatus } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
-import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
@@ -59,9 +58,6 @@ const mappableDevices = computed(() =>
 
 const highlightedDevice = computed(() =>
   devices.value.find((device) => device.deviceCode === highlightedDeviceCode.value)
-);
-const onlineDeviceCount = computed(() =>
-  devices.value.filter((device) => device.status === "online").length
 );
 
 const goodsOptions = computed(() => {
@@ -413,12 +409,6 @@ onShow(() => {
 
     <GlassCard tone="quiet">
       <view class="vm-stack">
-        <view class="metric-grid">
-          <ServiceMetric label="柜机总数" :value="devices.length" hint="当前列表中的柜机数量" tone="accent" />
-          <ServiceMetric label="在线柜机" :value="onlineDeviceCount" hint="优先选择在线柜机或在线巡检" />
-          <ServiceMetric label="地图点位" :value="mappableDevices.length" hint="已具备经纬度的柜机数量" />
-        </view>
-
         <view v-if="mappableDevices.length" class="nearby-map-card">
           <view class="nearby-location-banner">
             <text class="nearby-map-card__title">我的位置</text>
@@ -594,8 +584,7 @@ onShow(() => {
   gap: 16rpx;
 }
 
-.hero-action-grid,
-.metric-grid {
+.hero-action-grid {
   display: grid;
   gap: 16rpx;
 }

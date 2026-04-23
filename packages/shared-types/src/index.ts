@@ -983,6 +983,25 @@ export interface AiProviderStatus {
   baseUrl: string;
   model: string;
   missingConfig: string[];
+  apiKeyConfigured: boolean;
+  usingDefaultBaseUrl: boolean;
+  usingDefaultModel: boolean;
+}
+
+export interface AiProviderConfigPayload {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+}
+
+export interface AiProviderTestResult {
+  success: boolean;
+  provider: "openai-compatible";
+  model: string;
+  baseUrl: string;
+  testedAt: string;
+  latencyMs: number;
+  message: string;
 }
 
 export interface AiInsightMeta {

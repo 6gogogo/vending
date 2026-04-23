@@ -7,6 +7,7 @@ import { useAdminSessionStore } from "../stores/session";
 interface NavItem {
   to: string;
   label: string;
+  icon: string;
 }
 
 const route = useRoute();
@@ -19,23 +20,28 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     items: [
       {
         to: "/dashboard",
-        label: "运营总览"
+        label: "运营总览",
+        icon: "M4 6.75A2.75 2.75 0 0 1 6.75 4h10.5A2.75 2.75 0 0 1 20 6.75v10.5A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25zm2.75.75a.75.75 0 0 0-.75.75v2.5h5v-3.25zm6.5 0v3.25h5v-2.5a.75.75 0 0 0-.75-.75zM6 12.25v4.5c0 .414.336.75.75.75h5V12.25zm6.5 0v5.25h4.75a.75.75 0 0 0 .75-.75v-4.5z"
       },
       {
         to: "/goods",
-        label: "货物总览"
+        label: "货物总览",
+        icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
       },
       {
         to: "/operations",
-        label: "柜机监控"
+        label: "柜机监控",
+        icon: "M6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11A2.5 2.5 0 0 1 6.5 4m0 1.5c-.552 0-1 .448-1 1v11c0 .552.448 1 1 1h11c.552 0 1-.448 1-1v-11c0-.552-.448-1-1-1zm2.25 2.75a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5zm0 3.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5zm0 3.5a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5z"
       },
       {
         to: "/data-monitor",
-        label: "数据监控"
+        label: "数据监控",
+        icon: "M5.75 18A2.75 2.75 0 0 1 3 15.25v-6.5A2.75 2.75 0 0 1 5.75 6h12.5A2.75 2.75 0 0 1 21 8.75v6.5A2.75 2.75 0 0 1 18.25 18zm4.5-7a.75.75 0 0 0-1.5 0v3a.75.75 0 0 0 1.5 0zm2.5-1.5a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0zm2.5 2a.75.75 0 0 0-1.5 0v2.5a.75.75 0 0 0 1.5 0z"
       },
       {
         to: "/warehouse",
-        label: "本地仓库"
+        label: "本地仓库",
+        icon: "M12 3.75l7.5 3.5v9.5L12 20.25l-7.5-3.5v-9.5zm0 1.65L6.03 8.18l5.97 2.78l5.97-2.78zm-6 4v6.4l5.25 2.45v-6.4zm6.75 8.85L18 15.8V9.4l-5.25 2.45z"
       }
     ]
   },
@@ -44,11 +50,13 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     items: [
       {
         to: "/users",
-        label: "人员管理"
+        label: "人员管理",
+        icon: "M12 4.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 0 1 0-7m-5.25 11A3.75 3.75 0 0 1 10.5 11.75h3A3.75 3.75 0 0 1 17.25 15.5v2.25a.75.75 0 0 1-1.5 0V15.5a2.25 2.25 0 0 0-2.25-2.25h-3A2.25 2.25 0 0 0 8.25 15.5v2.25a.75.75 0 0 1-1.5 0z"
       },
       {
         to: "/logs",
-        label: "日志总览"
+        label: "日志总览",
+        icon: "M6.75 4h8.69c.464 0 .909.184 1.237.513l2.81 2.81c.329.328.513.773.513 1.237v8.69A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25V6.75A2.75 2.75 0 0 1 6.75 4m0 1.5c-.69 0-1.25.56-1.25 1.25v10.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25V9.31L14.69 5.5zm2 4a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5zm0 3.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5z"
       }
     ]
   },
@@ -57,7 +65,8 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     items: [
       {
         to: "/ai",
-        label: "AI 工作台"
+        label: "AI 工作台",
+        icon: "M10.29 3.86a1.75 1.75 0 0 1 3.42 0l.18.86a7.85 7.85 0 0 1 1.7.7l.76-.45a1.75 1.75 0 0 1 2.33.63l.42.74a1.75 1.75 0 0 1-.44 2.26l-.68.57q.08.4.08.83t-.08.83l.68.57a1.75 1.75 0 0 1 .44 2.26l-.42.74a1.75 1.75 0 0 1-2.33.63l-.76-.45a7.9 7.9 0 0 1-1.7.7l-.18.86a1.75 1.75 0 0 1-3.42 0l-.18-.86a7.84 7.84 0 0 1-1.7-.7l-.76.45a1.75 1.75 0 0 1-2.33-.63l-.42-.74a1.75 1.75 0 0 1 .44-2.26l.68-.57A4.3 4.3 0 0 1 5.75 12q0-.43.08-.83l-.68-.57a1.75 1.75 0 0 1-.44-2.26l.42-.74a1.75 1.75 0 0 1 2.33-.63l.76.45c.54-.3 1.11-.53 1.7-.7zm1.71 5.39a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5"
       }
     ]
   },
@@ -133,6 +142,11 @@ const isActive = (target: string) => {
             class="workbench__nav-link"
             :class="{ 'workbench__nav-link--active': isActive(item.to) }"
           >
+            <span class="workbench__nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path :d="item.icon" />
+              </svg>
+            </span>
             <span class="workbench__nav-label">{{ item.label }}</span>
           </RouterLink>
         </section>
@@ -156,7 +170,7 @@ const isActive = (target: string) => {
         <div class="workbench__header-side">
           <span class="admin-kicker">工作视图</span>
           <span class="workbench__header-value">{{ currentGroup }}</span>
-          <p class="admin-copy">界面保持克制、信息完整，便于街道和政务场景下的日常审阅与处置。</p>
+          <p class="admin-copy">当前模块的入口、数据和操作会在这一栏联动展示。</p>
         </div>
       </header>
 
@@ -166,3 +180,23 @@ const isActive = (target: string) => {
     </main>
   </div>
 </template>
+
+<style scoped>
+.workbench__nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 10px;
+  border-radius: 8px;
+  background: rgba(29, 79, 145, 0.1);
+  color: var(--admin-accent-strong);
+}
+
+.workbench__nav-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+</style>

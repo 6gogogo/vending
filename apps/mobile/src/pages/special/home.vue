@@ -6,7 +6,6 @@ import type { DeviceStatus, DeviceRecord, InventoryMovement } from "@vm/shared-t
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
-import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { appCopy } from "../../constants/copy";
 import { categoryLabelMap } from "../../constants/labels";
@@ -50,14 +49,6 @@ const serviceWindows = computed(() =>
   (sessionStore.quota?.activeWindows ?? []).map(
     (window) => `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`
   )
-);
-
-const availableUnits = computed(() =>
-  permissionList.value.reduce((total, item) => total + item.quantity, 0)
-);
-
-const onlineDeviceCount = computed(() =>
-  devices.value.filter((device) => device.status === "online").length
 );
 
 const guidanceText = computed(() => {
@@ -156,12 +147,6 @@ onShow(() => {
         <view class="section-heading">
           <text class="section-heading__title">今日可领取概览</text>
           <text class="vm-subtitle">把关键资格和路线信息放在最前面，先看清楚再去操作，会更省心。</text>
-        </view>
-
-        <view class="overview-grid">
-          <ServiceMetric label="可领物资" :value="permissionList.length" hint="按当前时段和资格自动计算" tone="accent" />
-          <ServiceMetric label="可领总件数" :value="availableUnits" hint="同类物资数量会合并显示" />
-          <ServiceMetric label="在线柜机" :value="onlineDeviceCount" hint="优先选择在线柜机，减少白跑" />
         </view>
 
         <view class="care-note">
@@ -293,7 +278,6 @@ onShow(() => {
   line-height: 1.6;
 }
 
-.overview-grid,
 .permission-list,
 .device-list,
 .goods-list,

@@ -8,6 +8,7 @@ import type {
   AiOperationsReportType,
   AiPolicyOptimizationSuggestion,
   AiProviderStatus,
+  AiProviderTestResult,
   AiRestockLayoutSuggestion,
   AlertTask,
   DataMonitorRange
@@ -38,23 +39,64 @@ interface AiWorkspaceStorage {
   history: AiWorkspaceHistoryEntry[];
 }
 
+interface WorkspaceTabOption {
+  key: WorkspaceTab;
+  label: string;
+  hint: string;
+  icon: string;
+}
+
+interface StatusCard {
+  key: string;
+  label: string;
+  value: string;
+  hint: string;
+  icon: string;
+  stateClass?: string;
+}
+
 const todayDateKey = getTodayDateKeyInBeijing();
 const aiWorkspaceStorageKey = "vm-admin-ai-workspace";
 const maxHistoryEntries = 12;
 const route = useRoute();
 const router = useRouter();
 
-const tabOptions: Array<{ key: WorkspaceTab; label: string; hint: string }> = [
-  { key: "report", label: "运维日报", hint: "汇总待办、缺货、临期和反馈。" },
-  { key: "diagnosis", label: "异常诊断", hint: "分析单次开柜事件的门状态和回调链路。" },
-  { key: "restock", label: "补货布局", hint: "结合区域和时段热度给出建议。" },
-  { key: "feedback", label: "反馈分流", hint: "分类反馈并生成回复草稿。" },
-  { key: "policy", label: "策略优化", hint: "根据完成率和未服务人数调整策略。" }
+const tabOptions: WorkspaceTabOption[] = [
+  {
+    key: "report",
+    label: "运维日报",
+    hint: "汇总待办、缺货、临期和反馈。",
+    icon: "M4 6.75A2.75 2.75 0 0 1 6.75 4h10.5A2.75 2.75 0 0 1 20 6.75v10.5A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25zm4.5 2.25a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5zm0 4a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5zm0 4a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5z"
+  },
+  {
+    key: "diagnosis",
+    label: "异常诊断",
+    hint: "分析单次开柜事件的门状态和回调链路。",
+    icon: "M10.5 3.75a6.75 6.75 0 1 0 4.244 12l3.253 3.253a.75.75 0 1 0 1.06-1.06l-3.252-3.254A6.75 6.75 0 0 0 10.5 3.75m0 1.5a5.25 5.25 0 1 1 0 10.5a5.25 5.25 0 0 1 0-10.5m-.75 2.5a.75.75 0 0 0 0 1.5h.75v2.75c0 .414.336.75.75.75h2a.75.75 0 0 0 0-1.5H12V9a.75.75 0 0 0-.75-.75z"
+  },
+  {
+    key: "restock",
+    label: "补货布局",
+    hint: "结合区域和时段热度给出建议。",
+    icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
+  },
+  {
+    key: "feedback",
+    label: "反馈分流",
+    hint: "分类反馈并生成回复草稿。",
+    icon: "M4.75 5A2.75 2.75 0 0 0 2 7.75v6.5A2.75 2.75 0 0 0 4.75 17H7.8l2.52 2.1a1 1 0 0 0 1.28 0L14.12 17h5.13A2.75 2.75 0 0 0 22 14.25v-6.5A2.75 2.75 0 0 0 19.25 5zm2.5 4.25a.75.75 0 0 0 0 1.5h9.5a.75.75 0 0 0 0-1.5zm0 3a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5z"
+  },
+  {
+    key: "policy",
+    label: "策略优化",
+    hint: "根据完成率和未服务人数调整策略。",
+    icon: "M5 18.25V8.75A2.75 2.75 0 0 1 7.75 6h8.5A2.75 2.75 0 0 1 19 8.75v9.5a.75.75 0 0 1-1.28.53l-1.97-1.97-1.97 1.97a.75.75 0 0 1-1.06 0l-1.97-1.97-1.97 1.97A.75.75 0 0 1 7.72 18L5.75 16.03 3.78 18A.75.75 0 0 1 2.5 17.47v-8.72A2.75 2.75 0 0 1 5.25 6H7v1.5H5.25c-.69 0-1.25.56-1.25 1.25v6.91l1.22-1.22a.75.75 0 0 1 1.06 0L8.25 16.4l1.97-1.97a.75.75 0 0 1 1.06 0l1.97 1.97 1.97-1.97a.75.75 0 0 1 1.06 0L17.5 15.66V8.75c0-.69-.56-1.25-1.25-1.25h-5.5V6h5.5A2.75 2.75 0 0 1 19 8.75v9.5a.75.75 0 0 1-1.28.53l-1.97-1.97-1.97 1.97a.75.75 0 0 1-1.06 0l-1.97-1.97-1.97 1.97A.75.75 0 0 1 7.72 18L5.75 16.03 3.78 18A.75.75 0 0 1 2.5 17.47z"
+  }
 ];
 
-const reportTypeOptions: Array<{ value: AiOperationsReportType; label: string }> = [
-  { value: "morning", label: "晨报" },
-  { value: "daily", label: "日报" }
+const reportTypeOptions: Array<{ value: AiOperationsReportType; label: string; hint: string }> = [
+  { value: "morning", label: "晨报", hint: "适合开班前巡检和排班确认。" },
+  { value: "daily", label: "日报", hint: "适合复盘当天问题和闭环情况。" }
 ];
 
 const rangeOptions: Array<{ value: DataMonitorRange; label: string }> = [
@@ -66,6 +108,17 @@ const rangeOptions: Array<{ value: DataMonitorRange; label: string }> = [
 const aiStatus = ref<AiProviderStatus>();
 const statusLoading = ref(false);
 const statusError = ref("");
+const configDialogOpen = ref(false);
+const configSaving = ref(false);
+const configError = ref("");
+const configForm = ref({
+  apiKey: "",
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-4.1-mini"
+});
+const testResult = ref<AiProviderTestResult>();
+const testLoading = ref(false);
+const testError = ref("");
 
 const alerts = ref<AlertTask[]>([]);
 const alertsLoading = ref(false);
@@ -117,6 +170,42 @@ const feedbackAlerts = computed(() =>
 const selectedFeedbackAlert = computed(() =>
   feedbackAlerts.value.find((alert) => alert.id === feedbackAlertId.value)
 );
+const statusCards = computed<StatusCard[]>(() => [
+  {
+    key: "provider",
+    label: "接入方式",
+    value: "OpenAI 兼容",
+    hint: "后端统一处理鉴权、转发和审计。",
+    icon: "M4 7.25A3.25 3.25 0 0 1 7.25 4h9.5A3.25 3.25 0 0 1 20 7.25v9.5A3.25 3.25 0 0 1 16.75 20h-9.5A3.25 3.25 0 0 1 4 16.75zm3.25-1.75c-.966 0-1.75.784-1.75 1.75v9.5c0 .966.784 1.75 1.75 1.75h9.5c.966 0 1.75-.784 1.75-1.75v-9.5c0-.966-.784-1.75-1.75-1.75zm1.5 3a.75.75 0 0 0-.75.75v1.5c0 .414.336.75.75.75h1.5v1.5a.75.75 0 0 0 1.5 0V11.5h1.5a.75.75 0 0 0 0-1.5h-1.5V8.5a.75.75 0 0 0-1.5 0V10h-1.5a.75.75 0 0 0-.75.75",
+    stateClass: "ai-page__status-card--info"
+  },
+  {
+    key: "status",
+    label: "配置状态",
+    value: isAiEnabled.value ? "已可调用" : "待补配置",
+    hint: missingConfig.value.length ? `待补 ${missingConfig.value.join("、")}` : "API Key 已就绪，可直接发起生成。",
+    icon: "M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.51 8.51 0 0 0 12 3.5m3.03 6.28a.75.75 0 1 1 1.06 1.06l-4.5 4.5a.75.75 0 0 1-1.06 0l-1.97-1.97a.75.75 0 1 1 1.06-1.06l1.44 1.44z",
+    stateClass: isAiEnabled.value ? "ai-page__status-card--success" : "ai-page__status-card--warning"
+  },
+  {
+    key: "strategy",
+    label: "模型策略",
+    value: aiStatus.value?.usingDefaultModel === false ? "自定义模型" : "默认模型",
+    hint: aiStatus.value?.usingDefaultBaseUrl === false ? "当前已切换到自定义网关。" : "当前使用默认地址。",
+    icon: "M6.75 4h10.5A2.75 2.75 0 0 1 20 6.75v10.5A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25V6.75A2.75 2.75 0 0 1 6.75 4m0 1.5c-.69 0-1.25.56-1.25 1.25v10.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25V6.75c0-.69-.56-1.25-1.25-1.25zm1.5 2.75a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5zm0 3.5a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5z",
+    stateClass: "ai-page__status-card--neutral"
+  },
+  {
+    key: "test",
+    label: "连通测试",
+    value: testResult.value ? "最近通过" : "未测试",
+    hint: testResult.value
+      ? `${formatDateTime(testResult.value.testedAt)} · ${testResult.value.latencyMs} ms`
+      : "保存配置后建议先做一次联通测试。",
+    icon: "M12 4.5a7.5 7.5 0 0 0-5.88 12.16a.75.75 0 0 0 1.17-.94A6 6 0 1 1 18 12c0 .66-.11 1.3-.31 1.9a.75.75 0 1 0 1.41.52c.25-.79.4-1.61.4-2.42A7.5 7.5 0 0 0 12 4.5m0 3a.75.75 0 0 0-.75.75v3.44l-1.72 1.72a.75.75 0 1 0 1.06 1.06l1.94-1.94a.75.75 0 0 0 .22-.53V8.25A.75.75 0 0 0 12 7.5",
+    stateClass: testResult.value ? "ai-page__status-card--success" : "ai-page__status-card--neutral"
+  }
+]);
 
 const assistantTips = computed(() => {
   if (activeTab.value === "diagnosis") {
@@ -384,6 +473,79 @@ const loadStatus = async () => {
   }
 };
 
+const resetConfigForm = () => {
+  configForm.value = {
+    apiKey: "",
+    baseUrl: aiStatus.value?.baseUrl ?? "https://api.openai.com/v1",
+    model: aiStatus.value?.model ?? "gpt-4.1-mini"
+  };
+  configError.value = "";
+};
+
+const openConfigDialog = () => {
+  resetConfigForm();
+  configDialogOpen.value = true;
+};
+
+const closeConfigDialog = () => {
+  configDialogOpen.value = false;
+  configError.value = "";
+};
+
+const saveConfig = async () => {
+  configError.value = "";
+  testError.value = "";
+
+  if (!configForm.value.baseUrl.trim()) {
+    configError.value = "请输入 Base URL。";
+    return;
+  }
+
+  if (!configForm.value.model.trim()) {
+    configError.value = "请输入模型名称。";
+    return;
+  }
+
+  if (!aiStatus.value?.apiKeyConfigured && !configForm.value.apiKey.trim()) {
+    configError.value = "首次启用时需要填写 API Key。";
+    return;
+  }
+
+  try {
+    configSaving.value = true;
+    aiStatus.value = await adminApi.saveAiConfig({
+      baseUrl: configForm.value.baseUrl.trim(),
+      model: configForm.value.model.trim(),
+      ...(configForm.value.apiKey.trim() ? { apiKey: configForm.value.apiKey.trim() } : {})
+    });
+    testResult.value = undefined;
+    closeConfigDialog();
+  } catch (error) {
+    configError.value = readErrorMessage(error);
+  } finally {
+    configSaving.value = false;
+  }
+};
+
+const testProvider = async () => {
+  testError.value = "";
+
+  if (!isAiEnabled.value) {
+    testError.value = "请先在模型配置中填写可用的 API Key，再执行连通测试。";
+    openConfigDialog();
+    return;
+  }
+
+  try {
+    testLoading.value = true;
+    testResult.value = await adminApi.testAiConfig();
+  } catch (error) {
+    testError.value = readErrorMessage(error);
+  } finally {
+    testLoading.value = false;
+  }
+};
+
 const loadAlerts = async () => {
   alertsLoading.value = true;
   alertsError.value = "";
@@ -553,75 +715,133 @@ onMounted(() => {
 <template>
   <section class="admin-page ai-page">
     <section class="admin-page__section">
-      <div class="admin-page__section-head">
-        <div>
+      <div class="admin-page__section-head ai-page__section-head">
+        <div class="ai-page__section-copy">
           <p class="admin-kicker">模型接入状态</p>
-          <h3 class="admin-page__section-title">OpenAI 兼容接口只需填入 API Key 即可启用</h3>
+          <h3 class="admin-page__section-title">AI 接入控制台</h3>
+          <p class="admin-copy">把状态查看、连通测试和模型配置集中在这一块处理。</p>
         </div>
-        <div class="admin-toolbar">
+        <div class="admin-toolbar ai-page__status-actions">
           <span class="admin-pill" :class="isAiEnabled ? 'admin-pill--success' : 'admin-pill--warning'">
             {{ isAiEnabled ? "已启用" : "待配置" }}
           </span>
-          <button class="admin-button admin-button--ghost" :disabled="statusLoading" @click="loadStatus">
-            {{ statusLoading ? "刷新中" : "刷新状态" }}
+          <button
+            type="button"
+            class="admin-button admin-button--ghost ai-page__action-button"
+            :disabled="statusLoading"
+            @click="loadStatus"
+          >
+            <span class="ai-page__button-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M12 5a7 7 0 0 1 6.93 5.93a.75.75 0 1 1-1.48.24A5.5 5.5 0 1 0 16.07 16H14.5a.75.75 0 0 1 0-1.5H18a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-1.47A7 7 0 1 1 12 5"
+                />
+              </svg>
+            </span>
+            <span>{{ statusLoading ? "刷新中" : "刷新状态" }}</span>
+          </button>
+          <button
+            type="button"
+            class="admin-button admin-button--ghost ai-page__action-button"
+            :disabled="testLoading"
+            @click="testProvider"
+          >
+            <span class="ai-page__button-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M9.75 4.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V6h2.25a.75.75 0 0 1 .53 1.28l-1.8 1.8 3.1 7.76a2 2 0 0 1-1.86 2.74H7.48a2 2 0 0 1-1.86-2.74l3.1-7.76-1.8-1.8A.75.75 0 0 1 7.45 6H9.75zm-.52 13.5h6.54l-2.61-6.53a.75.75 0 0 1 .16-.82l1.37-1.37H9.3l1.37 1.37a.75.75 0 0 1 .16.82z"
+                />
+              </svg>
+            </span>
+            <span>{{ testLoading ? "测试中" : "测试功能" }}</span>
+          </button>
+          <button type="button" class="admin-button ai-page__action-button" @click="openConfigDialog">
+            <span class="ai-page__button-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M10.29 3.86a1.75 1.75 0 0 1 3.42 0l.18.86a7.85 7.85 0 0 1 1.7.7l.76-.45a1.75 1.75 0 0 1 2.33.63l.42.74a1.75 1.75 0 0 1-.44 2.26l-.68.57q.08.4.08.83t-.08.83l.68.57a1.75 1.75 0 0 1 .44 2.26l-.42.74a1.75 1.75 0 0 1-2.33.63l-.76-.45a7.9 7.9 0 0 1-1.7.7l-.18.86a1.75 1.75 0 0 1-3.42 0l-.18-.86a7.84 7.84 0 0 1-1.7-.7l-.76.45a1.75 1.75 0 0 1-2.33-.63l-.42-.74a1.75 1.75 0 0 1 .44-2.26l.68-.57A4.3 4.3 0 0 1 5.75 12q0-.43.08-.83l-.68-.57a1.75 1.75 0 0 1-.44-2.26l.42-.74a1.75 1.75 0 0 1 2.33-.63l.76.45c.54-.3 1.11-.53 1.7-.7zm1.71 5.39a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5"
+                />
+              </svg>
+            </span>
+            <span>模型配置</span>
           </button>
         </div>
       </div>
 
-      <div class="admin-grid admin-grid--stats-4">
-        <article class="admin-panel admin-panel-block admin-panel-block--tight">
-          <span class="admin-kicker">Provider</span>
-          <h3 class="admin-page__section-title">{{ aiStatus?.provider ?? "openai-compatible" }}</h3>
-          <p class="admin-copy">后端统一负责鉴权与请求转发。</p>
-        </article>
-        <article class="admin-panel admin-panel-block admin-panel-block--tight">
-          <span class="admin-kicker">模型</span>
-          <h3 class="admin-page__section-title admin-code">{{ aiStatus?.model ?? "gpt-4.1-mini" }}</h3>
-          <p class="admin-copy">默认模型可直接使用，也可在环境变量中替换。</p>
-        </article>
-        <article class="admin-panel admin-panel-block admin-panel-block--tight">
-          <span class="admin-kicker">Base URL</span>
-          <h3 class="admin-page__section-title admin-code ai-page__code-title">
-            {{ aiStatus?.baseUrl ?? "https://api.openai.com/v1" }}
-          </h3>
-          <p class="admin-copy">默认对接 OpenAI 官方格式。</p>
-        </article>
-        <article class="admin-panel admin-panel-block admin-panel-block--tight">
-          <span class="admin-kicker">缺失配置</span>
-          <h3 class="admin-page__section-title">{{ missingConfig.length }}</h3>
-          <p class="admin-copy">{{ missingConfig.length ? missingConfig.join("、") : "配置完整" }}</p>
+      <div class="admin-grid admin-grid--stats-4 ai-page__status-grid">
+        <article
+          v-for="card in statusCards"
+          :key="card.key"
+          class="admin-panel admin-panel-block admin-panel-block--tight ai-page__status-card"
+          :class="card.stateClass"
+        >
+          <span class="ai-page__card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path :d="card.icon" />
+            </svg>
+          </span>
+          <span class="admin-kicker">{{ card.label }}</span>
+          <h3 class="admin-page__section-title">{{ card.value }}</h3>
+          <p class="admin-copy">{{ card.hint }}</p>
         </article>
       </div>
 
       <div v-if="statusError" class="admin-note ai-page__note ai-page__note--danger">{{ statusError }}</div>
+      <div v-if="testError" class="admin-note ai-page__note ai-page__note--danger">{{ testError }}</div>
+      <div v-if="testResult" class="admin-note ai-page__note ai-page__note--success">
+        最近一次测试已通过，{{ formatDateTime(testResult.testedAt) }} 完成，耗时 {{ testResult.latencyMs }} ms。
+      </div>
       <div v-if="!isAiEnabled" class="admin-note ai-page__note">
-        默认只需在后端 `.env` 中填写 `OPENAI_API_KEY`，就可以直接使用 OpenAI 官方地址和默认模型；只有切换兼容网关时才需要再改
-        `OPENAI_BASE_URL` 和 `OPENAI_MODEL`。
+        请在“模型配置”里录入 API Key。默认地址和默认模型已经预置，只有切换兼容网关时才需要改动。
       </div>
     </section>
 
     <section class="admin-page__section">
-      <div class="ai-page__tabs">
-        <button
-          v-for="tab in tabOptions"
-          :key="tab.key"
-          type="button"
-          class="ai-page__tab"
-          :class="{ 'ai-page__tab--active': activeTab === tab.key }"
-          @click="setTab(tab.key)"
-        >
-          <span class="ai-page__tab-title">{{ tab.label }}</span>
-          <span class="ai-page__tab-hint">{{ tab.hint }}</span>
-        </button>
-      </div>
+      <article class="admin-panel admin-panel-block ai-page__tab-shell">
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">功能选择</span>
+            <h3 class="admin-panel__title">先选当前要生成的 AI 能力</h3>
+          </div>
+          <span class="admin-copy">当前页签：{{ activeTabMeta.label }}</span>
+        </div>
+
+        <div class="ai-page__tabs">
+          <button
+            v-for="tab in tabOptions"
+            :key="tab.key"
+            type="button"
+            class="ai-page__tab"
+            :class="{ 'ai-page__tab--active': activeTab === tab.key }"
+            @click="setTab(tab.key)"
+          >
+            <span class="ai-page__tab-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path :d="tab.icon" />
+              </svg>
+            </span>
+            <span class="ai-page__tab-copy">
+              <span class="ai-page__tab-title">{{ tab.label }}</span>
+              <span class="ai-page__tab-hint">{{ tab.hint }}</span>
+            </span>
+          </button>
+        </div>
+      </article>
     </section>
 
     <section class="admin-grid admin-grid--main-aside">
       <article class="admin-panel admin-panel-block">
-        <div class="admin-panel__head">
-          <div>
-            <span class="admin-kicker">当前工作台</span>
-            <h3 class="admin-panel__title">{{ activeTabMeta.label }}</h3>
+        <div class="admin-panel__head ai-page__workspace-head">
+          <div class="ai-page__workspace-title">
+            <span class="ai-page__headline-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path :d="activeTabMeta.icon" />
+              </svg>
+            </span>
+            <div>
+              <span class="admin-kicker">当前工作台</span>
+              <h3 class="admin-panel__title">{{ activeTabMeta.label }}</h3>
+            </div>
           </div>
           <span class="admin-copy">{{ activeTabMeta.hint }}</span>
         </div>
@@ -725,27 +945,48 @@ onMounted(() => {
         </form>
 
         <form v-else-if="activeTab === 'report'" class="ai-page__form" @submit.prevent="runOperationsReport">
-          <div class="admin-grid admin-grid--two">
-            <label class="admin-field">
-              <span class="admin-field__label">业务日</span>
-              <input v-model="reportDateKey" class="admin-input admin-code" type="date" />
-            </label>
-            <label class="admin-field">
-              <span class="admin-field__label">报告类型</span>
-              <select v-model="reportType" class="admin-select">
-                <option v-for="item in reportTypeOptions" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select>
-            </label>
-          </div>
+          <section class="ai-page__selector-block">
+            <div class="ai-page__selector-head">
+              <div>
+                <span class="admin-kicker">功能选择</span>
+                <h4 class="ai-page__selector-title">先确定业务日和日报口径</h4>
+              </div>
+              <span class="admin-copy">
+                {{ reportType === "morning" ? "适合开班前巡检。" : "适合复盘当天问题和闭环。" }}
+              </span>
+            </div>
 
-          <div class="admin-toolbar">
-            <button class="admin-button" :disabled="operationsReportLoading">
-              {{ operationsReportLoading ? "生成中" : "生成运维日报" }}
-            </button>
-            <span class="admin-copy">晨报适合开班前巡检，日报适合复盘。</span>
-          </div>
+            <div class="admin-grid admin-grid--two">
+              <label class="admin-field">
+                <span class="admin-field__label">业务日</span>
+                <input v-model="reportDateKey" class="admin-input admin-code" type="date" />
+              </label>
+
+              <div class="admin-field">
+                <span class="admin-field__label">报告类型</span>
+                <div class="ai-page__choice-grid">
+                  <button
+                    v-for="item in reportTypeOptions"
+                    :key="item.value"
+                    type="button"
+                    class="ai-page__choice-card"
+                    :class="{ 'ai-page__choice-card--active': reportType === item.value }"
+                    @click="reportType = item.value"
+                  >
+                    <span class="ai-page__choice-title">{{ item.label }}</span>
+                    <span class="ai-page__choice-hint">{{ item.hint }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="admin-toolbar">
+              <button class="admin-button" :disabled="operationsReportLoading">
+                {{ operationsReportLoading ? "生成中" : "生成运维日报" }}
+              </button>
+              <span class="admin-copy">AI 会整合待办、缺货、临期和反馈摘要。</span>
+            </div>
+          </section>
 
           <div v-if="operationsReportError" class="admin-note ai-page__note ai-page__note--danger">
             {{ operationsReportError }}
@@ -1181,56 +1422,141 @@ onMounted(() => {
         </article>
       </aside>
     </section>
+
+    <div v-if="configDialogOpen" class="ai-page__modal-backdrop" @click.self="closeConfigDialog">
+      <section class="ai-page__modal admin-panel">
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">模型配置</span>
+            <h3 class="admin-panel__title">编辑 AI 接入参数</h3>
+          </div>
+          <button type="button" class="admin-button admin-button--ghost" @click="closeConfigDialog">取消</button>
+        </div>
+
+        <form class="ai-page__modal-form" @submit.prevent="saveConfig">
+          <div class="ai-page__modal-pills">
+            <span class="admin-pill" :class="aiStatus?.apiKeyConfigured ? 'admin-pill--success' : 'admin-pill--warning'">
+              {{ aiStatus?.apiKeyConfigured ? "API Key 已保存" : "需要 API Key" }}
+            </span>
+            <span class="admin-pill">{{ aiStatus?.usingDefaultBaseUrl === false ? "自定义地址" : "默认地址" }}</span>
+            <span class="admin-pill">{{ aiStatus?.usingDefaultModel === false ? "自定义模型" : "默认模型" }}</span>
+          </div>
+
+          <div class="admin-note ai-page__note">
+            API Key 不回显。已有 Key 留空即可保持不变，只有准备切换账号或网关时再重新填写。
+          </div>
+
+          <label class="admin-field">
+            <span class="admin-field__label">API Key</span>
+            <input
+              v-model="configForm.apiKey"
+              class="admin-input admin-code"
+              type="password"
+              autocomplete="off"
+              :placeholder="aiStatus?.apiKeyConfigured ? '已配置，留空则保持不变' : '请输入可用的 API Key'"
+            />
+          </label>
+
+          <label class="admin-field">
+            <span class="admin-field__label">Base URL</span>
+            <input
+              v-model.trim="configForm.baseUrl"
+              class="admin-input admin-code"
+              placeholder="https://api.openai.com/v1"
+            />
+          </label>
+
+          <label class="admin-field">
+            <span class="admin-field__label">模型名称</span>
+            <input v-model.trim="configForm.model" class="admin-input admin-code" placeholder="gpt-4.1-mini" />
+          </label>
+
+          <div v-if="configError" class="admin-note ai-page__note ai-page__note--danger">{{ configError }}</div>
+
+          <div class="admin-toolbar ai-page__modal-actions">
+            <button type="button" class="admin-button admin-button--ghost" @click="closeConfigDialog">取消</button>
+            <button class="admin-button" :disabled="configSaving">{{ configSaving ? "保存中" : "保存配置" }}</button>
+          </div>
+        </form>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
-.ai-page__code-title {
-  font-size: 0.94rem;
-  line-height: 1.3;
-  word-break: break-all;
+.ai-page__section-head {
+  align-items: flex-start;
 }
 
-.ai-page__tabs {
+.ai-page__section-copy {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ai-page__status-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ai-page__action-button {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
 
-.ai-page__tab {
+.ai-page__button-icon,
+.ai-page__card-icon,
+.ai-page__tab-icon,
+.ai-page__headline-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-page__button-icon svg,
+.ai-page__card-icon svg,
+.ai-page__tab-icon svg,
+.ai-page__headline-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.ai-page__status-grid {
+  align-items: stretch;
+}
+
+.ai-page__status-card {
   display: grid;
-  gap: 4px;
-  padding: 12px;
-  border: 1px solid var(--admin-line);
+  gap: 8px;
+  align-content: start;
+  border-radius: 12px;
+}
+
+.ai-page__status-card--info {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+}
+
+.ai-page__status-card--success {
+  border-color: #b9dec6;
+  background: linear-gradient(180deg, #ffffff 0%, #eff8f2 100%);
+}
+
+.ai-page__status-card--warning {
+  border-color: #efcf8d;
+  background: linear-gradient(180deg, #ffffff 0%, #fff8ea 100%);
+}
+
+.ai-page__status-card--neutral {
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+}
+
+.ai-page__card-icon {
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
-  background: var(--admin-panel);
-  text-align: left;
-  cursor: pointer;
-}
-
-.ai-page__tab:hover {
-  border-color: #aebfe1;
-  background: var(--admin-panel-muted);
-}
-
-.ai-page__tab--active {
-  border-color: #aebfe1;
-  background: var(--admin-accent-soft);
-}
-
-.ai-page__tab-title {
-  font-weight: 700;
-}
-
-.ai-page__tab-hint {
-  color: var(--admin-muted);
-  line-height: 1.45;
-  font-size: 0.82rem;
-}
-
-.ai-page__form {
-  display: grid;
-  gap: 12px;
+  background: rgba(29, 79, 145, 0.1);
+  color: var(--admin-accent-strong);
 }
 
 .ai-page__note {
@@ -1243,20 +1569,163 @@ onMounted(() => {
   color: #8d342e;
 }
 
-.ai-page__result {
+.ai-page__note--success {
+  border-left-color: #a9d2b5;
+  background: #effaf2;
+  color: #1d6b3d;
+}
+
+.ai-page__tab-shell {
+  gap: 10px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+}
+
+.ai-page__tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-page__tab {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 12px;
+  background: var(--admin-panel);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.ai-page__tab:hover {
+  border-color: #aebfe1;
+  background: var(--admin-panel-muted);
+  box-shadow: inset 0 0 0 1px rgba(29, 79, 145, 0.06);
+}
+
+.ai-page__tab--active {
+  border-color: #aebfe1;
+  background: var(--admin-accent-soft);
+}
+
+.ai-page__tab-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+  background: rgba(29, 79, 145, 0.1);
+  color: var(--admin-accent-strong);
+}
+
+.ai-page__tab-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.ai-page__tab-title {
+  font-weight: 700;
+}
+
+.ai-page__tab-hint {
+  color: var(--admin-muted);
+  line-height: 1.45;
+  font-size: 0.82rem;
+}
+
+.ai-page__workspace-head {
+  align-items: flex-start;
+}
+
+.ai-page__workspace-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-page__headline-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(29, 79, 145, 0.1);
+  color: var(--admin-accent-strong);
+}
+
+.ai-page__form,
+.ai-page__result,
+.ai-page__list-block,
+.ai-page__modal-form {
   display: grid;
   gap: 12px;
+}
+
+.ai-page__selector-block {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--admin-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.ai-page__selector-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.ai-page__selector-title {
+  margin: 4px 0 0;
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.ai-page__choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-page__choice-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-panel);
+  color: var(--admin-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.ai-page__choice-card:hover {
+  border-color: #aebfe1;
+  background: var(--admin-panel-muted);
+}
+
+.ai-page__choice-card--active {
+  border-color: #94afd8;
+  background: var(--admin-accent-soft);
+}
+
+.ai-page__choice-title {
+  font-weight: 700;
+}
+
+.ai-page__choice-hint {
+  color: var(--admin-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .ai-page__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-}
-
-.ai-page__list-block {
-  display: grid;
   gap: 8px;
 }
 
@@ -1291,9 +1760,39 @@ onMounted(() => {
   font-size: 0.8rem;
 }
 
+.ai-page__modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.ai-page__modal {
+  width: min(680px, 100%);
+  padding: 16px;
+}
+
+.ai-page__modal-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-page__modal-actions {
+  justify-content: flex-end;
+}
+
 @media (max-width: 980px) {
-  .ai-page__tabs {
+  .ai-page__tabs,
+  .ai-page__choice-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ai-page__selector-head {
+    display: grid;
   }
 }
 </style>

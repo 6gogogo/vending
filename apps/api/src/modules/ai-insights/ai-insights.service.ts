@@ -9,6 +9,8 @@ import type {
   AiOperationsReport,
   AiOperationsReportType,
   AiPolicyOptimizationSuggestion,
+  AiProviderConfigPayload,
+  AiProviderTestResult,
   AiRestockLayoutSuggestion,
   AlertTask,
   CabinetEventRecord,
@@ -44,6 +46,15 @@ export class AiInsightsService {
 
   status() {
     return this.openAiCompatibleService.getStatus();
+  }
+
+  saveProviderConfig(payload: AiProviderConfigPayload) {
+    this.cache.clear();
+    return this.openAiCompatibleService.saveConfig(payload);
+  }
+
+  testProvider(): Promise<AiProviderTestResult> {
+    return this.openAiCompatibleService.testConnection();
   }
 
   async diagnoseEvent(payload: { eventId?: string; orderNo?: string; logId?: string }) {

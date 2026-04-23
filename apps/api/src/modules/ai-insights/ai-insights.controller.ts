@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Inject, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Patch, Post, Query, UseGuards } from "@nestjs/common";
 
-import type { AiOperationsReportType, DataMonitorRange } from "@vm/shared-types";
+import type { AiOperationsReportType, AiProviderConfigPayload, DataMonitorRange } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
@@ -16,6 +16,16 @@ export class AiInsightsController {
   @Get("status")
   status() {
     return ok(this.aiInsightsService.status());
+  }
+
+  @Patch("config")
+  saveProviderConfig(@Body() body: AiProviderConfigPayload) {
+    return ok(this.aiInsightsService.saveProviderConfig(body), "配置已保存");
+  }
+
+  @Post("test")
+  async testProvider() {
+    return ok(await this.aiInsightsService.testProvider(), "测试完成");
   }
 
   @Post("event-diagnosis")

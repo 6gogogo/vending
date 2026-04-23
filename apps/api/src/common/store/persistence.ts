@@ -151,6 +151,8 @@ export const resolveSystemLogFile = () => {
   return resolveApiWorkspacePath(configuredPath, "runtime-data/system-audit.ndjson");
 };
 
+export const resolveApiEnvFile = () => resolve(apiWorkspaceRoot, ".env");
+
 export const createSeededPersistedState = (): PersistedStoreState => {
   const seed = cloneSeedState();
 

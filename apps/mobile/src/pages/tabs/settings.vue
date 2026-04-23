@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
@@ -74,11 +75,24 @@ onShow(() => {
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="action-grid">
-          <button class="vm-button" @tap="navigate('/pages/common/feedback')">反馈问题</button>
-          <button v-if="sessionStore.user?.role === 'admin'" class="vm-button vm-button--ghost" disabled>
-            PC 端支持更完整的管理能力
+          <button class="vm-button action-button" @tap="navigate('/pages/common/feedback')">
+            <view class="action-button__content">
+              <MenuIcon name="feedback" size="sm" tone="contrast" />
+              <text>反馈问题</text>
+            </view>
           </button>
-          <button class="vm-button vm-button--soft" @tap="logout">退出登录</button>
+          <button v-if="sessionStore.user?.role === 'admin'" class="vm-button vm-button--ghost action-button" disabled>
+            <view class="action-button__content">
+              <MenuIcon name="desktop" size="sm" tone="neutral" />
+              <text>PC 端支持更完整的管理能力</text>
+            </view>
+          </button>
+          <button class="vm-button vm-button--soft action-button" @tap="logout">
+            <view class="action-button__content">
+              <MenuIcon name="logout" size="sm" tone="accent" />
+              <text>退出登录</text>
+            </view>
+          </button>
         </view>
       </view>
     </GlassCard>
@@ -90,6 +104,14 @@ onShow(() => {
 .action-grid {
   display: grid;
   gap: 16rpx;
+}
+
+.action-button__content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  width: 100%;
 }
 
 .info-item {

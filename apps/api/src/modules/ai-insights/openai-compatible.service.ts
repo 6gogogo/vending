@@ -1,9 +1,11 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { BadGatewayException, BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
-import type { AiProviderStatus } from "@vm/shared-types";
+import type { AiProviderConfigPayload, AiProviderStatus, AiProviderTestResult } from "@vm/shared-types";
 
-import { appendSystemAuditLog } from "../../common/store/persistence";
+import { appendSystemAuditLog, resolveApiEnvFile } from "../../common/store/persistence";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -45,7 +47,61 @@ export class OpenAiCompatibleService {
       provider: "openai-compatible",
       baseUrl: this.baseUrl,
       model: this.model,
-      missingConfig
+      missingConfig,
+      apiKeyConfigured: Boolean(this.apiKey),
+      usingDefaultBaseUrl: !this.readConfiguredBaseUrl(),
+      usingDefaultModel: !this.readConfiguredModel()
+    };
+  }
+
+  saveConfig(payload: AiProviderConfigPayload) {
+    const nextApiKey = typeof payload.apiKey === "string" ? payload.apiKey.trim() : undefined;
+    const nextBaseUrl = typeof payload.baseUrl === "string" ? payload.baseUrl.trim() : this.readConfiguredBaseUrl() ?? "";
+    const nextModel = typeof payload.model === "string" ? payload.model.trim() : this.readConfiguredModel() ?? "";
+
+    this.persistEnvValue("OPENAI_BASE_URL", nextBaseUrl);
+    this.persistEnvValue("OPENAI_MODEL", nextModel);
+
+    if (nextApiKey !== undefined) {
+      this.persistEnvValue("OPENAI_API_KEY", nextApiKey);
+    }
+
+    appendSystemAuditLog({
+      occurredAt: new Date().toISOString(),
+      method: "PATCH",
+      path: "/api/ai-insights/config",
+      statusCode: 200,
+      durationMs: 0,
+      metadata: {
+        provider: "openai-compatible",
+        hasApiKey: nextApiKey !== undefined ? Boolean(nextApiKey) : Boolean(this.apiKey),
+        baseUrlCustomized: Boolean(nextBaseUrl),
+        modelCustomized: Boolean(nextModel)
+      }
+    });
+
+    return this.getStatus();
+  }
+
+  async testConnection(): Promise<AiProviderTestResult> {
+    const startedAt = Date.now();
+    const testedAt = new Date().toISOString();
+    const response = await this.completeJson<{ ok: boolean }>({
+      task: "provider-health-check",
+      systemPrompt: "你是 AI 接口连通性检查助手。只返回 JSON。",
+      userPrompt: '请仅返回 {"ok":true}。',
+      temperature: 0,
+      maxTokens: 32
+    });
+
+    return {
+      success: true,
+      provider: "openai-compatible",
+      model: response.model,
+      baseUrl: this.baseUrl,
+      testedAt,
+      latencyMs: Math.max(1, Date.now() - startedAt),
+      message: "模型接口调用成功。"
     };
   }
 
@@ -168,6 +224,14 @@ export class OpenAiCompatibleService {
 
   private get model() {
     return this.configService.get<string>("OPENAI_MODEL")?.trim() || "gpt-4.1-mini";
+  }
+
+  private readConfiguredBaseUrl() {
+    return this.configService.get<string>("OPENAI_BASE_URL")?.trim();
+  }
+
+  private readConfiguredModel() {
+    return this.configService.get<string>("OPENAI_MODEL")?.trim();
   }
 
   private get timeoutMs() {
@@ -320,5 +384,32 @@ export class OpenAiCompatibleService {
     }
 
     return "";
+  }
+
+  private persistEnvValue(name: string, value: string) {
+    process.env[name] = value;
+
+    const envFilePath = resolveApiEnvFile();
+    const nextEntry = `${name}=${this.encodeEnvValue(value)}`;
+    const currentContent = existsSync(envFilePath) ? readFileSync(envFilePath, "utf8") : "";
+    const linePattern = new RegExp(`^${name}=.*$`, "m");
+    const nextContent = linePattern.test(currentContent)
+      ? currentContent.replace(linePattern, nextEntry)
+      : `${currentContent.replace(/\s*$/, "")}${currentContent.trim() ? "\n" : ""}${nextEntry}\n`;
+
+    mkdirSync(dirname(envFilePath), { recursive: true });
+    writeFileSync(envFilePath, nextContent, "utf8");
+  }
+
+  private encodeEnvValue(value: string) {
+    if (!value) {
+      return "";
+    }
+
+    if (/[\s#"'`]/.test(value)) {
+      return JSON.stringify(value);
+    }
+
+    return value;
   }
 }
