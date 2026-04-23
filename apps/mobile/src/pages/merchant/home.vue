@@ -80,16 +80,6 @@ onShow(() => {
 
 <template>
   <MobileShell eyebrow="爱心商户" :title="sessionStore.user?.name ?? '爱心商户'" :subtitle="appCopy.merchantWelcome">
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">今日优先建议</text>
-          <text class="hero-support__body">{{ focusText }}</text>
-          <text class="hero-support__body">模板维护完整后，补货登记会更快，也更方便追踪货物去向。</text>
-        </view>
-      </GlassCard>
-    </template>
-
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="navigate('/pages/merchant/restock')">立即登记补货</button>
@@ -101,7 +91,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日运营概览</text>
-          <text class="vm-subtitle">先看补货量、异常与模板情况，再进入具体操作，判断会更快。</text>
+          <text class="vm-subtitle">请先查看补货量、异常提醒和模板数量。</text>
         </view>
 
         <view class="metric-grid">
@@ -111,7 +101,7 @@ onShow(() => {
         </view>
 
         <view class="ops-banner">
-          <text class="ops-banner__title">{{ loading ? "正在刷新运营数据" : "当前工作重点" }}</text>
+          <text class="ops-banner__title">{{ loading ? "正在刷新运营数据" : "请先查看异常提醒" }}</text>
           <text class="ops-banner__body">
             {{ loading ? "请稍候，系统正在同步补货概览和最近流向。" : focusText }}
           </text>
@@ -123,7 +113,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">常用操作</text>
-          <text class="vm-subtitle">遵循“模板 -> 补货 -> 去向”的顺序，能减少反复修改和遗漏。</text>
+          <text class="vm-subtitle">可从这里维护模板、登记补货和查看货物去向。</text>
         </view>
 
         <view class="menu-grid">
@@ -191,14 +181,12 @@ onShow(() => {
 </template>
 
 <style scoped>
-.hero-support,
 .section-heading {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
 }
 
-.hero-support__title,
 .section-heading__title,
 .menu-card__title,
 .ops-banner__title {
@@ -207,7 +195,6 @@ onShow(() => {
   color: var(--vm-text);
 }
 
-.hero-support__body,
 .menu-card__desc,
 .ops-banner__body,
 .menu-card__tag,

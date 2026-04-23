@@ -123,18 +123,6 @@ onShow(() => {
 
 <template>
   <MobileShell eyebrow="普通用户" :title="`${sessionStore.user?.name ?? '访客'}，您好`" :subtitle="appCopy.specialWelcome">
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">今日服务提醒</text>
-          <text class="hero-support__body">
-            {{ serviceWindows.length ? `可领取时段：${serviceWindows.join("、")}` : "当前暂无开放时段，系统会按业务时间自动刷新资格。" }}
-          </text>
-          <text class="hero-support__body">{{ guidanceText }}</text>
-        </view>
-      </GlassCard>
-    </template>
-
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="goNearbyTab">就近找柜机</button>
@@ -146,11 +134,17 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日可领取概览</text>
-          <text class="vm-subtitle">把关键资格和路线信息放在最前面，先看清楚再去操作，会更省心。</text>
+          <text class="vm-subtitle">请先确认今天可领取的物资和相关提醒。</text>
         </view>
 
         <view class="care-note">
           <text class="care-note__title">服务说明</text>
+          <text class="care-note__body">
+            {{ serviceWindows.length ? `可领取时段：${serviceWindows.join("、")}` : "当前暂无开放时段，系统会按业务时间自动刷新资格。" }}
+          </text>
+          <text class="care-note__body">
+            {{ guidanceText }}
+          </text>
           <text class="care-note__body">
             如果定位失败、柜门异常或识别结果与你实际领取不一致，可以直接反馈，工作人员会继续协助核对。
           </text>
@@ -180,7 +174,7 @@ onShow(() => {
     <view class="vm-section">
       <view class="section-heading">
         <text class="section-heading__title">附近柜机</text>
-        <text class="vm-subtitle">先看位置与库存，再决定去哪一台柜机，能减少往返和等待。</text>
+        <text class="vm-subtitle">可先查看位置和库存，再决定前往哪一台柜机。</text>
       </view>
 
       <view v-if="devices.length" class="device-list">
@@ -247,7 +241,6 @@ onShow(() => {
 </template>
 
 <style scoped>
-.hero-support,
 .section-heading,
 .permission-item__main,
 .device-header__main,
@@ -257,7 +250,6 @@ onShow(() => {
   gap: 10rpx;
 }
 
-.hero-support__title,
 .section-heading__title,
 .permission-item__title,
 .device-header__title,
@@ -268,7 +260,6 @@ onShow(() => {
   color: var(--vm-text);
 }
 
-.hero-support__body,
 .permission-item__meta,
 .device-meta,
 .goods-item__meta,

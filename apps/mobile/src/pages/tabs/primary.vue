@@ -53,47 +53,59 @@ const pageSubtitle = computed(() => {
   }
 
   if (sessionStore.user?.role === "merchant") {
-    return "把模板、补货和异常处理放在同一入口里，方便边走边完成操作。";
+    return "可在这里查看模板、登记补货和处理异常。";
   }
 
-  return "把待办、审批和柜机入口集中在首页，适合移动端快速处理关键事项。";
+  return "可在这里查看待办事件、注册审核和柜机入口。";
+});
+
+const specialReminderText = computed(() => {
+  if (sessionStore.user?.role !== "special") {
+    return "";
+  }
+
+  if (activeWindows.value.length) {
+    return `今日可领取时段：${activeWindows.value.join("、")}`;
+  }
+
+  return "当前暂无开放时段，系统会按业务时间自动刷新资格。";
 });
 
 const heroSupport = computed(() => {
   if (sessionStore.user?.role === "special") {
     return {
-      title: "服务提醒",
+      title: "领取提示",
       lines: [
-        activeWindows.value.length ? `可领取时段：${activeWindows.value.join("、")}` : "当前暂无开放时段，系统会按业务时间自动刷新资格。",
-        permissions.value.length ? "建议先确认今天还能领什么，再去最近柜机，能少走冤枉路。" : "当前没有可领取额度时，不需要重复提交，等待时段刷新即可。",
-        activeAlerts.value.length ? `你有 ${activeAlerts.value.length} 条待确认提醒，可在下方查看。` : "如果识别结果异常或柜机有问题，可以直接联系工作人员。"
+        activeWindows.value.length ? `可领取时段：${activeWindows.value.join("、")}` : "当前暂无开放时段，请稍后再查看。",
+        permissions.value.length ? "请先确认今天可领取的物资，再前往柜机。" : "当前没有可领取额度，无需重复提交。",
+        activeAlerts.value.length ? `你有 ${activeAlerts.value.length} 条提醒待确认。` : "如遇识别异常或柜机问题，可直接提交反馈。"
       ]
     };
   }
 
   if (sessionStore.user?.role === "merchant") {
     return {
-      title: "今日重点",
+      title: "补货提示",
       lines: [
-        `当前维护模板 ${templates.value.length} 个，补货总量 ${merchantSummary.value.donatedUnits} 件。`,
+        `当前已维护模板 ${templates.value.length} 个，累计补货 ${merchantSummary.value.donatedUnits} 件。`,
         merchantSummary.value.pendingAlerts
-          ? `有 ${merchantSummary.value.pendingAlerts} 条待处理异常，建议先核对。`
-          : "当前异常压力较低，可以直接安排补货与模板维护。",
-        "遵循“模板 -> 补货 -> 去向”的顺序，操作会更稳。"
+          ? `有 ${merchantSummary.value.pendingAlerts} 条异常待处理，请先查看。`
+          : "当前没有新的异常提醒。",
+        "可先维护商品属性，再登记补货和查看去向。"
       ]
     };
   }
 
   return {
-    title: "处理重点",
+    title: "处理提示",
     lines: [
       pendingApplications.value.length
-        ? `当前有 ${pendingApplications.value.length} 条待审申请，建议优先处理。`
-        : "当前没有待审申请，可优先巡检柜机和日志。",
+        ? `当前有 ${pendingApplications.value.length} 条待审申请，请先处理。`
+        : "当前没有待审申请。",
       activeAlerts.value.length
-        ? `待处理事件 ${activeAlerts.value.length} 条，移动端适合快速查看和确认。`
-        : "当前没有新的待办事件，可继续查看柜机与人员日志。",
-      "移动端优先解决现场决策，复杂批量操作可继续交给 PC 端。"
+        ? `待处理事件 ${activeAlerts.value.length} 条，请及时查看。`
+        : "当前没有新的待办事件。",
+      "如需继续核对柜机、人员或日志，可从下方入口进入。"
     ]
   };
 });
@@ -276,13 +288,11 @@ onShow(() => {
     :title="sessionStore.user?.name ?? '公益智助柜'"
     :subtitle="pageSubtitle"
   >
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">{{ heroSupport.title }}</text>
-          <text v-for="line in heroSupport.lines" :key="line" class="hero-support__body">{{ line }}</text>
-        </view>
-      </GlassCard>
+    <template v-if="sessionStore.user?.role === 'special'" #hero-extra>
+      <view class="compact-reminder">
+        <text class="compact-reminder__label">提醒</text>
+        <text class="compact-reminder__body">{{ specialReminderText }}</text>
+      </view>
     </template>
 
     <template #hero-actions>
@@ -336,7 +346,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日资格与提醒</text>
-          <text class="vm-subtitle">把最关心的可领信息、开放时段和异常兜底放在前面，判断会更轻松。</text>
+          <text class="vm-subtitle">请先确认可领取物资、开放时段和提醒事项。</text>
         </view>
         <view class="metric-grid">
           <ServiceMetric label="可领物资" :value="permissions.length" hint="当前时段内允许领取的种类" tone="accent" />
@@ -368,7 +378,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">商品属性与补货</text>
-          <text class="vm-subtitle">先维护商品属性，再按属性登记补货；货物流向可在底部第三栏查看。</text>
+          <text class="vm-subtitle">请先维护商品属性，再登记补货；货物流向可在记录页查看。</text>
         </view>
         <view class="metric-grid">
           <ServiceMetric label="属性数量" :value="templates.length" hint="当前账号已维护商品属性" />
@@ -387,7 +397,7 @@ onShow(() => {
         <view class="vm-stack">
           <view class="section-heading">
             <text class="section-heading__title">待办事件</text>
-            <text class="vm-subtitle">未完成事件始终排在最前面，处理前需要再次确认。</text>
+            <text class="vm-subtitle">未完成事件会显示在这里，处理前请再次确认。</text>
           </view>
           <view class="metric-grid">
             <ServiceMetric label="待处理事件" :value="activeAlerts.length" hint="优先处理故障、反馈和预警" tone="warning" />
@@ -400,7 +410,7 @@ onShow(() => {
         <view class="vm-stack">
           <view class="section-heading">
             <text class="section-heading__title">待处理事件</text>
-            <text class="vm-subtitle">点击详情可查看完整备注，点击按钮前会再次确认。</text>
+            <text class="vm-subtitle">可先查看详情，再确认处理。</text>
           </view>
           <scroll-view v-if="activeAlerts.length" class="scroll-list" scroll-y>
             <view class="simple-list">
@@ -422,7 +432,7 @@ onShow(() => {
         <view class="vm-stack">
           <view class="section-heading">
             <text class="section-heading__title">注册审批</text>
-            <text class="vm-subtitle">可在这里直接通过或驳回，也可进入更完整的审核页继续处理。</text>
+            <text class="vm-subtitle">可在这里直接通过或驳回申请。</text>
           </view>
           <scroll-view v-if="pendingApplications.length" class="scroll-list" scroll-y>
             <view class="simple-list">
@@ -483,11 +493,17 @@ onShow(() => {
         />
       </view>
     </GlassCard>
+
+    <GlassCard tone="quiet">
+      <view class="vm-stack hero-note">
+        <text class="hero-note__title">{{ heroSupport.title }}</text>
+        <text v-for="line in heroSupport.lines" :key="line" class="hero-note__body">{{ line }}</text>
+      </view>
+    </GlassCard>
   </MobileShell>
 </template>
 
 <style scoped>
-.hero-support,
 .section-heading,
 .info-item,
 .simple-list__main {
@@ -500,18 +516,6 @@ onShow(() => {
   font-size: 30rpx;
   font-weight: 700;
   color: var(--vm-text);
-}
-
-.hero-support__title {
-  font-size: 30rpx;
-  font-weight: 700;
-  color: var(--vm-text);
-}
-
-.hero-support__body {
-  font-size: 22rpx;
-  color: var(--vm-text-soft);
-  line-height: 1.6;
 }
 
 .metric-grid,
@@ -529,6 +533,38 @@ onShow(() => {
   justify-content: center;
   gap: 14rpx;
   width: 100%;
+}
+
+.compact-reminder,
+.hero-note {
+  display: grid;
+  gap: 10rpx;
+}
+
+.compact-reminder {
+  padding: 18rpx 20rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid rgba(13, 148, 136, 0.16);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.compact-reminder__label {
+  font-size: 20rpx;
+  letter-spacing: 0.08em;
+  color: var(--vm-accent-strong);
+}
+
+.compact-reminder__body,
+.hero-note__body {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+  line-height: 1.6;
+}
+
+.hero-note__title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--vm-text);
 }
 
 .simple-list__row,

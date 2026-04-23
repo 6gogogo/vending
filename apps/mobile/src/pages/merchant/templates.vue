@@ -207,7 +207,7 @@ watch(
 </script>
 
 <template>
-  <MobileShell eyebrow="商品属性" title="爱心商户商品属性" subtitle="维护和 PC 端一致的货品基础信息，补货时直接复用。">
+  <MobileShell eyebrow="商品属性" title="爱心商户商品属性" subtitle="请先维护常用货品信息，补货时可直接选用。">
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="form-grid">

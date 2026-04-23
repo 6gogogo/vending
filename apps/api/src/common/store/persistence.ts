@@ -7,6 +7,8 @@ import { cloneSeedState, type AlertTask, type BatchConsumptionTrace, type Cabine
 export interface VerificationRecord {
   code: string;
   expiresAt: string;
+  requestedAt?: string;
+  resendAvailableAt?: string;
 }
 
 export interface SessionRecord {

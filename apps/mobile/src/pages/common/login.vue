@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { onShow } from "@dcloudio/uni-app";
 
+import AccessibilityModePanel from "../../components/ui/AccessibilityModePanel.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
+import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
+const uiPreferencesStore = useUiPreferencesStore();
+
+uiPreferencesStore.hydrate();
 
 const bootstrap = async () => {
   await sessionStore.bootstrap();
@@ -68,10 +73,18 @@ onShow(() => {
     </GlassCard>
 
     <GlassCard tone="quiet">
+      <AccessibilityModePanel
+        :checked="uiPreferencesStore.specialAccessibilityMode"
+        description="切换后会进入关怀版，使用更大的文字、更高对比和更醒目的整屏按钮。"
+        @update:checked="uiPreferencesStore.setSpecialAccessibilityMode"
+      />
+    </GlassCard>
+
+    <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">使用说明</text>
-          <text class="vm-subtitle">注册提交后，审核中与已驳回账号都不会直接登录系统。</text>
+          <text class="vm-subtitle">请先完成注册并等待审核，通过后即可登录。</text>
         </view>
         <view class="tips-list">
           <text class="tips-list__item">1. 登录只对已登记且已通过审核的手机号开放。</text>

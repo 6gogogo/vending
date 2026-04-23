@@ -62,7 +62,7 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="日志记录" title="移动端日志总览" subtitle="按时间查看全量日志，点击可进入详情并查看关联主体。">
+  <MobileShell eyebrow="日志记录" title="日志总览" subtitle="可按时间查看日志，并进入详情页查看关联信息。">
     <GlassCard tone="accent">
       <view class="filter-grid">
         <button

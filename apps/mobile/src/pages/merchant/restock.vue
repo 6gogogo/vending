@@ -136,17 +136,6 @@ onLoad((query) => {
 
 <template>
   <MobileShell eyebrow="按模板补货" title="登记补货" subtitle="选择柜机、模板、数量和生产日期，系统会自动推导保质期。">
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">当前准备补货</text>
-          <text class="hero-support__body">模板：{{ selectedTemplate?.goodsName ?? "未选择" }}</text>
-          <text class="hero-support__body">柜机：{{ selectedDevice?.name ?? "未选择" }}</text>
-          <text class="hero-support__body">预计到期：{{ estimatedExpireDate || "等待填写生产日期" }}</text>
-        </view>
-      </GlassCard>
-    </template>
-
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="submit" :loading="submitting">提交补货登记</button>
@@ -158,7 +147,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">选择货品模板</text>
-          <text class="vm-subtitle">先选模板再填明细，数量、保质期等默认值会自动带入。</text>
+          <text class="vm-subtitle">请先选择模板，数量和保质期会自动带入。</text>
         </view>
 
         <view class="template-list">
@@ -185,7 +174,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">补货明细</text>
-          <text class="vm-subtitle">把柜机、数量和生产日期放在一起确认，提交前能更快核对。</text>
+          <text class="vm-subtitle">请确认柜机、数量和生产日期后再提交。</text>
         </view>
 
         <view class="overview-grid">
@@ -243,7 +232,6 @@ onLoad((query) => {
 </template>
 
 <style scoped>
-.hero-support,
 .section-heading,
 .template-item__main {
   display: flex;
@@ -251,7 +239,6 @@ onLoad((query) => {
   gap: 12rpx;
 }
 
-.hero-support__title,
 .section-heading__title,
 .template-item__title,
 .summary-panel__title {
@@ -260,7 +247,6 @@ onLoad((query) => {
   color: var(--vm-text);
 }
 
-.hero-support__body,
 .template-item__meta,
 .summary-panel__body {
   font-size: 22rpx;

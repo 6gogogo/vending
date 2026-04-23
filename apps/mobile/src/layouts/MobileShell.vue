@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { useSessionStore } from "../stores/session";
+import { useUiPreferencesStore } from "../stores/ui-preferences";
+
 type ShellMode = "care" | "ops";
 
 const props = withDefaults(
@@ -29,15 +32,41 @@ const resolvedMode = computed<ShellMode>(() => {
 
   return "care";
 });
+
+const sessionStore = useSessionStore();
+const uiPreferencesStore = useUiPreferencesStore();
+
+uiPreferencesStore.hydrate();
+
+const isGuestPage = computed(() => {
+  const currentPage = getCurrentPages().at(-1);
+  const route = typeof currentPage?.route === "string" ? currentPage.route : "";
+  return route.startsWith("pages/common/");
+});
+
+const accessibilityEnabled = computed(() => {
+  if (sessionStore.user?.role) {
+    return uiPreferencesStore.isAccessibilityEnabled(sessionStore.user.role);
+  }
+
+  return uiPreferencesStore.specialAccessibilityMode && isGuestPage.value;
+});
 </script>
 
 <template>
-  <view class="vm-page shell" :class="`shell--${resolvedMode}`">
+  <view class="vm-page shell" :class="[`shell--${resolvedMode}`, { 'vm-page--accessible': accessibilityEnabled }]">
     <view class="shell__shape shell__shape--sun" />
     <view class="shell__shape shell__shape--leaf" />
     <view class="shell__body">
       <view class="shell__hero vm-fade-up">
         <view class="shell__hero-main">
+          <view v-if="accessibilityEnabled" class="shell__care-banner">
+            <view class="shell__care-badge">
+              <text class="shell__care-badge-mark">关怀版</text>
+              <text class="shell__care-badge-title">无障碍模式已开启</text>
+            </view>
+            <text class="shell__care-text">大字显示 · 高对比界面 · 更大按钮和输入框</text>
+          </view>
           <slot name="hero-badge">
             <text class="vm-pill">{{ eyebrow }}</text>
           </slot>
@@ -113,25 +142,99 @@ const resolvedMode = computed<ShellMode>(() => {
 }
 
 .shell__hero {
+  position: relative;
   display: grid;
   gap: 20rpx;
-  padding: 36rpx 32rpx;
+  padding: 28rpx 28rpx 26rpx;
   border: 1rpx solid var(--vm-hero-border);
-  border-radius: 40rpx;
+  border-radius: 34rpx;
   background: var(--vm-hero-bg);
   box-shadow: var(--vm-hero-shadow);
+  overflow: hidden;
+}
+
+.shell__hero::before,
+.shell__hero::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.shell__hero::before {
+  inset: 0;
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.08), transparent 42%),
+    radial-gradient(circle at 100% 0%, rgba(13, 148, 136, 0.08), transparent 28%);
+}
+
+.shell__hero::after {
+  top: 14rpx;
+  right: 18rpx;
+  width: 180rpx;
+  height: 120rpx;
+  border-radius: 999rpx;
+  opacity: 0.28;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(13, 148, 136, 0.18) 0,
+      rgba(13, 148, 136, 0.18) 4rpx,
+      transparent 4rpx,
+      transparent 14rpx
+    );
 }
 
 .shell__hero-main {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
+  gap: 14rpx;
+}
+
+.shell__care-banner {
+  display: grid;
+  gap: 12rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 26rpx;
+  border: 2rpx solid rgba(47, 120, 231, 0.22);
+  background: linear-gradient(180deg, rgba(235, 244, 255, 0.96), rgba(245, 249, 255, 0.96));
+}
+
+.shell__care-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 14rpx;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.shell__care-badge-mark {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #2f78e7;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.shell__care-badge-title {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #144aa0;
+}
+
+.shell__care-text {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #24476d;
 }
 
 .shell__title-group {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
+  gap: 10rpx;
 }
 
 .shell__eyebrow {
@@ -147,6 +250,8 @@ const resolvedMode = computed<ShellMode>(() => {
 
 .shell__hero-side,
 .shell__actions {
+  position: relative;
+  z-index: 1;
   display: grid;
   gap: 16rpx;
 }
@@ -185,6 +290,71 @@ const resolvedMode = computed<ShellMode>(() => {
 
 .shell--ops .shell__shape--leaf {
   background: radial-gradient(circle, rgba(29, 111, 220, 0.14), rgba(29, 111, 220, 0));
+}
+
+.shell--ops .shell__hero::before {
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.08), transparent 42%),
+    radial-gradient(circle at 100% 0%, rgba(29, 111, 220, 0.08), transparent 30%);
+}
+
+.shell--ops .shell__hero::after {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(29, 111, 220, 0.16) 0,
+      rgba(29, 111, 220, 0.16) 4rpx,
+      transparent 4rpx,
+      transparent 14rpx
+    );
+}
+
+.vm-page--accessible .shell__hero {
+  padding: 34rpx 30rpx;
+  border-width: 4rpx;
+  border-radius: 30rpx;
+  box-shadow: none;
+}
+
+.vm-page--accessible .shell__hero::before,
+.vm-page--accessible .shell__hero::after {
+  display: none;
+}
+
+.vm-page--accessible .shell__eyebrow {
+  font-size: 26rpx;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.vm-page--accessible .shell__subtitle {
+  max-width: none;
+}
+
+.vm-page--accessible .shell__care-banner {
+  gap: 16rpx;
+  padding: 24rpx 24rpx;
+  border-width: 4rpx;
+  border-color: rgba(47, 120, 231, 0.34);
+}
+
+.vm-page--accessible .shell__care-badge-mark {
+  padding: 10rpx 18rpx;
+  font-size: 26rpx;
+}
+
+.vm-page--accessible .shell__care-badge-title {
+  font-size: 30rpx;
+}
+
+.vm-page--accessible .shell__care-text {
+  font-size: 28rpx;
+  line-height: 1.7;
+  color: #1e3a5f;
+}
+
+.vm-page--accessible .shell__shape {
+  opacity: 0;
 }
 
 @media screen and (min-width: 720px) {

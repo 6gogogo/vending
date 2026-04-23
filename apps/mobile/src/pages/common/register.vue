@@ -6,6 +6,7 @@ import type { RegistrationApplicationProfile, RegistrationPhoneLookup, RegionRec
 
 import { mobileApi } from "../../api/mobile";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import { useSmsCooldown } from "../../composables/useSmsCooldown";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
@@ -15,13 +16,15 @@ const phone = ref("");
 const code = ref("");
 const previewCode = ref("");
 const requestedRole = ref<UserRole>("special");
-const busy = ref(false);
+const sendingCode = ref(false);
+const submitting = ref(false);
 const lookupBusy = ref(false);
 const regions = ref<RegionRecord[]>([]);
 const selectedRegionId = ref("");
 const customRegionName = ref("");
 const lookup = ref<RegistrationPhoneLookup>();
 const lastLookupPhone = ref("");
+const { remainingSeconds, isCoolingDown, startCooldown } = useSmsCooldown(60);
 
 const form = reactive<RegistrationApplicationProfile>({
   name: "",
@@ -70,6 +73,9 @@ const selectedRegionLabel = computed(
   () => regionOptions.value.find((item) => item.value === selectedRegionId.value)?.label ?? "请选择区域"
 );
 const phoneValid = computed(() => /^1\d{10}$/.test(phone.value.trim()));
+const sendCodeLabel = computed(() =>
+  isCoolingDown.value ? `${remainingSeconds.value}s 后重发` : "获取验证码"
+);
 
 const applyProfile = (profile?: RegistrationApplicationProfile) => {
   form.name = profile?.name ?? "";
@@ -162,15 +168,21 @@ const sendCode = async () => {
     return;
   }
 
-  busy.value = true;
+  if (isCoolingDown.value) {
+    showOperationFailure(new Error(`请在 ${remainingSeconds.value}s 后重试`));
+    return;
+  }
+
+  sendingCode.value = true;
   try {
     const response = await mobileApi.requestCode(phone.value.trim(), "register");
     previewCode.value = response.previewCode ?? "";
+    startCooldown();
     showOperationSuccess();
   } catch (error) {
     showOperationFailure(error);
   } finally {
-    busy.value = false;
+    sendingCode.value = false;
   }
 };
 
@@ -235,7 +247,7 @@ const submit = async () => {
     return;
   }
 
-  busy.value = true;
+  submitting.value = true;
   try {
     const payload = {
       phone: phone.value.trim(),
@@ -275,7 +287,7 @@ const submit = async () => {
   } catch (error) {
     showOperationFailure(error);
   } finally {
-    busy.value = false;
+    submitting.value = false;
   }
 };
 
@@ -355,11 +367,18 @@ onLoad(async (query) => {
         </view>
 
         <view class="action-row">
-          <button class="vm-button vm-button--ghost" :loading="busy" @tap="sendCode">获取验证码</button>
+          <button
+            class="vm-button vm-button--ghost"
+            :disabled="sendingCode || isCoolingDown"
+            :loading="sendingCode"
+            @tap="sendCode"
+          >
+            {{ sendCodeLabel }}
+          </button>
         </view>
 
         <view v-if="previewCode" class="debug-box">
-          <text class="debug-box__label">测试环境验证码</text>
+          <text class="debug-box__label">当前验证码</text>
           <text class="vm-number">{{ previewCode }}</text>
         </view>
 
@@ -431,7 +450,7 @@ onLoad(async (query) => {
           />
         </view>
 
-        <button class="vm-button" :loading="busy" @tap="submit">
+        <button class="vm-button" :loading="submitting" @tap="submit">
           {{ hasPendingDraft ? "覆盖更新并重新提交" : "提交注册资料" }}
         </button>
         <button class="vm-button vm-button--ghost" @tap="goLogin">已有账号，直接登录</button>

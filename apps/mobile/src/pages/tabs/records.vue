@@ -60,7 +60,7 @@ const subtitle = computed(() => {
     return "按日查看货物被领取的件数、帮助人数和累计帮助人次。";
   }
 
-  return "在同一页切换查看人员与日志。";
+  return "可切换查看人员信息和处理记录。";
 });
 
 const load = async () => {
@@ -185,7 +185,7 @@ onShow(() => {
               <text class="simple-card__meta">{{ user.neighborhood || user.tags.join("、") || "未补充资料" }}</text>
             </button>
           </view>
-          <EmptyState v-else :title="loading ? '正在加载人员' : '当前没有人员数据'" description="可稍后刷新，或到 PC 端继续处理。" />
+          <EmptyState v-else :title="loading ? '正在加载人员' : '当前没有人员数据'" description="可稍后刷新，或等待新资料同步后再查看。" />
         </view>
 
         <view v-else>

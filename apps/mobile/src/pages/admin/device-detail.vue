@@ -91,7 +91,7 @@ const resolveTask = async (id: string, isFault: boolean) => {
       }
 
       try {
-        await mobileApi.resolveAlert(id, isFault ? "移动端管理员已知晓并接手处理。" : "移动端管理员已手动完成。");
+        await mobileApi.resolveAlert(id, isFault ? "管理员已知晓并接手处理。" : "管理员已手动完成。");
         showOperationSuccess();
         await load();
       } catch (error) {
@@ -115,17 +115,6 @@ onLoad((query) => {
 
 <template>
   <MobileShell eyebrow="柜机详情" :title="detail?.device.name ?? deviceCode" :subtitle="detail?.device.location ?? '正在加载柜机详情'">
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">现场摘要</text>
-          <text class="hero-support__body">柜机编号：{{ detail?.device.deviceCode ?? deviceCode }}</text>
-          <text class="hero-support__body">门状态：{{ detail?.runtime.doorState ?? "unknown" }}</text>
-          <text class="hero-support__body">故障待办：{{ faultTaskCount }} 条</text>
-        </view>
-      </GlassCard>
-    </template>
-
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="refresh">手动刷新</button>
@@ -137,7 +126,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">运行概览</text>
-          <text class="vm-subtitle">先看实时状态和待办，再进入明细列表，排查效率会更高。</text>
+          <text class="vm-subtitle">请先查看实时状态和待处理任务。</text>
         </view>
 
         <view class="metric-grid">
@@ -147,6 +136,10 @@ onLoad((query) => {
         </view>
 
         <view class="runtime-panel">
+          <view class="runtime-row">
+            <text class="runtime-row__label">柜机编号</text>
+            <text class="runtime-row__value">{{ detail?.device.deviceCode ?? deviceCode }}</text>
+          </view>
           <view class="runtime-row">
             <text class="runtime-row__label">门状态</text>
             <text class="vm-status" :class="detail?.runtime.doorState === 'open' ? 'vm-status--warning' : 'vm-status--online'">
@@ -161,6 +154,10 @@ onLoad((query) => {
             <text class="runtime-row__label">最近关门</text>
             <text class="runtime-row__value">{{ lastClosedText }}</text>
           </view>
+          <view class="runtime-row">
+            <text class="runtime-row__label">故障待办</text>
+            <text class="runtime-row__value">{{ faultTaskCount }} 条</text>
+          </view>
         </view>
       </view>
     </GlassCard>
@@ -169,7 +166,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日服务人员</text>
-          <text class="vm-subtitle">适合快速回看今天谁在这台柜机完成过操作。</text>
+          <text class="vm-subtitle">这里会显示今天在这台柜机完成过操作的人员。</text>
         </view>
 
         <view v-if="detail?.businessDayServedUsers.length" class="list-block">
@@ -186,7 +183,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">库存变化与阈值</text>
-          <text class="vm-subtitle">优先关注低库存和开启阈值的货品，能更快发现补货风险。</text>
+          <text class="vm-subtitle">请优先关注低库存和已开启阈值提醒的货品。</text>
         </view>
 
         <view v-if="detail?.stockChanges.length" class="list-block">
@@ -208,7 +205,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">待处理任务</text>
-          <text class="vm-subtitle">点击详情可看完整上下文，处理动作会再次确认，避免误操作。</text>
+          <text class="vm-subtitle">可先查看详情，再确认处理动作。</text>
         </view>
 
         <view v-if="detail?.pendingTasks.length" class="list-block">
@@ -236,7 +233,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">相关日志</text>
-          <text class="vm-subtitle">适合顺手回看这台柜机最近发生过什么，点击可进入完整日志详情。</text>
+          <text class="vm-subtitle">这里会显示这台柜机最近的相关记录，点击可查看详情。</text>
         </view>
 
         <view v-if="detail?.recentLogs.length" class="list-block">
@@ -252,14 +249,12 @@ onLoad((query) => {
 </template>
 
 <style scoped>
-.hero-support,
 .section-heading {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
 }
 
-.hero-support__title,
 .section-heading__title,
 .list-item__title {
   font-size: 30rpx;
@@ -267,7 +262,6 @@ onLoad((query) => {
   color: var(--vm-text);
 }
 
-.hero-support__body,
 .list-item__meta,
 .runtime-row__label {
   font-size: 22rpx;

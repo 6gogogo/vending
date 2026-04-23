@@ -119,12 +119,29 @@ export class InMemoryStoreService {
 
   issueVerificationCode(phone: string) {
     const code = "123456";
-    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    const now = Date.now();
+    const expiresAt = new Date(now + 5 * 60_000).toISOString();
+    const requestedAt = new Date(now).toISOString();
+    const resendAvailableAt = new Date(now + 60_000).toISOString();
     this.verificationCodes.set(phone, {
       code,
-      expiresAt
+      expiresAt,
+      requestedAt,
+      resendAvailableAt
     });
     return code;
+  }
+
+  rememberVerificationRequest(phone: string) {
+    const now = Date.now();
+    const existing = this.verificationCodes.get(phone);
+
+    this.verificationCodes.set(phone, {
+      code: existing?.code ?? "",
+      expiresAt: existing?.expiresAt ?? new Date(now + 5 * 60_000).toISOString(),
+      requestedAt: new Date(now).toISOString(),
+      resendAvailableAt: new Date(now + 60_000).toISOString()
+    });
   }
 
   verifyCode(phone: string, code: string) {

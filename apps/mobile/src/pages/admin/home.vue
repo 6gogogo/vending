@@ -72,17 +72,7 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="管理员端" :title="sessionStore.user?.name ?? '管理员'" subtitle="移动端适合处理审核、巡检与异常确认，复杂批量操作继续交给 PC 端。">
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">当前优先事项</text>
-          <text class="hero-support__body">{{ priorityText }}</text>
-          <text class="hero-support__body">移动端更适合边走边看设备、边处理待办，避免漏掉现场问题。</text>
-        </view>
-      </GlassCard>
-    </template>
-
+  <MobileShell eyebrow="管理员端" :title="sessionStore.user?.name ?? '管理员'" subtitle="可在这里查看审核申请、柜机状态和运行记录。">
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="navigate('/pages/admin/reviews')">先处理待审</button>
@@ -94,7 +84,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日管理概览</text>
-          <text class="vm-subtitle">把最常看的审核、人员、设备和日志放在同一屏，适合快速扫读。</text>
+          <text class="vm-subtitle">请先查看待审申请、人员数量、柜机数量和日志数量。</text>
         </view>
 
         <view class="metric-grid">
@@ -105,7 +95,7 @@ onShow(() => {
         </view>
 
         <view class="ops-banner">
-          <text class="ops-banner__title">{{ loading ? "正在刷新数据" : "移动端建议先看待审与柜机" }}</text>
+          <text class="ops-banner__title">{{ loading ? "正在刷新数据" : "请先处理待审申请" }}</text>
           <text class="ops-banner__body">
             {{ loading ? "请稍候，系统正在同步最新审核、设备和日志数据。" : priorityText }}
           </text>
@@ -124,12 +114,12 @@ onShow(() => {
           <button class="menu-card" @tap="navigate('/pages/admin/reviews')">
             <view class="menu-card__top">
               <MenuIcon name="review" size="lg" />
-              <view class="menu-card__title-group">
+            <view class="menu-card__title-group">
                 <text class="menu-card__tag">优先</text>
                 <text class="menu-card__title">审核工作台</text>
               </view>
             </view>
-            <text class="menu-card__desc">处理待审、驳回和已通过的移动端申请</text>
+            <text class="menu-card__desc">处理待审、驳回和已通过的注册申请</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/admin/users')">
             <view class="menu-card__top">
@@ -168,14 +158,12 @@ onShow(() => {
 </template>
 
 <style scoped>
-.hero-support,
 .section-heading {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
 }
 
-.hero-support__title,
 .section-heading__title,
 .menu-card__title,
 .ops-banner__title {
@@ -184,7 +172,6 @@ onShow(() => {
   color: var(--vm-text);
 }
 
-.hero-support__body,
 .menu-card__desc,
 .ops-banner__body,
 .menu-card__tag {

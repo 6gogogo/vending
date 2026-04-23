@@ -8,7 +8,7 @@ import { getErrorMessage } from "../utils/error-message";
 import { resolveHomePath } from "../utils/role-routing";
 
 export const useAuthFlow = () => {
-  const phone = ref("13800000002");
+  const phone = ref("");
   const code = ref("");
   const requestedRole = ref<UserRole>("special");
   const busy = ref(false);

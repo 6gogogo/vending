@@ -71,9 +71,15 @@ export class VerificationCodeService {
 
   async requestCode(phone: string): Promise<VerificationCodeResult> {
     const normalizedPhone = this.normalizePhone(phone);
+    const remainingCooldownSeconds = this.getRemainingCooldownSeconds(normalizedPhone);
+
+    if (remainingCooldownSeconds > 0) {
+      throw new BadRequestException(`验证码已发送，请在 ${remainingCooldownSeconds}s 后重试。`);
+    }
 
     if (this.getProvider() === "aliyun") {
       await this.requestAliyunCode(normalizedPhone);
+      this.store.rememberVerificationRequest(normalizedPhone);
       return {
         phone: normalizedPhone,
         expiresInSeconds: 300,
@@ -170,6 +176,17 @@ export class VerificationCodeService {
       regionId,
       endpoint
     });
+  }
+
+  private getRemainingCooldownSeconds(phone: string) {
+    const resendAvailableAt = this.store.verificationCodes.get(phone)?.resendAvailableAt;
+
+    if (!resendAvailableAt) {
+      return 0;
+    }
+
+    const remainingMs = new Date(resendAvailableAt).getTime() - Date.now();
+    return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
   }
 
   private async requestAliyunCode(phone: string) {

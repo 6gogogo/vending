@@ -96,32 +96,32 @@ const selectedGoodsName = computed(
 const heroSupport = computed(() => {
   if (sessionStore.user?.role === "special") {
     return {
-      title: "就近建议",
+      title: "找柜机提示",
       lines: [
-        distanceEnabled.value ? "已按距离排序，优先看排在前面的柜机，路程会更省。" : "未开启定位时仍可查看列表，但建议允许定位后再找最近柜机。",
-        selectedGoodsName.value ? `当前正在查找：${selectedGoodsName.value}` : "你也可以先选择想领的物资，再让系统定位最近柜机。",
-        highlightedDevice.value ? `当前高亮：${highlightedDevice.value.name}` : "点击地图大头钉或列表卡片，可以锁定想去的柜机。"
+        distanceEnabled.value ? "已按距离排序，越靠前的柜机通常离你越近。" : "未开启定位时也能查看柜机，开启定位后会更容易找到最近的一台。",
+        selectedGoodsName.value ? `正在查找：${selectedGoodsName.value}` : "可先选择想领取的物资，再查找附近柜机。",
+        highlightedDevice.value ? `当前查看：${highlightedDevice.value.name}` : "点击地图大头钉或下方列表，可切换要查看的柜机。"
       ]
     };
   }
 
   if (sessionStore.user?.role === "merchant") {
     return {
-      title: "操作建议",
+      title: "补货提示",
       lines: [
-        "优先查看在线柜机，再进入补货，能减少来回切换。",
-        selectedGoodsName.value ? `当前筛选物资：${selectedGoodsName.value}` : "可按物资名称快速查找适合补货的柜机。",
-        highlightedDevice.value ? `当前高亮：${highlightedDevice.value.name}` : "选中柜机后可直接进入补货登记。"
+        "建议先看在线柜机，再安排补货。",
+        selectedGoodsName.value ? `当前筛选物资：${selectedGoodsName.value}` : "可按物资名称查找需要补货的柜机。",
+        highlightedDevice.value ? `当前查看：${highlightedDevice.value.name}` : "选中柜机后可直接进入补货登记。"
       ]
     };
   }
 
   return {
-    title: "巡检建议",
+    title: "查看提示",
     lines: [
-      "移动端适合现场巡检，先看地图位置，再快速进入柜机详情。",
-      distanceEnabled.value ? "当前列表已带距离信息，便于就近排查。" : "未开启定位时仍可巡检，但路线规划会弱一些。",
-      highlightedDevice.value ? `当前高亮：${highlightedDevice.value.name}` : "点击列表卡片可把对应柜机在地图上高亮。"
+      "请先看地图位置，再进入柜机详情。",
+      distanceEnabled.value ? "当前列表已显示距离信息，方便按顺序查看。" : "未开启定位时仍可查看柜机列表。",
+      highlightedDevice.value ? `当前查看：${highlightedDevice.value.name}` : "点击列表卡片后，地图会同步高亮对应柜机。"
     ]
   };
 });
@@ -390,50 +390,9 @@ onShow(() => {
     :title="roleLabelMap[sessionStore.user?.role ?? 'special']"
     :subtitle="subtitle"
   >
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">{{ heroSupport.title }}</text>
-          <text v-for="line in heroSupport.lines" :key="line" class="hero-support__body">{{ line }}</text>
-        </view>
-      </GlassCard>
-    </template>
-
-    <template #hero-actions>
-      <view class="hero-action-grid">
-        <button class="vm-button" @tap="focusNearestDevice">定位最近柜机</button>
-        <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--ghost" @tap="scanAndOpen">扫码开门</button>
-        <button v-else class="vm-button vm-button--ghost" @tap="mapExpanded = true">放大地图</button>
-      </view>
-    </template>
-
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view v-if="mappableDevices.length" class="nearby-map-card">
-          <view class="nearby-location-banner">
-            <text class="nearby-map-card__title">我的位置</text>
-            <text class="nearby-location-banner__value">{{ locationMessage }}</text>
-            <text class="nearby-map-card__hint">
-              {{
-                distanceEnabled
-                  ? "已使用当前位置计算距离并排序。"
-                  : "若要按距离排序并查找最近柜机，请在小程序和系统设置中允许定位权限。"
-              }}
-            </text>
-          </view>
-
-          <view class="nearby-map-card__head">
-            <view>
-              <text class="nearby-map-card__title">附近柜机地图</text>
-              <text class="nearby-map-card__hint">
-                {{ distanceEnabled ? "已按距离排序，点大头钉可高亮对应柜机。" : "未开启定位，地图按默认顺序展示。" }}
-              </text>
-            </view>
-            <button class="vm-button vm-button--ghost nearby-map-card__expand" @tap="mapExpanded = true">
-              放大
-            </button>
-          </view>
-
           <map
             class="nearby-map nearby-map--compact"
             :longitude="mapCenter.longitude"
@@ -445,9 +404,31 @@ onShow(() => {
             @markertap="handleMarkerTap"
           />
 
+          <view class="nearby-map-card__summary">
+            <view class="nearby-location-banner">
+              <text class="nearby-map-card__title">当前位置与地图提示</text>
+              <text class="nearby-location-banner__value">{{ locationMessage }}</text>
+              <text class="nearby-map-card__hint">
+                {{
+                  distanceEnabled
+                    ? "已按距离排序，点地图大头钉可高亮对应柜机。"
+                    : "未开启定位时仍可使用列表；如需按距离排序，请在小程序和系统设置中允许定位权限。"
+                }}
+              </text>
+            </view>
+
+            <view v-if="highlightedDevice" class="nearby-map-card__focus">
+              <text class="nearby-map-card__focus-title">当前定位</text>
+              <text class="nearby-map-card__focus-value">
+                {{ highlightedDevice.name }} · {{ formatDistance(highlightedDevice.distanceMeters) }}
+              </text>
+            </view>
+          </view>
+
           <view class="nearby-map-card__tools">
+            <button class="vm-button" @tap="focusNearestDevice">定位最近柜机</button>
             <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--ghost" @tap="scanAndOpen">扫码开门</button>
-            <button class="vm-button vm-button--ghost" @tap="focusNearestDevice">找寻最近柜机</button>
+            <button v-else class="vm-button vm-button--ghost" @tap="mapExpanded = true">放大地图查看</button>
             <view class="nearby-map-card__search">
               <picker
                 :range="goodsOptions"
@@ -461,13 +442,6 @@ onShow(() => {
               </picker>
               <button class="vm-button" @tap="focusNearestGoods">搜索最近物资</button>
             </view>
-          </view>
-
-          <view v-if="highlightedDevice" class="nearby-map-card__focus">
-            <text class="nearby-map-card__focus-title">当前定位</text>
-            <text class="nearby-map-card__focus-value">
-              {{ highlightedDevice.name }} · {{ formatDistance(highlightedDevice.distanceMeters) }}
-            </text>
           </view>
         </view>
 
@@ -530,6 +504,13 @@ onShow(() => {
       </view>
     </GlassCard>
 
+    <GlassCard tone="quiet">
+      <view class="vm-stack nearby-advice">
+        <text class="nearby-advice__title">{{ heroSupport.title }}</text>
+        <text v-for="line in heroSupport.lines" :key="line" class="nearby-advice__body">{{ line }}</text>
+      </view>
+    </GlassCard>
+
     <view v-if="mapExpanded" class="nearby-map-overlay" @tap.self="mapExpanded = false">
       <view class="nearby-map-overlay__panel">
         <view class="nearby-map-overlay__head">
@@ -573,44 +554,42 @@ onShow(() => {
 </template>
 
 <style scoped>
-.hero-support,
 .nearby-map-card,
 .device-list,
 .goods-list,
 .action-grid,
 .nearby-map-card__search,
-.nearby-location-banner {
+.nearby-location-banner,
+.nearby-map-card__summary,
+.nearby-advice {
   display: grid;
   gap: 16rpx;
 }
 
-.hero-action-grid {
-  display: grid;
-  gap: 16rpx;
-}
-
-.nearby-map-card__head,
 .nearby-map-card__tools,
 .nearby-map-overlay__head {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 16rpx;
 }
 
-.hero-support__title,
-.nearby-map-card__title {
+.nearby-map-overlay__head {
+  justify-content: space-between;
+}
+
+.nearby-map-card__title,
+.nearby-advice__title {
   font-size: 28rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
-.hero-support__body,
 .nearby-map-card__hint,
 .device-card__meta,
 .goods-item__meta,
 .nearby-map-card__focus-value,
-.nearby-location-banner__value {
+.nearby-location-banner__value,
+.nearby-advice__body {
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.6;
@@ -621,10 +600,6 @@ onShow(() => {
   border-radius: 22rpx;
   background: rgba(255, 255, 255, 0.74);
   border: 1rpx solid rgba(159, 127, 94, 0.14);
-}
-
-.nearby-map-card__expand {
-  min-width: 120rpx;
 }
 
 .nearby-map-card__picker {
@@ -655,6 +630,14 @@ onShow(() => {
 
 .nearby-map-card__tools {
   display: grid;
+  gap: 16rpx;
+}
+
+.nearby-map-card__tools .vm-button {
+  width: 100%;
+}
+
+.nearby-map-card__search {
   gap: 16rpx;
 }
 

@@ -58,7 +58,7 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="审核工作台" title="移动端注册审核" subtitle="处理普通用户、爱心商户和管理员的注册申请。">
+  <MobileShell eyebrow="审核工作台" title="注册审核" subtitle="请在这里处理普通用户、爱心商户和管理员的注册申请。">
     <GlassCard tone="accent">
       <view class="vm-stack">
         <text class="section-title">申请列表</text>

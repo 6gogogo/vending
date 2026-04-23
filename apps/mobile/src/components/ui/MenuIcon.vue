@@ -116,7 +116,13 @@ withDefaults(
     </template>
 
     <template v-else-if="name === 'logout'">
+      <view class="menu-icon__outline logout__sign" />
       <view class="menu-icon__outline logout__door" />
+      <view class="menu-icon__dot logout__head" />
+      <view class="menu-icon__line logout__torso" />
+      <view class="menu-icon__line logout__arm" />
+      <view class="menu-icon__line logout__leg logout__leg--front" />
+      <view class="menu-icon__line logout__leg logout__leg--back" />
       <view class="menu-icon__line logout__arrow logout__arrow--body" />
       <view class="menu-icon__line logout__arrow logout__arrow--top" />
       <view class="menu-icon__line logout__arrow logout__arrow--bottom" />
@@ -582,37 +588,94 @@ withDefaults(
   top: 59%;
 }
 
+.logout__sign {
+  width: 58%;
+  height: 58%;
+  left: 18%;
+  top: 21%;
+  border-radius: 16%;
+  background: #16a34a;
+  border-color: #15803d;
+}
+
 .logout__door {
-  width: 26%;
-  height: 52%;
-  left: 22%;
-  top: 24%;
-  border-radius: 18%;
+  width: 10%;
+  height: 28%;
+  right: 25%;
+  top: 36%;
+  border-radius: 8rpx;
   background: transparent;
+  border-color: #fffdfa;
+}
+
+.logout__head {
+  width: 8%;
+  height: 8%;
+  left: 31%;
+  top: 34%;
+  background: #fffdfa;
+}
+
+.logout__torso,
+.logout__arm,
+.logout__leg {
+  height: 4rpx;
+  transform-origin: right center;
+  background: #fffdfa;
+}
+
+.logout__torso {
+  width: 14%;
+  left: 30%;
+  top: 48%;
+  transform: rotate(48deg);
+}
+
+.logout__arm {
+  width: 10%;
+  left: 27%;
+  top: 50%;
+  transform: rotate(18deg);
+}
+
+.logout__leg {
+  width: 12%;
+}
+
+.logout__leg--front {
+  left: 36%;
+  top: 60%;
+  transform: rotate(-28deg);
+}
+
+.logout__leg--back {
+  left: 28%;
+  top: 60%;
+  transform: rotate(24deg);
 }
 
 .logout__arrow {
   height: 4rpx;
-  right: 22%;
+  right: 18%;
+  background: #fffdfa;
+  transform-origin: right center;
 }
 
 .logout__arrow--body {
-  width: 24%;
+  width: 12%;
   top: 49%;
 }
 
 .logout__arrow--top {
-  width: 12%;
-  top: 42%;
-  transform: rotate(38deg);
-  transform-origin: right center;
+  width: 8%;
+  top: 41%;
+  transform: rotate(36deg);
 }
 
 .logout__arrow--bottom {
-  width: 12%;
-  top: 56%;
-  transform: rotate(-38deg);
-  transform-origin: right center;
+  width: 8%;
+  top: 57%;
+  transform: rotate(-36deg);
 }
 
 .desktop__screen {

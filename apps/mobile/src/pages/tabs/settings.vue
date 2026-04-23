@@ -2,21 +2,30 @@
 import { computed } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
+import AccessibilityModePanel from "../../components/ui/AccessibilityModePanel.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
+const uiPreferencesStore = useUiPreferencesStore();
+
+uiPreferencesStore.hydrate();
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "admin") {
-    return "管理员可在这里退出登录、提交反馈，并继续使用 PC 端完成高密度操作。";
+    return "可查看账号信息、提交反馈，并在需要时退出登录。";
   }
 
-  return "可查看账号信息、提交反馈或退出登录。";
+  if (sessionStore.user?.role === "merchant") {
+    return "可查看账号信息、提交反馈，并在需要时退出登录。";
+  }
+
+  return "可查看账号信息、提交反馈、切换无障碍模式或退出登录。";
 });
 
 const bootstrap = async () => {
@@ -72,6 +81,14 @@ onShow(() => {
       </view>
     </GlassCard>
 
+    <GlassCard v-if="sessionStore.user?.role === 'special'" tone="quiet">
+      <AccessibilityModePanel
+        :checked="uiPreferencesStore.specialAccessibilityMode"
+        description="仅普通用户可切换。开启后将使用关怀版界面，采用大字、高对比和更大的操作按钮。"
+        @update:checked="uiPreferencesStore.setSpecialAccessibilityMode"
+      />
+    </GlassCard>
+
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="action-grid">
@@ -84,7 +101,7 @@ onShow(() => {
           <button v-if="sessionStore.user?.role === 'admin'" class="vm-button vm-button--ghost action-button" disabled>
             <view class="action-button__content">
               <MenuIcon name="desktop" size="sm" tone="neutral" />
-              <text>PC 端支持更完整的管理能力</text>
+              <text>需要批量处理时，请在电脑上继续操作</text>
             </view>
           </button>
           <button class="vm-button vm-button--soft action-button" @tap="logout">

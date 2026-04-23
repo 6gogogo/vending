@@ -1,28 +1,35 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 
 import type { AppLoginResult } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import { useSmsCooldown } from "../../composables/useSmsCooldown";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
-const phone = ref("13800000002");
+const phone = ref("");
 const code = ref("");
 const previewCode = ref("");
-const busy = ref(false);
+const sendingCode = ref(false);
+const submitting = ref(false);
 const loginState = ref<AppLoginResult | null>(null);
 const rejectedReason = ref("");
+const { remainingSeconds, isCoolingDown, startCooldown } = useSmsCooldown(60);
 
 const helper = reactive({
   title: "",
   detail: ""
 });
+
+const sendCodeLabel = computed(() =>
+  isCoolingDown.value ? `${remainingSeconds.value}s 后重发` : "获取验证码"
+);
 
 const bootstrap = async () => {
   await sessionStore.bootstrap();
@@ -38,10 +45,29 @@ const bootstrap = async () => {
 };
 
 const sendCode = async () => {
-  busy.value = true;
+  const normalizedPhone = phone.value.trim();
+
+  if (!/^1\d{10}$/.test(normalizedPhone)) {
+    uni.showToast({
+      title: "请输入 11 位手机号",
+      icon: "none"
+    });
+    return;
+  }
+
+  if (isCoolingDown.value) {
+    uni.showToast({
+      title: `请在 ${remainingSeconds.value}s 后重试`,
+      icon: "none"
+    });
+    return;
+  }
+
+  sendingCode.value = true;
   try {
-    const response = await mobileApi.requestCode(phone.value, "app-login");
+    const response = await mobileApi.requestCode(normalizedPhone, "app-login");
     previewCode.value = response.previewCode ?? "";
+    startCooldown();
     uni.showToast({
       title: "验证码已发送",
       icon: "none"
@@ -68,12 +94,12 @@ const sendCode = async () => {
       }
     });
   } finally {
-    busy.value = false;
+    sendingCode.value = false;
   }
 };
 
 const submit = async () => {
-  busy.value = true;
+  submitting.value = true;
   loginState.value = null;
   rejectedReason.value = "";
 
@@ -105,7 +131,7 @@ const submit = async () => {
       icon: "none"
     });
   } finally {
-    busy.value = false;
+    submitting.value = false;
   }
 };
 
@@ -143,7 +169,7 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="登录" title="手机号验证码登录" subtitle="登录不再选择账号类型，只对已登记且已通过审核的手机号开放。">
+  <MobileShell eyebrow="登录" title="手机号验证码登录" subtitle="请输入已通过审核的手机号和验证码。">
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="vm-field">
@@ -172,12 +198,19 @@ onShow(() => {
         </view>
 
         <view class="entry-actions">
-          <button class="vm-button vm-button--ghost" :loading="busy" @tap="sendCode">获取验证码</button>
-          <button class="vm-button" :loading="busy" @tap="submit">进入系统</button>
+          <button
+            class="vm-button vm-button--ghost"
+            :disabled="sendingCode || isCoolingDown"
+            :loading="sendingCode"
+            @tap="sendCode"
+          >
+            {{ sendCodeLabel }}
+          </button>
+          <button class="vm-button" :loading="submitting" @tap="submit">进入系统</button>
         </view>
 
         <view v-if="previewCode" class="debug-box">
-          <text class="debug-box__label">测试环境验证码</text>
+          <text class="debug-box__label">当前验证码</text>
           <text class="vm-number">{{ previewCode }}</text>
         </view>
       </view>

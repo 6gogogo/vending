@@ -70,6 +70,143 @@ input {
   background: transparent;
 }
 
+.vm-page--accessible {
+  --vm-bg: #f7fbff;
+  --vm-bg-soft: #eef5ff;
+  --vm-surface: #ffffff;
+  --vm-surface-strong: #ffffff;
+  --vm-surface-soft: #f8fbff;
+  --vm-line: rgba(24, 74, 160, 0.22);
+  --vm-line-strong: rgba(24, 74, 160, 0.36);
+  --vm-text: #102235;
+  --vm-muted: #24476d;
+  --vm-text-soft: #24476d;
+  --vm-accent: #2f78e7;
+  --vm-accent-strong: #144aa0;
+  --vm-warning: #b86316;
+  --vm-danger: #b43a2d;
+  --vm-shadow: none;
+  --vm-button-shadow: none;
+  --vm-page-gradient: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  --vm-card-bg: linear-gradient(180deg, #ffffff, #f8fbff);
+  --vm-card-accent-bg: linear-gradient(180deg, #eef4ff, #f7fbff);
+  --vm-card-warning-bg: linear-gradient(180deg, #fff5e8, #fffaf4);
+  --vm-card-quiet-bg: linear-gradient(180deg, #ffffff, #f8fbff);
+  --vm-card-highlight: linear-gradient(90deg, #2f78e7, #69a2ff);
+  --vm-hero-bg: linear-gradient(180deg, #ffffff, #f8fbff);
+  --vm-hero-border: rgba(24, 74, 160, 0.28);
+  --vm-hero-shadow: none;
+  --vm-pill-bg: #2f78e7;
+  --vm-pill-text: #ffffff;
+}
+
+.vm-page--accessible .vm-title {
+  font-size: 66rpx;
+  line-height: 1.16;
+  letter-spacing: -0.03em;
+}
+
+.vm-page--accessible .vm-subtitle,
+.vm-page--accessible .vm-empty__body,
+.vm-page--accessible .vm-section__hint {
+  font-size: 30rpx;
+  line-height: 1.8;
+  color: var(--vm-text);
+}
+
+.vm-page--accessible .vm-pill,
+.vm-page--accessible .vm-status {
+  padding: 14rpx 22rpx;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.vm-page--accessible .vm-card {
+  border-width: 4rpx;
+  border-radius: 30rpx;
+  box-shadow: none;
+}
+
+.vm-page--accessible .vm-card::before {
+  height: 10rpx;
+}
+
+.vm-page--accessible .vm-button {
+  min-height: 120rpx;
+  padding: 0 30rpx;
+  border-width: 3rpx;
+  font-size: 36rpx;
+  border-radius: 30rpx;
+  justify-content: center;
+  text-align: center;
+}
+
+.vm-page--accessible .vm-button--ghost {
+  background: #ffffff;
+  color: var(--vm-accent-strong);
+  border-color: rgba(20, 74, 160, 0.4);
+}
+
+.vm-page--accessible .vm-button--soft {
+  background: #fff3e5;
+  color: var(--vm-warning);
+  border-color: rgba(184, 99, 22, 0.24);
+}
+
+.vm-page--accessible .vm-button--warning {
+  background: linear-gradient(135deg, #cc7a2b, #e59a4b);
+}
+
+.vm-page--accessible .vm-field__label {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.vm-page--accessible .vm-field__input {
+  min-height: 118rpx;
+  padding: 0 28rpx;
+  border-width: 3rpx;
+  border-radius: 28rpx;
+  background: #ffffff;
+  font-size: 34rpx;
+}
+
+.vm-page--accessible .vm-textarea {
+  min-height: 240rpx;
+  padding: 24rpx 28rpx;
+  border-width: 3rpx;
+  border-radius: 28rpx;
+  background: #ffffff;
+  font-size: 32rpx;
+}
+
+.vm-page--accessible .vm-empty__title,
+.vm-page--accessible .vm-section__title {
+  font-size: 38rpx;
+}
+
+.vm-page--accessible .menu-icon--sm {
+  width: 58rpx;
+  height: 58rpx;
+}
+
+.vm-page--accessible .menu-icon--md {
+  width: 82rpx;
+  height: 82rpx;
+}
+
+.vm-page--accessible .menu-icon--lg {
+  width: 96rpx;
+  height: 96rpx;
+}
+
+.vm-page--accessible .vm-stack,
+.vm-page--accessible .vm-grid,
+.vm-page--accessible .vm-section {
+  gap: 24rpx;
+}
+
 .vm-card {
   position: relative;
   border: 1rpx solid var(--vm-line);
@@ -332,4 +469,12 @@ input {
     animation: none;
     transition: none;
   }
+}
+
+.vm-page--accessible .vm-fade-up,
+.vm-page--accessible .vm-slide-in,
+.vm-page--accessible .vm-button,
+.vm-page--accessible .vm-card {
+  animation: none;
+  transition: none;
 }

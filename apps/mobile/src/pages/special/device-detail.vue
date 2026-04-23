@@ -186,21 +186,11 @@ onLoad((query) => {
 
 <template>
   <MobileShell eyebrow="柜机详情" :title="deviceName" :subtitle="location || '请先确认柜机位置和货品信息'">
-    <template #hero-side>
-      <GlassCard tone="quiet" compact>
-        <view class="hero-support">
-          <text class="hero-support__title">开柜前提醒</text>
-          <text class="hero-support__body">{{ openGuideText }}</text>
-          <text class="hero-support__body">如果识别结果异常或柜门无法关闭，可以直接走反馈通道，工作人员会继续协助处理。</text>
-        </view>
-      </GlassCard>
-    </template>
-
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">本次领取计划</text>
-          <text class="vm-subtitle">先选想领取的货品，再确认开柜，会比直接开门更稳妥。</text>
+          <text class="vm-subtitle">请先选择本次要领取的货品，再确认开柜。</text>
         </view>
 
         <view class="overview-grid">
@@ -212,6 +202,7 @@ onLoad((query) => {
         <view class="selection-banner">
           <text class="selection-banner__label">{{ scanMode ? "扫码模式" : "手动模式" }}</text>
           <text class="selection-banner__value">{{ selectedSummary || "暂未选择货品" }}</text>
+          <text class="selection-banner__hint">{{ openGuideText }}</text>
           <text class="selection-banner__hint">正式结算仍以柜门关闭后的平台识别结果为准。</text>
         </view>
 
@@ -251,7 +242,6 @@ onLoad((query) => {
 </template>
 
 <style scoped>
-.hero-support,
 .section-heading,
 .goods-item__main {
   display: flex;
@@ -259,7 +249,6 @@ onLoad((query) => {
   gap: 10rpx;
 }
 
-.hero-support__title,
 .section-heading__title,
 .goods-item__name {
   font-size: 30rpx;
@@ -267,7 +256,6 @@ onLoad((query) => {
   color: var(--vm-text);
 }
 
-.hero-support__body,
 .goods-item__meta,
 .goods-item__hint,
 .selection-banner__hint {
