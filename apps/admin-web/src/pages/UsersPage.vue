@@ -4,6 +4,7 @@ import { RouterLink } from "vue-router";
 import type { GoodsCatalogItem, RegionRecord, RegistrationApplication, SpecialAccessPolicy, UserLedgerStatus, UserRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 import { formatDateTime } from "../utils/datetime";
 
 type DrawerMode = "" | "create-user" | "edit-user" | "create-policy" | "edit-policy";
@@ -60,6 +61,9 @@ const regionDraftName = ref("");
 const regionDraftSortOrder = ref<number | undefined>(undefined);
 const regionDraftLongitude = ref<number | undefined>(undefined);
 const regionDraftLatitude = ref<number | undefined>(undefined);
+const regionDraftLocation = ref("");
+const regionDraftAddress = ref("");
+const regionMapPickerVisible = ref(false);
 const rejectReasons = ref<Record<string, string>>({});
 const userForm = ref<UserFormState>({ role: "special", phone: "", name: "", status: "active", regionId: "", regionName: "", tagsText: "" });
 const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: "", quantity: 1 }] });
@@ -95,6 +99,16 @@ const visibleRegionNames = computed(() => {
   const names = new Set<string>();
   users.value.forEach((user) => names.add(user.regionName || "未分配区域"));
   return Array.from(names).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
+});
+const regionDraftPositionSummary = computed(() => {
+  if (regionDraftLongitude.value === undefined || regionDraftLatitude.value === undefined) {
+    return "尚未在地图上设置位置";
+  }
+
+  const coordinates = `${regionDraftLongitude.value.toFixed(6)}, ${regionDraftLatitude.value.toFixed(6)}`;
+  return regionDraftLocation.value.trim()
+    ? `${regionDraftLocation.value.trim()} · ${coordinates}`
+    : coordinates;
 });
 
 const formatRole = (role: UserRecord["role"]) => role === "special" ? "普通用户" : role === "merchant" ? "爱心商户" : "管理员";
@@ -135,6 +149,14 @@ const fillUserForm = (user: UserRecord) => {
 };
 const resetPolicyForm = () => {
   policyForm.value = { name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }] };
+};
+const resetRegionDraft = () => {
+  regionDraftName.value = "";
+  regionDraftSortOrder.value = undefined;
+  regionDraftLongitude.value = undefined;
+  regionDraftLatitude.value = undefined;
+  regionDraftLocation.value = "";
+  regionDraftAddress.value = "";
 };
 const resolveRegionPayload = (state: UserFormState) => {
   if (!state.regionId) return { regionId: undefined, regionName: undefined };
@@ -254,10 +276,7 @@ const createRegionDirect = async () => {
       longitude: regionDraftLongitude.value,
       latitude: regionDraftLatitude.value
     });
-    regionDraftName.value = "";
-    regionDraftSortOrder.value = undefined;
-    regionDraftLongitude.value = undefined;
-    regionDraftLatitude.value = undefined;
+    resetRegionDraft();
     await load();
     userForm.value.regionId = region.id;
     userForm.value.regionName = "";
@@ -266,6 +285,19 @@ const createRegionDirect = async () => {
   } finally {
     creatingRegion.value = false;
   }
+};
+
+const saveRegionLocation = (payload: {
+  longitude: number;
+  latitude: number;
+  location: string;
+  address: string;
+}) => {
+  regionDraftLongitude.value = payload.longitude;
+  regionDraftLatitude.value = payload.latitude;
+  regionDraftLocation.value = payload.location;
+  regionDraftAddress.value = payload.address;
+  regionMapPickerVisible.value = false;
 };
 
 const addPolicyGoodsLimit = () => {
@@ -395,34 +427,40 @@ onMounted(load);
           <span class="admin-field__label">搜索</span>
           <input v-model="keyword" class="admin-input" placeholder="输入姓名、手机号、标签或区域" />
         </label>
-        <div class="admin-field">
+        <div class="admin-field users-region-create-field">
           <span class="admin-field__label">新增地区</span>
-          <div class="users-region-create">
-            <input v-model="regionDraftName" class="admin-input" placeholder="输入新的地区名称" />
-            <input
-              v-model.number="regionDraftSortOrder"
-              class="admin-input"
-              type="number"
-              min="1"
-              placeholder="排序"
-            />
-            <input
-              v-model.number="regionDraftLongitude"
-              class="admin-input admin-code"
-              type="number"
-              step="0.000001"
-              placeholder="经度"
-            />
-            <input
-              v-model.number="regionDraftLatitude"
-              class="admin-input admin-code"
-              type="number"
-              step="0.000001"
-              placeholder="纬度"
-            />
-            <button class="admin-button admin-button--ghost" :disabled="creatingRegion || !regionDraftName.trim()" @click="createRegionDirect">
-              {{ creatingRegion ? "新增中" : "新增地区" }}
-            </button>
+          <div class="users-region-create-card">
+            <div class="users-region-form-grid">
+              <input v-model="regionDraftName" class="admin-input" placeholder="输入新的地区名称" />
+              <input
+                v-model.number="regionDraftSortOrder"
+                class="admin-input"
+                type="number"
+                min="1"
+                placeholder="排序"
+              />
+            </div>
+            <div class="users-region-create">
+              <div class="admin-note users-region-location-summary">
+                {{ regionDraftPositionSummary }}
+              </div>
+              <div class="admin-toolbar users-region-create-actions">
+                <button
+                  class="admin-button admin-button--ghost"
+                  :disabled="creatingRegion"
+                  @click="regionMapPickerVisible = true"
+                >
+                  {{ regionDraftLongitude !== undefined && regionDraftLatitude !== undefined ? "重新设置位置" : "地图设置位置" }}
+                </button>
+                <button
+                  class="admin-button"
+                  :disabled="creatingRegion || !regionDraftName.trim() || regionDraftLongitude === undefined || regionDraftLatitude === undefined"
+                  @click="createRegionDirect"
+                >
+                  {{ creatingRegion ? "新增中" : "新增地区" }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="users-filters__summary admin-note">
@@ -677,6 +715,22 @@ onMounted(load);
         </div>
       </aside>
     </div>
+
+    <div v-if="regionMapPickerVisible" class="users-map-backdrop" @click.self="regionMapPickerVisible = false">
+      <section class="users-map-panel admin-panel">
+        <AmapLocationPicker
+          :initial-longitude="regionDraftLongitude"
+          :initial-latitude="regionDraftLatitude"
+          :initial-location="regionDraftLocation"
+          :initial-address="regionDraftAddress"
+          subject-label="地区"
+          description="地区选点"
+          location-placeholder="例如 扬名街道中心位置"
+          @close="regionMapPickerVisible = false"
+          @confirm="saveRegionLocation"
+        />
+      </section>
+    </div>
   </section>
 </template>
 
@@ -702,6 +756,7 @@ onMounted(load);
 }
 
 .users-filters__summary {
+  grid-column: 1 / -1;
   align-self: end;
 }
 
@@ -738,6 +793,10 @@ onMounted(load);
   gap: 8px;
 }
 
+.users-region-create-field {
+  grid-column: 1 / -1;
+}
+
 .users-policy-limit-row {
   grid-template-columns: minmax(0, 1fr) 120px auto;
 }
@@ -747,8 +806,43 @@ onMounted(load);
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.users-region-create-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-panel-muted);
+}
+
 .users-region-create {
-  grid-template-columns: minmax(0, 1fr) 92px 120px 120px auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.users-region-location-summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+}
+
+.users-region-create-actions {
+  justify-content: flex-end;
+}
+
+.users-map-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.users-map-panel {
+  width: min(960px, 100%);
+  padding: 14px;
 }
 
 .users-drawer-backdrop {
@@ -789,6 +883,10 @@ onMounted(load);
 
   .users-region-create {
     grid-template-columns: 1fr;
+  }
+
+  .users-region-create-actions {
+    justify-content: stretch;
   }
 }
 </style>

@@ -8,6 +8,10 @@ const props = defineProps<{
   initialLatitude?: number;
   initialLocation?: string;
   initialAddress?: string;
+  subjectLabel?: string;
+  title?: string;
+  description?: string;
+  locationPlaceholder?: string;
 }>();
 
 const emit = defineEmits<{
@@ -56,6 +60,12 @@ let geocodeToken = 0;
 const formatCoordinates = (longitude: number, latitude: number) =>
   `${longitude.toFixed(6)}, ${latitude.toFixed(6)}`;
 
+const resolvedSubjectLabel = props.subjectLabel?.trim() || "柜机";
+const resolvedTitle = props.title?.trim() || `搜索地点后选择候选项，或直接点击地图确定${resolvedSubjectLabel}位置`;
+const resolvedDescription = props.description?.trim() || "地图选点";
+const resolvedLocationPlaceholder =
+  props.locationPlaceholder?.trim() || `例如 ${resolvedSubjectLabel}所在位置说明`;
+
 const updateCurrentPositionText = (longitude: number, latitude: number, label?: string) => {
   const coordinates = formatCoordinates(longitude, latitude);
   currentPositionText.value = label?.trim() ? `${label.trim()} · ${coordinates}` : coordinates;
@@ -78,7 +88,7 @@ const setMarker = (longitude: number, latitude: number) => {
 };
 
 const buildFallbackAddress = (longitude: number, latitude: number) =>
-  `柜机位置 ${formatCoordinates(longitude, latitude)}`;
+  `${resolvedSubjectLabel}位置 ${formatCoordinates(longitude, latitude)}`;
 
 const buildGeocoderAddress = (regeocode: any) =>
   regeocode?.formattedAddress ||
@@ -399,8 +409,8 @@ watch(
   <section class="amap-picker">
     <div class="admin-panel__head">
       <div>
-        <span class="admin-kicker">地图选点</span>
-        <h3 class="admin-panel__title">搜索地点后选择候选项，或直接点击地图确定柜机位置</h3>
+        <span class="admin-kicker">{{ resolvedDescription }}</span>
+        <h3 class="admin-panel__title">{{ resolvedTitle }}</h3>
       </div>
       <button class="admin-button admin-button--ghost" @click="emit('close')">关闭</button>
     </div>
@@ -420,7 +430,7 @@ watch(
 
     <label class="admin-field">
       <span class="admin-field__label">位置说明</span>
-      <input v-model="locationLabel" class="admin-input" placeholder="例如 扬名路 18 号西侧广场" />
+      <input v-model="locationLabel" class="admin-input" :placeholder="resolvedLocationPlaceholder" />
     </label>
     <div class="admin-note">
       当前坐标：{{ currentPositionText || "尚未选择" }}
