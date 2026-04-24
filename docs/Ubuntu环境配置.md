@@ -72,6 +72,7 @@ BUSINESS_DAY_START_HOUR=4
 PUBLIC_BASE_URL=http://127.0.0.1:4000
 
 AMAP_WEB_KEY=
+AMAP_SECURITY_JS_CODE=
 
 SMARTVM_BASE_URL=
 SMARTVM_CLIENT_ID=
@@ -89,6 +90,7 @@ ALIYUN_SMS_ENDPOINT=dysmsapi.aliyuncs.com
 
 - `PUBLIC_BASE_URL`：后端对外访问地址，后续如果部署到公网或局域网，要改成真实地址
 - `AMAP_WEB_KEY`：PC 端地图选点必需
+- `AMAP_SECURITY_JS_CODE`：高德 JS API 新 Key 常用的安全密钥
 - `SMARTVM_*`：真实柜机平台联调必需
 - `ALIYUN_SMS_*`：真实短信验证码必需
 

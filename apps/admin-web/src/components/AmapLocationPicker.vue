@@ -218,14 +218,14 @@ const buildPlaceSearchErrorMessage = (result: any) => {
     (typeof result === "string" ? result : result?.info || result?.message || "").trim();
 
   if (/USERKEY_PLAT_NOMATCH|INVALID_USER_KEY|INVALID_USER_SCODE/i.test(info)) {
-    return `高德搜索失败（${info}），请检查 AMAP_WEB_KEY 与当前域名白名单。`;
+    return `高德搜索失败（${info}），请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单。`;
   }
 
   if (info) {
-    return `高德搜索失败（${info}），请检查 AMAP_WEB_KEY、域名白名单或控制台配额。`;
+    return `高德搜索失败（${info}），请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE、域名白名单或控制台配额。`;
   }
 
-  return "高德搜索失败，请检查 AMAP_WEB_KEY、域名白名单或控制台配额。";
+  return "高德搜索失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE、域名白名单或控制台配额。";
 };
 
 const searchPlaces = async () => {
@@ -243,7 +243,7 @@ const searchPlaces = async () => {
     searching.value = false;
     searchFeedbackTone.value = "danger";
     searchFeedbackMessage.value =
-      mapErrorMessage.value || "地图尚未初始化，无法搜索地点。请检查 AMAP_WEB_KEY 与域名白名单。";
+      mapErrorMessage.value || "地图尚未初始化，无法搜索地点。请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与域名白名单。";
     return;
   }
 
@@ -293,7 +293,7 @@ const normalizeMapErrorMessage = (error: unknown) => {
     if (message.includes("域名白名单")) {
       return message;
     }
-    return `${message}，请检查 AMAP_WEB_KEY 与当前管理端域名白名单。`;
+    return `${message}，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前管理端域名白名单。`;
   }
 
   return message;

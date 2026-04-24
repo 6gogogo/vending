@@ -32,7 +32,8 @@ export class AppController {
   @Get("public-config")
   publicConfig() {
     return ok({
-      amapWebKey: this.configService.get<string>("AMAP_WEB_KEY") ?? ""
+      amapWebKey: this.configService.get<string>("AMAP_WEB_KEY") ?? "",
+      amapSecurityJsCode: this.configService.get<string>("AMAP_SECURITY_JS_CODE") ?? ""
     });
   }
 }

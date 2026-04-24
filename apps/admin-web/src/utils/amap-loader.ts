@@ -2,6 +2,9 @@ declare global {
   interface Window {
     AMap?: any;
     __vmAmapLoaderPromise__?: Promise<any>;
+    _AMapSecurityConfig?: {
+      securityJsCode?: string;
+    };
   }
 }
 
@@ -15,6 +18,7 @@ const loadPublicConfig = async () => {
     message: string;
     data?: {
       amapWebKey?: string;
+      amapSecurityJsCode?: string;
     };
   };
 
@@ -40,11 +44,17 @@ export const loadAmap = () => {
 
   window.__vmAmapLoaderPromise__ = loadPublicConfig()
     .then(
-      ({ amapWebKey }) =>
+      ({ amapWebKey, amapSecurityJsCode }) =>
         new Promise((resolve, reject) => {
           if (!amapWebKey) {
             reject(new Error("后端未配置 AMAP_WEB_KEY"));
             return;
+          }
+
+          if (amapSecurityJsCode) {
+            window._AMapSecurityConfig = {
+              securityJsCode: amapSecurityJsCode
+            };
           }
 
           const existing = document.querySelector<HTMLScriptElement>("script[data-vm-amap='true']");
@@ -52,7 +62,7 @@ export const loadAmap = () => {
           if (existing) {
             existing.addEventListener("load", () => resolve(window.AMap));
             existing.addEventListener("error", () =>
-              reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY 与当前域名白名单"))
+              reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单"))
             );
             return;
           }
@@ -64,7 +74,7 @@ export const loadAmap = () => {
           script.dataset.vmAmap = "true";
           script.onload = () => resolve(window.AMap);
           script.onerror = () =>
-            reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY 与当前域名白名单"));
+            reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单"));
           document.head.appendChild(script);
         })
     )
