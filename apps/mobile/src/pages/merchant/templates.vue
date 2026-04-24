@@ -207,7 +207,7 @@ watch(
 </script>
 
 <template>
-  <MobileShell eyebrow="商品属性" title="爱心商户商品属性" subtitle="请先维护常用货品信息，补货时可直接选用。">
+  <MobileShell eyebrow="后端模板库" title="爱心商户商品属性" subtitle="从后端公共模板库维护货品信息，所有商户补货时可直接选用。">
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="form-grid">
@@ -274,7 +274,7 @@ watch(
         </view>
 
         <view class="action-row">
-          <button class="vm-button" :loading="saving" @tap="submit">{{ editingId ? "保存修改" : "新增商品属性" }}</button>
+          <button class="vm-button" :loading="saving" @tap="submit">{{ editingId ? "保存修改" : "新增后端模板" }}</button>
           <button v-if="editingId" class="vm-button vm-button--ghost" @tap="resetForm">取消编辑</button>
         </view>
       </view>
@@ -283,8 +283,8 @@ watch(
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">已有商品属性</text>
-          <text class="vm-subtitle">点击任意条目可直接带入上方表单修改。</text>
+          <text class="section-heading__title">后端商品模板</text>
+          <text class="vm-subtitle">这些模板由后端统一返回，不按商户账号单独隔离。</text>
         </view>
 
         <view v-if="templates.length" class="template-list">
@@ -304,7 +304,7 @@ watch(
             </text>
           </button>
         </view>
-        <EmptyState v-else :title="loading ? '正在加载商品属性' : '还没有商品属性'" description="先新增常用商品属性，后续补货时可直接选用。" />
+        <EmptyState v-else :title="loading ? '正在加载商品属性' : '还没有商品属性'" description="先新增后端商品模板，后续所有商户补货时可直接选用。" />
       </view>
     </GlassCard>
   </MobileShell>

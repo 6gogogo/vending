@@ -139,7 +139,7 @@ onLoad((query) => {
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="submit" :loading="submitting">提交补货登记</button>
-        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">管理货品模板</button>
+        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">后端商品模板</button>
       </view>
     </template>
 
@@ -147,7 +147,7 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">选择货品模板</text>
-          <text class="vm-subtitle">请先选择模板，数量和保质期会自动带入。</text>
+          <text class="vm-subtitle">请先选择后端公共模板，数量和保质期会自动带入。</text>
         </view>
 
         <view class="template-list">
@@ -224,7 +224,7 @@ onLoad((query) => {
 
         <view class="action-grid">
           <button class="vm-button" :loading="submitting" @tap="submit">提交补货登记</button>
-          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">返回维护模板</button>
+          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">查看后端模板</button>
         </view>
       </view>
     </GlassCard>

@@ -370,12 +370,6 @@ export class UsersService {
       }
     }
 
-    for (let index = this.store.merchantGoodsTemplates.length - 1; index >= 0; index -= 1) {
-      if (this.store.merchantGoodsTemplates[index].ownerUserId === removed.id) {
-        this.store.merchantGoodsTemplates.splice(index, 1);
-      }
-    }
-
     for (let index = this.store.adminCredentials.length - 1; index >= 0; index -= 1) {
       if (this.store.adminCredentials[index].userId === removed.id) {
         this.store.adminCredentials.splice(index, 1);

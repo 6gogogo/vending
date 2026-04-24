@@ -16,9 +16,8 @@ export class MerchantGoodsTemplatesService {
     @Inject(AlertsService) private readonly alertsService: AlertsService
   ) {}
 
-  list(ownerUserId: string) {
+  list() {
     return this.store.merchantGoodsTemplates
-      .filter((entry) => entry.ownerUserId === ownerUserId)
       .slice()
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
@@ -44,6 +43,7 @@ export class MerchantGoodsTemplatesService {
     const now = new Date().toISOString();
     const created: MerchantGoodsTemplate = {
       id: this.store.createId("template"),
+      // 记录创建来源用于审计；模板本身是后端公共模板库，所有商户都可调用。
       ownerUserId,
       goodsId: payload.goodsId,
       goodsCode: payload.goodsCode,
@@ -110,7 +110,7 @@ export class MerchantGoodsTemplatesService {
     }>
   ) {
     const owner = this.getMerchant(ownerUserId);
-    const template = this.findOwnedTemplate(ownerUserId, templateId);
+    const template = this.findTemplate(templateId);
     Object.assign(template, payload, {
       updatedAt: new Date().toISOString()
     });
@@ -153,7 +153,12 @@ export class MerchantGoodsTemplatesService {
     }
   ) {
     const owner = this.getMerchant(ownerUserId);
-    const template = this.findOwnedTemplate(ownerUserId, payload.templateId);
+    const template = this.findTemplate(payload.templateId);
+
+    if (template.status !== "active") {
+      throw new BadRequestException("当前货品模板已停用。");
+    }
+
     const quantity = payload.quantity ?? template.defaultQuantity;
 
     if (quantity <= 0) {
@@ -387,15 +392,11 @@ export class MerchantGoodsTemplatesService {
     return expires.toISOString();
   }
 
-  private findOwnedTemplate(ownerUserId: string, templateId: string) {
+  private findTemplate(templateId: string) {
     const template = this.store.merchantGoodsTemplates.find((entry) => entry.id === templateId);
 
     if (!template) {
       throw new NotFoundException("未找到对应货品模板。");
-    }
-
-    if (template.ownerUserId !== ownerUserId) {
-      throw new ForbiddenException("当前模板不属于你。");
     }
 
     return template;

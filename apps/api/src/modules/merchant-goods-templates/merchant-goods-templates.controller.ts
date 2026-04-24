@@ -17,8 +17,8 @@ export class MerchantGoodsTemplatesController {
 
   @Get("merchant-goods-templates")
   @AllowedRoles("merchant")
-  list(@Req() request: { authUser?: { id: string } }) {
-    return ok(this.merchantGoodsTemplatesService.list(request.authUser?.id ?? ""));
+  list() {
+    return ok(this.merchantGoodsTemplatesService.list());
   }
 
   @Post("merchant-goods-templates")
