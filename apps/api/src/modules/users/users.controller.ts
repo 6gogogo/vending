@@ -76,6 +76,14 @@ export class UsersController {
     return ok(this.usersService.updateUser(userId, body, request.authUser?.id), "操作成功");
   }
 
+  @Delete(":userId")
+  removeUser(
+    @Param("userId") userId: string,
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(this.usersService.removeUser(userId, request.authUser?.id), "操作成功");
+  }
+
   @Post("import")
   importUsers(
     @Body()

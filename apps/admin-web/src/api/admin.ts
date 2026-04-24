@@ -148,6 +148,9 @@ export const adminApi = {
   ) {
     return adminClient.patch<UserRecord>(`/users/${userId}`, payload);
   },
+  removeUser(userId: string) {
+    return adminClient.delete<{ id: string; name: string }>(`/users/${userId}`);
+  },
   userDetail(userId: string, query?: { month?: string; date?: string }) {
     return adminClient.get<UserManagementDetail>(`/users/${userId}`, {
       query

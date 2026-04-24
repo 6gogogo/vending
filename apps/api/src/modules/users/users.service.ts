@@ -338,6 +338,94 @@ export class UsersService {
     return user;
   }
 
+  removeUser(userId: string, actorUserId?: string) {
+    const user = this.findById(userId);
+
+    if (user.id === actorUserId) {
+      throw new BadRequestException("不能删除当前登录账号。");
+    }
+
+    if (
+      user.role === "admin" &&
+      this.store.users.filter((entry) => entry.role === "admin" && entry.status === "active").length <= 1
+    ) {
+      throw new BadRequestException("至少需要保留一个启用的管理员账号。");
+    }
+
+    const targetIndex = this.store.users.findIndex((entry) => entry.id === userId);
+
+    if (targetIndex < 0) {
+      throw new NotFoundException("未找到对应用户。");
+    }
+
+    const [removed] = this.store.users.splice(targetIndex, 1);
+
+    for (const policy of this.store.specialAccessPolicies) {
+      policy.applicableUserIds = policy.applicableUserIds.filter((id) => id !== removed.id);
+    }
+
+    for (let index = this.store.alerts.length - 1; index >= 0; index -= 1) {
+      if (this.store.alerts[index].targetUserId === removed.id) {
+        this.store.alerts.splice(index, 1);
+      }
+    }
+
+    for (let index = this.store.merchantGoodsTemplates.length - 1; index >= 0; index -= 1) {
+      if (this.store.merchantGoodsTemplates[index].ownerUserId === removed.id) {
+        this.store.merchantGoodsTemplates.splice(index, 1);
+      }
+    }
+
+    for (let index = this.store.adminCredentials.length - 1; index >= 0; index -= 1) {
+      if (this.store.adminCredentials[index].userId === removed.id) {
+        this.store.adminCredentials.splice(index, 1);
+      }
+    }
+
+    for (const [token, session] of this.store.sessions.entries()) {
+      if (session.userId === removed.id) {
+        this.store.sessions.delete(token);
+      }
+    }
+
+    for (const application of this.store.registrationApplications) {
+      if (application.linkedUserId !== removed.id) {
+        continue;
+      }
+
+      application.linkedUserId = undefined;
+      application.status = "rejected";
+      application.reviewReason = "该人员已由管理员从台账中删除，可重新提交注册资料。";
+      application.updatedAt = new Date().toISOString();
+    }
+
+    this.store.logOperation({
+      category: "user",
+      type: "remove-user",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "user",
+        id: removed.id,
+        label: removed.name
+      },
+      description: `管理员删除了人员 ${removed.name}。`,
+      detail: `人员 ${removed.name}（${removed.phone}）已从当前人员台账中删除，历史日志、库存记录和柜机事件保留。`,
+      metadata: {
+        userId: removed.id,
+        userName: removed.name,
+        phone: removed.phone,
+        role: removed.role,
+        undoState: "not_undoable"
+      }
+    });
+
+    return {
+      id: removed.id,
+      name: removed.name
+    };
+  }
+
   importUsers(payload: ImportUsersPayload) {
     const imported = payload.entries.map((entry) => {
       const existing = this.store.users.find((user) => user.phone === entry.phone);

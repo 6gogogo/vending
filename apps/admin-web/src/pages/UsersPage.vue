@@ -46,6 +46,7 @@ const goodsCatalog = ref<GoodsCatalogItem[]>([]);
 const regions = ref<RegionRecord[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+const removingUserId = ref("");
 const creatingRegion = ref(false);
 const drawerMode = ref<DrawerMode>("");
 const editingUserId = ref("");
@@ -95,6 +96,7 @@ const selectedUsers = computed(() => users.value.filter((user) => selectedUserId
 const selectedSpecialUsers = computed(() => selectedUsers.value.filter((user) => user.role === "special"));
 const allFilteredSelected = computed(() => filteredUsers.value.length > 0 && filteredUsers.value.every((user) => selectedUserIds.value.includes(user.id)));
 const currentDrawerTitle = computed(() => drawerMode.value === "create-user" ? "新增人员" : drawerMode.value === "edit-user" ? "编辑人员" : drawerMode.value === "create-policy" ? "新增策略模板" : drawerMode.value === "edit-policy" ? "编辑策略模板" : "");
+const isUserMutating = computed(() => saving.value || Boolean(removingUserId.value));
 const visibleRegionNames = computed(() => {
   const names = new Set<string>();
   users.value.forEach((user) => names.add(user.regionName || "未分配区域"));
@@ -248,6 +250,37 @@ const submitUserForm = async () => {
   } finally {
     saving.value = false;
   }
+};
+
+const removeUser = async (user: UserRecord) => {
+  if (!window.confirm(`确认从当前人员台账中删除 ${user.name}（${user.phone}）吗？`)) {
+    return;
+  }
+
+  removingUserId.value = user.id;
+  try {
+    await adminApi.removeUser(user.id);
+    selectedUserIds.value = selectedUserIds.value.filter((id) => id !== user.id);
+    if (editingUserId.value === user.id) {
+      closeDrawer();
+    }
+    await load();
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+  } finally {
+    removingUserId.value = "";
+  }
+};
+
+const removeEditingUser = async () => {
+  const user = users.value.find((item) => item.id === editingUserId.value);
+
+  if (!user) {
+    window.alert("操作失败：未找到当前编辑的人员");
+    return;
+  }
+
+  await removeUser(user);
 };
 
 const createRegionDirect = async () => {
@@ -613,7 +646,7 @@ onMounted(load);
             <span class="admin-kicker">编辑面板</span>
             <h3 class="admin-panel__title">{{ currentDrawerTitle }}</h3>
           </div>
-          <button class="admin-button admin-button--ghost" @click="closeDrawer">关闭</button>
+          <button class="admin-button admin-button--ghost" :disabled="isUserMutating" @click="closeDrawer">关闭</button>
         </div>
 
         <div v-if="drawerMode === 'create-user' || drawerMode === 'edit-user'" class="users-drawer__body">
@@ -660,6 +693,16 @@ onMounted(load);
           >
             {{ saving ? "保存中" : "保存人员信息" }}
           </button>
+
+          <div v-if="drawerMode === 'edit-user'" class="users-danger-zone">
+            <div>
+              <strong>删除人员</strong>
+              <p>删除人员会移出当前人员台账，并清理取货模板绑定、待处理预警和登录会话；历史日志、库存记录和柜机事件保留，便于后续追溯。</p>
+            </div>
+            <button class="admin-button admin-button--danger" :disabled="saving || removingUserId === editingUserId" @click="removeEditingUser">
+              {{ removingUserId === editingUserId ? "删除中" : "删除当前人员" }}
+            </button>
+          </div>
         </div>
 
         <div v-else class="users-drawer__body">
@@ -864,6 +907,24 @@ onMounted(load);
   overflow: auto;
 }
 
+.users-danger-zone {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #efc0ba;
+  border-radius: 12px;
+  background: #fff4f2;
+  color: #8c2f29;
+}
+
+.users-danger-zone p {
+  margin: 4px 0 0;
+  color: #9a514b;
+  line-height: 1.6;
+}
+
 .admin-text-button {
   border: 0;
   padding: 0;
@@ -882,6 +943,10 @@ onMounted(load);
   }
 
   .users-region-create {
+    grid-template-columns: 1fr;
+  }
+
+  .users-danger-zone {
     grid-template-columns: 1fr;
   }
 
