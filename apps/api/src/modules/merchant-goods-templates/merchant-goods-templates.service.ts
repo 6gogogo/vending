@@ -17,7 +17,31 @@ export class MerchantGoodsTemplatesService {
   ) {}
 
   list() {
-    return this.store.merchantGoodsTemplates
+    const storedTemplates = this.store.merchantGoodsTemplates;
+    const templatedGoodsIds = new Set(storedTemplates.map((entry) => entry.goodsId).filter(Boolean));
+    const catalogTemplates: MerchantGoodsTemplate[] = this.store.goodsCatalog
+      .filter((entry) => entry.status !== "inactive" && !templatedGoodsIds.has(entry.goodsId))
+      .map((entry) => ({
+        id: this.buildCatalogTemplateId(entry.goodsId),
+        ownerUserId: "system",
+        goodsId: entry.goodsId,
+        goodsCode: entry.goodsCode,
+        goodsName: entry.name,
+        fullName: entry.fullName,
+        category: entry.category,
+        categoryName: entry.categoryName,
+        packageForm: entry.packageForm,
+        specification: entry.specification,
+        manufacturer: entry.manufacturer,
+        defaultQuantity: 1,
+        defaultShelfLifeDays: 2,
+        imageUrl: entry.imageUrl,
+        status: "active",
+        createdAt: entry.createdAt ?? "1970-01-01T00:00:00.000Z",
+        updatedAt: entry.updatedAt ?? entry.createdAt ?? "1970-01-01T00:00:00.000Z"
+      }));
+
+    return [...storedTemplates, ...catalogTemplates]
       .slice()
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
@@ -110,7 +134,7 @@ export class MerchantGoodsTemplatesService {
     }>
   ) {
     const owner = this.getMerchant(ownerUserId);
-    const template = this.findTemplate(templateId);
+    const template = this.findOrCreateTemplateFromCatalog(ownerUserId, templateId);
     Object.assign(template, payload, {
       updatedAt: new Date().toISOString()
     });
@@ -395,11 +419,92 @@ export class MerchantGoodsTemplatesService {
   private findTemplate(templateId: string) {
     const template = this.store.merchantGoodsTemplates.find((entry) => entry.id === templateId);
 
-    if (!template) {
+    if (template) {
+      return template;
+    }
+
+    const catalogItem = this.findCatalogItemByTemplateId(templateId);
+
+    if (!catalogItem) {
       throw new NotFoundException("未找到对应货品模板。");
     }
 
-    return template;
+    return this.mapCatalogItemToTemplate(catalogItem);
+  }
+
+  private findOrCreateTemplateFromCatalog(ownerUserId: string, templateId: string) {
+    const template = this.store.merchantGoodsTemplates.find((entry) => entry.id === templateId);
+
+    if (template) {
+      return template;
+    }
+
+    const catalogItem = this.findCatalogItemByTemplateId(templateId);
+
+    if (!catalogItem) {
+      throw new NotFoundException("未找到对应货品模板。");
+    }
+
+    const now = new Date().toISOString();
+    const created: MerchantGoodsTemplate = {
+      ...this.mapCatalogItemToTemplate(catalogItem),
+      id: this.store.createId("template"),
+      ownerUserId,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.store.merchantGoodsTemplates.unshift(created);
+    return created;
+  }
+
+  private mapCatalogItemToTemplate(catalogItem: {
+    goodsId: string;
+    goodsCode: string;
+    name: string;
+    fullName?: string;
+    category: GoodsCategory;
+    categoryName?: string;
+    packageForm?: string;
+    specification?: string;
+    manufacturer?: string;
+    imageUrl: string;
+    createdAt?: string;
+    updatedAt?: string;
+  }): MerchantGoodsTemplate {
+    return {
+      id: this.buildCatalogTemplateId(catalogItem.goodsId),
+      ownerUserId: "system",
+      goodsId: catalogItem.goodsId,
+      goodsCode: catalogItem.goodsCode,
+      goodsName: catalogItem.name,
+      fullName: catalogItem.fullName,
+      category: catalogItem.category,
+      categoryName: catalogItem.categoryName,
+      packageForm: catalogItem.packageForm,
+      specification: catalogItem.specification,
+      manufacturer: catalogItem.manufacturer,
+      defaultQuantity: 1,
+      defaultShelfLifeDays: 2,
+      imageUrl: catalogItem.imageUrl,
+      status: "active",
+      createdAt: catalogItem.createdAt ?? "1970-01-01T00:00:00.000Z",
+      updatedAt: catalogItem.updatedAt ?? catalogItem.createdAt ?? "1970-01-01T00:00:00.000Z"
+    };
+  }
+
+  private findCatalogItemByTemplateId(templateId: string) {
+    const goodsId = templateId.startsWith("catalog-") ? templateId.slice("catalog-".length) : "";
+
+    if (!goodsId) {
+      return undefined;
+    }
+
+    return this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId && entry.status !== "inactive");
+  }
+
+  private buildCatalogTemplateId(goodsId: string) {
+    return `catalog-${goodsId}`;
   }
 
   private getMerchant(ownerUserId: string) {

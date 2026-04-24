@@ -59,6 +59,7 @@ export class UsersController {
     @Param("userId") userId: string,
     @Body()
     body: {
+      role?: UserRole;
       phone?: string;
       name?: string;
       status?: "active" | "inactive";

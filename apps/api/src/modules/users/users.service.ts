@@ -277,6 +277,7 @@ export class UsersService {
   updateUser(
     userId: string,
     payload: {
+      role?: UserRole;
       phone?: string;
       name?: string;
       status?: UserRecord["status"];
@@ -293,6 +294,23 @@ export class UsersService {
 
     if (payload.phone !== undefined) {
       user.phone = payload.phone;
+    }
+
+    if (payload.role !== undefined && payload.role !== user.role) {
+      user.role = payload.role;
+      if (payload.role === "merchant") {
+        user.merchantProfile = user.merchantProfile ?? {
+          donationWindowDays: 2,
+          defaultDeviceCodes: []
+        };
+      } else {
+        user.merchantProfile = undefined;
+      }
+
+      if (payload.role !== "special") {
+        user.quota = undefined;
+        user.accessPolicies = undefined;
+      }
     }
 
     if (payload.name !== undefined) {

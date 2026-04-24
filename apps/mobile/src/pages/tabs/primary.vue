@@ -124,7 +124,7 @@ const pageSubtitle = computed(() => {
   }
 
   if (sessionStore.user?.role === "merchant") {
-    return "可在这里查看模板、登记补货和处理异常。";
+    return "可在这里查看模板、登记补货和货物流向。";
   }
 
   return "可在这里按分类处理待办、审核申请和查看柜机。";
@@ -159,9 +159,6 @@ const heroSupport = computed(() => {
       title: "补货提示",
       lines: [
         `当前已维护模板 ${templates.value.length} 个，累计补货 ${merchantSummary.value.donatedUnits} 件。`,
-        merchantSummary.value.pendingAlerts
-          ? `有 ${merchantSummary.value.pendingAlerts} 条异常待处理，请先查看。`
-          : "当前没有新的异常提醒。",
         "可先维护商品属性，再登记补货和查看去向。"
       ]
     };
@@ -289,11 +286,10 @@ const load = async () => {
       adminAiReport.value = null;
       adminAiError.value = "";
       adminAiLoading.value = false;
-      const [templateResponse, summaryResponse, traceResponse, alertResponse] = await Promise.all([
+      const [templateResponse, summaryResponse, traceResponse] = await Promise.all([
         mobileApi.merchantTemplates(),
         mobileApi.merchantSummary(sessionStore.user.id),
-        mobileApi.merchantRestockTraces(),
-        mobileApi.alerts(undefined, sessionStore.user.id)
+        mobileApi.merchantRestockTraces()
       ]);
       templates.value = templateResponse;
       merchantSummary.value = {
@@ -302,8 +298,7 @@ const load = async () => {
         pendingAlerts: summaryResponse.pendingAlerts
       };
       records.value = traceResponse.records;
-      alerts.value = alertResponse;
-      maybeNotifyResolvedFeedback();
+      alerts.value = [];
       return;
     }
 
@@ -526,25 +521,7 @@ onShow(() => {
       </view>
     </GlassCard>
 
-    <GlassCard tone="accent" v-else-if="sessionStore.user?.role === 'merchant'">
-      <view class="vm-stack">
-        <view class="section-heading">
-          <text class="section-heading__title">商品属性与补货</text>
-          <text class="vm-subtitle">请先维护商品属性，再登记补货；货物流向可在记录页查看。</text>
-        </view>
-        <view class="metric-grid">
-          <ServiceMetric label="属性数量" :value="templates.length" hint="当前账号已维护商品属性" />
-          <ServiceMetric label="累计补货件数" :value="merchantSummary.donatedUnits" hint="当前账号历史累计" />
-          <ServiceMetric label="待处理问题" :value="merchantSummary.pendingAlerts" hint="优先处理反馈与异常" tone="warning" />
-        </view>
-        <view class="action-grid">
-          <button class="vm-button" @tap="navigate('/pages/merchant/templates')">管理商品属性</button>
-          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/restock')">立即登记补货</button>
-        </view>
-      </view>
-    </GlassCard>
-
-    <template v-else>
+    <template v-else-if="sessionStore.user?.role === 'admin'">
       <GlassCard tone="accent">
         <view class="vm-stack">
           <view class="section-heading">

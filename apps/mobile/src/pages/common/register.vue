@@ -129,6 +129,8 @@ const queryPhone = async () => {
 
     if (response.fixedRole) {
       requestedRole.value = response.fixedRole;
+    } else if (response.application?.requestedRole) {
+      requestedRole.value = response.application.requestedRole;
     }
 
     applyProfile(response.profile);

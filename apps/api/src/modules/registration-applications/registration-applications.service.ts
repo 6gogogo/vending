@@ -72,7 +72,7 @@ export class RegistrationApplicationsService {
       return {
         phone: normalizedPhone,
         state: "pending",
-        fixedRole: linkedUser?.role ?? application.requestedRole,
+        fixedRole: linkedUser?.role,
         profile: application.profile,
         application,
         linkedUser: linkedUser ? this.mapLinkedUser(linkedUser) : undefined,
@@ -84,7 +84,7 @@ export class RegistrationApplicationsService {
       return {
         phone: normalizedPhone,
         state: "rejected",
-        fixedRole: linkedUser?.role ?? application.requestedRole,
+        fixedRole: linkedUser?.role,
         profile: application.profile,
         application,
         linkedUser: linkedUser ? this.mapLinkedUser(linkedUser) : undefined,

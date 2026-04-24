@@ -137,6 +137,7 @@ export const adminApi = {
   updateUser(
     userId: string,
     payload: {
+      role?: UserRecord["role"];
       phone?: string;
       name?: string;
       status?: "active" | "inactive";

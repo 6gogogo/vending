@@ -652,7 +652,7 @@ onMounted(load);
         <div v-if="drawerMode === 'create-user' || drawerMode === 'edit-user'" class="users-drawer__body">
           <label class="admin-field">
             <span class="admin-field__label">角色</span>
-            <select v-model="userForm.role" class="admin-select" :disabled="drawerMode === 'edit-user'">
+            <select v-model="userForm.role" class="admin-select">
               <option value="special">普通用户</option>
               <option value="merchant">爱心商户</option>
               <option value="admin">管理员</option>

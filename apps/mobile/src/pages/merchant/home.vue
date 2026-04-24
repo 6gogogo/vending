@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
 import { mobileApi } from "../../api/mobile";
@@ -21,14 +21,6 @@ const summary = ref({
 });
 const templateCount = ref(0);
 const recentLogs = ref<Array<{ id: string; description: string; occurredAt: string }>>([]);
-
-const focusText = computed(() => {
-  if (summary.value.pendingAlerts > 0) {
-    return `当前有 ${summary.value.pendingAlerts} 条待处理反馈或预警，建议先核对异常，再安排补货。`;
-  }
-
-  return "当前异常压力较低，可以优先维护模板、登记补货并回看货物流向。";
-});
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -91,20 +83,12 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">今日运营概览</text>
-          <text class="vm-subtitle">请先查看补货量、异常提醒和模板数量。</text>
+          <text class="vm-subtitle">请先查看补货量和后端模板数量。</text>
         </view>
 
         <view class="metric-grid">
           <ServiceMetric label="累计补货件数" :value="summary.donatedUnits" hint="当前账号历史累计" />
-          <ServiceMetric label="待处理反馈/预警" :value="summary.pendingAlerts" hint="优先处理异常与到期问题" tone="warning" />
-          <ServiceMetric label="模板数量" :value="templateCount" hint="常用货品模板总数" />
-        </view>
-
-        <view class="ops-banner">
-          <text class="ops-banner__title">{{ loading ? "正在刷新运营数据" : "请先查看异常提醒" }}</text>
-          <text class="ops-banner__body">
-            {{ loading ? "请稍候，系统正在同步补货概览和最近流向。" : focusText }}
-          </text>
+          <ServiceMetric label="后端模板数量" :value="templateCount" hint="可直接用于补货的公共模板" />
         </view>
       </view>
     </GlassCard>
@@ -188,15 +172,13 @@ onShow(() => {
 }
 
 .section-heading__title,
-.menu-card__title,
-.ops-banner__title {
+.menu-card__title {
   font-size: 30rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
 
 .menu-card__desc,
-.ops-banner__body,
 .menu-card__tag,
 .log-item__time {
   font-size: 22rpx;
@@ -231,7 +213,6 @@ onShow(() => {
   gap: 6rpx;
 }
 
-.ops-banner,
 .menu-card,
 .log-item {
   display: flex;

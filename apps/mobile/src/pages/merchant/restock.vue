@@ -16,6 +16,7 @@ const templates = ref<MerchantGoodsTemplate[]>([]);
 const devices = ref<DeviceRecord[]>([]);
 const selectedTemplateId = ref("");
 const selectedDeviceCode = ref("");
+const templateKeyword = ref("");
 const quantity = ref(0);
 const productionDate = ref(new Date().toISOString().slice(0, 10));
 const note = ref("");
@@ -29,6 +30,21 @@ const selectedTemplate = computed(() =>
 const selectedDevice = computed(() =>
   devices.value.find((entry) => entry.deviceCode === selectedDeviceCode.value)
 );
+const filteredTemplates = computed(() => {
+  const query = templateKeyword.value.trim().toLowerCase();
+
+  if (!query) {
+    return templates.value;
+  }
+
+  return templates.value.filter((entry) =>
+    [entry.goodsName, entry.fullName, entry.goodsCode, entry.categoryName, entry.specification, entry.manufacturer]
+      .filter((value): value is string => Boolean(value))
+      .join(" ")
+      .toLowerCase()
+      .includes(query)
+  );
+});
 
 const estimatedExpireDate = computed(() => {
   const shelfLifeDays = selectedTemplate.value?.defaultShelfLifeDays;
@@ -150,9 +166,14 @@ onLoad((query) => {
           <text class="vm-subtitle">请先选择后端公共模板，数量和保质期会自动带入。</text>
         </view>
 
+        <view class="vm-field">
+          <text class="vm-field__label">搜索商品名称</text>
+          <input v-model="templateKeyword" class="vm-field__input" placeholder="输入名称、编号、分类或规格" />
+        </view>
+
         <view class="template-list">
           <button
-            v-for="item in templates"
+            v-for="item in filteredTemplates"
             :key="item.id"
             class="template-item"
             :class="{ 'template-item--active': selectedTemplateId === item.id }"

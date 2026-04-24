@@ -17,6 +17,7 @@ const loading = ref(false);
 const saving = ref(false);
 const uploading = ref(false);
 const editingId = ref<string>();
+const keyword = ref("");
 const templates = ref<MerchantGoodsTemplate[]>([]);
 const goodsCategories = ref<GoodsCategoryRecord[]>([]);
 const categories: GoodsCategory[] = ["food", "drink", "daily"];
@@ -39,6 +40,29 @@ const form = reactive({
 const categoryOptions = computed(() =>
   goodsCategories.value.filter((item) => item.status === "active" && item.category === form.category)
 );
+const filteredTemplates = computed(() => {
+  const query = keyword.value.trim().toLowerCase();
+
+  if (!query) {
+    return templates.value;
+  }
+
+  return templates.value.filter((item) =>
+    [
+      item.goodsName,
+      item.fullName,
+      item.goodsCode,
+      item.categoryName,
+      item.packageForm,
+      item.specification,
+      item.manufacturer
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" ")
+      .toLowerCase()
+      .includes(query)
+  );
+});
 
 const resetForm = () => {
   editingId.value = undefined;
@@ -287,8 +311,13 @@ watch(
           <text class="vm-subtitle">这些模板由后端统一返回，不按商户账号单独隔离。</text>
         </view>
 
-        <view v-if="templates.length" class="template-list">
-          <button v-for="item in templates" :key="item.id" class="template-item" @tap="edit(item)">
+        <view class="vm-field">
+          <text class="vm-field__label">搜索商品名称</text>
+          <input v-model="keyword" class="vm-field__input" placeholder="输入名称、编号、分类、规格或厂家" />
+        </view>
+
+        <view v-if="filteredTemplates.length" class="template-list">
+          <button v-for="item in filteredTemplates" :key="item.id" class="template-item" @tap="edit(item)">
             <view class="template-item__main">
               <text class="template-item__title">{{ item.goodsName }}</text>
               <text class="template-item__meta">{{ item.fullName || item.goodsName }}</text>
@@ -304,7 +333,11 @@ watch(
             </text>
           </button>
         </view>
-        <EmptyState v-else :title="loading ? '正在加载商品属性' : '还没有商品属性'" description="先新增后端商品模板，后续所有商户补货时可直接选用。" />
+        <EmptyState
+          v-else
+          :title="loading ? '正在加载商品属性' : keyword.trim() ? '没有匹配的商品属性' : '还没有商品属性'"
+          :description="keyword.trim() ? '请换一个名称、编号或规格继续搜索。' : '先新增后端商品模板，后续所有商户补货时可直接选用。'"
+        />
       </view>
     </GlassCard>
   </MobileShell>
