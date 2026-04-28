@@ -12,3 +12,6 @@
 - `knowledge/mobile.md`：移动端的目录结构、运行方式与知识点。
 - `knowledge/api.md`：后端接口服务的目录结构与知识点。
 - `knowledge/shared-and-tooling.md`：共享包、工作区脚本、构建和类型检查说明。
+
+## 一键部署
+npm install
