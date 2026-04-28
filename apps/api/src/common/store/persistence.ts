@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { cloneSeedState, type AlertTask, type BackofficeRole, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type PaymentOrderRecord, type PaymentRefundRecord, type RegionRecord, type RegistrationApplication, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
+import { cloneSeedState, type AlertTask, type BackofficeRole, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CabinetReservationRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type PaymentOrderRecord, type PaymentRefundRecord, type RegionRecord, type RegistrationApplication, type ReservationSettings, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
 
 export interface VerificationRecord {
   code: string;
@@ -71,6 +71,8 @@ export interface PersistedStoreState {
   inventory: InventoryMovement[];
   paymentOrders: PaymentOrderRecord[];
   paymentRefunds: PaymentRefundRecord[];
+  reservations: CabinetReservationRecord[];
+  reservationSettings: ReservationSettings;
   alerts: AlertTask[];
   logs: OperationLogRecord[];
   verificationCodes: Array<[string, VerificationRecord]>;
@@ -83,6 +85,11 @@ export interface PersistedStoreState {
 }
 
 const MAX_PERSISTED_CALLBACK_LOGS = 1000;
+export const DEFAULT_RESERVATION_SETTINGS: ReservationSettings = {
+  enabled: true,
+  holdMinutes: 60,
+  maxTimeouts: 3
+};
 
 const findApiWorkspaceRoot = () => {
   const cwdApiRoot = resolve(process.cwd(), "apps/api");
@@ -194,6 +201,8 @@ export const createSeededPersistedState = (): PersistedStoreState => {
     backofficeCredentials: [],
     paymentOrders: [],
     paymentRefunds: [],
+    reservations: [],
+    reservationSettings: structuredClone(DEFAULT_RESERVATION_SETTINGS),
     callbackLog: [],
     deviceRuntime: seed.devices.map((device) => [
       device.deviceCode,
@@ -241,6 +250,8 @@ export const createEmptyPersistedState = (): PersistedStoreState => ({
   inventory: [],
   paymentOrders: [],
   paymentRefunds: [],
+  reservations: [],
+  reservationSettings: structuredClone(DEFAULT_RESERVATION_SETTINGS),
   alerts: [],
   logs: [],
   verificationCodes: [],
@@ -277,6 +288,11 @@ const normalizePersistedState = (raw: Partial<PersistedStoreState>): PersistedSt
     inventory: raw.inventory ?? seeded.inventory,
     paymentOrders: raw.paymentOrders ?? seeded.paymentOrders,
     paymentRefunds: raw.paymentRefunds ?? seeded.paymentRefunds,
+    reservations: raw.reservations ?? seeded.reservations,
+    reservationSettings: {
+      ...DEFAULT_RESERVATION_SETTINGS,
+      ...(raw.reservationSettings ?? seeded.reservationSettings)
+    },
     alerts: raw.alerts ?? seeded.alerts,
     logs: raw.logs ?? seeded.logs,
     verificationCodes: raw.verificationCodes ?? seeded.verificationCodes,

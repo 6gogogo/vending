@@ -133,6 +133,11 @@ export class UsersController {
       unitPrice?: number;
       direction: "restock" | "deduct";
       note?: string;
+      confirmed?: boolean;
+      batchConsumptions?: Array<{
+        batchId: string;
+        quantity: number;
+      }>;
     },
     @Req() request: { authUser?: { id: string } }
   ) {

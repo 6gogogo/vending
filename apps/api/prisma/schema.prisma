@@ -21,6 +21,9 @@ model User {
   profile                Json?
   merchantProfile        Json?
   accessPolicies         Json?
+  reservationTimeoutCount Int?
+  reservationDisabledAt  String?
+  reservationDisabledReason String?
   mobileProfileCompleted Boolean  @default(false)
   createdAt              String?
   updatedAt              String?
@@ -253,6 +256,32 @@ model PaymentRefund {
 
   @@index([paymentOrderId])
   @@index([status])
+}
+
+model Reservation {
+  id          String @id
+  userId      String
+  phone       String
+  deviceCode  String
+  doorNum     String
+  status      String
+  reservedAt  String
+  expiresAt   String
+  createdAt   String
+  updatedAt   String
+  data        Json
+
+  @@index([userId])
+  @@index([deviceCode])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model ReservationSetting {
+  id        String @id
+  enabled   Boolean
+  data      Json
+  updatedAt String?
 }
 
 model Alert {

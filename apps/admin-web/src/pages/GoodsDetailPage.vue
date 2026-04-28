@@ -204,6 +204,14 @@ const addBatch = async () => {
     return;
   }
 
+  if (
+    !window.confirm(
+      `确认向 ${batchForm.value.deviceCode} 新增 ${goods.value.name} x${batchForm.value.quantity} 的补货批次？`
+    )
+  ) {
+    return;
+  }
+
   saving.value = true;
   try {
     await adminApi.addGoodsBatch(goods.value.goodsId, {
@@ -212,7 +220,8 @@ const addBatch = async () => {
       expiresAt: batchForm.value.expiresAt ? new Date(`${batchForm.value.expiresAt}T23:59:59`).toISOString() : undefined,
       sourceType: batchForm.value.sourceType,
       sourceUserName: batchForm.value.sourceUserName || undefined,
-      note: batchForm.value.note || undefined
+      note: batchForm.value.note || undefined,
+      confirmed: true
     });
     batchForm.value.quantity = 1;
     batchForm.value.expiresAt = "";
@@ -230,11 +239,16 @@ const removeBatch = async (batchId: string) => {
     return;
   }
 
+  if (!window.confirm(`确认从批次 ${batchId} 去除 ${form.quantity} 件？该操作会记录为指定批次补扣。`)) {
+    return;
+  }
+
   saving.value = true;
   try {
     await adminApi.removeGoodsBatch(batchId, {
       quantity: form.quantity,
-      note: form.note || undefined
+      note: form.note || undefined,
+      confirmed: true
     });
     await load();
   } finally {

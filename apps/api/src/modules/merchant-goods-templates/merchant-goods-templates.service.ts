@@ -174,8 +174,13 @@ export class MerchantGoodsTemplatesService {
       quantity?: number;
       productionDate: string;
       note?: string;
+      confirmed?: boolean;
     }
   ) {
+    if (!payload.confirmed) {
+      throw new BadRequestException("补货登记前需要先确认补货明细。");
+    }
+
     const owner = this.getMerchant(ownerUserId);
     const template = this.findTemplate(payload.templateId);
 
@@ -221,6 +226,7 @@ export class MerchantGoodsTemplatesService {
     this.store.inventory.unshift({
       id: this.store.createId("movement"),
       userId: owner.id,
+      batchId: batch.batchId,
       deviceCode: device.deviceCode,
       goodsId: goods.goodsId,
       goodsName: goods.name,
@@ -257,6 +263,12 @@ export class MerchantGoodsTemplatesService {
       metadata: {
         templateId: template.id,
         batchId: batch.batchId,
+        confirmation: {
+          confirmed: true,
+          confirmedAt: batch.createdAt,
+          confirmedByUserId: owner.id,
+          batchSelection: "new_batch"
+        },
         goodsId: goods.goodsId,
         goodsName: goods.name,
         deviceCode: device.deviceCode,

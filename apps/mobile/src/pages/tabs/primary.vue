@@ -181,13 +181,17 @@ const heroSupport = computed(() => {
 });
 
 const resolveFeedbackNoticeContent = (task: AlertTask) => {
+  if (task.userNoticeContent) {
+    return task.userNoticeContent;
+  }
+
   const feedbackType =
     task.feedbackType ??
     task.detail.match(/反馈类型：([^。；]+)/)?.[1]?.trim();
 
   return feedbackType
-    ? `${feedbackType}反馈已被处理，感谢您的反馈`
-    : "您的反馈已被处理，感谢您的反馈";
+    ? `管理员已接受你的${feedbackType}反馈，感谢你的反馈`
+    : "管理员已接受你的反馈，感谢你的反馈";
 };
 
 const maybeNotifyResolvedFeedback = () => {
@@ -213,7 +217,7 @@ const maybeNotifyResolvedFeedback = () => {
 
   uni.setStorageSync(`mobile:resolved-feedback:${resolvedFeedback.id}`, "1");
   uni.showModal({
-    title: "反馈处理完成",
+    title: resolvedFeedback.userNoticeTitle || "反馈已接受",
     content: resolveFeedbackNoticeContent(resolvedFeedback),
     showCancel: false
   });

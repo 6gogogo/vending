@@ -350,6 +350,7 @@ export class OperationLogsService {
       }
     });
 
+    this.markBatchConsumptionTracesReverted(log.id, undoLog.id);
     this.markAsUndone(log, actorUserId, undoLog.id);
     return undoLog;
   }
@@ -401,6 +402,7 @@ export class OperationLogsService {
       }
     });
 
+    this.markBatchConsumptionTracesReverted(log.id, undoLog.id);
     this.markAsUndone(log, actorUserId, undoLog.id);
     return undoLog;
   }
@@ -498,6 +500,18 @@ export class OperationLogsService {
     }
 
     const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
+    this.store.inventory.unshift(this.buildUndoMovement({
+      userId: actorUserId,
+      deviceCode,
+      goodsId,
+      goodsName: goods?.name ?? goodsId,
+      category: goods?.category ?? "daily",
+      quantity: removed.actualQuantity,
+      unitPrice: goods?.price ?? 0,
+      type: "manual-deduction",
+      batchId
+    }));
+
     const undoLog = this.store.logOperation({
       category: "goods",
       type: "undo-manual-add-batch",
@@ -539,6 +553,18 @@ export class OperationLogsService {
     }
 
     const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
+    this.store.inventory.unshift(this.buildUndoMovement({
+      userId: actorUserId,
+      deviceCode,
+      goodsId,
+      goodsName: goods?.name ?? goodsId,
+      category: goods?.category ?? "daily",
+      quantity,
+      unitPrice: goods?.price ?? 0,
+      type: "manual-restock",
+      batchId
+    }));
+
     const undoLog = this.store.logOperation({
       category: "goods",
       type: "undo-manual-remove-batch",
@@ -564,6 +590,7 @@ export class OperationLogsService {
       }
     });
 
+    this.markBatchConsumptionTracesReverted(log.id, undoLog.id);
     this.markAsUndone(log, actorUserId, undoLog.id);
     return undoLog;
   }
@@ -578,6 +605,19 @@ export class OperationLogsService {
     };
   }
 
+  private markBatchConsumptionTracesReverted(sourceLogId: string, undoLogId: string) {
+    const now = new Date().toISOString();
+
+    for (const trace of this.store.batchConsumptionTraces) {
+      if (trace.sourceLogId !== sourceLogId || trace.revertedAt) {
+        continue;
+      }
+
+      trace.revertedAt = now;
+      trace.revertedByLogId = undoLogId;
+    }
+  }
+
   private buildUndoMovement(payload: {
     userId?: string;
     deviceCode: string;
@@ -587,6 +627,7 @@ export class OperationLogsService {
     quantity: number;
     unitPrice: number;
     type: InventoryMovement["type"];
+    batchId?: string;
   }): InventoryMovement {
     return {
       id: this.store.createId("movement"),
@@ -595,6 +636,7 @@ export class OperationLogsService {
         this.store.users.find((entry) => entry.role === "admin")?.id ??
         "system",
       deviceCode: payload.deviceCode,
+      batchId: payload.batchId,
       goodsId: payload.goodsId,
       goodsName: payload.goodsName,
       category: payload.category,

@@ -7,6 +7,7 @@ import {
   type BackofficeRole,
   type CabinetAccessRule,
   type CabinetEventRecord,
+  type CabinetReservationRecord,
   type CallbackLogRecord,
   type DeviceGoods,
   type DeviceGoodsSetting,
@@ -26,6 +27,7 @@ import {
   type PaymentRefundRecord,
   type RegionRecord,
   type RegistrationApplication,
+  type ReservationSettings,
   type SpecialAccessPolicy,
   type StocktakeRecord,
   type UserRecord,
@@ -50,6 +52,10 @@ import {
 interface BatchConsumptionEntry {
   batchId: string;
   quantity: number;
+  expiresAt?: string;
+  sourceUserId?: string;
+  sourceUserName?: string;
+  selectionReason?: "specified" | "earliest_expiry" | "negative_balance";
 }
 
 const MAX_CALLBACK_LOGS = 1000;
@@ -88,6 +94,12 @@ export class InMemoryStoreService {
   readonly inventory: InventoryMovement[] = this.seed.inventory;
   readonly paymentOrders: PaymentOrderRecord[] = [];
   readonly paymentRefunds: PaymentRefundRecord[] = [];
+  readonly reservations: CabinetReservationRecord[] = [];
+  readonly reservationSettings: ReservationSettings = {
+    enabled: true,
+    holdMinutes: 60,
+    maxTimeouts: 3
+  };
   readonly alerts: AlertTask[] = this.seed.alerts;
   readonly logs: OperationLogRecord[] = this.seed.logs.map((entry) => this.decorateStoredLog(entry));
 
@@ -808,9 +820,48 @@ export class InMemoryStoreService {
     return batch;
   }
 
-  consumeGoodsBatches(deviceCode: string, goodsId: string, quantity: number) {
+  consumeGoodsBatches(
+    deviceCode: string,
+    goodsId: string,
+    quantity: number,
+    requestedBatches?: Array<{ batchId: string; quantity: number }>
+  ) {
     let remaining = Math.max(0, quantity);
     const consumed: BatchConsumptionEntry[] = [];
+
+    for (const request of requestedBatches ?? []) {
+      if (remaining <= 0) {
+        break;
+      }
+
+      const requestedQuantity = Math.max(0, Math.floor(Number(request.quantity)));
+
+      if (!request.batchId || requestedQuantity <= 0) {
+        continue;
+      }
+
+      const batch = this.goodsBatches.find(
+        (entry) =>
+          entry.batchId === request.batchId &&
+          entry.deviceCode === deviceCode &&
+          entry.goodsId === goodsId &&
+          entry.remainingQuantity > 0
+      );
+
+      if (!batch) {
+        continue;
+      }
+
+      const used = Math.min(batch.remainingQuantity, requestedQuantity, remaining);
+
+      if (used <= 0) {
+        continue;
+      }
+
+      batch.remainingQuantity -= used;
+      remaining -= used;
+      consumed.push(this.buildBatchConsumptionEntry(batch, used, "specified"));
+    }
 
     const ordered = this.getGoodsBatches(deviceCode, goodsId)
       .filter((entry) => entry.remainingQuantity > 0)
@@ -838,18 +889,12 @@ export class InMemoryStoreService {
 
       batch.remainingQuantity -= used;
       remaining -= used;
-      consumed.push({
-        batchId: batch.batchId,
-        quantity: used
-      });
+      consumed.push(this.buildBatchConsumptionEntry(batch, used, "earliest_expiry"));
     }
 
     if (remaining > 0) {
       const negativeBalanceBatch = this.recordNegativeStockBalance(deviceCode, goodsId, remaining);
-      consumed.push({
-        batchId: negativeBalanceBatch.batchId,
-        quantity: remaining
-      });
+      consumed.push(this.buildBatchConsumptionEntry(negativeBalanceBatch, remaining, "negative_balance"));
       remaining = 0;
     }
 
@@ -859,6 +904,21 @@ export class InMemoryStoreService {
       actualQuantity: quantity,
       consumed,
       shortage: remaining
+    };
+  }
+
+  private buildBatchConsumptionEntry(
+    batch: GoodsBatchRecord,
+    quantity: number,
+    selectionReason: BatchConsumptionEntry["selectionReason"]
+  ): BatchConsumptionEntry {
+    return {
+      batchId: batch.batchId,
+      quantity,
+      expiresAt: batch.expiresAt,
+      sourceUserId: batch.sourceUserId,
+      sourceUserName: batch.sourceUserName,
+      selectionReason
     };
   }
 
@@ -1271,6 +1331,8 @@ export class InMemoryStoreService {
       inventory: structuredClone(this.inventory),
       paymentOrders: structuredClone(this.paymentOrders),
       paymentRefunds: structuredClone(this.paymentRefunds),
+      reservations: structuredClone(this.reservations),
+      reservationSettings: structuredClone(this.reservationSettings),
       alerts: structuredClone(this.alerts),
       logs: structuredClone(this.logs),
       verificationCodes: Array.from(this.verificationCodes.entries()).map(([key, value]) => [key, structuredClone(value)]),
@@ -1315,6 +1377,8 @@ export class InMemoryStoreService {
     this.replaceArray(this.inventory, state.inventory);
     this.replaceArray(this.paymentOrders, state.paymentOrders);
     this.replaceArray(this.paymentRefunds, state.paymentRefunds);
+    this.replaceArray(this.reservations, state.reservations);
+    Object.assign(this.reservationSettings, structuredClone(state.reservationSettings));
     this.replaceArray(this.alerts, state.alerts);
     this.replaceArray(
       this.logs,

@@ -104,4 +104,19 @@ export class CabinetEventsController {
       "操作成功"
     );
   }
+
+  @Post("event/:eventId/billing-confirmation")
+  @HttpCode(200)
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  confirmBilling(
+    @Param("eventId") eventId: string,
+    @Body() body: { note?: string },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(
+      this.cabinetEventsService.confirmBillingResolution(eventId, request.authUser?.id, body),
+      "操作成功"
+    );
+  }
 }

@@ -87,6 +87,9 @@ const main = async () => {
     profile: row.profile,
     merchantProfile: row.merchantProfile,
     accessPolicies: row.accessPolicies,
+    reservationTimeoutCount: row.reservationTimeoutCount,
+    reservationDisabledAt: row.reservationDisabledAt,
+    reservationDisabledReason: row.reservationDisabledReason,
     mobileProfileCompleted: row.mobileProfileCompleted ?? false,
     createdAt: undefined,
     updatedAt: undefined
@@ -235,6 +238,33 @@ const main = async () => {
   }));
   await upsertJsonRows(prisma.paymentOrder, state.paymentOrders, "id", (row) => row as unknown as Record<string, unknown>);
   await upsertJsonRows(prisma.paymentRefund, state.paymentRefunds, "id", (row) => row as unknown as Record<string, unknown>);
+  await upsertJsonRows(prisma.reservation, state.reservations, "id", (row) => ({
+    id: row.id,
+    userId: row.userId,
+    phone: row.phone,
+    deviceCode: row.deviceCode,
+    doorNum: row.doorNum,
+    status: row.status,
+    reservedAt: row.reservedAt,
+    expiresAt: row.expiresAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    data: row
+  }));
+  await prisma.reservationSetting.upsert({
+    where: { id: "default" },
+    create: {
+      id: "default",
+      enabled: state.reservationSettings.enabled,
+      data: state.reservationSettings,
+      updatedAt: state.reservationSettings.updatedAt
+    },
+    update: {
+      enabled: state.reservationSettings.enabled,
+      data: state.reservationSettings,
+      updatedAt: state.reservationSettings.updatedAt
+    }
+  });
   await upsertJsonRows(prisma.alert, state.alerts, "id", (row) => ({
     id: row.id,
     type: row.type,

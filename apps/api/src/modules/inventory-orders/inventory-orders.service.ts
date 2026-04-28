@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type {
   CabinetEventRecord,
+  BatchConsumptionLine,
   GoodsCategory,
   InventoryMovement,
   SmartVmAdjustmentPayload,
@@ -85,9 +86,13 @@ export class InventoryOrdersService {
         );
         const consumed = this.store.consumeGoodsBatches(movement.deviceCode, movement.goodsId, movement.quantity);
         const consumer = this.store.users.find((entry) => entry.id === movement.userId);
+        movement.consumedBatches = consumed.consumed;
+        movement.batchId = consumed.consumed.length === 1 ? consumed.consumed[0]?.batchId : undefined;
 
         for (const item of consumed.consumed) {
-          const batch = sourceBatches.get(item.batchId);
+          const batch =
+            sourceBatches.get(item.batchId) ??
+            this.store.goodsBatches.find((entry) => entry.batchId === item.batchId);
 
           if (!batch) {
             continue;
@@ -99,6 +104,8 @@ export class InventoryOrdersService {
             goodsId: movement.goodsId,
             goodsName: movement.goodsName,
             deviceCode: movement.deviceCode,
+            movementId: movement.id,
+            operationType: movement.type,
             sourceUserId: batch.sourceUserId,
             sourceUserName: batch.sourceUserName,
             consumerUserId: movement.userId,
@@ -223,6 +230,17 @@ export class InventoryOrdersService {
       ) ?? [];
 
     for (const movement of movements) {
+      if (movement.type === "adjustment" && movement.quantity > 0) {
+        const consumed = this.store.consumeGoodsBatches(
+          movement.deviceCode,
+          movement.goodsId,
+          movement.quantity
+        );
+        movement.consumedBatches = consumed.consumed;
+        movement.batchId = consumed.consumed.length === 1 ? consumed.consumed[0]?.batchId : undefined;
+        this.recordAdjustmentBatchConsumption(event, movement, consumed.consumed, payload.orderNo);
+      }
+
       this.store.inventory.unshift(movement);
     }
 
@@ -432,6 +450,37 @@ export class InventoryOrdersService {
     event.adjustmentRefundNo = latest?.refundNo;
     event.adjustmentRefundTransactionId = latest?.refundTransactionId;
     event.adjustmentRefundedAt = latest?.refundedAt;
+  }
+
+  private recordAdjustmentBatchConsumption(
+    event: CabinetEventRecord,
+    movement: InventoryMovement,
+    consumedBatches: BatchConsumptionLine[],
+    orderNo: string
+  ) {
+    const consumer = this.store.users.find((entry) => entry.id === movement.userId);
+
+    for (const item of consumedBatches) {
+      const batch = this.store.goodsBatches.find((entry) => entry.batchId === item.batchId);
+      this.store.recordBatchConsumption({
+        id: this.store.createId("consumption-trace"),
+        batchId: item.batchId,
+        goodsId: movement.goodsId,
+        goodsName: movement.goodsName,
+        deviceCode: movement.deviceCode,
+        movementId: movement.id,
+        operationType: movement.type,
+        sourceUserId: batch?.sourceUserId ?? item.sourceUserId,
+        sourceUserName: batch?.sourceUserName ?? item.sourceUserName,
+        consumerUserId: movement.userId,
+        consumerUserName: consumer?.name,
+        quantity: item.quantity,
+        happenedAt: movement.happenedAt,
+        orderNo,
+        eventId: event.eventId,
+        note: "柜机补扣回调按保质期最短批次扣减"
+      });
+    }
   }
 
   private createMovementFromLineItem(

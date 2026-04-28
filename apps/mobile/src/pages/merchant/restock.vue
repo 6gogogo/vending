@@ -112,6 +112,20 @@ const submit = async () => {
     return;
   }
 
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: "确认补货登记",
+      content: `请确认向 ${selectedDevice.value?.name ?? selectedDeviceCode.value} 补充 ${selectedTemplate.value?.goodsName ?? "货品"} x${quantity.value}，预计到期 ${estimatedExpireDate.value || "未设置"}。提交后会生成可追溯批次。`,
+      confirmText: "确认补货",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
   submitting.value = true;
   try {
     await mobileApi.createMerchantRestock({
@@ -119,7 +133,8 @@ const submit = async () => {
       deviceCode: selectedDeviceCode.value,
       quantity: quantity.value,
       productionDate: productionDate.value,
-      note: note.value || undefined
+      note: note.value || undefined,
+      confirmed: true
     });
 
     uni.reLaunch({

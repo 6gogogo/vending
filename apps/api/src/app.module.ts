@@ -17,6 +17,7 @@ import { OperationLogsModule } from "./modules/operation-logs/operation-logs.mod
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { RegistrationApplicationsModule } from "./modules/registration-applications/registration-applications.module";
 import { RegionsModule } from "./modules/regions/regions.module";
+import { ReservationsModule } from "./modules/reservations/reservations.module";
 import { SpecialAccessPoliciesModule } from "./modules/special-access-policies/special-access-policies.module";
 import { SystemSettingsModule } from "./modules/system-settings/system-settings.module";
 import { UploadsModule } from "./modules/uploads/uploads.module";
@@ -53,6 +54,7 @@ import { WarehousesModule } from "./modules/warehouses/warehouses.module";
     SpecialAccessPoliciesModule,
     SystemSettingsModule,
     RegistrationApplicationsModule,
+    ReservationsModule,
     RegionsModule,
     UploadsModule,
     WarehousesModule

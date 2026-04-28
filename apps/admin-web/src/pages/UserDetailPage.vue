@@ -190,6 +190,15 @@ const load = async () => {
 
 const submitAdjustment = async () => {
   if (!detail.value || !selectedGoods.value) return;
+  const actionLabel = form.value.direction === "restock" ? "补货" : "补扣";
+  const confirmed = window.confirm(
+    form.value.direction === "restock"
+      ? `确认给 ${detail.value.user.name} 在 ${form.value.deviceCode} ${actionLabel} ${selectedGoods.value.name} x${form.value.quantity}？提交后会生成新批次。`
+      : `确认给 ${detail.value.user.name} ${actionLabel} ${selectedGoods.value.name} x${form.value.quantity}？未指定批次时会默认扣除保质期最短的批次。`
+  );
+
+  if (!confirmed) return;
+
   saving.value = true;
   try {
     await adminApi.manualAdjustUser(detail.value.user.id, {
@@ -199,7 +208,8 @@ const submitAdjustment = async () => {
       category: selectedGoods.value.category,
       quantity: form.value.quantity,
       direction: form.value.direction,
-      note: form.value.note
+      note: form.value.note,
+      confirmed: true
     });
     form.value.quantity = 1;
     form.value.note = "";

@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 
 import type {
   AccessQuota,
+  BatchConsumptionLine,
   InventoryMovement,
   SpecialAccessPolicyGoodsLimit,
   UserAccessPolicy,
@@ -810,13 +811,28 @@ export class UsersService {
       unitPrice?: number;
       direction: "restock" | "deduct";
       note?: string;
+      confirmed?: boolean;
+      batchConsumptions?: Array<{
+        batchId: string;
+        quantity: number;
+      }>;
     },
     actorUserId?: string
   ) {
+    if (!payload.confirmed) {
+      throw new BadRequestException("补货或补扣前需要先确认操作。");
+    }
+
+    if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
+      throw new BadRequestException("调整数量必须大于 0。");
+    }
+
     const user = this.findById(userId);
     const localGoods = this.devicesService.findGoods(payload.deviceCode, payload.goodsId);
+    const movementId = this.store.createId("movement");
+    const happenedAt = new Date().toISOString();
     const movement: InventoryMovement = {
-      id: this.store.createId("movement"),
+      id: movementId,
       sourceOrderNo: payload.relatedOrderNo,
       eventId: payload.relatedEventId,
       userId: user.id,
@@ -827,12 +843,11 @@ export class UsersService {
       quantity: payload.quantity,
       unitPrice: payload.unitPrice ?? 0,
       type: payload.direction === "restock" ? "manual-restock" : "manual-deduction",
-      happenedAt: new Date().toISOString()
+      happenedAt
     };
 
-    this.store.inventory.unshift(movement);
     let createdBatchId: string | undefined;
-    let consumedBatches: Array<{ batchId: string; quantity: number }> = [];
+    let consumedBatches: BatchConsumptionLine[] = [];
 
     if (payload.direction === "restock") {
       const catalogItem = this.store.ensureGoodsCatalogItem({
@@ -855,7 +870,7 @@ export class UsersService {
         price: catalogItem.price,
         imageUrl: catalogItem.imageUrl
       });
-      createdBatchId = this.store.createGoodsBatch({
+      const batch = this.store.createGoodsBatch({
         goodsId: payload.goodsId,
         deviceCode: payload.deviceCode,
         quantity: payload.quantity,
@@ -863,16 +878,23 @@ export class UsersService {
         sourceUserId: actorUserId,
         sourceUserName: this.store.users.find((entry) => entry.id === actorUserId)?.name,
         note: payload.note
-      }).batchId;
+      });
+      createdBatchId = batch.batchId;
+      movement.batchId = batch.batchId;
+      movement.expiresAt = batch.expiresAt;
     } else {
       consumedBatches = this.store.consumeGoodsBatches(
         payload.deviceCode,
         payload.goodsId,
-        payload.quantity
+        payload.quantity,
+        payload.batchConsumptions
       ).consumed;
+      movement.batchId = consumedBatches.length === 1 ? consumedBatches[0]?.batchId : undefined;
+      movement.consumedBatches = consumedBatches;
     }
 
-    this.store.logOperation({
+    this.store.inventory.unshift(movement);
+    const log = this.store.logOperation({
       category: "inventory",
       type: payload.direction === "restock" ? "manual-restock" : "manual-deduction",
       status: "success",
@@ -902,9 +924,45 @@ export class UsersService {
         relatedOrderNo: payload.relatedOrderNo,
         batchId: createdBatchId,
         consumedBatches,
+        confirmation: {
+          confirmed: true,
+          confirmedAt: happenedAt,
+          confirmedByUserId: actorUserId,
+          batchSelection:
+            payload.direction === "deduct"
+              ? payload.batchConsumptions?.length
+                ? "specified"
+                : "earliest_expiry"
+              : "new_batch"
+        },
         undoState: "undoable"
       }
     });
+
+    if (payload.direction === "deduct") {
+      const adminUser = actorUserId ? this.store.users.find((entry) => entry.id === actorUserId) : undefined;
+      for (const item of consumedBatches) {
+        this.store.recordBatchConsumption({
+          id: this.store.createId("consumption-trace"),
+          batchId: item.batchId,
+          goodsId: movement.goodsId,
+          goodsName: movement.goodsName,
+          deviceCode: movement.deviceCode,
+          movementId: movement.id,
+          sourceLogId: log.id,
+          operationType: movement.type,
+          consumerUserId: movement.userId,
+          consumerUserName: user.name,
+          sourceUserId: item.sourceUserId,
+          sourceUserName: item.sourceUserName,
+          quantity: item.quantity,
+          happenedAt: movement.happenedAt,
+          orderNo: movement.orderNo,
+          eventId: movement.eventId,
+          note: payload.note ?? (adminUser ? `管理员 ${adminUser.name} 手工补扣` : "管理员手工补扣")
+        });
+      }
+    }
 
     return movement;
   }

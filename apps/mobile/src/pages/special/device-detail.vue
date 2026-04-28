@@ -2,7 +2,13 @@
 import { computed, reactive, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 
-import type { CabinetOpenRequest, CabinetPreSettlement, GoodsCategory } from "@vm/shared-types";
+import type {
+  CabinetOpenRequest,
+  CabinetPreSettlement,
+  CabinetReservationRecord,
+  GoodsCategory,
+  ReservationSettings
+} from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -40,6 +46,8 @@ const goodsList = ref<Array<{
 }>>([]);
 const selectedMap = reactive<Record<string, number>>({});
 const preSettlement = ref<CabinetPreSettlement>();
+const reservationSettings = ref<ReservationSettings>();
+const reservations = ref<CabinetReservationRecord[]>([]);
 
 uiPreferencesStore.hydrate();
 
@@ -61,6 +69,24 @@ const selectedSummary = computed(() =>
 const selectedTotal = computed(() =>
   selectedItems.value.reduce((total, item) => total + item.quantity, 0)
 );
+
+const activeReservations = computed(() =>
+  reservations.value
+    .filter((item) => item.status === "active" && item.deviceCode === deviceCode.value)
+    .sort((left, right) => Date.parse(left.expiresAt) - Date.parse(right.expiresAt))
+);
+
+const nearestReservation = computed(() => activeReservations.value[0]);
+
+const reservationSummary = computed(() => {
+  const reservation = nearestReservation.value;
+
+  if (!reservation) {
+    return "";
+  }
+
+  return reservation.items.map((item) => `${item.goodsName} x${item.quantity}`).join("、");
+});
 
 const selectedGoodsDetails = computed(() =>
   selectedItems.value.map((item) => {
@@ -159,10 +185,12 @@ const load = async () => {
 
   loading.value = true;
   try {
-    const [device, goods, quota] = await Promise.all([
+    const [device, goods, quota, settings, reservationList] = await Promise.all([
       mobileApi.getDevice(deviceCode.value),
       mobileApi.queryGoods(deviceCode.value),
-      mobileApi.getQuotaSummary(sessionStore.user.phone)
+      mobileApi.getQuotaSummary(sessionStore.user.phone),
+      mobileApi.reservationSettings(),
+      mobileApi.myReservations()
     ]);
 
     deviceName.value = device.name;
@@ -171,6 +199,8 @@ const load = async () => {
     deviceLongitude.value = device.longitude;
     deviceLatitude.value = device.latitude;
     sessionStore.setQuota(quota);
+    reservationSettings.value = settings;
+    reservations.value = reservationList;
     goodsList.value = goods.filter((item) => (item.stock ?? 0) > 0);
     for (const key of Object.keys(selectedMap)) {
       delete selectedMap[key];
@@ -275,8 +305,10 @@ const updateSelected = (goodsId: string, delta: number) => {
   selectedMap[goodsId] = next;
 };
 
-const buildOpenPayload = (): CabinetOpenRequest | undefined => {
-  if (!sessionStore.user || !selectedItems.value.length) {
+const buildOpenPayload = (reservation?: CabinetReservationRecord): CabinetOpenRequest | undefined => {
+  const items = reservation?.items ?? selectedItems.value;
+
+  if (!sessionStore.user || !items.length) {
     return undefined;
   }
 
@@ -284,9 +316,10 @@ const buildOpenPayload = (): CabinetOpenRequest | undefined => {
     phone: sessionStore.user.phone,
     deviceCode: deviceCode.value,
     doorNum: "1",
-    category: selectedItems.value[0]?.category,
+    reservationId: reservation?.id,
+    category: items[0]?.category,
     openMode: scanMode.value ? "scan" : "manual",
-    intentItems: selectedItems.value.map((item) => ({
+    intentItems: items.map((item) => ({
       goodsId: item.goodsId,
       goodsName: item.goodsName,
       quantity: item.quantity,
@@ -393,6 +426,72 @@ const submit = async () => {
   }
 };
 
+const createReservation = async () => {
+  if (!selectedItems.value.length) {
+    uni.showModal({
+      title: "请选择商品",
+      content: "预约前需要先选择要保留的货品。",
+      showCancel: false
+    });
+    return;
+  }
+
+  submitting.value = true;
+  try {
+    const reservation = await mobileApi.createReservation({
+      deviceCode: deviceCode.value,
+      doorNum: "1",
+      intentItems: selectedItems.value.map((item) => ({
+        goodsId: item.goodsId,
+        goodsName: item.goodsName,
+        quantity: item.quantity,
+        category: item.category
+      }))
+    });
+    reservations.value = [reservation, ...reservations.value.filter((item) => item.id !== reservation.id)];
+    uni.showToast({
+      title: "预约成功",
+      icon: "success"
+    });
+  } catch (error) {
+    uni.showToast({
+      title: getErrorMessage(error),
+      icon: "none"
+    });
+  } finally {
+    submitting.value = false;
+  }
+};
+
+const openWithReservation = async (reservation: CabinetReservationRecord) => {
+  const payload = buildOpenPayload(reservation);
+
+  if (!payload) {
+    return;
+  }
+
+  await performOpen(payload);
+};
+
+const cancelReservation = async (reservation: CabinetReservationRecord) => {
+  submitting.value = true;
+  try {
+    const updated = await mobileApi.cancelReservation(reservation.id);
+    reservations.value = reservations.value.map((item) => (item.id === updated.id ? updated : item));
+    uni.showToast({
+      title: "已取消预约",
+      icon: "success"
+    });
+  } catch (error) {
+    uni.showToast({
+      title: getErrorMessage(error),
+      icon: "none"
+    });
+  } finally {
+    submitting.value = false;
+  }
+};
+
 const formatSettlementBreakdown = (item: {
   freeQuantity: number;
   paidQuantity: number;
@@ -435,6 +534,8 @@ const openNavigation = () => {
 };
 
 const formatCurrency = (amount: number) => `￥${(amount / 100).toFixed(2)}`;
+
+const formatShortDateTime = (value: string) => value.slice(5, 16).replace("T", " ");
 
 const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters === undefined) {
@@ -481,6 +582,18 @@ onLoad((query) => {
           <text class="selection-banner__hint">
             {{ estimatedPayableAmount > 0 ? `当前预估需支付 ${formatCurrency(estimatedPayableAmount)}` : "当前选择预计免费" }}，正式结算仍以柜门关闭后的平台识别结果为准。
           </text>
+        </view>
+
+        <view v-if="reservationSettings?.enabled && nearestReservation && !accessibilityEnabled" class="reservation-panel">
+          <view class="reservation-panel__main">
+            <text class="reservation-panel__label">当前预约</text>
+            <text class="reservation-panel__title">{{ reservationSummary }}</text>
+            <text class="reservation-panel__hint">保留到 {{ formatShortDateTime(nearestReservation.expiresAt) }}</text>
+          </view>
+          <view class="reservation-panel__actions">
+            <button class="reservation-panel__button" :loading="submitting" @tap="openWithReservation(nearestReservation)">用预约开柜</button>
+            <button class="reservation-panel__button reservation-panel__button--ghost" :loading="submitting" @tap="cancelReservation(nearestReservation)">取消</button>
+          </view>
         </view>
 
         <view v-if="selectedGoodsDetails.length && !accessibilityEnabled" class="settlement-preview">
@@ -535,6 +648,9 @@ onLoad((query) => {
           <button class="vm-button" :loading="submitting" @tap="submit">
             {{ scanMode ? "确认货品并扫码开柜" : "确认货品并手动开柜" }}
           </button>
+          <button v-if="reservationSettings?.enabled" class="vm-button vm-button--ghost" :loading="submitting" @tap="createReservation">
+            预约所选货品
+          </button>
           <button v-if="!accessibilityEnabled && hasNavigationTarget" class="vm-button vm-button--ghost" @tap="openNavigation">
             导航到此柜机
           </button>
@@ -574,14 +690,16 @@ onLoad((query) => {
 .goods-list,
 .action-stack,
 .distance-banner,
-.settlement-preview {
+.settlement-preview,
+.reservation-panel__actions {
   display: grid;
   gap: 16rpx;
 }
 
 .selection-banner,
 .goods-item,
-.settlement-preview {
+.settlement-preview,
+.reservation-panel {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -594,6 +712,47 @@ onLoad((query) => {
 
 .selection-banner {
   display: grid;
+}
+
+.reservation-panel {
+  align-items: stretch;
+}
+
+.reservation-panel__main {
+  display: grid;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.reservation-panel__label,
+.reservation-panel__hint {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+}
+
+.reservation-panel__title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+  line-height: 1.5;
+}
+
+.reservation-panel__actions {
+  min-width: 190rpx;
+}
+
+.reservation-panel__button {
+  min-height: 64rpx;
+  border-radius: 18rpx;
+  background: var(--vm-accent);
+  color: #fff;
+  font-size: 22rpx;
+}
+
+.reservation-panel__button--ghost {
+  background: var(--vm-surface-strong);
+  color: var(--vm-text);
+  border: 1rpx solid var(--vm-line);
 }
 
 .settlement-preview {

@@ -199,6 +199,11 @@ export const adminApi = {
       unitPrice?: number;
       direction: "restock" | "deduct";
       note?: string;
+      confirmed?: boolean;
+      batchConsumptions?: Array<{
+        batchId: string;
+        quantity: number;
+      }>;
     }
   ) {
     return adminClient.post(`/users/${userId}/manual-adjustment`, payload);
@@ -452,11 +457,12 @@ export const adminApi = {
       sourceUserId?: string;
       sourceUserName?: string;
       note?: string;
+      confirmed?: boolean;
     }
   ) {
     return adminClient.post(`/goods/${goodsId}/batches`, payload);
   },
-  removeGoodsBatch(batchId: string, payload: { quantity: number; note?: string }) {
+  removeGoodsBatch(batchId: string, payload: { quantity: number; note?: string; confirmed?: boolean }) {
     return adminClient.post(`/goods/batches/${batchId}/remove`, payload);
   },
   goodsAlertPolicies() {

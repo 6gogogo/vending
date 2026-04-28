@@ -102,6 +102,12 @@ export class AlertsService {
     alert.resolvedAt = new Date().toISOString();
     alert.resolvedByUserId = actorUserId;
     alert.resolutionNote = note;
+    if (alert.type === "user_feedback" && alert.targetUserId) {
+      alert.userNoticeStatus = "pending";
+      alert.userNoticeTitle = "反馈已接受";
+      alert.userNoticeContent = this.buildFeedbackUserNotice(alert, note);
+      alert.userNotifiedAt = undefined;
+    }
     this.store.decorateAlert(alert);
     this.store.logOperation({
       category: "alert",
@@ -128,6 +134,15 @@ export class AlertsService {
       }
     });
     return alert;
+  }
+
+  private buildFeedbackUserNotice(alert: AlertTask, note?: string) {
+    const feedbackType = alert.feedbackType ? `${alert.feedbackType}反馈` : "反馈";
+    const adminNote = note?.trim();
+
+    return adminNote
+      ? `管理员已接受你的${feedbackType}：${adminNote}`
+      : `管理员已接受你的${feedbackType}，后续会继续跟进处理。`;
   }
 
   createFeedbackTask(payload: {

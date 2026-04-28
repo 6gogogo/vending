@@ -14,8 +14,10 @@ import type {
   CabinetOpenPreviewResult,
   CabinetOpenRequest,
   CabinetPreSettlement,
+  CabinetPreSettlementItem,
   CabinetSettlementComparison,
   CabinetSettlementComparisonItem,
+  GoodsCategory,
   SmartVmAdjustmentPayload,
   SmartVmDoorStatusPayload,
   SmartVmPaymentPayload,
@@ -27,6 +29,15 @@ import { AccessRulesService } from "../access-rules/access-rules.service";
 import { AlertsService } from "../alerts/alerts.service";
 import { SmartVmGateway } from "../devices/smartvm.gateway";
 import { InventoryOrdersService } from "../inventory-orders/inventory-orders.service";
+import { ReservationsService } from "../reservations/reservations.service";
+
+type CallbackBilling = Pick<
+  CabinetPreSettlement,
+  "totalQuantity" | "freeQuantity" | "paidQuantity" | "originalAmount" | "freeAmount" | "payableAmount"
+> & {
+  platformAmount: number;
+  items: CabinetPreSettlementItem[];
+};
 
 @Injectable()
 export class CabinetEventsService {
@@ -36,6 +47,7 @@ export class CabinetEventsService {
     @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway,
     @Inject(InventoryOrdersService) private readonly inventoryOrdersService: InventoryOrdersService,
     @Inject(AlertsService) private readonly alertsService: AlertsService,
+    @Inject(ReservationsService) private readonly reservationsService: ReservationsService,
     @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
@@ -57,7 +69,7 @@ export class CabinetEventsService {
   }
 
   async openCabinet(payload: CabinetOpenRequest) {
-    const { user, quotaSummary, intentItems, preSettlement, doorNum } = this.prepareOpenContext(payload);
+    const { user, quotaSummary, intentItems, preSettlement, doorNum, reservation } = this.prepareOpenContext(payload);
 
     const eventId = this.store.createId("event");
     let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
@@ -120,10 +132,12 @@ export class CabinetEventsService {
       updatedAt: new Date().toISOString(),
       amount: 0,
       billingStatus: preSettlement ? "pending" : undefined,
+      reservationId: reservation?.id,
       intentItems,
       preSettlement,
       goods: []
     });
+    this.reservationsService.markFulfilled(reservation?.id, eventId);
 
     this.store.updateDeviceRuntime(payload.deviceCode, {
       lastCommandAt: new Date().toISOString(),
@@ -158,7 +172,8 @@ export class CabinetEventsService {
         category: payload.category,
         openMode: payload.openMode ?? "manual",
         intentItems,
-        preSettlement
+        preSettlement,
+        reservationId: reservation?.id
       }
     });
 
@@ -167,6 +182,7 @@ export class CabinetEventsService {
       eventId,
       deviceCode: payload.deviceCode,
       doorNum,
+      reservationId: reservation?.id,
       role: user.role,
       openMode: payload.openMode ?? "manual",
       remainingQuota: quotaSummary?.remainingToday,
@@ -329,9 +345,17 @@ export class CabinetEventsService {
     this.assertSignature(payload);
 
     const event = this.getEventByPlatformOrderNo(payload.orderNo);
+    const settlementWasAlreadyRecorded = this.hasSettlementRecord(payload.orderNo);
+    const callbackBilling = settlementWasAlreadyRecorded
+      ? undefined
+      : this.buildCallbackBilling(event, payload);
     event.status = "settled";
     event.platformAmount = payload.amount;
-    event.amount = payload.amount;
+    if (callbackBilling) {
+      event.amount = callbackBilling.payableAmount;
+    } else if (!settlementWasAlreadyRecorded) {
+      event.amount = payload.amount;
+    }
     event.updatedAt = new Date().toISOString();
     event.paymentNotifyUrl = payload.notifyUrl;
     const settlementAlreadyRecorded = this.inventoryOrdersService
@@ -349,28 +373,18 @@ export class CabinetEventsService {
         payload.detail?.map((item) => ({
           goodsId: item.goodsId,
           goodsName: item.goodsName,
-          category:
-            this.store.devices
-              .flatMap((device) => device.doors)
-              .flatMap((door) => door.goods)
-              .find((goods) => goods.goodsId === item.goodsId)?.category ?? "daily",
+          category: this.getGoodsCategory(event.deviceCode, item.goodsId),
           quantity: item.quantity,
           unitPrice: item.unitPrice
-            })) ?? [];
+        })) ?? [];
     }
 
     const settlementComparison = this.compareSettlement(event, payload);
     event.settlementComparison = settlementComparison;
-    const shouldUsePreSettlement =
-      event.role === "special" &&
-      Boolean(event.preSettlement) &&
-      Boolean(event.intentItems?.length) &&
-      settlementComparison.matched;
 
-    if (shouldUsePreSettlement && event.preSettlement) {
-      event.amount = event.preSettlement.payableAmount;
-      event.billingStatus = event.amount > 0 ? "payable" : "free";
-    } else if (event.intentItems?.length) {
+    if (!settlementAlreadyRecorded.duplicated && callbackBilling) {
+      this.applyCallbackBilling(event, callbackBilling, settlementComparison);
+    } else if (event.role === "special" && event.intentItems?.length && !event.billingStatus) {
       event.billingStatus = settlementComparison.matched
         ? event.amount > 0
           ? "payable"
@@ -393,6 +407,25 @@ export class CabinetEventsService {
           `平台结算：${this.formatComparisonItems(settlementComparison.settledItems)}`
         ].join("；"),
         previewDetail: settlementComparison.summary,
+        relatedEventId: event.eventId
+      });
+    }
+
+    if (!settlementAlreadyRecorded.duplicated && event.billingDeltaType === "supplement") {
+      this.alertsService.create({
+        type: "callback",
+        grade: "warning",
+        title: "用户结算需补差",
+        deviceCode: event.deviceCode,
+        targetUserId: event.userId,
+        dueAt: event.updatedAt,
+        detail: [
+          `事件 ${event.eventId}`,
+          `原预估 ${this.formatAmount(event.billingBaseAmount ?? 0)}`,
+          `按柜机回调商品应付 ${this.formatAmount(event.billingActualAmount ?? event.amount)}`,
+          `需补 ${this.formatAmount(event.billingDeltaAmount ?? 0)}`
+        ].join("；"),
+        previewDetail: "补差完成或管理员确认前，该用户不能继续开柜或预约。",
         relatedEventId: event.eventId
       });
     }
@@ -432,7 +465,10 @@ export class CabinetEventsService {
     }
 
     const shouldAutoForwardFreeSettlement =
-      shouldUsePreSettlement && event.amount <= 0 && settlementComparison.matched;
+      event.role === "special" &&
+      event.amount <= 0 &&
+      settlementComparison.matched &&
+      event.billingDeltaType !== "supplement";
 
     if (
       event.paymentNotifyStatus !== "success" &&
@@ -582,6 +618,61 @@ export class CabinetEventsService {
     });
   }
 
+  confirmBillingResolution(
+    eventId: string,
+    actorUserId?: string,
+    payload?: {
+      note?: string;
+    }
+  ) {
+    const event = this.store.events.find((entry) => entry.eventId === eventId);
+
+    if (!event) {
+      throw new BadRequestException("未找到对应开柜事件。");
+    }
+
+    const now = new Date().toISOString();
+    event.billingStatus = "admin_confirmed";
+    event.billingResolvedAt = now;
+    event.billingConfirmedByUserId = actorUserId;
+    event.billingResolutionNote = payload?.note;
+    event.updatedAt = now;
+
+    if (event.paymentNotifyStatus !== "success") {
+      event.paymentNotifyMessage = payload?.note
+        ? `管理员已确认本次结算：${payload.note}`
+        : "管理员已确认本次结算。";
+    }
+
+    this.store.logOperation({
+      category: "admin",
+      type: "confirm-billing-resolution",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "event",
+        id: event.eventId,
+        label: event.orderNo
+      },
+      secondarySubject: {
+        type: "user",
+        id: event.userId,
+        label: this.store.users.find((entry) => entry.id === event.userId)?.name ?? event.phone
+      },
+      description: `管理员确认了订单 ${event.orderNo} 的结算状态。`,
+      detail: payload?.note,
+      relatedEventId: event.eventId,
+      relatedOrderNo: event.orderNo,
+      metadata: {
+        billingStatus: event.billingStatus,
+        billingDeltaAmount: event.billingDeltaAmount,
+        undoState: "not_undoable"
+      }
+    });
+
+    return event;
+  }
+
   private assertSignature(payload: Record<string, unknown>) {
     if (!this.smartVmGateway.verifySignedPayload(payload)) {
       throw new BadRequestException("签名校验失败。");
@@ -684,10 +775,13 @@ export class CabinetEventsService {
     }
   ) {
     const event = this.getEventByPlatformOrderNo(payload.orderNo);
-    event.amount = payload.amount;
     event.updatedAt = new Date().toISOString();
     const adjustment = this.getAdjustment(event, payload.orderNo);
     const isAdjustmentOrder = Boolean(adjustment);
+
+    if (!isAdjustmentOrder) {
+      event.amount = payload.amount;
+    }
 
     const resolvedTargetUrl =
       options.targetUrl ??
@@ -713,6 +807,10 @@ export class CabinetEventsService {
       adjustment.paymentNotifiedAt = event.updatedAt;
       adjustment.paymentTransactionId = payload.transactionId;
       adjustment.updatedAt = event.updatedAt;
+      if (event.billingStatus === "supplement_pending") {
+        event.billingStatus = "paid";
+        event.billingResolvedAt = event.updatedAt;
+      }
       this.syncLatestAdjustmentFields(event);
     } else {
       event.paymentNotifyStatus = "success";
@@ -721,6 +819,10 @@ export class CabinetEventsService {
         : `已回写平台付款成功，订单 ${payload.orderNo}。`;
       event.paymentNotifiedAt = event.updatedAt;
       event.paymentTransactionId = payload.transactionId;
+      if (event.role === "special" && event.amount > 0) {
+        event.billingStatus = "paid";
+        event.billingResolvedAt = event.updatedAt;
+      }
     }
 
     this.store.logOperation({
@@ -844,14 +946,21 @@ export class CabinetEventsService {
     }
 
     const doorNum = payload.doorNum ?? "1";
+    this.reservationsService.assertUserCanUseRelatedFeatures(user.id);
+    const reservation = payload.reservationId
+      ? this.reservationsService.getReservationForOpen(user.id, payload.reservationId, payload.deviceCode)
+      : undefined;
     const intentItems = this.resolveIntentItems(
       payload.deviceCode,
-      payload.intentItems ?? [],
+      reservation?.items ?? payload.intentItems ?? [],
       payload.category ?? "daily"
     );
     const quotaSummary =
       user.role === "special"
-        ? this.accessRulesService.getQuotaSummaryForUser(user)
+        ? this.accessRulesService.assertCanOpenSpecialCabinet(
+            user,
+            payload.category ?? intentItems[0]?.category
+          )
         : undefined;
 
     if (user.role === "special" && !intentItems.length) {
@@ -868,7 +977,8 @@ export class CabinetEventsService {
       doorNum,
       quotaSummary,
       intentItems,
-      preSettlement
+      preSettlement,
+      reservation
     };
   }
 
@@ -994,6 +1104,149 @@ export class CabinetEventsService {
     };
   }
 
+  private hasSettlementRecord(orderNo: string) {
+    return this.store.inventory.some(
+      (entry) =>
+        entry.orderNo === orderNo &&
+        (entry.type === "pickup" || entry.type === "donation")
+    );
+  }
+
+  private buildCallbackBilling(
+    event: CabinetEventRecord,
+    payload: SmartVmSettlementPayload
+  ): CallbackBilling {
+    const platformAmount = Math.max(0, Math.round(payload.amount));
+    const lines =
+      payload.detail?.map((item) => ({
+        goodsId: item.goodsId,
+        goodsName: item.goodsName,
+        category: this.getGoodsCategory(event.deviceCode, item.goodsId),
+        quantity: Math.max(0, Math.floor(Number(item.quantity))),
+        unitPrice: Math.max(0, Math.round(Number(item.unitPrice)))
+      })) ?? [];
+
+    if (!lines.length || event.role !== "special") {
+      const totalQuantity = lines.reduce((sum, item) => sum + item.quantity, 0);
+      const originalAmount = lines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+
+      return {
+        platformAmount,
+        totalQuantity,
+        freeQuantity: 0,
+        paidQuantity: totalQuantity,
+        originalAmount: originalAmount || platformAmount,
+        freeAmount: 0,
+        payableAmount: platformAmount,
+        items: lines.map((item) => ({
+          goodsId: item.goodsId,
+          goodsName: item.goodsName,
+          category: item.category,
+          quantity: item.quantity,
+          freeQuantity: 0,
+          paidQuantity: item.quantity,
+          unitPrice: item.unitPrice,
+          originalAmount: item.quantity * item.unitPrice,
+          freeAmount: 0,
+          paidAmount: item.quantity * item.unitPrice
+        }))
+      };
+    }
+
+    const user = this.store.users.find((entry) => entry.id === event.userId);
+    const quotaSummary = user ? this.accessRulesService.getQuotaSummaryForUser(user) : undefined;
+    const remainingByGoods = new Map(
+      Object.entries((quotaSummary?.remainingByGoods as Record<string, number> | undefined) ?? {})
+    );
+    const remainingByCategory = new Map(
+      Object.entries((quotaSummary?.remainingToday as Record<string, number> | undefined) ?? {})
+    );
+    const useGoodsQuota = remainingByGoods.size > 0;
+    const items = lines.map((item) => {
+      const goodsRemaining = remainingByGoods.get(item.goodsId);
+      const categoryRemaining = useGoodsQuota ? undefined : remainingByCategory.get(item.category);
+      const freeQuantity = Math.min(
+        item.quantity,
+        Math.max(0, goodsRemaining ?? categoryRemaining ?? 0)
+      );
+      const paidQuantity = Math.max(0, item.quantity - freeQuantity);
+
+      if (useGoodsQuota && goodsRemaining !== undefined) {
+        remainingByGoods.set(item.goodsId, Math.max(0, goodsRemaining - freeQuantity));
+      } else if (!useGoodsQuota && categoryRemaining !== undefined) {
+        remainingByCategory.set(item.category, Math.max(0, categoryRemaining - freeQuantity));
+      }
+
+      return {
+        goodsId: item.goodsId,
+        goodsName: item.goodsName,
+        category: item.category,
+        quantity: item.quantity,
+        freeQuantity,
+        paidQuantity,
+        unitPrice: item.unitPrice,
+        originalAmount: item.unitPrice * item.quantity,
+        freeAmount: item.unitPrice * freeQuantity,
+        paidAmount: item.unitPrice * paidQuantity
+      };
+    });
+
+    return {
+      platformAmount,
+      totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+      freeQuantity: items.reduce((sum, item) => sum + item.freeQuantity, 0),
+      paidQuantity: items.reduce((sum, item) => sum + item.paidQuantity, 0),
+      originalAmount: items.reduce((sum, item) => sum + item.originalAmount, 0),
+      freeAmount: items.reduce((sum, item) => sum + item.freeAmount, 0),
+      payableAmount: items.reduce((sum, item) => sum + item.paidAmount, 0),
+      items
+    };
+  }
+
+  private applyCallbackBilling(
+    event: CabinetEventRecord,
+    billing: CallbackBilling,
+    settlementComparison: CabinetSettlementComparison
+  ) {
+    const expectedAmount = event.preSettlement?.payableAmount ?? 0;
+    const actualAmount = billing.payableAmount;
+    const deltaAmount = actualAmount - expectedAmount;
+
+    event.amount = actualAmount;
+    event.billingBaseAmount = expectedAmount;
+    event.billingActualAmount = actualAmount;
+    event.billingDeltaAmount = deltaAmount;
+    event.billingDeltaType =
+      deltaAmount > 0 ? "supplement" : deltaAmount < 0 ? "refund" : "none";
+
+    if (event.role !== "special") {
+      return;
+    }
+
+    if (actualAmount <= 0) {
+      event.billingStatus = "free";
+      return;
+    }
+
+    if (deltaAmount > 0) {
+      event.billingStatus = "supplement_pending";
+      return;
+    }
+
+    event.billingStatus = settlementComparison.matched ? "payable" : "mismatch";
+  }
+
+  private getGoodsCategory(deviceCode: string, goodsId: string, fallback: GoodsCategory = "daily") {
+    return (
+      this.store.devices
+        .find((device) => device.deviceCode === deviceCode)
+        ?.doors.flatMap((door) => door.goods)
+        .find((goods) => goods.goodsId === goodsId)?.category ??
+      this.store.goodsCatalog.find((goods) => goods.goodsId === goodsId)?.category ??
+      fallback
+    );
+  }
+
   private formatAmount(amount: number) {
     return `￥${(amount / 100).toFixed(2)}`;
   }
@@ -1002,13 +1255,17 @@ export class CabinetEventsService {
     const intendedItems = (event.intentItems ?? []).map((item) => ({
       goodsId: item.goodsId,
       goodsName: item.goodsName,
-      quantity: item.quantity
+      quantity: item.quantity,
+      unitPrice: this.getGoodsSnapshot(event.deviceCode, item.goodsId).unitPrice,
+      amount: this.getGoodsSnapshot(event.deviceCode, item.goodsId).unitPrice * item.quantity
     }));
     const settledItems =
       payload.detail?.map((item) => ({
         goodsId: item.goodsId,
         goodsName: item.goodsName,
-        quantity: item.quantity
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        amount: item.unitPrice * item.quantity
       })) ?? [];
 
     const intendedMap = new Map(intendedItems.map((item) => [item.goodsId, item]));
@@ -1031,13 +1288,17 @@ export class CabinetEventsService {
           missingItems.push({
             goodsId: item.goodsId,
             goodsName: item.goodsName,
-            quantity: delta
+            quantity: delta,
+            unitPrice: item.unitPrice,
+            amount: (item.unitPrice ?? 0) * delta
           });
         } else if (delta < 0) {
           extraItems.push({
             goodsId: item.goodsId,
             goodsName: item.goodsName,
-            quantity: Math.abs(delta)
+            quantity: Math.abs(delta),
+            unitPrice: settled.unitPrice,
+            amount: (settled.unitPrice ?? 0) * Math.abs(delta)
           });
         }
       }

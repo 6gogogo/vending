@@ -153,6 +153,23 @@ const submitAdjustment = async () => {
     return;
   }
 
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: direction.value === "restock" ? "确认手工补货" : "确认手工补扣",
+      content:
+        direction.value === "restock"
+          ? `请确认给 ${detail.value?.user.name} 在 ${devices.value.find((item) => item.deviceCode === deviceCode.value)?.name ?? deviceCode.value} 补货 ${goods.name} x${quantity.value}。提交后会生成新批次。`
+          : `请确认从 ${detail.value?.user.name} 的记录中补扣 ${goods.name} x${quantity.value}。未指定批次时，系统会默认扣除保质期最短的批次。`,
+      confirmText: "确认提交",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
   adjusting.value = true;
   try {
     await mobileApi.manualAdjustUser(detail.value.user.id, {
@@ -162,7 +179,8 @@ const submitAdjustment = async () => {
       category: goods.category,
       quantity: quantity.value,
       direction: direction.value,
-      note: note.value || undefined
+      note: note.value || undefined,
+      confirmed: true
     });
     await load();
     note.value = "";

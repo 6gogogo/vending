@@ -6,6 +6,7 @@ export type PaymentProvider = "wechat" | "alipay";
 export type PaymentPhase = "pre_open" | "post_settlement";
 export type PaymentStatus = "created" | "pending" | "paid" | "failed" | "closed" | "refunded";
 export type PaymentRefundStatus = "pending" | "success" | "failed";
+export type ReservationStatus = "active" | "fulfilled" | "cancelled" | "expired";
 
 export type GoodsCategory = "food" | "drink" | "daily";
 export type InventoryLocationType = "device" | "warehouse";
@@ -111,6 +112,9 @@ export interface UserRecord {
     defaultDeviceCodes: string[];
   };
   accessPolicies?: UserAccessPolicy[];
+  reservationTimeoutCount?: number;
+  reservationDisabledAt?: string;
+  reservationDisabledReason?: string;
 }
 
 export interface RegistrationApplicationProfile {
@@ -433,6 +437,7 @@ export interface CabinetOpenRequest {
   phone: string;
   deviceCode: string;
   doorNum?: string;
+  reservationId?: string;
   payStyle?: string;
   category?: GoodsCategory;
   openMode?: "manual" | "scan";
@@ -449,6 +454,7 @@ export interface CabinetOpenResult {
   eventId: string;
   deviceCode: string;
   doorNum: string;
+  reservationId?: string;
   role: UserRole;
   openMode?: "manual" | "scan";
   remainingQuota?: Partial<Record<string, number>>;
@@ -467,7 +473,19 @@ export interface CabinetIntentItem {
   quantity: number;
 }
 
-export type CabinetBillingStatus = "pending" | "free" | "payable" | "mismatch";
+export type CabinetBillingStatus =
+  | "pending"
+  | "free"
+  | "payable"
+  | "paid"
+  | "refund_pending"
+  | "refunded"
+  | "supplement_pending"
+  | "admin_confirmed"
+  | "mismatch"
+  | "blocked";
+
+export type CabinetBillingDeltaType = "none" | "refund" | "supplement";
 
 export interface CabinetPreSettlementItem {
   goodsId: string;
@@ -514,6 +532,8 @@ export interface CabinetSettlementComparisonItem {
   goodsId: string;
   goodsName: string;
   quantity: number;
+  unitPrice?: number;
+  amount?: number;
 }
 
 export interface CabinetSettlementComparison {
@@ -541,6 +561,14 @@ export interface CabinetEventRecord {
   amount: number;
   platformAmount?: number;
   billingStatus?: CabinetBillingStatus;
+  billingBaseAmount?: number;
+  billingActualAmount?: number;
+  billingDeltaAmount?: number;
+  billingDeltaType?: CabinetBillingDeltaType;
+  billingResolvedAt?: string;
+  billingConfirmedByUserId?: string;
+  billingResolutionNote?: string;
+  reservationId?: string;
   intentItems?: CabinetIntentItem[];
   preSettlement?: CabinetPreSettlement;
   settlementComparison?: CabinetSettlementComparison;
@@ -572,6 +600,46 @@ export interface CabinetEventRecord {
   }>;
 }
 
+export interface ReservationSettings {
+  enabled: boolean;
+  holdMinutes: number;
+  maxTimeouts: number;
+  updatedAt?: string;
+  updatedByUserId?: string;
+}
+
+export interface CabinetReservationRecord {
+  id: string;
+  userId: string;
+  phone: string;
+  userName?: string;
+  deviceCode: string;
+  doorNum: string;
+  status: ReservationStatus;
+  items: CabinetIntentItem[];
+  reservedAt: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  fulfilledAt?: string;
+  fulfilledEventId?: string;
+  cancelledAt?: string;
+  cancelledByUserId?: string;
+  expiredAt?: string;
+  timeoutCountAtCreation?: number;
+}
+
+export interface CabinetReservationCreatePayload {
+  deviceCode: string;
+  doorNum?: string;
+  intentItems: Array<{
+    goodsId: string;
+    quantity: number;
+    goodsName?: string;
+    category?: GoodsCategory;
+  }>;
+}
+
 export interface CabinetAdjustmentRecord {
   orderNo: string;
   sourceOrderNo?: string;
@@ -599,6 +667,8 @@ export interface InventoryMovement {
   orderNo?: string;
   sourceOrderNo?: string;
   eventId?: string;
+  batchId?: string;
+  consumedBatches?: BatchConsumptionLine[];
   userId: string;
   deviceCode: string;
   goodsId: string;
@@ -611,6 +681,15 @@ export interface InventoryMovement {
   expiresAt?: string;
   transactionId?: string;
   refundNo?: string;
+}
+
+export interface BatchConsumptionLine {
+  batchId: string;
+  quantity: number;
+  expiresAt?: string;
+  sourceUserId?: string;
+  sourceUserName?: string;
+  selectionReason?: "specified" | "earliest_expiry" | "negative_balance";
 }
 
 export interface AlertTask {
@@ -637,6 +716,10 @@ export interface AlertTask {
   resolvedAt?: string;
   resolvedByUserId?: string;
   resolutionNote?: string;
+  userNoticeStatus?: "pending" | "shown";
+  userNoticeTitle?: string;
+  userNoticeContent?: string;
+  userNotifiedAt?: string;
 }
 
 export type OperationLogCategory =
@@ -782,6 +865,9 @@ export interface BatchConsumptionTrace {
   goodsId: string;
   goodsName: string;
   deviceCode: string;
+  movementId?: string;
+  sourceLogId?: string;
+  operationType?: InventoryMovementType;
   sourceUserId?: string;
   sourceUserName?: string;
   consumerUserId?: string;
@@ -790,6 +876,9 @@ export interface BatchConsumptionTrace {
   happenedAt: string;
   orderNo?: string;
   eventId?: string;
+  note?: string;
+  revertedAt?: string;
+  revertedByLogId?: string;
 }
 
 export interface DeviceGoodsSetting {

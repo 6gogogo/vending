@@ -148,6 +148,7 @@ export class GoodsController {
       sourceUserId?: string;
       sourceUserName?: string;
       note?: string;
+      confirmed?: boolean;
     },
     @Req() request: { authUser?: { id: string } }
   ) {
@@ -163,6 +164,7 @@ export class GoodsController {
     body: {
       quantity: number;
       note?: string;
+      confirmed?: boolean;
     },
     @Req() request: { authUser?: { id: string } }
   ) {

@@ -85,6 +85,7 @@ export class MerchantGoodsTemplatesController {
       quantity?: number;
       productionDate: string;
       note?: string;
+      confirmed?: boolean;
     },
     @Req() request: { authUser?: { id: string } }
   ) {

@@ -8,6 +8,8 @@ import type {
   CabinetOpenRequest,
   CabinetOpenPreviewResult,
   CabinetOpenResult,
+  CabinetReservationCreatePayload,
+  CabinetReservationRecord,
   DeviceMonitoringDetail,
   DeviceRecord,
   GoodsCategory,
@@ -22,6 +24,7 @@ import type {
   PaymentOrderCreateResult,
   PaymentOrderRecord,
   RegionRecord,
+  ReservationSettings,
   RegistrationPhoneLookup,
   RegistrationApplication,
   UserManagementDetail,
@@ -121,6 +124,18 @@ export const mobileApi = {
   },
   mockPaymentPaid(id: string) {
     return mobileClient.post<PaymentOrderRecord>(`/payments/orders/${id}/mock-paid`, {});
+  },
+  reservationSettings() {
+    return mobileClient.get<ReservationSettings>("/reservations/settings");
+  },
+  myReservations() {
+    return mobileClient.get<CabinetReservationRecord[]>("/reservations/my");
+  },
+  createReservation(payload: CabinetReservationCreatePayload) {
+    return mobileClient.post<CabinetReservationRecord>("/reservations", payload);
+  },
+  cancelReservation(id: string) {
+    return mobileClient.post<CabinetReservationRecord>(`/reservations/${id}/cancel`, {});
   },
   getCabinetEvent(eventId: string) {
     return mobileClient.get<CabinetEventRecord>(`/cabinet-events/event/${eventId}`);
@@ -235,6 +250,7 @@ export const mobileApi = {
     quantity?: number;
     productionDate: string;
     note?: string;
+    confirmed?: boolean;
   }) {
     return mobileClient.post("/merchant-restocks", payload);
   },
@@ -353,6 +369,11 @@ export const mobileApi = {
       unitPrice?: number;
       direction: "restock" | "deduct";
       note?: string;
+      confirmed?: boolean;
+      batchConsumptions?: Array<{
+        batchId: string;
+        quantity: number;
+      }>;
     }
   ) {
     return mobileClient.post(`/users/${userId}/manual-adjustment`, payload);
