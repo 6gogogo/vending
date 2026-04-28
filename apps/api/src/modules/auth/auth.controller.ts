@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Inject, Patch, Post } from "@nestjs/common";
 
-import type { RegistrationApplicationProfile, UserRole } from "@vm/shared-types";
+import type { BackofficeRole, RegistrationApplicationProfile, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import { AuthService } from "./auth.service";
@@ -57,6 +57,11 @@ export class AuthController {
     return ok(await this.authService.adminPasswordLogin(body.username, body.password));
   }
 
+  @Post("backoffice-login")
+  async backofficeLogin(@Body() body: { username: string; password: string }) {
+    return ok(await this.authService.backofficeLogin(body.username, body.password));
+  }
+
   @Patch("admin-password")
   async changeAdminPassword(
     @Headers("authorization") authorization: string | undefined,
@@ -72,9 +77,46 @@ export class AuthController {
     );
   }
 
+  @Patch("backoffice-password")
+  async changeBackofficePassword(
+    @Headers("authorization") authorization: string | undefined,
+    @Body() body: { currentPassword: string; newPassword: string }
+  ) {
+    return ok(
+      this.authService.changeBackofficePassword(
+        this.extractBearerToken(authorization),
+        body.currentPassword,
+        body.newPassword
+      ),
+      "密码已更新。"
+    );
+  }
+
+  @Post("backoffice-credentials")
+  createBackofficeCredential(
+    @Headers("authorization") authorization: string | undefined,
+    @Body()
+    body: {
+      userId: string;
+      username: string;
+      password: string;
+      role?: BackofficeRole;
+    }
+  ) {
+    return ok(
+      this.authService.createBackofficeCredential(this.extractBearerToken(authorization), body),
+      "后台账号已保存。"
+    );
+  }
+
   @Get("session")
   session(@Headers("authorization") authorization?: string) {
     return ok(this.authService.getAdminSession(this.extractBearerToken(authorization)));
+  }
+
+  @Get("backoffice-session")
+  backofficeSession(@Headers("authorization") authorization?: string) {
+    return ok(this.authService.getBackofficeSession(this.extractBearerToken(authorization)));
   }
 
   @Get("mobile-session")

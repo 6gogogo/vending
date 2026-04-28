@@ -6,6 +6,7 @@ import type {
   AppLoginResult,
   CabinetEventRecord,
   CabinetOpenRequest,
+  CabinetOpenPreviewResult,
   CabinetOpenResult,
   DeviceMonitoringDetail,
   DeviceRecord,
@@ -17,6 +18,9 @@ import type {
   MobileSessionSnapshot,
   OperationLogCategory,
   OperationLogRecord,
+  PaymentOrderCreatePayload,
+  PaymentOrderCreateResult,
+  PaymentOrderRecord,
   RegionRecord,
   RegistrationPhoneLookup,
   RegistrationApplication,
@@ -105,6 +109,18 @@ export const mobileApi = {
   },
   openCabinet(payload: CabinetOpenRequest) {
     return mobileClient.post<CabinetOpenResult>("/cabinet-events/open", payload);
+  },
+  previewOpenSettlement(payload: CabinetOpenRequest) {
+    return mobileClient.post<CabinetOpenPreviewResult>("/cabinet-events/open/pre-settlement", payload);
+  },
+  createPaymentOrder(payload: PaymentOrderCreatePayload) {
+    return mobileClient.post<PaymentOrderCreateResult>("/payments/orders", payload);
+  },
+  paymentOrder(id: string) {
+    return mobileClient.get<PaymentOrderRecord>(`/payments/orders/${id}`);
+  },
+  mockPaymentPaid(id: string) {
+    return mobileClient.post<PaymentOrderRecord>(`/payments/orders/${id}/mock-paid`, {});
   },
   getCabinetEvent(eventId: string) {
     return mobileClient.get<CabinetEventRecord>(`/cabinet-events/event/${eventId}`);

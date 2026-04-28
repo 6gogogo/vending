@@ -1,0 +1,326 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String   @id
+  role                   String
+  phone                  String
+  name                   String
+  status                 String
+  neighborhood           String?
+  regionId               String?
+  regionName             String?
+  ledgerStatus           String?
+  tags                   Json
+  quota                  Json?
+  profile                Json?
+  merchantProfile        Json?
+  accessPolicies         Json?
+  mobileProfileCompleted Boolean  @default(false)
+  createdAt              String?
+  updatedAt              String?
+
+  @@index([role])
+  @@index([phone])
+}
+
+model BackofficeCredential {
+  id                  String @id
+  userId              String
+  username            String @unique
+  role                String
+  passwordSalt        String
+  passwordHash        String
+  usesDefaultPassword Boolean
+  passwordUpdatedAt   String
+
+  @@index([userId])
+  @@index([role])
+}
+
+model AdminCredential {
+  userId              String @id
+  username            String @unique
+  passwordSalt        String
+  passwordHash        String
+  usesDefaultPassword Boolean
+  passwordUpdatedAt   String
+}
+
+model Session {
+  token          String  @id
+  userId         String
+  role           String
+  backofficeRole String?
+  createdAt      String
+
+  @@index([userId])
+}
+
+model DraftSession {
+  token         String  @id
+  phone         String
+  requestedRole String?
+  linkedUserId  String?
+  applicationId String?
+  createdAt     String
+}
+
+model VerificationCode {
+  phone             String  @id
+  code              String
+  expiresAt         String
+  requestedAt       String?
+  resendAvailableAt String?
+}
+
+model Device {
+  deviceCode String @id
+  name       String
+  status     String
+  data       Json
+
+  @@index([status])
+}
+
+model DeviceRuntime {
+  deviceCode String @id
+  data       Json
+}
+
+model GoodsCatalogItem {
+  goodsId String @id
+  name    String
+  status  String?
+  data    Json
+
+  @@index([status])
+}
+
+model GoodsCategory {
+  id     String @id
+  name   String
+  status String
+  data   Json
+}
+
+model Region {
+  id     String @id
+  name   String
+  status String
+  data   Json
+}
+
+model Warehouse {
+  code   String @id
+  name   String
+  status String
+  data   Json
+}
+
+model RegistrationApplication {
+  id            String @id
+  phone         String
+  requestedRole String
+  status        String
+  data          Json
+
+  @@index([phone])
+  @@index([status])
+}
+
+model MerchantGoodsTemplate {
+  id          String @id
+  ownerUserId String
+  goodsName   String
+  status      String
+  data        Json
+
+  @@index([ownerUserId])
+  @@index([status])
+}
+
+model GoodsBatch {
+  batchId          String @id
+  goodsId          String
+  deviceCode       String
+  remainingQuantity Int
+  data             Json
+
+  @@index([goodsId])
+  @@index([deviceCode])
+}
+
+model BatchConsumptionTrace {
+  id           String @id
+  batchId      String
+  goodsId      String
+  deviceCode   String
+  sourceUserId String?
+  consumerUserId String?
+  happenedAt   String
+  data         Json
+
+  @@index([sourceUserId])
+  @@index([consumerUserId])
+}
+
+model InventoryMovement {
+  id         String @id
+  orderNo    String?
+  userId     String
+  deviceCode String
+  goodsId    String
+  type       String
+  happenedAt String
+  data       Json
+
+  @@index([orderNo])
+  @@index([userId])
+  @@index([type])
+}
+
+model CabinetEvent {
+  eventId    String @id
+  orderNo    String @unique
+  userId     String
+  role       String
+  deviceCode String
+  status     String
+  amount     Int
+  createdAt  String
+  updatedAt  String
+  data       Json
+
+  @@index([userId])
+  @@index([deviceCode])
+  @@index([status])
+}
+
+model PaymentOrder {
+  id                    String  @id
+  paymentNo             String  @unique
+  provider              String
+  phase                 String
+  status                String
+  amount                Int
+  currency              String
+  subject               String
+  eventId               String?
+  orderNo               String?
+  adjustmentOrderNo     String?
+  deviceCode            String?
+  payerUserId           String?
+  merchantUserId        String?
+  providerOrderId       String?
+  providerTransactionId String?
+  invokePayload         Json?
+  callbackPayload       Json?
+  metadata              Json?
+  createdAt             String
+  updatedAt             String
+  paidAt                String?
+  closedAt              String?
+  refundNo              String?
+  failReason            String?
+
+  @@index([provider])
+  @@index([phase])
+  @@index([status])
+  @@index([eventId])
+}
+
+model PaymentRefund {
+  id                String  @id
+  paymentOrderId    String
+  paymentNo         String
+  refundNo          String  @unique
+  provider          String
+  status            String
+  amount            Int
+  reason            String?
+  providerRefundId  String?
+  callbackPayload   Json?
+  createdAt         String
+  updatedAt         String
+  refundedAt        String?
+  failReason        String?
+
+  @@index([paymentOrderId])
+  @@index([status])
+}
+
+model Alert {
+  id       String @id
+  type     String
+  grade    String
+  status   String
+  dueAt    String
+  targetUserId String?
+  data     Json
+
+  @@index([status])
+  @@index([targetUserId])
+}
+
+model OperationLog {
+  id         String @id
+  category   String
+  type       String
+  status     String
+  occurredAt String
+  actorId    String?
+  data       Json
+
+  @@index([category])
+  @@index([status])
+  @@index([actorId])
+}
+
+model CallbackLog {
+  id         String @id
+  type       String
+  receivedAt String
+  payload    Json
+
+  @@index([type])
+}
+
+model SystemAuditLog {
+  id         String @id
+  occurredAt String
+  method     String
+  path       String
+  statusCode Int
+  actorUserId String?
+  actorRole   String?
+  data       Json
+
+  @@index([path])
+  @@index([actorUserId])
+}
+
+model PolicyBlob {
+  id     String @id
+  kind   String
+  status String?
+  data   Json
+
+  @@index([kind])
+  @@index([status])
+}
+
+model UploadFile {
+  id           String @id
+  filename     String
+  relativePath String
+  url          String
+  createdAt    String
+  metadata     Json?
+}

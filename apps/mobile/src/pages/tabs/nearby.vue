@@ -48,7 +48,7 @@ const isAccessibleSpecial = computed(() => sessionStore.user?.role === "special"
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return isAccessibleSpecial.value ? "只显示柜机名称、地点和可领取货物。" : "查看附近柜机位置和当前可领取的货品，再进入领取。";
+    return isAccessibleSpecial.value ? "显示柜机名称、地点和可选货物。" : "查看附近柜机位置、库存和免费额度，再进入领取。";
   }
 
   if (sessionStore.user?.role === "merchant") {
@@ -472,7 +472,7 @@ onShow(() => {
                 @change="selectedGoodsId = goodsOptions[$event.detail.value]?.goodsId ?? ''"
               >
                 <view class="nearby-map-card__picker">
-                  {{ selectedGoodsName || "请选择允许领取的物资" }}
+                  {{ selectedGoodsName || "请选择想找的物资" }}
                 </view>
               </picker>
               <button class="vm-button" @tap="focusNearestGoods">搜索最近物资</button>
@@ -499,7 +499,7 @@ onShow(() => {
                   {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按默认顺序显示" }}
                 </text>
                 <text v-if="sessionStore.user?.role === 'special' && !isAccessibleSpecial" class="device-card__highlight">
-                  仅展示你当前还能领取且柜内有货的物资
+                  展示柜内有货的物资，超出免费额度会按价格计费
                 </text>
               </view>
               <text v-if="!isAccessibleSpecial" class="vm-status" :class="`vm-status--${statusToneMap[entry.device.status]}`">
@@ -515,8 +515,8 @@ onShow(() => {
                     {{
                       sessionStore.user?.role === "special"
                         ? isAccessibleSpecial
-                          ? `今日可领 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
-                          : `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 今日可领 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
+                          ? `今日免费 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
+                          : `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 免费 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
                         : `${categoryLabelMap[goods.category]} · 当前 ${goods.stock} 件`
                     }}
                   </text>
@@ -527,9 +527,9 @@ onShow(() => {
               </view>
             </view>
             <view v-else-if="sessionStore.user?.role === 'special'" class="device-card__empty">
-              <text class="device-card__empty-title">当前这台柜机没有你今天可领取的货品</text>
+              <text class="device-card__empty-title">当前这台柜机没有可选货品</text>
               <text v-if="!isAccessibleSpecial" class="device-card__empty-body">
-                柜机会继续显示，方便你确认位置；这里只隐藏暂时不能领取的其他货品。
+                柜机会继续显示，方便你确认位置；有库存的货品会在设备详情中继续展示。
               </text>
             </view>
 
@@ -550,8 +550,8 @@ onShow(() => {
 
         <EmptyState
           v-else
-          :title="loading ? '正在同步柜机' : isAccessibleSpecial ? '当前没有可领取货物' : '当前没有可展示柜机'"
-          :description="loading ? '请稍候，系统正在拉取设备信息。' : isAccessibleSpecial ? '系统会按你的资格和库存自动刷新。' : '请确认后端是否已经接入柜机数据。'"
+          :title="loading ? '正在同步柜机' : isAccessibleSpecial ? '当前没有可选货物' : '当前没有可展示柜机'"
+          :description="loading ? '请稍候，系统正在拉取设备信息。' : isAccessibleSpecial ? '系统会按库存自动刷新。' : '请确认后端是否已经接入柜机数据。'"
         />
       </view>
     </GlassCard>
@@ -594,7 +594,7 @@ onShow(() => {
               @change="selectedGoodsId = goodsOptions[$event.detail.value]?.goodsId ?? ''"
             >
               <view class="nearby-map-card__picker">
-                {{ selectedGoodsName || "请选择允许领取的物资" }}
+                {{ selectedGoodsName || "请选择想找的物资" }}
               </view>
             </picker>
             <button class="vm-button" @tap="focusNearestGoods">搜索最近物资</button>

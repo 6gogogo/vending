@@ -10,7 +10,7 @@ export const getReceivableLimit = (quota: QuotaSummary | undefined, goodsId: str
 export const getReceivableDeviceGoods = (device: DeviceRecord, quota: QuotaSummary | undefined) =>
   device.doors
     .flatMap((door) => door.goods)
-    .filter((goods) => getReceivableLimit(quota, goods.goodsId) > 0 && (goods.stock ?? 0) > 0);
+    .filter((goods) => (goods.stock ?? 0) > 0);
 
 export const getReceivableGoodsOptions = (
   quota: QuotaSummary | undefined,

@@ -10,7 +10,10 @@ import { ConfigService } from "@nestjs/config";
 
 import type {
   CabinetEventRecord,
+  CabinetIntentItem,
+  CabinetOpenPreviewResult,
   CabinetOpenRequest,
+  CabinetPreSettlement,
   CabinetSettlementComparison,
   CabinetSettlementComparisonItem,
   SmartVmAdjustmentPayload,
@@ -36,51 +39,27 @@ export class CabinetEventsService {
     @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
+  previewOpenSettlement(payload: CabinetOpenRequest): CabinetOpenPreviewResult {
+    const { user, quotaSummary, intentItems, preSettlement, doorNum } = this.prepareOpenContext(payload);
+
+    return {
+      deviceCode: payload.deviceCode,
+      doorNum,
+      role: user.role,
+      remainingQuota: quotaSummary?.remainingToday,
+      acceptedIntentItems: intentItems.map((item) => ({
+        goodsId: item.goodsId,
+        goodsName: item.goodsName,
+        quantity: item.quantity
+      })),
+      preSettlement
+    };
+  }
+
   async openCabinet(payload: CabinetOpenRequest) {
-    const user = this.store.users.find(
-      (entry) => entry.phone === payload.phone && entry.status === "active"
-    );
-
-    if (!user) {
-      throw new UnauthorizedException("该手机号未登记，无法开柜。");
-    }
-
-    if (user.role === "admin") {
-      throw new BadRequestException("管理员账号不能直接开柜。");
-    }
-
-    let quotaSummary:
-      | ReturnType<AccessRulesService["getQuotaSummaryForUser"]>
-      | undefined;
-
-    if (user.role === "special") {
-      quotaSummary = this.accessRulesService.assertCanOpenSpecialCabinet(user, payload.category);
-
-      if (!payload.intentItems?.length) {
-        throw new BadRequestException("正式开柜前请先选择本次计划领取的商品。");
-      }
-
-      const remainingToday = (quotaSummary.remainingToday ?? {}) as Record<string, number>;
-      const remainingByGoods =
-        ((quotaSummary.remainingByGoods as Record<string, number> | undefined) ?? {});
-
-      for (const item of payload.intentItems) {
-        const fallbackCategory = item.category ?? payload.category ?? "daily";
-        const remaining = remainingByGoods[item.goodsId] ?? remainingToday[fallbackCategory] ?? 0;
-
-        if (item.quantity > remaining) {
-          throw new BadRequestException("意向领取数量超过当前可用额度。");
-        }
-      }
-    }
+    const { user, quotaSummary, intentItems, preSettlement, doorNum } = this.prepareOpenContext(payload);
 
     const eventId = this.store.createId("event");
-    const doorNum = payload.doorNum ?? "1";
-    const intentItems = this.resolveIntentItems(
-      payload.deviceCode,
-      payload.intentItems ?? [],
-      payload.category ?? "daily"
-    );
     let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
 
     try {
@@ -140,7 +119,9 @@ export class CabinetEventsService {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       amount: 0,
+      billingStatus: preSettlement ? "pending" : undefined,
       intentItems,
+      preSettlement,
       goods: []
     });
 
@@ -176,7 +157,8 @@ export class CabinetEventsService {
         deviceCode: payload.deviceCode,
         category: payload.category,
         openMode: payload.openMode ?? "manual",
-        intentItems
+        intentItems,
+        preSettlement
       }
     });
 
@@ -192,7 +174,8 @@ export class CabinetEventsService {
         goodsId: item.goodsId,
         goodsName: item.goodsName,
         quantity: item.quantity
-      }))
+      })),
+      preSettlement
     };
   }
 
@@ -347,16 +330,20 @@ export class CabinetEventsService {
 
     const event = this.getEventByPlatformOrderNo(payload.orderNo);
     event.status = "settled";
+    event.platformAmount = payload.amount;
     event.amount = payload.amount;
     event.updatedAt = new Date().toISOString();
     event.paymentNotifyUrl = payload.notifyUrl;
     const settlementAlreadyRecorded = this.inventoryOrdersService
       .recordSettlement(event, payload);
 
-    event.paymentNotifyStatus = "pending";
-    event.paymentNotifyMessage = settlementAlreadyRecorded.duplicated
-      ? "重复收到结算回调，已保持现有记录，等待向平台回写付款成功。"
-      : "等待向平台回写付款成功。";
+    if (event.paymentNotifyStatus !== "success") {
+      event.paymentNotifyStatus = "pending";
+      event.paymentNotifyMessage = settlementAlreadyRecorded.duplicated
+        ? "重复收到结算回调，已保持现有记录，等待向平台回写付款成功。"
+        : "等待向平台回写付款成功。";
+    }
+
     if (!settlementAlreadyRecorded.duplicated) {
       event.goods =
         payload.detail?.map((item) => ({
@@ -374,6 +361,22 @@ export class CabinetEventsService {
 
     const settlementComparison = this.compareSettlement(event, payload);
     event.settlementComparison = settlementComparison;
+    const shouldUsePreSettlement =
+      event.role === "special" &&
+      Boolean(event.preSettlement) &&
+      Boolean(event.intentItems?.length) &&
+      settlementComparison.matched;
+
+    if (shouldUsePreSettlement && event.preSettlement) {
+      event.amount = event.preSettlement.payableAmount;
+      event.billingStatus = event.amount > 0 ? "payable" : "free";
+    } else if (event.intentItems?.length) {
+      event.billingStatus = settlementComparison.matched
+        ? event.amount > 0
+          ? "payable"
+          : "free"
+        : "mismatch";
+    }
 
     if (event.intentItems?.length && !settlementComparison.matched) {
       this.alertsService.create({
@@ -420,13 +423,24 @@ export class CabinetEventsService {
         relatedEventId: event.eventId,
         relatedOrderNo: event.orderNo,
         metadata: {
-          amount: payload.amount,
+          amount: event.amount,
+          platformAmount: payload.amount,
+          billingStatus: event.billingStatus,
           undoState: "not_undoable"
         }
       });
     }
 
-    if (this.shouldAutoForwardSettlementPaymentSuccess()) {
+    const shouldAutoForwardFreeSettlement =
+      shouldUsePreSettlement && event.amount <= 0 && settlementComparison.matched;
+
+    if (
+      event.paymentNotifyStatus !== "success" &&
+      (this.shouldAutoForwardSettlementPaymentSuccess() || shouldAutoForwardFreeSettlement)
+    ) {
+      event.paymentNotifyMessage = shouldAutoForwardFreeSettlement
+        ? "本次预结算金额为 0，系统将自动回写平台付款成功。"
+        : "已收到结算回调，系统将自动回写平台付款成功。";
       void this.tryAutoForwardPaymentSuccess(
         event,
         {
@@ -434,13 +448,16 @@ export class CabinetEventsService {
           eventId: event.eventId,
           transactionId: this.store.createReference("txn"),
           deviceCode: payload.deviceCode,
-          amount: payload.amount
+          amount: event.amount
         },
         payload.notifyUrl
       );
-    } else {
+    } else if (event.paymentNotifyStatus !== "success") {
       event.paymentNotifyStatus = "pending";
-      event.paymentNotifyMessage = "已收到结算回调，等待手动或外部支付成功后回写平台。";
+      event.paymentNotifyMessage =
+        event.amount > 0
+          ? "已收到结算回调，等待用户支付成功后回写平台。"
+          : "已收到结算回调，本次无需用户支付。";
     }
 
     return {
@@ -528,7 +545,7 @@ export class CabinetEventsService {
       .toLowerCase();
 
     if (!raw) {
-      return true;
+      return false;
     }
 
     return raw === "true" || raw === "1" || raw === "yes" || raw === "on";
@@ -813,25 +830,172 @@ export class CabinetEventsService {
     };
   }
 
+  private prepareOpenContext(payload: CabinetOpenRequest) {
+    const user = this.store.users.find(
+      (entry) => entry.phone === payload.phone && entry.status === "active"
+    );
+
+    if (!user) {
+      throw new UnauthorizedException("该手机号未登记，无法开柜。");
+    }
+
+    if (user.role === "admin") {
+      throw new BadRequestException("管理员账号不能直接开柜。");
+    }
+
+    const doorNum = payload.doorNum ?? "1";
+    const intentItems = this.resolveIntentItems(
+      payload.deviceCode,
+      payload.intentItems ?? [],
+      payload.category ?? "daily"
+    );
+    const quotaSummary =
+      user.role === "special"
+        ? this.accessRulesService.getQuotaSummaryForUser(user)
+        : undefined;
+
+    if (user.role === "special" && !intentItems.length) {
+      throw new BadRequestException("正式开柜前请先选择本次计划领取的商品。");
+    }
+
+    const preSettlement =
+      user.role === "special" && quotaSummary
+        ? this.buildPreSettlement(payload.deviceCode, doorNum, intentItems, quotaSummary)
+        : undefined;
+
+    return {
+      user,
+      doorNum,
+      quotaSummary,
+      intentItems,
+      preSettlement
+    };
+  }
+
   private resolveIntentItems(
     deviceCode: string,
     intentItems: NonNullable<CabinetOpenRequest["intentItems"]>,
     fallbackCategory: CabinetOpenRequest["category"] = "daily"
-  ) {
-    return intentItems.map((item) => {
+  ): CabinetIntentItem[] {
+    this.store.syncDeviceStocksFromBatches(deviceCode);
+    const resolved = new Map<string, CabinetIntentItem>();
+
+    for (const item of intentItems) {
+      const quantity = Math.floor(Number(item.quantity));
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new BadRequestException("选择商品数量必须大于 0。");
+      }
+
       const deviceGoods = this.store.devices
         .find((device) => device.deviceCode === deviceCode)
         ?.doors.flatMap((door) => door.goods)
         .find((goods) => goods.goodsId === item.goodsId);
       const catalogGoods = this.store.goodsCatalog.find((goods) => goods.goodsId === item.goodsId);
+      const existing = resolved.get(item.goodsId);
+      const goodsName = item.goodsName || deviceGoods?.name || catalogGoods?.name || item.goodsId;
+      const category = item.category || deviceGoods?.category || catalogGoods?.category || fallbackCategory;
+      const nextQuantity = (existing?.quantity ?? 0) + quantity;
+      const stock = this.store.getCurrentStock(deviceCode, item.goodsId);
+
+      if (stock < nextQuantity) {
+        throw new BadRequestException(`${goodsName} 当前库存不足，最多可选择 ${Math.max(0, stock)} 件。`);
+      }
+
+      resolved.set(item.goodsId, {
+        goodsId: item.goodsId,
+        goodsName,
+        category,
+        quantity: nextQuantity
+      });
+    }
+
+    return Array.from(resolved.values());
+  }
+
+  private buildPreSettlement(
+    deviceCode: string,
+    doorNum: string,
+    intentItems: CabinetIntentItem[],
+    quotaSummary: ReturnType<AccessRulesService["getQuotaSummaryForUser"]>
+  ): CabinetPreSettlement {
+    const remainingByGoods = new Map(
+      Object.entries((quotaSummary.remainingByGoods as Record<string, number> | undefined) ?? {})
+    );
+    const remainingByCategory = new Map(
+      Object.entries((quotaSummary.remainingToday as Record<string, number> | undefined) ?? {})
+    );
+    const useGoodsQuota = remainingByGoods.size > 0;
+    const items = intentItems.map((item) => {
+      const goods = this.getGoodsSnapshot(deviceCode, item.goodsId);
+      const goodsRemaining = remainingByGoods.get(item.goodsId);
+      const categoryRemaining = useGoodsQuota ? undefined : remainingByCategory.get(item.category);
+      const freeQuantity = Math.min(
+        item.quantity,
+        Math.max(0, goodsRemaining ?? categoryRemaining ?? 0)
+      );
+      const paidQuantity = Math.max(0, item.quantity - freeQuantity);
+      const unitPrice = goods.unitPrice;
+
+      if (useGoodsQuota && goodsRemaining !== undefined) {
+        remainingByGoods.set(item.goodsId, Math.max(0, goodsRemaining - freeQuantity));
+      } else if (!useGoodsQuota && categoryRemaining !== undefined) {
+        remainingByCategory.set(item.category, Math.max(0, categoryRemaining - freeQuantity));
+      }
 
       return {
         goodsId: item.goodsId,
-        goodsName: item.goodsName || deviceGoods?.name || catalogGoods?.name || item.goodsId,
-        category: item.category || deviceGoods?.category || catalogGoods?.category || fallbackCategory,
-        quantity: item.quantity
+        goodsName: item.goodsName,
+        category: item.category,
+        quantity: item.quantity,
+        freeQuantity,
+        paidQuantity,
+        unitPrice,
+        originalAmount: unitPrice * item.quantity,
+        freeAmount: unitPrice * freeQuantity,
+        paidAmount: unitPrice * paidQuantity
       };
     });
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+    const freeQuantity = items.reduce((sum, item) => sum + item.freeQuantity, 0);
+    const paidQuantity = items.reduce((sum, item) => sum + item.paidQuantity, 0);
+    const originalAmount = items.reduce((sum, item) => sum + item.originalAmount, 0);
+    const freeAmount = items.reduce((sum, item) => sum + item.freeAmount, 0);
+    const payableAmount = items.reduce((sum, item) => sum + item.paidAmount, 0);
+    const chargeRequired = payableAmount > 0;
+
+    return {
+      deviceCode,
+      doorNum,
+      createdAt: new Date().toISOString(),
+      totalQuantity,
+      freeQuantity,
+      paidQuantity,
+      originalAmount,
+      freeAmount,
+      payableAmount,
+      chargeRequired,
+      summary: chargeRequired
+        ? `本次预计免费 ${freeQuantity} 件，超出范围 ${paidQuantity} 件，需支付 ${this.formatAmount(payableAmount)}。`
+        : `本次选择的 ${totalQuantity} 件均在可领取范围内，预计免费。`,
+      items
+    };
+  }
+
+  private getGoodsSnapshot(deviceCode: string, goodsId: string) {
+    const deviceGoods = this.store.devices
+      .find((device) => device.deviceCode === deviceCode)
+      ?.doors.flatMap((door) => door.goods)
+      .find((goods) => goods.goodsId === goodsId);
+    const catalogGoods = this.store.goodsCatalog.find((goods) => goods.goodsId === goodsId);
+
+    return {
+      unitPrice: Math.max(0, Math.round(deviceGoods?.price ?? catalogGoods?.price ?? 0))
+    };
+  }
+
+  private formatAmount(amount: number) {
+    return `￥${(amount / 100).toFixed(2)}`;
   }
 
   private compareSettlement(event: CabinetEventRecord, payload: SmartVmSettlementPayload) {

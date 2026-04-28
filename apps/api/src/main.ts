@@ -12,6 +12,12 @@ async function bootstrap() {
     cors: true
   });
 
+  const captureRawBody = (request: { rawBody?: string }, _response: unknown, buffer: Buffer) => {
+    request.rawBody = buffer.toString("utf8");
+  };
+  app.useBodyParser("json", { verify: captureRawBody });
+  app.useBodyParser("urlencoded", { extended: true, verify: captureRawBody });
+
   app.setGlobalPrefix("api");
 
   const uploadDir = resolveUploadDir();

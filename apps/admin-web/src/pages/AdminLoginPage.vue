@@ -19,9 +19,9 @@ const submit = async () => {
   busy.value = true;
   errorMessage.value = "";
   try {
-    const response = await adminApi.adminPasswordLogin(username.value, password.value);
+    const response = await adminApi.backofficeLogin(username.value, password.value);
     sessionStore.setSession(response);
-    await router.replace("/dashboard");
+    await router.replace(response.user.backofficeRole === "merchant" ? "/merchant" : "/dashboard");
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "登录失败。";
   } finally {
@@ -34,9 +34,9 @@ const submit = async () => {
   <section class="login-shell">
     <article class="login-panel admin-panel">
       <div class="login-panel__head">
-        <span class="admin-kicker">管理员登录</span>
+        <span class="admin-kicker">后台登录</span>
         <h1 class="login-panel__title">公益智助柜后台</h1>
-        <p class="admin-copy">仅管理员可登录此 PC 后台并执行远程开门、人员修改和任务处理。</p>
+        <p class="admin-copy">超级管理员和已开通后台账号的商家可登录 PC 后台。</p>
       </div>
 
       <label class="admin-field">
@@ -55,7 +55,7 @@ const submit = async () => {
         />
       </label>
 
-      <div class="admin-note">空库或无管理员凭证时，系统会自动补建超级管理员：账号 `admin`，密码 `admin`。</div>
+      <div class="admin-note">空库或无超级管理员凭证时，系统会自动补建超级管理员：账号 `admin`，密码 `admin`。</div>
       <div v-if="errorMessage" class="admin-note login-panel__error">{{ errorMessage }}</div>
 
       <button class="admin-button" :disabled="busy || !username || !password" @click="submit">

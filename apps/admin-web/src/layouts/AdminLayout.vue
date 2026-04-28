@@ -9,6 +9,7 @@ interface NavItem {
   to: string;
   label: string;
   icon: string;
+  roles?: Array<"super_admin" | "merchant">;
 }
 
 const route = useRoute();
@@ -24,6 +25,17 @@ const passwordForm = reactive({
 });
 
 const navSections: Array<{ title: string; items: NavItem[] }> = [
+  {
+    title: "商家后台",
+    items: [
+      {
+        to: "/merchant",
+        label: "商家工作台",
+        roles: ["merchant"],
+        icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
+      }
+    ]
+  },
   {
     title: "总览",
     items: [
@@ -79,7 +91,34 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       }
     ]
   },
+  {
+    title: "系统设置",
+    items: [
+      {
+        to: "/settings",
+        label: "统一设置",
+        icon: "M10.29 3.86a1.75 1.75 0 0 1 3.42 0l.16.76c.52.14 1.02.34 1.49.62l.68-.41a1.75 1.75 0 0 1 2.35.61l.46.79a1.75 1.75 0 0 1-.43 2.25l-.6.5c.05.34.08.68.08 1.02s-.03.68-.08 1.02l.6.5a1.75 1.75 0 0 1 .43 2.25l-.46.79a1.75 1.75 0 0 1-2.35.61l-.68-.41c-.47.28-.97.49-1.49.62l-.16.76a1.75 1.75 0 0 1-3.42 0l-.16-.76a6.6 6.6 0 0 1-1.49-.62l-.68.41a1.75 1.75 0 0 1-2.35-.61l-.46-.79a1.75 1.75 0 0 1 .43-2.25l.6-.5A6.7 6.7 0 0 1 6.1 12c0-.34.03-.68.08-1.02l-.6-.5a1.75 1.75 0 0 1-.43-2.25l.46-.79a1.75 1.75 0 0 1 2.35-.61l.68.41c.47-.28.97-.49 1.49-.62zm1.71 5.14a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5"
+      }
+    ]
+  },
 ];
+
+const visibleNavSections = computed(() => {
+  const role = sessionStore.user?.backofficeRole ?? "super_admin";
+
+  return navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (item.roles) {
+          return item.roles.includes(role);
+        }
+
+        return role === "super_admin";
+      })
+    }))
+    .filter((section) => section.items.length > 0);
+});
 
 const currentMeta = computed(() => ({
   eyebrow: typeof route.meta.eyebrow === "string" ? route.meta.eyebrow : "后台工作台",
@@ -182,6 +221,14 @@ const isActive = (target: string) => {
     return route.path.startsWith("/ai");
   }
 
+  if (target === "/merchant") {
+    return route.path.startsWith("/merchant");
+  }
+
+  if (target === "/settings") {
+    return route.path.startsWith("/settings");
+  }
+
   return route.path === target;
 };
 </script>
@@ -196,7 +243,7 @@ const isActive = (target: string) => {
       </div>
 
       <nav class="workbench__nav">
-        <section v-for="section in navSections" :key="section.title" class="workbench__nav-group">
+        <section v-for="section in visibleNavSections" :key="section.title" class="workbench__nav-group">
           <p class="workbench__nav-title">{{ section.title }}</p>
           <RouterLink
             v-for="item in section.items"
@@ -218,7 +265,8 @@ const isActive = (target: string) => {
       <div class="workbench__status admin-panel">
         <p class="admin-kicker">当前模块</p>
         <h2 class="workbench__status-title">{{ currentGroup }}</h2>
-        <p class="admin-copy workbench__status-copy">{{ sessionStore.user?.name ?? "管理员" }}</p>
+        <p class="admin-copy workbench__status-copy">{{ sessionStore.user?.name ?? "后台用户" }}</p>
+        <p class="admin-copy workbench__status-copy">角色：{{ sessionStore.user?.backofficeRole === "merchant" ? "商家" : "超级管理员" }}</p>
         <p class="admin-copy workbench__status-copy">登录账号：{{ sessionStore.auth?.username ?? "admin" }}</p>
         <div v-if="sessionStore.auth?.usesDefaultPassword" class="admin-note workbench__password-warning">
           当前仍在使用默认密码 `admin`，建议立即修改。

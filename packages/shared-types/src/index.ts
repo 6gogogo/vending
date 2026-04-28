@@ -1,6 +1,11 @@
 export type UserRole = "admin" | "merchant" | "special";
+export type BackofficeRole = "super_admin" | "merchant";
 export type MobileDisplayRole = "admin" | "merchant" | "normal";
 export type RegistrationStatus = "pending" | "approved" | "rejected";
+export type PaymentProvider = "wechat" | "alipay";
+export type PaymentPhase = "pre_open" | "post_settlement";
+export type PaymentStatus = "created" | "pending" | "paid" | "failed" | "closed" | "refunded";
+export type PaymentRefundStatus = "pending" | "success" | "failed";
 
 export type GoodsCategory = "food" | "drink" | "daily";
 export type InventoryLocationType = "device" | "warehouse";
@@ -166,6 +171,93 @@ export interface MobileSessionSnapshot {
       goodsLimits: SpecialAccessPolicyGoodsLimit[];
     }>;
   };
+}
+
+export interface BackofficeSessionSnapshot {
+  token: string;
+  user: {
+    id: string;
+    role: Extract<UserRole, "admin" | "merchant">;
+    backofficeRole: BackofficeRole;
+    name: string;
+    phone: string;
+    tags: string[];
+  };
+  auth: {
+    username: string;
+    usesDefaultPassword: boolean;
+    passwordUpdatedAt: string;
+  };
+}
+
+export interface PaymentOrderRecord {
+  id: string;
+  paymentNo: string;
+  provider: PaymentProvider;
+  phase: PaymentPhase;
+  status: PaymentStatus;
+  amount: number;
+  currency: "CNY";
+  subject: string;
+  eventId?: string;
+  orderNo?: string;
+  adjustmentOrderNo?: string;
+  deviceCode?: string;
+  payerUserId?: string;
+  merchantUserId?: string;
+  providerOrderId?: string;
+  providerTransactionId?: string;
+  invokePayload?: Record<string, unknown>;
+  callbackPayload?: unknown;
+  refundNo?: string;
+  failReason?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  paidAt?: string;
+  closedAt?: string;
+}
+
+export interface PaymentRefundRecord {
+  id: string;
+  paymentOrderId: string;
+  paymentNo: string;
+  refundNo: string;
+  provider: PaymentProvider;
+  status: PaymentRefundStatus;
+  amount: number;
+  reason?: string;
+  providerRefundId?: string;
+  callbackPayload?: unknown;
+  createdAt: string;
+  updatedAt: string;
+  refundedAt?: string;
+  failReason?: string;
+}
+
+export interface PaymentOrderCreatePayload {
+  provider: PaymentProvider;
+  phase: PaymentPhase;
+  amount?: number;
+  subject?: string;
+  eventId?: string;
+  orderNo?: string;
+  adjustmentOrderNo?: string;
+  deviceCode?: string;
+  payerUserId?: string;
+  merchantUserId?: string;
+  openRequest?: CabinetOpenRequest;
+  intentItems?: Array<{
+    goodsId: string;
+    goodsName?: string;
+    quantity: number;
+    unitPrice?: number;
+  }>;
+}
+
+export interface PaymentOrderCreateResult {
+  order: PaymentOrderRecord;
+  invokePayload: Record<string, unknown>;
 }
 
 export type MobileLoginResult =
@@ -365,6 +457,7 @@ export interface CabinetOpenResult {
     quantity: number;
     goodsName?: string;
   }>;
+  preSettlement?: CabinetPreSettlement;
 }
 
 export interface CabinetIntentItem {
@@ -372,6 +465,49 @@ export interface CabinetIntentItem {
   goodsName: string;
   category: GoodsCategory;
   quantity: number;
+}
+
+export type CabinetBillingStatus = "pending" | "free" | "payable" | "mismatch";
+
+export interface CabinetPreSettlementItem {
+  goodsId: string;
+  goodsName: string;
+  category: GoodsCategory;
+  quantity: number;
+  freeQuantity: number;
+  paidQuantity: number;
+  unitPrice: number;
+  originalAmount: number;
+  freeAmount: number;
+  paidAmount: number;
+}
+
+export interface CabinetPreSettlement {
+  deviceCode: string;
+  doorNum: string;
+  createdAt: string;
+  totalQuantity: number;
+  freeQuantity: number;
+  paidQuantity: number;
+  originalAmount: number;
+  freeAmount: number;
+  payableAmount: number;
+  chargeRequired: boolean;
+  summary: string;
+  items: CabinetPreSettlementItem[];
+}
+
+export interface CabinetOpenPreviewResult {
+  deviceCode: string;
+  doorNum: string;
+  role: UserRole;
+  remainingQuota?: Partial<Record<string, number>>;
+  acceptedIntentItems: Array<{
+    goodsId: string;
+    quantity: number;
+    goodsName?: string;
+  }>;
+  preSettlement?: CabinetPreSettlement;
 }
 
 export interface CabinetSettlementComparisonItem {
@@ -403,7 +539,10 @@ export interface CabinetEventRecord {
   createdAt: string;
   updatedAt: string;
   amount: number;
+  platformAmount?: number;
+  billingStatus?: CabinetBillingStatus;
   intentItems?: CabinetIntentItem[];
+  preSettlement?: CabinetPreSettlement;
   settlementComparison?: CabinetSettlementComparison;
   paymentNotifyUrl?: string;
   paymentNotifyStatus?: "pending" | "success" | "failed";
@@ -1011,6 +1150,55 @@ export interface AiProviderTestResult {
   testedAt: string;
   latencyMs: number;
   message: string;
+}
+
+export type SystemSettingInputType =
+  | "text"
+  | "password"
+  | "textarea"
+  | "number"
+  | "boolean"
+  | "select"
+  | "url"
+  | "path";
+
+export interface SystemSettingOption {
+  label: string;
+  value: string;
+}
+
+export interface SystemSettingEntry {
+  key: string;
+  value: string;
+  exampleValue?: string;
+  group: string;
+  label: string;
+  description: string;
+  inputType: SystemSettingInputType;
+  options?: SystemSettingOption[];
+  sensitive: boolean;
+  required: boolean;
+  restartRequired: boolean;
+  source: "env" | "example" | "runtime";
+  effectiveValue: string;
+}
+
+export interface SystemSettingsSnapshot {
+  envFilePath: string;
+  exampleFilePath?: string;
+  loadedAt: string;
+  settings: SystemSettingEntry[];
+}
+
+export interface SystemSettingsUpdatePayload {
+  values: Record<string, string>;
+}
+
+export interface SystemSettingsUpdateResult extends SystemSettingsSnapshot {
+  updatedAt: string;
+  changedKeys: string[];
+  runtimeAppliedKeys: string[];
+  restartRequiredKeys: string[];
 }
 
 export interface AiInsightMeta {

@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 
-import type { UserRole } from "@vm/shared-types";
+import type { BackofficeRole, UserRole } from "@vm/shared-types";
 
 import { ALLOWED_ROLES_KEY } from "./allowed-roles.decorator";
 import { InMemoryStoreService } from "../store/in-memory-store.service";
@@ -35,7 +35,7 @@ export class RoleGuard implements CanActivate {
       query: Record<string, string | undefined>;
       body?: Record<string, unknown>;
       userRole?: UserRole;
-      authUser?: { id: string; role: UserRole; name: string };
+      authUser?: { id: string; role: UserRole; name: string; backofficeRole?: BackofficeRole };
     }>();
 
     const authHeader = request.headers.authorization ?? request.headers.Authorization;
@@ -53,7 +53,8 @@ export class RoleGuard implements CanActivate {
       request.authUser = {
         id: sessionUser.id,
         role: sessionUser.role,
-        name: sessionUser.name
+        name: sessionUser.name,
+        backofficeRole: this.store.getSession(bearerToken)?.backofficeRole
       };
       return true;
     }

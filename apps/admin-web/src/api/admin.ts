@@ -21,12 +21,17 @@ import type {
   GoodsCategoryRecord,
   GoodsDetailSnapshot,
   GoodsOverviewSnapshot,
+  InventoryMovement,
+  MerchantGoodsTemplate,
   OperationLogCategory,
   OperationLogRecord,
   OperationLogStatus,
   RegionRecord,
   RegistrationApplication,
   SystemAuditLogEntry,
+  SystemSettingsSnapshot,
+  SystemSettingsUpdatePayload,
+  SystemSettingsUpdateResult,
   SpecialAccessPolicy,
   UserAccessPolicy,
   UserManagementDetail,
@@ -42,7 +47,8 @@ interface AdminLoginResponse {
   token: string;
   user: {
     id: string;
-    role: "admin";
+    role: "admin" | "merchant";
+    backofficeRole: "super_admin" | "merchant";
     name: string;
     phone: string;
     tags: string[];
@@ -72,11 +78,22 @@ export const adminApi = {
   adminPasswordLogin(username: string, password: string) {
     return adminClient.post<AdminLoginResponse>("/auth/admin-password-login", { username, password });
   },
+  backofficeLogin(username: string, password: string) {
+    return adminClient.post<AdminLoginResponse>("/auth/backoffice-login", { username, password });
+  },
   changeAdminPassword(payload: { currentPassword: string; newPassword: string }) {
-    return adminClient.patch<AdminLoginResponse>("/auth/admin-password", payload);
+    return adminClient.patch<AdminLoginResponse>("/auth/backoffice-password", payload);
   },
   session() {
-    return adminClient.get<AdminLoginResponse>("/auth/session");
+    return adminClient.get<AdminLoginResponse>("/auth/backoffice-session");
+  },
+  createBackofficeCredential(payload: {
+    userId: string;
+    username: string;
+    password: string;
+    role?: "super_admin" | "merchant";
+  }) {
+    return adminClient.post("/auth/backoffice-credentials", payload);
   },
   dashboard() {
     return adminClient.get<DashboardSnapshot>("/analytics/dashboard");
@@ -476,6 +493,34 @@ export const adminApi = {
   alerts() {
     return adminClient.get<AlertTask[]>("/alerts");
   },
+  merchantTemplates() {
+    return adminClient.get<MerchantGoodsTemplate[]>("/merchant-goods-templates");
+  },
+  merchantRestockTraces() {
+    return adminClient.get<{
+      batches: Array<{
+        batchId: string;
+        goodsId: string;
+        goodsName: string;
+        deviceCode: string;
+        deviceName: string;
+        quantity: number;
+        remainingQuantity: number;
+        expiresAt?: string;
+        createdAt: string;
+      }>;
+      records: InventoryMovement[];
+      logs: OperationLogRecord[];
+      dailySummary: Array<{
+        dateKey: string;
+        claimedUnits: number;
+        helpedUsers: number;
+        helpTimes: number;
+        cumulativeHelpTimes: number;
+      }>;
+      cumulativeHelpTimes: number;
+    }>("/merchant-restock-traces");
+  },
   aiStatus() {
     return adminClient.get<AiProviderStatus>("/ai-insights/status");
   },
@@ -484,6 +529,12 @@ export const adminApi = {
   },
   testAiConfig() {
     return adminClient.post<AiProviderTestResult>("/ai-insights/test", {});
+  },
+  systemSettings() {
+    return adminClient.get<SystemSettingsSnapshot>("/system-settings");
+  },
+  saveSystemSettings(payload: SystemSettingsUpdatePayload) {
+    return adminClient.patch<SystemSettingsUpdateResult>("/system-settings", payload);
   },
   aiEventDiagnosis(payload: { eventId?: string; orderNo?: string; logId?: string }) {
     return adminClient.post<AiEventDiagnosis>("/ai-insights/event-diagnosis", payload);

@@ -54,6 +54,12 @@ export class CabinetEventsController {
     return ok(await this.cabinetEventsService.openCabinet(body));
   }
 
+  @Post("open/pre-settlement")
+  @HttpCode(200)
+  preSettlement(@Body() body: CabinetOpenRequest) {
+    return ok(this.cabinetEventsService.previewOpenSettlement(body));
+  }
+
   @Post("callbacks/door-status")
   @HttpCode(200)
   doorStatus(@Body() body: SmartVmDoorStatusPayload & Record<string, unknown>) {

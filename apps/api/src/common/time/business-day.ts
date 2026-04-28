@@ -1,14 +1,19 @@
-const timezoneOffsetHours = Number(process.env.BUSINESS_TIMEZONE_OFFSET_HOURS ?? 8);
-const businessDayStartHour = Number(process.env.BUSINESS_DAY_START_HOUR ?? 4);
-
 const pad = (value: number) => String(value).padStart(2, "0");
 
-export const getBusinessTimezoneOffsetHours = () => timezoneOffsetHours;
+const readNumberEnv = (name: string, fallback: number, validate: (value: number) => boolean) => {
+  const configured = Number(process.env[name] ?? fallback);
+  return Number.isFinite(configured) && validate(configured) ? configured : fallback;
+};
 
-export const getBusinessDayStartHour = () => businessDayStartHour;
+export const getBusinessTimezoneOffsetHours = () =>
+  readNumberEnv("BUSINESS_TIMEZONE_OFFSET_HOURS", 8, (value) => value >= -12 && value <= 14);
+
+export const getBusinessDayStartHour = () =>
+  readNumberEnv("BUSINESS_DAY_START_HOUR", 4, (value) => Number.isInteger(value) && value >= 0 && value <= 23);
 
 export const getLocalDateParts = (value: string | Date) => {
   const date = value instanceof Date ? value : new Date(value);
+  const timezoneOffsetHours = getBusinessTimezoneOffsetHours();
   const shifted = new Date(date.getTime() + timezoneOffsetHours * 60 * 60_000);
 
   return {
@@ -39,6 +44,8 @@ export const getWeekdayForDateKey = (dateKey: string) => {
 
 export const getBusinessDayKey = (value: string | Date = new Date()) => {
   const date = value instanceof Date ? value : new Date(value);
+  const timezoneOffsetHours = getBusinessTimezoneOffsetHours();
+  const businessDayStartHour = getBusinessDayStartHour();
   const shifted = new Date(
     date.getTime() + timezoneOffsetHours * 60 * 60_000 - businessDayStartHour * 60 * 60_000
   );

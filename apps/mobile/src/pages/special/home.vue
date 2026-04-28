@@ -141,7 +141,7 @@ onShow(() => {
   <MobileShell
     eyebrow="普通用户"
     :title="`${sessionStore.user?.name ?? '访客'}，您好`"
-    :subtitle="accessibilityEnabled ? '只显示柜机名称、地点和可领取货物。' : appCopy.specialWelcome"
+    :subtitle="accessibilityEnabled ? '显示柜机名称、地点和可选货物。' : appCopy.specialWelcome"
   >
     <template v-if="!accessibilityEnabled" #hero-actions>
       <view class="hero-action-grid">
@@ -195,7 +195,7 @@ onShow(() => {
       <view class="section-heading">
         <text class="section-heading__title">附近柜机</text>
         <text class="vm-subtitle">
-          {{ accessibilityEnabled ? "仅保留柜机名称、地点和可领取货物。" : "可先查看位置和库存，再决定前往哪一台柜机。" }}
+          {{ accessibilityEnabled ? "仅保留柜机名称、地点和可选货物。" : "可先查看位置、库存和免费额度，再决定前往哪一台柜机。" }}
         </text>
       </view>
 
@@ -224,8 +224,8 @@ onShow(() => {
                   <text class="goods-item__meta">
                     {{
                       accessibilityEnabled
-                        ? `今日可领 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
-                        : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件`
+                        ? `今日免费 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
+                        : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 免费 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
                     }}
                   </text>
                 </view>
@@ -234,8 +234,8 @@ onShow(() => {
             </view>
             <EmptyState
               v-else
-              title="当前没有可领取货物"
-              :description="accessibilityEnabled ? '' : '这台柜机目前没有你今天可领取且柜内有库存的货品。'"
+              title="当前没有可选货物"
+              :description="accessibilityEnabled ? '' : '这台柜机目前没有柜内有库存的可选货品。'"
             />
 
             <view class="action-grid" :class="{ 'action-grid--single': accessibilityEnabled }">
@@ -249,8 +249,8 @@ onShow(() => {
       </view>
       <GlassCard v-else tone="quiet">
         <EmptyState
-          :title="loading ? '正在加载柜机信息' : accessibilityEnabled ? '附近暂无可领取货物' : '附近暂无可用柜机'"
-          :description="loading ? '请稍候，系统正在同步设备状态。' : accessibilityEnabled ? '稍后再来查看，系统会按资格和库存自动刷新。' : '请联系工作人员确认设备接入状态。'"
+          :title="loading ? '正在加载柜机信息' : accessibilityEnabled ? '附近暂无可选货物' : '附近暂无可用柜机'"
+          :description="loading ? '请稍候，系统正在同步设备状态。' : accessibilityEnabled ? '稍后再来查看，系统会按库存自动刷新。' : '请联系工作人员确认设备接入状态。'"
         />
       </GlassCard>
     </view>

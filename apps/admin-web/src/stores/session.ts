@@ -4,7 +4,8 @@ const storageKey = "vm-admin-session";
 
 interface AdminSessionUser {
   id: string;
-  role: "admin";
+  role: "admin" | "merchant";
+  backofficeRole: "super_admin" | "merchant";
   name: string;
   phone: string;
   tags: string[];
@@ -48,6 +49,8 @@ export const useAdminSessionStore = defineStore("admin-session", {
   }),
   getters: {
     isAuthenticated: (state) => Boolean(state.token && state.user),
+    isSuperAdmin: (state) => state.user?.backofficeRole === "super_admin",
+    isMerchant: (state) => state.user?.backofficeRole === "merchant",
     needsValidation: (state) => Boolean(state.token && state.token !== state.validatedToken)
   },
   actions: {

@@ -21,7 +21,7 @@ export class AlertsController {
   ) {
     const actor = request?.authUser;
     const resolvedTargetUserId =
-      actor?.role === "special" ? actor.id : targetUserId;
+      actor?.role === "special" || actor?.role === "merchant" ? actor.id : targetUserId;
     return ok(this.alertsService.list(status, resolvedTargetUserId));
   }
 

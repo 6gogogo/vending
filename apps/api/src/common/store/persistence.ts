@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { cloneSeedState, type AlertTask, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type RegionRecord, type RegistrationApplication, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
+import { cloneSeedState, type AlertTask, type BackofficeRole, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type PaymentOrderRecord, type PaymentRefundRecord, type RegionRecord, type RegistrationApplication, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
 
 export interface VerificationRecord {
   code: string;
@@ -15,6 +15,7 @@ export interface SessionRecord {
   token: string;
   userId: string;
   role: UserRole;
+  backofficeRole?: BackofficeRole;
   createdAt: string;
 }
 
@@ -30,6 +31,16 @@ export interface DraftSessionRecord {
 export interface AdminCredentialRecord {
   userId: string;
   username: string;
+  passwordSalt: string;
+  passwordHash: string;
+  usesDefaultPassword: boolean;
+  passwordUpdatedAt: string;
+}
+
+export interface BackofficeCredentialRecord {
+  userId: string;
+  username: string;
+  role: BackofficeRole;
   passwordSalt: string;
   passwordHash: string;
   usesDefaultPassword: boolean;
@@ -58,12 +69,15 @@ export interface PersistedStoreState {
   stocktakes: StocktakeRecord[];
   events: CabinetEventRecord[];
   inventory: InventoryMovement[];
+  paymentOrders: PaymentOrderRecord[];
+  paymentRefunds: PaymentRefundRecord[];
   alerts: AlertTask[];
   logs: OperationLogRecord[];
   verificationCodes: Array<[string, VerificationRecord]>;
   sessions: Array<[string, SessionRecord]>;
   draftSessions: Array<[string, DraftSessionRecord]>;
   adminCredentials: AdminCredentialRecord[];
+  backofficeCredentials: BackofficeCredentialRecord[];
   callbackLog: CallbackLogRecord[];
   deviceRuntime: Array<[string, DeviceRuntimeState]>;
 }
@@ -177,6 +191,9 @@ export const createSeededPersistedState = (): PersistedStoreState => {
     sessions: [],
     draftSessions: [],
     adminCredentials: [],
+    backofficeCredentials: [],
+    paymentOrders: [],
+    paymentRefunds: [],
     callbackLog: [],
     deviceRuntime: seed.devices.map((device) => [
       device.deviceCode,
@@ -222,12 +239,15 @@ export const createEmptyPersistedState = (): PersistedStoreState => ({
   stocktakes: [],
   events: [],
   inventory: [],
+  paymentOrders: [],
+  paymentRefunds: [],
   alerts: [],
   logs: [],
   verificationCodes: [],
   sessions: [],
   draftSessions: [],
   adminCredentials: [],
+  backofficeCredentials: [],
   callbackLog: [],
   deviceRuntime: []
 });
@@ -255,12 +275,15 @@ const normalizePersistedState = (raw: Partial<PersistedStoreState>): PersistedSt
     stocktakes: raw.stocktakes ?? seeded.stocktakes,
     events: raw.events ?? seeded.events,
     inventory: raw.inventory ?? seeded.inventory,
+    paymentOrders: raw.paymentOrders ?? seeded.paymentOrders,
+    paymentRefunds: raw.paymentRefunds ?? seeded.paymentRefunds,
     alerts: raw.alerts ?? seeded.alerts,
     logs: raw.logs ?? seeded.logs,
     verificationCodes: raw.verificationCodes ?? seeded.verificationCodes,
     sessions: raw.sessions ?? seeded.sessions,
     draftSessions: raw.draftSessions ?? seeded.draftSessions,
     adminCredentials: raw.adminCredentials ?? seeded.adminCredentials,
+    backofficeCredentials: raw.backofficeCredentials ?? seeded.backofficeCredentials,
     callbackLog: (raw.callbackLog ?? seeded.callbackLog).slice(0, MAX_PERSISTED_CALLBACK_LOGS),
     deviceRuntime: raw.deviceRuntime ?? seeded.deviceRuntime
   };

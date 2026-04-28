@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 
-import type { GoodsCategory } from "@vm/shared-types";
+import type { CabinetOpenRequest, CabinetPreSettlement, GoodsCategory } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -13,7 +13,6 @@ import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { getErrorMessage } from "../../utils/error-message";
-import { getReceivableLimit } from "../../utils/receivable-goods";
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
@@ -40,6 +39,7 @@ const goodsList = ref<Array<{
   expiresAt?: string;
 }>>([]);
 const selectedMap = reactive<Record<string, number>>({});
+const preSettlement = ref<CabinetPreSettlement>();
 
 uiPreferencesStore.hydrate();
 
@@ -62,6 +62,36 @@ const selectedTotal = computed(() =>
   selectedItems.value.reduce((total, item) => total + item.quantity, 0)
 );
 
+const selectedGoodsDetails = computed(() =>
+  selectedItems.value.map((item) => {
+    const goods = goodsList.value.find((entry) => entry.goodsId === item.goodsId);
+    const freeQuantity = Math.min(item.quantity, Math.max(0, getRemaining(item.goodsId)));
+    const paidQuantity = Math.max(0, item.quantity - freeQuantity);
+    const unitPrice = goods?.price ?? 0;
+
+    return {
+      ...item,
+      stock: goods?.stock ?? 0,
+      unitPrice,
+      freeQuantity,
+      paidQuantity,
+      paidAmount: paidQuantity * unitPrice
+    };
+  })
+);
+
+const selectedFreeTotal = computed(() =>
+  selectedGoodsDetails.value.reduce((total, item) => total + item.freeQuantity, 0)
+);
+
+const selectedPaidTotal = computed(() =>
+  selectedGoodsDetails.value.reduce((total, item) => total + item.paidQuantity, 0)
+);
+
+const estimatedPayableAmount = computed(() =>
+  selectedGoodsDetails.value.reduce((total, item) => total + item.paidAmount, 0)
+);
+
 const availableGoodsCount = computed(() =>
   goodsList.value.filter((item) => (item.stock ?? 0) > 0).length
 );
@@ -78,7 +108,7 @@ const distanceBanner = computed(() => {
     return {
       tone: "success",
       title: "已通过扫码识别柜机",
-      lines: ["当前默认你已经站在柜机旁，可直接确认可领取货品后开柜。"]
+      lines: ["当前默认你已经站在柜机旁，可直接确认货品和预结算后开柜。"]
     };
   }
 
@@ -99,7 +129,7 @@ const distanceBanner = computed(() => {
       title: "已确认你就在柜机附近",
       lines: [
         `当前检测距离约 ${formatDistance(manualDistanceMeters.value)}，可以继续选择货品。`,
-        "本页只展示你今天仍可领取且柜内有库存的货品。"
+        "本页展示柜内有库存的货品，超出免费额度的部分会按商品价格计费。"
       ]
     };
   }
@@ -107,7 +137,7 @@ const distanceBanner = computed(() => {
   return {
     tone: "warning",
     title: "暂未确认你与柜机的相对距离",
-    lines: ["如果不是扫码进入，建议站到柜机旁后再继续操作。", "本页只展示你今天仍可领取且柜内有库存的货品。"]
+    lines: ["如果不是扫码进入，建议站到柜机旁后再继续操作。", "超出免费额度的部分会按商品价格计费。"]
   };
 });
 
@@ -141,9 +171,7 @@ const load = async () => {
     deviceLongitude.value = device.longitude;
     deviceLatitude.value = device.latitude;
     sessionStore.setQuota(quota);
-    goodsList.value = goods.filter(
-      (item) => getReceivableLimit(quota, item.goodsId) > 0 && (item.stock ?? 0) > 0
-    );
+    goodsList.value = goods.filter((item) => (item.stock ?? 0) > 0);
     for (const key of Object.keys(selectedMap)) {
       delete selectedMap[key];
     }
@@ -234,40 +262,44 @@ const inspectRelativeDistance = async (device: {
   }
 };
 
-const getRemaining = (goodsId: string) => sessionStore.quota?.remainingByGoods?.[goodsId] ?? 0;
+function getRemaining(goodsId: string) {
+  return sessionStore.quota?.remainingByGoods?.[goodsId] ?? 0;
+}
 
 const updateSelected = (goodsId: string, delta: number) => {
   const current = selectedMap[goodsId] ?? 0;
-  const max = Math.max(0, getRemaining(goodsId));
+  const goods = goodsList.value.find((item) => item.goodsId === goodsId);
+  const max = Math.max(0, goods?.stock ?? 0);
   const next = Math.min(max, Math.max(0, current + delta));
+  preSettlement.value = undefined;
   selectedMap[goodsId] = next;
 };
 
-const performOpen = async () => {
+const buildOpenPayload = (): CabinetOpenRequest | undefined => {
   if (!sessionStore.user || !selectedItems.value.length) {
-    uni.showModal({
-      title: "请选择商品",
-      content: "正式开柜前需要先选择本次计划领取的商品。",
-      showCancel: false
-    });
-    return;
+    return undefined;
   }
 
+  return {
+    phone: sessionStore.user.phone,
+    deviceCode: deviceCode.value,
+    doorNum: "1",
+    category: selectedItems.value[0]?.category,
+    openMode: scanMode.value ? "scan" : "manual",
+    intentItems: selectedItems.value.map((item) => ({
+      goodsId: item.goodsId,
+      goodsName: item.goodsName,
+      quantity: item.quantity,
+      category: item.category
+    }))
+  };
+};
+
+const performOpen = async (payload: CabinetOpenRequest) => {
   submitting.value = true;
   try {
-    const response = await mobileApi.openCabinet({
-      phone: sessionStore.user.phone,
-      deviceCode: deviceCode.value,
-      doorNum: "1",
-      category: selectedItems.value[0]?.category,
-      openMode: scanMode.value ? "scan" : "manual",
-      intentItems: selectedItems.value.map((item) => ({
-        goodsId: item.goodsId,
-        goodsName: item.goodsName,
-        quantity: item.quantity,
-        category: item.category
-      }))
-    });
+    const response = await mobileApi.openCabinet(payload);
+    preSettlement.value = response.preSettlement;
 
     if (response.remainingQuota) {
       sessionStore.setQuota({
@@ -288,7 +320,33 @@ const performOpen = async () => {
   }
 };
 
-const submit = () => {
+const formatPreSettlementContent = (settlement: CabinetPreSettlement) => {
+  const lines = settlement.items.map((item) => {
+    return `${item.goodsName} x${item.quantity}：${formatSettlementBreakdown(item)}`;
+  });
+
+  return [
+    settlement.summary,
+    ...lines,
+    settlement.chargeRequired
+      ? "柜门关闭后，若实际拿取与选择一致，将按以上预结算金额支付。"
+      : "柜门关闭后，若实际拿取与选择一致，本次无需支付。"
+  ].join("\n");
+};
+
+const openNoticeText = () => {
+  if (scanMode.value) {
+    return "当前通过扫码识别柜机，请取货后及时关门。";
+  }
+
+  if (manualDistanceState.value === "far") {
+    return `当前检测你距离柜机约 ${formatDistance(manualDistanceMeters.value)}，请确认不是误点其他柜机。`;
+  }
+
+  return "请确认你已经在柜机旁，并准备好立即取货和及时关门。";
+};
+
+const submit = async () => {
   if (!selectedItems.value.length) {
     uni.showModal({
       title: "请选择商品",
@@ -298,19 +356,51 @@ const submit = () => {
     return;
   }
 
-  uni.showModal({
-    title: scanMode.value ? "确认扫码开柜" : "确认手动开柜",
-    content: scanMode.value
-      ? `即将按扫码流程开柜，已选择：${selectedSummary.value}。柜门关闭后会按平台实际识别结果结算。`
-      : `${manualDistanceState.value === "far" ? `当前检测你距离柜机约 ${formatDistance(manualDistanceMeters.value)}，请先确认不是误点了其他柜机。` : "请确认你已经在柜机旁，并准备好立即取货和及时关门。"}已选择：${selectedSummary.value}。`,
-    confirmText: scanMode.value ? "确认开柜" : "继续开柜",
-    success: ({ confirm }) => {
-      if (confirm) {
-        void performOpen();
-      }
+  const payload = buildOpenPayload();
+
+  if (!payload) {
+    return;
+  }
+
+  submitting.value = true;
+  try {
+    const preview = await mobileApi.previewOpenSettlement(payload);
+    const settlement = preview.preSettlement;
+    preSettlement.value = settlement;
+    submitting.value = false;
+
+    if (!settlement) {
+      await performOpen(payload);
+      return;
     }
-  });
+
+    uni.showModal({
+      title: settlement.chargeRequired ? "确认预结算" : "确认免费领取",
+      content: `${openNoticeText()}\n${formatPreSettlementContent(settlement)}`,
+      confirmText: "确认开柜",
+      success: ({ confirm }) => {
+        if (confirm) {
+          void performOpen(payload);
+        }
+      }
+    });
+  } catch (error) {
+    submitting.value = false;
+    uni.showToast({
+      title: getErrorMessage(error),
+      icon: "none"
+    });
+  }
 };
+
+const formatSettlementBreakdown = (item: {
+  freeQuantity: number;
+  paidQuantity: number;
+  paidAmount: number;
+}) =>
+  `免费 ${item.freeQuantity} 件 · 付费 ${item.paidQuantity} 件${
+    item.paidQuantity > 0 ? ` · ${formatCurrency(item.paidAmount)}` : ""
+  }`;
 
 const goFeedback = () => {
   uni.navigateTo({
@@ -343,6 +433,8 @@ const openNavigation = () => {
     }
   });
 };
+
+const formatCurrency = (amount: number) => `￥${(amount / 100).toFixed(2)}`;
 
 const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters === undefined) {
@@ -378,7 +470,7 @@ onLoad((query) => {
 
         <view v-if="!accessibilityEnabled" class="overview-grid">
           <ServiceMetric label="已选种类" :value="selectedItems.length" hint="已加入本次计划的货品种类" tone="accent" />
-          <ServiceMetric label="已选件数" :value="selectedTotal" hint="会按你的实时资格限制上限" />
+          <ServiceMetric label="已选件数" :value="selectedTotal" :hint="`免费 ${selectedFreeTotal} 件，付费 ${selectedPaidTotal} 件`" />
           <ServiceMetric label="可选货品" :value="availableGoodsCount" hint="当前柜机仍有库存的货品种类" />
         </view>
 
@@ -386,7 +478,24 @@ onLoad((query) => {
           <text class="selection-banner__label">{{ scanMode ? "扫码模式" : "手动模式" }}</text>
           <text class="selection-banner__value">{{ selectedSummary || "暂未选择货品" }}</text>
           <text class="selection-banner__hint">{{ openGuideText }}</text>
-          <text class="selection-banner__hint">正式结算仍以柜门关闭后的平台识别结果为准。</text>
+          <text class="selection-banner__hint">
+            {{ estimatedPayableAmount > 0 ? `当前预估需支付 ${formatCurrency(estimatedPayableAmount)}` : "当前选择预计免费" }}，正式结算仍以柜门关闭后的平台识别结果为准。
+          </text>
+        </view>
+
+        <view v-if="selectedGoodsDetails.length && !accessibilityEnabled" class="settlement-preview">
+          <view class="settlement-preview__head">
+            <text class="settlement-preview__title">预结算明细</text>
+            <text class="settlement-preview__amount">
+              {{ estimatedPayableAmount > 0 ? formatCurrency(estimatedPayableAmount) : "免费" }}
+            </text>
+          </view>
+          <view v-for="item in selectedGoodsDetails" :key="item.goodsId" class="settlement-row">
+            <text class="settlement-row__name">{{ item.goodsName }} x{{ item.quantity }}</text>
+            <text class="settlement-row__meta">
+              {{ formatSettlementBreakdown(item) }}
+            </text>
+          </view>
         </view>
 
         <view v-if="!accessibilityEnabled" class="distance-banner" :class="`distance-banner--${distanceBanner.tone}`">
@@ -401,8 +510,8 @@ onLoad((query) => {
               <text class="goods-item__meta">
                 {{
                   accessibilityEnabled
-                    ? `今日可领 ${getRemaining(goods.goodsId)} 件`
-                    : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 可领 ${getRemaining(goods.goodsId)} 件`
+                    ? `今日免费额度 ${getRemaining(goods.goodsId)} 件，超出按价计费`
+                    : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 免费 ${getRemaining(goods.goodsId)} 件 · 超出 ${formatCurrency(goods.price)}/件`
                 }}
               </text>
               <text v-if="!accessibilityEnabled && goods.expiresAt" class="goods-item__hint">
@@ -418,8 +527,8 @@ onLoad((query) => {
         </view>
         <EmptyState
           v-else
-          :title="loading ? '正在加载货品信息' : '当前没有你今天可领取的货品'"
-          :description="loading ? '请稍候，系统正在同步柜机商品列表。' : accessibilityEnabled ? '' : '本页只展示你今天仍可领取且柜内有库存的货品。'"
+          :title="loading ? '正在加载货品信息' : '当前柜机暂无可选货品'"
+          :description="loading ? '请稍候，系统正在同步柜机商品列表。' : accessibilityEnabled ? '' : '柜内有库存的货品会在这里展示，超出免费额度的部分会按商品价格计费。'"
         />
 
         <view class="action-stack">
@@ -454,7 +563,8 @@ onLoad((query) => {
 .goods-item__meta,
 .goods-item__hint,
 .selection-banner__hint,
-.distance-banner__body {
+.distance-banner__body,
+.settlement-row__meta {
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.6;
@@ -463,13 +573,15 @@ onLoad((query) => {
 .overview-grid,
 .goods-list,
 .action-stack,
-.distance-banner {
+.distance-banner,
+.settlement-preview {
   display: grid;
   gap: 16rpx;
 }
 
 .selection-banner,
-.goods-item {
+.goods-item,
+.settlement-preview {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -482,6 +594,46 @@ onLoad((query) => {
 
 .selection-banner {
   display: grid;
+}
+
+.settlement-preview {
+  display: grid;
+  align-items: stretch;
+}
+
+.settlement-preview__head,
+.settlement-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.settlement-preview__title,
+.settlement-row__name {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.settlement-preview__amount {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-accent-strong);
+}
+
+.settlement-row {
+  padding-top: 14rpx;
+  border-top: 1rpx solid var(--vm-line);
+}
+
+.settlement-row__name,
+.settlement-row__meta {
+  min-width: 0;
+}
+
+.settlement-row__meta {
+  text-align: right;
 }
 
 .selection-banner__label {

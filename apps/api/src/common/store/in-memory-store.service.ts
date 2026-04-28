@@ -4,6 +4,7 @@ import {
   cloneSeedState,
   type BatchConsumptionTrace,
   type AlertTask,
+  type BackofficeRole,
   type CabinetAccessRule,
   type CabinetEventRecord,
   type CallbackLogRecord,
@@ -21,6 +22,8 @@ import {
   type InventoryMovement,
   type MerchantGoodsTemplate,
   type OperationLogRecord,
+  type PaymentOrderRecord,
+  type PaymentRefundRecord,
   type RegionRecord,
   type RegistrationApplication,
   type SpecialAccessPolicy,
@@ -36,6 +39,7 @@ import {
   createSeededPersistedState,
   readPersistedState,
   type AdminCredentialRecord,
+  type BackofficeCredentialRecord,
   type DraftSessionRecord,
   type PersistedStoreState,
   type SessionRecord,
@@ -82,6 +86,8 @@ export class InMemoryStoreService {
   readonly stocktakes: StocktakeRecord[] = this.seed.stocktakes;
   readonly events: CabinetEventRecord[] = this.seed.events;
   readonly inventory: InventoryMovement[] = this.seed.inventory;
+  readonly paymentOrders: PaymentOrderRecord[] = [];
+  readonly paymentRefunds: PaymentRefundRecord[] = [];
   readonly alerts: AlertTask[] = this.seed.alerts;
   readonly logs: OperationLogRecord[] = this.seed.logs.map((entry) => this.decorateStoredLog(entry));
 
@@ -89,6 +95,7 @@ export class InMemoryStoreService {
   readonly sessions = new Map<string, SessionRecord>();
   readonly draftSessions = new Map<string, DraftSessionRecord>();
   readonly adminCredentials: AdminCredentialRecord[] = [];
+  readonly backofficeCredentials: BackofficeCredentialRecord[] = [];
   readonly callbackLog: CallbackLogRecord[] = [];
   readonly deviceRuntime = new Map<string, DeviceRuntimeState>(
     this.seed.devices.map((device) => [
@@ -226,6 +233,18 @@ export class InMemoryStoreService {
     return token;
   }
 
+  createBackofficeSession(user: UserRecord, backofficeRole: BackofficeRole) {
+    const token = this.createId("session");
+    this.sessions.set(token, {
+      token,
+      userId: user.id,
+      role: user.role,
+      backofficeRole,
+      createdAt: new Date().toISOString()
+    });
+    return token;
+  }
+
   createDraftSession(payload: {
     phone: string;
     requestedRole?: UserRole;
@@ -260,6 +279,25 @@ export class InMemoryStoreService {
     }
 
     return this.users.find((entry) => entry.id === session.userId);
+  }
+
+  getBackofficeSessionUser(token?: string) {
+    const session = this.getSession(token);
+
+    if (!session?.backofficeRole) {
+      return undefined;
+    }
+
+    const user = this.users.find((entry) => entry.id === session.userId);
+
+    if (!user) {
+      return undefined;
+    }
+
+    return {
+      session,
+      user
+    };
   }
 
   getDraftSession(token?: string) {
@@ -302,6 +340,52 @@ export class InMemoryStoreService {
 
     this.adminCredentials.unshift(record);
     return record;
+  }
+
+  findBackofficeCredentialByUsername(username: string) {
+    const normalizedUsername = username.trim().toLowerCase();
+
+    if (!normalizedUsername) {
+      return undefined;
+    }
+
+    return this.backofficeCredentials.find((entry) => {
+      if (entry.username.trim().toLowerCase() !== normalizedUsername) {
+        return false;
+      }
+
+      return this.users.some((user) => this.isUserValidForBackofficeRole(user, entry.role));
+    });
+  }
+
+  findBackofficeCredentialByUserId(userId: string, role?: BackofficeRole) {
+    return this.backofficeCredentials.find(
+      (entry) => entry.userId === userId && (!role || entry.role === role)
+    );
+  }
+
+  upsertBackofficeCredential(record: BackofficeCredentialRecord) {
+    const existing = this.findBackofficeCredentialByUserId(record.userId, record.role);
+
+    if (existing) {
+      Object.assign(existing, record);
+      return existing;
+    }
+
+    this.backofficeCredentials.unshift(record);
+    return record;
+  }
+
+  isUserValidForBackofficeRole(user: UserRecord, role: BackofficeRole) {
+    if (user.status !== "active") {
+      return false;
+    }
+
+    if (role === "super_admin") {
+      return user.role === "admin";
+    }
+
+    return user.role === "merchant";
   }
 
   updateDraftSession(
@@ -1185,12 +1269,15 @@ export class InMemoryStoreService {
       stocktakes: structuredClone(this.stocktakes),
       events: structuredClone(this.events),
       inventory: structuredClone(this.inventory),
+      paymentOrders: structuredClone(this.paymentOrders),
+      paymentRefunds: structuredClone(this.paymentRefunds),
       alerts: structuredClone(this.alerts),
       logs: structuredClone(this.logs),
       verificationCodes: Array.from(this.verificationCodes.entries()).map(([key, value]) => [key, structuredClone(value)]),
       sessions: Array.from(this.sessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
       draftSessions: Array.from(this.draftSessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
       adminCredentials: structuredClone(this.adminCredentials),
+      backofficeCredentials: structuredClone(this.backofficeCredentials),
       callbackLog: structuredClone(this.callbackLog),
       deviceRuntime: Array.from(this.deviceRuntime.entries()).map(([key, value]) => [key, structuredClone(value)])
     };
@@ -1226,6 +1313,8 @@ export class InMemoryStoreService {
     this.replaceArray(this.stocktakes, state.stocktakes);
     this.replaceArray(this.events, state.events);
     this.replaceArray(this.inventory, state.inventory);
+    this.replaceArray(this.paymentOrders, state.paymentOrders);
+    this.replaceArray(this.paymentRefunds, state.paymentRefunds);
     this.replaceArray(this.alerts, state.alerts);
     this.replaceArray(
       this.logs,
@@ -1248,6 +1337,7 @@ export class InMemoryStoreService {
     }
 
     this.replaceArray(this.adminCredentials, state.adminCredentials);
+    this.replaceArray(this.backofficeCredentials, state.backofficeCredentials);
     this.replaceArray(this.callbackLog, state.callbackLog);
     this.deviceRuntime.clear();
     for (const [key, value] of state.deviceRuntime) {
@@ -1295,6 +1385,27 @@ export class InMemoryStoreService {
       this.adminCredentials.unshift({
         userId: adminUser.id,
         username: DEFAULT_SUPER_ADMIN_USERNAME,
+        passwordSalt: hashedPassword.salt,
+        passwordHash: hashedPassword.hash,
+        usesDefaultPassword: true,
+        passwordUpdatedAt: new Date().toISOString()
+      });
+      changed = true;
+    }
+
+    if (!this.findBackofficeCredentialByUserId(adminUser.id, "super_admin")) {
+      const existingAdminCredential = this.findAdminCredentialByUserId(adminUser.id);
+      const hashedPassword = existingAdminCredential
+        ? {
+            salt: existingAdminCredential.passwordSalt,
+            hash: existingAdminCredential.passwordHash
+          }
+        : hashAdminPassword(DEFAULT_SUPER_ADMIN_PASSWORD);
+
+      this.backofficeCredentials.unshift({
+        userId: adminUser.id,
+        username: DEFAULT_SUPER_ADMIN_USERNAME,
+        role: "super_admin",
         passwordSalt: hashedPassword.salt,
         passwordHash: hashedPassword.hash,
         usesDefaultPassword: true,

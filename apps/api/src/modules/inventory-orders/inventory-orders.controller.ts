@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Post, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type { SmartVmRefundPayload } from "@vm/shared-types";
 
@@ -16,18 +16,28 @@ export class InventoryOrdersController {
   ) {}
 
   @Get()
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin", "merchant", "special")
   list(
     @Query("userId") userId?: string,
-    @Query("role") role?: "special" | "merchant" | "admin"
+    @Query("role") role?: "special" | "merchant" | "admin",
+    @Req() request?: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
   ) {
-    return ok(this.inventoryOrdersService.list(userId, role));
+    const actor = request?.authUser;
+    const resolvedUserId = actor && actor.role !== "admin" ? actor.id : userId;
+    const resolvedRole = actor && actor.role !== "admin" ? actor.role : role;
+    return ok(this.inventoryOrdersService.list(resolvedUserId, resolvedRole));
   }
 
   @Get("merchant-summary")
   @UseGuards(RoleGuard)
   @AllowedRoles("merchant", "admin")
-  merchantSummary(@Query("userId") userId: string) {
-    return ok(this.inventoryOrdersService.getMerchantSummary(userId));
+  merchantSummary(
+    @Query("userId") userId: string,
+    @Req() request?: { authUser?: { id: string; role: "admin" | "merchant" } }
+  ) {
+    const actor = request?.authUser;
+    return ok(this.inventoryOrdersService.getMerchantSummary(actor?.role === "merchant" ? actor.id : userId));
   }
 
   @Post("callbacks/refund")
