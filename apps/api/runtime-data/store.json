@@ -686,14 +686,6 @@
       "sortOrder": 2,
       "createdAt": "2026-04-01T00:00:00.000Z",
       "updatedAt": "2026-04-01T00:00:00.000Z"
-    },
-    {
-      "id": "region-other",
-      "name": "其他",
-      "status": "active",
-      "sortOrder": 99,
-      "createdAt": "2026-04-01T00:00:00.000Z",
-      "updatedAt": "2026-04-01T00:00:00.000Z"
     }
   ],
   "warehouses": [
@@ -773,6 +765,21 @@
     }
   ],
   "registrationApplications": [
+    {
+      "id": "application-mpfgni0960u1e",
+      "phone": "13900000099",
+      "requestedRole": "special",
+      "profile": {
+        "note": "H5 视觉预览待审核样例",
+        "name": "待审用户",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道"
+      },
+      "status": "pending",
+      "createdAt": "2026-05-21T12:22:11.433Z",
+      "updatedAt": "2026-05-21T12:22:11.433Z"
+    },
     {
       "id": "application-1776014596357-3998",
       "phone": "13800000004",
@@ -1220,6 +1227,14 @@
       "expiresAt": "2026-04-09T08:00:00.000Z"
     }
   ],
+  "paymentOrders": [],
+  "paymentRefunds": [],
+  "reservations": [],
+  "reservationSettings": {
+    "enabled": true,
+    "holdMinutes": 60,
+    "maxTimeouts": 3
+  },
   "alerts": [
     {
       "id": "alert-1776063858584-812",
@@ -1231,9 +1246,12 @@
       "deviceCode": "91120149",
       "targetUserId": "admin-001",
       "dueAt": "2026-04-13T07:04:18.584Z",
-      "detail": "事件 91120149H260413141457H794746H103 超过 90 秒未收到成功开门确认。",
+      "detail": "用户 街道管理员；柜机 测试平台柜机 91120149；事件 91120149H260413141457H794746H103 超过 90 秒未收到成功开门确认。",
       "sourceLogId": "log-1776060895712-665",
-      "relatedEventId": "event-1776060895531-2276"
+      "relatedEventId": "event-1776060895531-2276",
+      "deviceName": "测试平台柜机 91120149",
+      "targetUserName": "街道管理员",
+      "previewDetail": "用户 街道管理员 · 柜机 测试平台柜机 91120149"
     },
     {
       "id": "alert-1776014578951-4567",
@@ -1246,7 +1264,10 @@
       "goodsId": "goods-1001",
       "goodsName": "三明治",
       "dueAt": "2026-04-12T17:22:58.951Z",
-      "detail": "扬名西点位 的 三明治 当前库存为 0，请尽快补货。"
+      "detail": "商品 三明治；柜机 扬名西点位；扬名西点位 的 三明治 当前库存为 0，请尽快补货。",
+      "deviceName": "扬名西点位",
+      "goodsSummary": "三明治",
+      "previewDetail": "商品 三明治 · 柜机 扬名西点位"
     },
     {
       "id": "alert-1776014298921-4785",
@@ -1259,7 +1280,10 @@
       "goodsId": "goods-1003",
       "goodsName": "方便面",
       "dueAt": "2026-04-12T17:18:18.921Z",
-      "detail": "扬名东点位 的 方便面 当前库存为 0，请尽快补货。"
+      "detail": "商品 方便面；柜机 扬名东点位；扬名东点位 的 方便面 当前库存为 0，请尽快补货。",
+      "deviceName": "扬名东点位",
+      "goodsSummary": "方便面",
+      "previewDetail": "商品 方便面 · 柜机 扬名东点位"
     },
     {
       "id": "alert-1776014296848-6626",
@@ -1272,7 +1296,10 @@
       "goodsId": "goods-1001",
       "goodsName": "三明治",
       "dueAt": "2026-04-12T17:18:16.848Z",
-      "detail": "扬名西点位 的 三明治 当前库存仅剩 2 件，低于阈值 2 件。"
+      "detail": "商品 三明治；柜机 扬名西点位；扬名西点位 的 三明治 当前库存仅剩 2 件，低于阈值 2 件。",
+      "deviceName": "扬名西点位",
+      "goodsSummary": "三明治",
+      "previewDetail": "商品 三明治 · 柜机 扬名西点位"
     },
     {
       "id": "alert-1776014294614-4016",
@@ -1285,7 +1312,10 @@
       "goodsId": "goods-1002",
       "goodsName": "牛奶",
       "dueAt": "2026-04-12T17:18:14.614Z",
-      "detail": "扬名西点位 的 牛奶 当前库存仅剩 1 件，低于阈值 1 件。"
+      "detail": "商品 牛奶；柜机 扬名西点位；扬名西点位 的 牛奶 当前库存仅剩 1 件，低于阈值 1 件。",
+      "deviceName": "扬名西点位",
+      "goodsSummary": "牛奶",
+      "previewDetail": "商品 牛奶 · 柜机 扬名西点位"
     },
     {
       "id": "alert-1776014292924-6845",
@@ -1298,10 +1328,13 @@
       "goodsId": "goods-1003",
       "goodsName": "方便面",
       "dueAt": "2026-04-12T17:18:12.924Z",
-      "detail": "扬名东点位 的 方便面 当前库存为 0，请尽快补货。",
+      "detail": "商品 方便面；柜机 扬名东点位；扬名东点位 的 方便面 当前库存为 0，请尽快补货。",
       "resolvedAt": "2026-04-12T17:18:18.914Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员手动完成"
+      "resolutionNote": "管理员手动完成",
+      "deviceName": "扬名东点位",
+      "goodsSummary": "方便面",
+      "previewDetail": "商品 方便面 · 柜机 扬名东点位"
     },
     {
       "id": "alert-1776002894269-4726",
@@ -1313,12 +1346,15 @@
       "deviceCode": "CAB-1002",
       "targetUserId": "admin-001",
       "dueAt": "2026-04-12T14:08:14.269Z",
-      "detail": "事件 ord-004 超过 90 秒未收到成功开门确认。",
+      "detail": "用户 街道管理员；柜机 扬名东点位；事件 ord-004 超过 90 秒未收到成功开门确认。",
       "sourceLogId": "log-004",
       "relatedEventId": "evt-004",
       "resolvedAt": "2026-04-12T17:18:11.240Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员已知晓并接手处理"
+      "resolutionNote": "管理员已知晓并接手处理",
+      "deviceName": "扬名东点位",
+      "targetUserName": "街道管理员",
+      "previewDetail": "用户 街道管理员 · 柜机 扬名东点位"
     },
     {
       "id": "alert-1776002894269-9688",
@@ -1331,10 +1367,13 @@
       "goodsId": "goods-1003",
       "goodsName": "方便面",
       "dueAt": "2026-04-12T14:08:14.269Z",
-      "detail": "扬名东点位 的 方便面 当前库存为 0，请尽快补货。",
+      "detail": "商品 方便面；柜机 扬名东点位；扬名东点位 的 方便面 当前库存为 0，请尽快补货。",
       "resolvedAt": "2026-04-12T17:18:12.913Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员手动完成"
+      "resolutionNote": "管理员手动完成",
+      "deviceName": "扬名东点位",
+      "goodsSummary": "方便面",
+      "previewDetail": "商品 方便面 · 柜机 扬名东点位"
     },
     {
       "id": "alert-1776002894269-3836",
@@ -1347,10 +1386,13 @@
       "goodsId": "goods-1002",
       "goodsName": "牛奶",
       "dueAt": "2026-04-12T14:08:14.269Z",
-      "detail": "扬名西点位 的 牛奶 当前库存仅剩 1 件，低于阈值 1 件。",
+      "detail": "商品 牛奶；柜机 扬名西点位；扬名西点位 的 牛奶 当前库存仅剩 1 件，低于阈值 1 件。",
       "resolvedAt": "2026-04-12T17:18:14.608Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员手动完成"
+      "resolutionNote": "管理员手动完成",
+      "deviceName": "扬名西点位",
+      "goodsSummary": "牛奶",
+      "previewDetail": "商品 牛奶 · 柜机 扬名西点位"
     },
     {
       "id": "alert-1776002894269-8691",
@@ -1363,10 +1405,13 @@
       "goodsId": "goods-1001",
       "goodsName": "三明治",
       "dueAt": "2026-04-12T14:08:14.269Z",
-      "detail": "扬名西点位 的 三明治 当前库存仅剩 2 件，低于阈值 2 件。",
+      "detail": "商品 三明治；柜机 扬名西点位；扬名西点位 的 三明治 当前库存仅剩 2 件，低于阈值 2 件。",
       "resolvedAt": "2026-04-12T17:18:16.835Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员手动完成"
+      "resolutionNote": "管理员手动完成",
+      "deviceName": "扬名西点位",
+      "goodsSummary": "三明治",
+      "previewDetail": "商品 三明治 · 柜机 扬名西点位"
     },
     {
       "id": "task-001",
@@ -1380,10 +1425,14 @@
       "goodsName": "三明治",
       "dueAt": "2026-04-09T06:00:00.000Z",
       "createdAt": "2026-04-08T02:40:00.000Z",
-      "detail": "三明治批次即将到期，请在领取期限结束前处理。",
+      "detail": "用户 王店长；商品 三明治；柜机 扬名西点位；三明治批次即将到期，请在领取期限结束前处理。",
       "resolvedAt": "2026-04-12T17:18:09.011Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员手动完成"
+      "resolutionNote": "管理员手动完成",
+      "deviceName": "扬名西点位",
+      "targetUserName": "王店长",
+      "goodsSummary": "三明治",
+      "previewDetail": "用户 王店长 · 商品 三明治 · 柜机 扬名西点位"
     },
     {
       "id": "task-002",
@@ -1394,12 +1443,16 @@
       "deviceCode": "CAB-1002",
       "dueAt": "2026-04-08T02:02:00.000Z",
       "createdAt": "2026-04-08T02:01:30.000Z",
-      "detail": "远程开门后超过 90 秒未收到成功开门确认。",
+      "detail": "用户 街道管理员；柜机 扬名东点位；远程开门后超过 90 秒未收到成功开门确认。",
       "relatedEventId": "evt-004",
       "sourceLogId": "log-004",
       "resolvedAt": "2026-04-12T17:18:04.628Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员已知晓并接手处理"
+      "resolutionNote": "管理员已知晓并接手处理",
+      "targetUserId": "admin-001",
+      "deviceName": "扬名东点位",
+      "targetUserName": "街道管理员",
+      "previewDetail": "用户 街道管理员 · 柜机 扬名东点位"
     },
     {
       "id": "task-003",
@@ -1411,10 +1464,13 @@
       "targetUserId": "special-002",
       "dueAt": "2026-04-08T03:20:00.000Z",
       "createdAt": "2026-04-08T02:50:00.000Z",
-      "detail": "陈师傅反馈 CAB-1001 关门速度较慢，需要现场检查闭门器。",
+      "detail": "用户 陈师傅；柜机 扬名西点位；陈师傅反馈 CAB-1001 关门速度较慢，需要现场检查闭门器。",
       "resolvedAt": "2026-04-12T17:18:07.494Z",
       "resolvedByUserId": "admin-001",
-      "resolutionNote": "管理员手动完成"
+      "resolutionNote": "管理员手动完成",
+      "deviceName": "扬名西点位",
+      "targetUserName": "陈师傅",
+      "previewDetail": "用户 陈师傅 · 柜机 扬名西点位"
     }
   ],
   "logs": [
@@ -1443,7 +1499,8 @@
         "dueAt": "2026-04-13T07:04:18.584Z",
         "deviceCode": "91120149",
         "grade": "fault",
-        "relatedEventId": "event-1776060895531-2276"
+        "relatedEventId": "event-1776060895531-2276",
+        "deviceName": "测试平台柜机 91120149"
       },
       "description": "系统为测试平台柜机 91120149创建了测试平台柜机 91120149超时未开门。",
       "detail": "柜机 测试平台柜机 91120149；预警 测试平台柜机 91120149超时未开门；状态 需关注"
@@ -1475,7 +1532,9 @@
         "deviceCode": "91120149",
         "goodsId": "goods-1001",
         "goodsName": "三明治",
-        "doorNum": "1"
+        "doorNum": "1",
+        "deviceName": "测试平台柜机 91120149",
+        "goodsSummary": "三明治"
       },
       "description": "管理员街道管理员从测试平台柜机 91120149移除了货品三明治。",
       "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；货品 三明治；货门 1；状态 已完成"
@@ -1501,7 +1560,8 @@
       "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；状态 已完成",
       "metadata": {
         "undoState": "not_undoable",
-        "deviceCode": "91120149"
+        "deviceCode": "91120149",
+        "deviceName": "测试平台柜机 91120149"
       }
     },
     {
@@ -1527,13 +1587,18 @@
         "label": "91120149H260413141457H794746H103"
       },
       "description": "管理员街道管理员向测试平台柜机 91120149下发了远程开门指令。",
-      "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；关联事件 91120149H260413141457H794746H103；状态 待处理",
+      "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；关联人员 街道管理员；关联单据 91120149H260413141457H794746H103；状态 待处理",
       "relatedEventId": "event-1776060895531-2276",
       "relatedOrderNo": "91120149H260413141457H794746H103",
       "metadata": {
         "undoState": "not_undoable",
         "deviceCode": "91120149",
-        "doorNum": "1"
+        "doorNum": "1",
+        "deviceName": "测试平台柜机 91120149",
+        "targetUserId": "admin-001",
+        "targetUserName": "街道管理员",
+        "relatedEventId": "event-1776060895531-2276",
+        "relatedOrderNo": "91120149H260413141457H794746H103"
       }
     },
     {
@@ -1557,7 +1622,8 @@
       "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；状态 已完成",
       "metadata": {
         "undoState": "not_undoable",
-        "deviceCode": "91120149"
+        "deviceCode": "91120149",
+        "deviceName": "测试平台柜机 91120149"
       }
     },
     {
@@ -1580,7 +1646,8 @@
       "metadata": {
         "undoState": "not_undoable",
         "deviceCode": "91120149",
-        "count": 8
+        "count": 8,
+        "deviceName": "测试平台柜机 91120149"
       },
       "description": "管理员街道管理员同步了测试平台柜机 91120149的货品种类。",
       "detail": "动作人 管理员街道管理员；柜机 测试平台柜机 91120149；同步种类 8；状态 已完成"
@@ -1605,7 +1672,9 @@
       "metadata": {
         "undoState": "not_undoable",
         "policyId": "user-policy-1776048687351-1061",
-        "policyName": "牛奶 周一、周二、周三、周四、周五 08:00-12:00"
+        "policyName": "牛奶 周一、周二、周三、周四、周五 08:00-12:00",
+        "targetUserId": "special-001",
+        "targetUserName": "林阿姨"
       },
       "description": "管理员街道管理员修改了林阿姨的个人取货设定 牛奶 周一、周二、周三、周四、周五 08:00-12:00。",
       "detail": "动作人 管理员街道管理员；人员 林阿姨；设定 牛奶 周一、周二、周三、周四、周五 08:00-12:00；状态 已完成"
@@ -1655,7 +1724,9 @@
       "metadata": {
         "undoState": "not_undoable",
         "policyId": "user-policy-1776043275862-951",
-        "policyName": "123"
+        "policyName": "123",
+        "targetUserId": "special-001",
+        "targetUserName": "林阿姨"
       },
       "description": "管理员街道管理员修改了林阿姨的个人取货设定 123。",
       "detail": "动作人 管理员街道管理员；人员 林阿姨；设定 123；状态 已完成"
@@ -1733,7 +1804,9 @@
             ]
           },
           "neighborhood": "扬名街道"
-        }
+        },
+        "targetUserId": "merchant-001",
+        "targetUserName": "王店长"
       },
       "description": "管理员街道管理员修改了王店长的基础信息。",
       "detail": "动作人 管理员街道管理员；人员 王店长；状态 已完成"
@@ -1759,7 +1832,9 @@
         "undoState": "not_undoable",
         "phone": "13800000004",
         "requestedRole": "merchant",
-        "applicationId": "application-1776014596357-3998"
+        "applicationId": "application-1776014596357-3998",
+        "targetUserId": "merchant-001",
+        "targetUserName": "王店长"
       }
     },
     {
@@ -1788,10 +1863,12 @@
         "deviceCode": "CAB-1001",
         "goodsId": "goods-1001",
         "goodsName": "三明治",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名西点位",
+        "goodsSummary": "三明治"
       },
       "description": "系统为扬名西点位创建了柜机缺货提醒。",
-      "detail": "柜机 扬名西点位；预警 柜机缺货提醒；状态 需关注"
+      "detail": "柜机 扬名西点位；相关商品 三明治；预警 柜机缺货提醒；状态 需关注"
     },
     {
       "id": "log-1776014446126-2990",
@@ -1822,10 +1899,12 @@
         "deviceCode": "CAB-1001",
         "quantity": 2,
         "batchId": "batch-001",
-        "note": "过保质期"
+        "note": "过保质期",
+        "deviceName": "扬名西点位",
+        "goodsSummary": "三明治"
       },
-      "description": "管理员街道管理员从扬名西点位去除了三明治批次 x2。",
-      "detail": "动作人 管理员街道管理员；柜机 扬名西点位；货品 三明治；数量 2；说明 过保质期；状态 已完成"
+      "description": "管理员街道管理员从扬名西点位去除了三明治批次 x2（仅本地，未同步平台）。",
+      "detail": "动作人 管理员街道管理员；柜机 扬名西点位；货品 三明治；数量 2；说明 过保质期；同步范围 仅本地，未同步平台；状态 已完成"
     },
     {
       "id": "log-1776014298921-6758",
@@ -1853,10 +1932,12 @@
         "deviceCode": "CAB-1002",
         "goodsId": "goods-1003",
         "goodsName": "方便面",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名东点位",
+        "goodsSummary": "方便面"
       },
       "description": "系统为扬名东点位创建了柜机缺货提醒。",
-      "detail": "柜机 扬名东点位；预警 柜机缺货提醒；状态 需关注"
+      "detail": "柜机 扬名东点位；相关商品 方便面；预警 柜机缺货提醒；状态 需关注"
     },
     {
       "id": "log-1776014298914-5759",
@@ -1884,7 +1965,9 @@
         "undoState": "not_undoable",
         "note": "管理员手动完成",
         "grade": "warning",
-        "action": "resolve"
+        "action": "resolve",
+        "deviceCode": "CAB-1002",
+        "deviceName": "扬名东点位"
       },
       "description": "管理员街道管理员完成了柜机缺货提醒的处理。",
       "detail": "动作人 管理员街道管理员；柜机 扬名东点位；预警 柜机缺货提醒；处理说明 管理员手动完成；状态 已完成"
@@ -1915,10 +1998,12 @@
         "deviceCode": "CAB-1001",
         "goodsId": "goods-1001",
         "goodsName": "三明治",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名西点位",
+        "goodsSummary": "三明治"
       },
       "description": "系统为扬名西点位创建了柜机低库存提醒。",
-      "detail": "柜机 扬名西点位；预警 柜机低库存提醒；状态 需关注"
+      "detail": "柜机 扬名西点位；相关商品 三明治；预警 柜机低库存提醒；状态 需关注"
     },
     {
       "id": "log-1776014296835-787",
@@ -1946,7 +2031,9 @@
         "undoState": "not_undoable",
         "note": "管理员手动完成",
         "grade": "warning",
-        "action": "resolve"
+        "action": "resolve",
+        "deviceCode": "CAB-1001",
+        "deviceName": "扬名西点位"
       },
       "description": "管理员街道管理员完成了柜机低库存提醒的处理。",
       "detail": "动作人 管理员街道管理员；柜机 扬名西点位；预警 柜机低库存提醒；处理说明 管理员手动完成；状态 已完成"
@@ -1977,10 +2064,12 @@
         "deviceCode": "CAB-1001",
         "goodsId": "goods-1002",
         "goodsName": "牛奶",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名西点位",
+        "goodsSummary": "牛奶"
       },
       "description": "系统为扬名西点位创建了柜机低库存提醒。",
-      "detail": "柜机 扬名西点位；预警 柜机低库存提醒；状态 需关注"
+      "detail": "柜机 扬名西点位；相关商品 牛奶；预警 柜机低库存提醒；状态 需关注"
     },
     {
       "id": "log-1776014294608-4441",
@@ -2008,7 +2097,9 @@
         "undoState": "not_undoable",
         "note": "管理员手动完成",
         "grade": "warning",
-        "action": "resolve"
+        "action": "resolve",
+        "deviceCode": "CAB-1001",
+        "deviceName": "扬名西点位"
       },
       "description": "管理员街道管理员完成了柜机低库存提醒的处理。",
       "detail": "动作人 管理员街道管理员；柜机 扬名西点位；预警 柜机低库存提醒；处理说明 管理员手动完成；状态 已完成"
@@ -2039,10 +2130,12 @@
         "deviceCode": "CAB-1002",
         "goodsId": "goods-1003",
         "goodsName": "方便面",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名东点位",
+        "goodsSummary": "方便面"
       },
       "description": "系统为扬名东点位创建了柜机缺货提醒。",
-      "detail": "柜机 扬名东点位；预警 柜机缺货提醒；状态 需关注"
+      "detail": "柜机 扬名东点位；相关商品 方便面；预警 柜机缺货提醒；状态 需关注"
     },
     {
       "id": "log-1776014292913-8398",
@@ -2070,7 +2163,9 @@
         "undoState": "not_undoable",
         "note": "管理员手动完成",
         "grade": "warning",
-        "action": "resolve"
+        "action": "resolve",
+        "deviceCode": "CAB-1002",
+        "deviceName": "扬名东点位"
       },
       "description": "管理员街道管理员完成了柜机缺货提醒的处理。",
       "detail": "动作人 管理员街道管理员；柜机 扬名东点位；预警 柜机缺货提醒；处理说明 管理员手动完成；状态 已完成"
@@ -2101,7 +2196,9 @@
         "undoState": "not_undoable",
         "note": "管理员已知晓并接手处理",
         "grade": "fault",
-        "action": "acknowledge"
+        "action": "acknowledge",
+        "deviceCode": "CAB-1002",
+        "deviceName": "扬名东点位"
       },
       "description": "管理员街道管理员已知晓扬名东点位超时未开门。",
       "detail": "动作人 管理员街道管理员；柜机 扬名东点位；预警 扬名东点位超时未开门；处理说明 管理员已知晓并接手处理；状态 已完成"
@@ -2132,7 +2229,9 @@
         "undoState": "not_undoable",
         "note": "管理员手动完成",
         "grade": "warning",
-        "action": "resolve"
+        "action": "resolve",
+        "deviceCode": "CAB-1001",
+        "deviceName": "扬名西点位"
       },
       "description": "管理员街道管理员完成了物资即将过期的处理。",
       "detail": "动作人 管理员街道管理员；柜机 扬名西点位；预警 物资即将过期；处理说明 管理员手动完成；状态 已完成"
@@ -2163,7 +2262,9 @@
         "undoState": "not_undoable",
         "note": "管理员手动完成",
         "grade": "feedback",
-        "action": "resolve"
+        "action": "resolve",
+        "deviceCode": "CAB-1001",
+        "deviceName": "扬名西点位"
       },
       "description": "管理员街道管理员完成了用户反馈柜门关闭缓慢的处理。",
       "detail": "动作人 管理员街道管理员；柜机 扬名西点位；预警 用户反馈柜门关闭缓慢；处理说明 管理员手动完成；状态 已完成"
@@ -2194,7 +2295,9 @@
         "undoState": "not_undoable",
         "note": "管理员已知晓并接手处理",
         "grade": "fault",
-        "action": "acknowledge"
+        "action": "acknowledge",
+        "deviceCode": "CAB-1002",
+        "deviceName": "扬名东点位"
       },
       "description": "管理员街道管理员已知晓柜机开门无响应。",
       "detail": "动作人 管理员街道管理员；柜机 扬名东点位；预警 柜机开门无响应；处理说明 管理员已知晓并接手处理；状态 已完成"
@@ -2219,7 +2322,9 @@
       "metadata": {
         "undoState": "not_undoable",
         "policyId": "user-policy-1776012956707-2159",
-        "policyName": "123"
+        "policyName": "123",
+        "targetUserId": "special-001",
+        "targetUserName": "林阿姨"
       },
       "description": "管理员街道管理员为林阿姨新增了个人取货设定 123。",
       "detail": "动作人 管理员街道管理员；人员 林阿姨；设定 123；状态 已完成"
@@ -2244,7 +2349,9 @@
       "metadata": {
         "undoState": "not_undoable",
         "policyId": "user-policy-1776012950239-866",
-        "policyName": "233"
+        "policyName": "233",
+        "targetUserId": "special-001",
+        "targetUserName": "林阿姨"
       },
       "description": "管理员街道管理员为林阿姨新增了个人取货设定 233。",
       "detail": "动作人 管理员街道管理员；人员 林阿姨；设定 233；状态 已完成"
@@ -2297,7 +2404,9 @@
         "undoState": "not_undoable",
         "applicationId": "application-001",
         "phone": "13800000006",
-        "requestedRole": "merchant"
+        "requestedRole": "merchant",
+        "targetUserId": "merchant-1776008894951-9353",
+        "targetUserName": "社区烘焙坊"
       }
     },
     {
@@ -2321,7 +2430,9 @@
         "undoState": "not_undoable",
         "phone": "13800000001",
         "requestedRole": "admin",
-        "applicationId": "application-1776008890039-321"
+        "applicationId": "application-1776008890039-321",
+        "targetUserId": "admin-001",
+        "targetUserName": "街道管理员"
       }
     },
     {
@@ -2345,7 +2456,9 @@
         "undoState": "not_undoable",
         "phone": "13800000002",
         "requestedRole": "special",
-        "applicationId": "application-1776003087015-9685"
+        "applicationId": "application-1776003087015-9685",
+        "targetUserId": "special-001",
+        "targetUserName": "林阿姨"
       }
     },
     {
@@ -2373,7 +2486,8 @@
         "dueAt": "2026-04-12T14:08:14.269Z",
         "deviceCode": "CAB-1002",
         "grade": "fault",
-        "relatedEventId": "evt-004"
+        "relatedEventId": "evt-004",
+        "deviceName": "扬名东点位"
       },
       "description": "系统为扬名东点位创建了扬名东点位超时未开门。",
       "detail": "柜机 扬名东点位；预警 扬名东点位超时未开门；状态 需关注"
@@ -2404,10 +2518,12 @@
         "deviceCode": "CAB-1002",
         "goodsId": "goods-1003",
         "goodsName": "方便面",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名东点位",
+        "goodsSummary": "方便面"
       },
       "description": "系统为扬名东点位创建了柜机缺货提醒。",
-      "detail": "柜机 扬名东点位；预警 柜机缺货提醒；状态 需关注"
+      "detail": "柜机 扬名东点位；相关商品 方便面；预警 柜机缺货提醒；状态 需关注"
     },
     {
       "id": "log-1776002894269-2138",
@@ -2435,10 +2551,12 @@
         "deviceCode": "CAB-1001",
         "goodsId": "goods-1002",
         "goodsName": "牛奶",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名西点位",
+        "goodsSummary": "牛奶"
       },
       "description": "系统为扬名西点位创建了柜机低库存提醒。",
-      "detail": "柜机 扬名西点位；预警 柜机低库存提醒；状态 需关注"
+      "detail": "柜机 扬名西点位；相关商品 牛奶；预警 柜机低库存提醒；状态 需关注"
     },
     {
       "id": "log-1776002894269-7325",
@@ -2466,10 +2584,12 @@
         "deviceCode": "CAB-1001",
         "goodsId": "goods-1001",
         "goodsName": "三明治",
-        "grade": "warning"
+        "grade": "warning",
+        "deviceName": "扬名西点位",
+        "goodsSummary": "三明治"
       },
       "description": "系统为扬名西点位创建了柜机低库存提醒。",
-      "detail": "柜机 扬名西点位；预警 柜机低库存提醒；状态 需关注"
+      "detail": "柜机 扬名西点位；相关商品 三明治；预警 柜机低库存提醒；状态 需关注"
     },
     {
       "id": "log-001",
@@ -2502,7 +2622,13 @@
         "deviceCode": "CAB-1001",
         "goodsId": "goods-1001",
         "goodsName": "三明治",
-        "undoState": "not_undoable"
+        "undoState": "not_undoable",
+        "deviceName": "扬名西点位",
+        "targetUserId": "merchant-001",
+        "targetUserName": "王店长",
+        "goodsSummary": "三明治 x4、牛奶 x2",
+        "relatedEventId": "evt-003",
+        "relatedOrderNo": "ord-003"
       }
     },
     {
@@ -2536,7 +2662,13 @@
         "deviceCode": "CAB-1001",
         "goodsId": "goods-1002",
         "goodsName": "牛奶",
-        "undoState": "not_undoable"
+        "undoState": "not_undoable",
+        "deviceName": "扬名西点位",
+        "targetUserId": "special-001",
+        "targetUserName": "林阿姨",
+        "goodsSummary": "三明治 x1、牛奶 x1",
+        "relatedEventId": "evt-001",
+        "relatedOrderNo": "ord-001"
       }
     },
     {
@@ -2564,7 +2696,8 @@
       "metadata": {
         "goodsId": "goods-1001",
         "deviceCode": "CAB-1001",
-        "undoState": "not_undoable"
+        "undoState": "not_undoable",
+        "deviceName": "扬名西点位"
       }
     },
     {
@@ -2590,12 +2723,17 @@
         "label": "ord-004"
       },
       "description": "管理员街道管理员向扬名东点位下发了远程开门指令。",
-      "detail": "动作人 管理员街道管理员；柜机 扬名东点位；关联事件 ord-004；状态 待处理",
+      "detail": "动作人 管理员街道管理员；柜机 扬名东点位；关联人员 街道管理员；关联单据 ord-004；状态 待处理",
       "relatedEventId": "evt-004",
       "relatedOrderNo": "ord-004",
       "metadata": {
         "deviceCode": "CAB-1002",
-        "undoState": "not_undoable"
+        "undoState": "not_undoable",
+        "deviceName": "扬名东点位",
+        "targetUserId": "admin-001",
+        "targetUserName": "街道管理员",
+        "relatedEventId": "evt-004",
+        "relatedOrderNo": "ord-004"
       }
     },
     {
@@ -2619,11 +2757,13 @@
         "label": "扬名西点位"
       },
       "description": "系统为扬名西点位创建了用户反馈柜门关闭缓慢。",
-      "detail": "柜机 扬名西点位；预警 用户反馈柜门关闭缓慢；状态 需关注",
+      "detail": "柜机 扬名西点位；关联人员 陈师傅；预警 用户反馈柜门关闭缓慢；状态 需关注",
       "metadata": {
         "deviceCode": "CAB-1001",
         "targetUserId": "special-002",
-        "undoState": "not_undoable"
+        "undoState": "not_undoable",
+        "deviceName": "扬名西点位",
+        "targetUserName": "陈师傅"
       }
     },
     {
@@ -2650,7 +2790,8 @@
       "detail": "柜机 扬名东点位；预警 柜机开门无响应；状态 需关注",
       "metadata": {
         "deviceCode": "CAB-1002",
-        "undoState": "not_undoable"
+        "undoState": "not_undoable",
+        "deviceName": "扬名东点位"
       }
     }
   ],
@@ -2659,28 +2800,36 @@
       "13800000001",
       {
         "code": "123456",
-        "expiresAt": "2026-04-13T05:33:19.901Z"
+        "expiresAt": "2026-05-21T12:51:35.503Z",
+        "requestedAt": "2026-05-21T12:46:35.503Z",
+        "resendAvailableAt": "2026-05-21T12:47:35.503Z"
       }
     ],
     [
       "13800000002",
       {
         "code": "123456",
-        "expiresAt": "2026-04-13T05:33:26.573Z"
+        "expiresAt": "2026-05-21T12:35:23.948Z",
+        "requestedAt": "2026-05-21T12:30:23.948Z",
+        "resendAvailableAt": "2026-05-21T12:31:23.948Z"
       }
     ],
     [
       "13800000006",
       {
         "code": "123456",
-        "expiresAt": "2026-04-12T17:27:45.958Z"
+        "expiresAt": "2026-05-21T11:06:30.682Z",
+        "requestedAt": "2026-05-21T11:01:30.682Z",
+        "resendAvailableAt": "2026-05-21T11:02:30.682Z"
       }
     ],
     [
       "13800000004",
       {
         "code": "123456",
-        "expiresAt": "2026-04-13T05:33:12.575Z"
+        "expiresAt": "2026-05-21T12:40:45.054Z",
+        "requestedAt": "2026-05-21T12:35:45.054Z",
+        "resendAvailableAt": "2026-05-21T12:36:45.054Z"
       }
     ],
     [
@@ -2688,6 +2837,15 @@
       {
         "code": "123456",
         "expiresAt": "2026-04-13T05:33:03.195Z"
+      }
+    ],
+    [
+      "13900000099",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-21T12:27:11.395Z",
+        "requestedAt": "2026-05-21T12:22:11.395Z",
+        "resendAvailableAt": "2026-05-21T12:23:11.395Z"
       }
     ]
   ],
@@ -2799,9 +2957,120 @@
         "role": "special",
         "createdAt": "2026-04-13T05:28:26.806Z"
       }
+    ],
+    [
+      "session-mpfd2u826bk6f",
+      {
+        "token": "session-mpfd2u826bk6f",
+        "userId": "special-001",
+        "role": "special",
+        "createdAt": "2026-05-21T10:42:08.642Z"
+      }
+    ],
+    [
+      "session-mpfdrquplqj23",
+      {
+        "token": "session-mpfdrquplqj23",
+        "userId": "merchant-001",
+        "role": "merchant",
+        "createdAt": "2026-05-21T11:01:30.673Z"
+      }
+    ],
+    [
+      "session-mpfdrqv6igljp",
+      {
+        "token": "session-mpfdrqv6igljp",
+        "userId": "merchant-1776008894951-9353",
+        "role": "merchant",
+        "createdAt": "2026-05-21T11:01:30.690Z"
+      }
+    ],
+    [
+      "session-mpfdrqvpkpn8n",
+      {
+        "token": "session-mpfdrqvpkpn8n",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-05-21T11:01:30.709Z"
+      }
+    ],
+    [
+      "session-mpfgfvv2yurrp",
+      {
+        "token": "session-mpfgfvv2yurrp",
+        "userId": "special-001",
+        "role": "special",
+        "createdAt": "2026-05-21T12:16:16.142Z"
+      }
+    ],
+    [
+      "session-mpfgq3uodik4k",
+      {
+        "token": "session-mpfgq3uodik4k",
+        "userId": "merchant-001",
+        "role": "merchant",
+        "createdAt": "2026-05-21T12:24:13.056Z"
+      }
+    ],
+    [
+      "session-mpfgyl3m9q9k0",
+      {
+        "token": "session-mpfgyl3m9q9k0",
+        "userId": "special-001",
+        "role": "special",
+        "createdAt": "2026-05-21T12:30:48.658Z"
+      }
+    ],
+    [
+      "session-mpfh5jijk9can",
+      {
+        "token": "session-mpfh5jijk9can",
+        "userId": "merchant-001",
+        "role": "merchant",
+        "createdAt": "2026-05-21T12:36:13.195Z"
+      }
+    ],
+    [
+      "session-mpfhmld19u4jc",
+      {
+        "token": "session-mpfhmld19u4jc",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-05-21T12:49:28.741Z"
+      }
+    ],
+    [
+      "session-mpfhp026c45uu",
+      {
+        "token": "session-mpfhp026c45uu",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-05-21T12:51:21.102Z"
+      }
     ]
   ],
   "draftSessions": [],
+  "adminCredentials": [
+    {
+      "userId": "admin-001",
+      "username": "admin",
+      "passwordSalt": "e1bae5b6dfe1dde131e694ee982531be",
+      "passwordHash": "233b07f9a05bcebc1d542895f4d93d0bafbb393c6d16bb939fe98dfea50275685aaedc2791e0378e805f0483cb37be95c21aff7c45dd50fbbd49e71196b7130d",
+      "usesDefaultPassword": true,
+      "passwordUpdatedAt": "2026-05-21T10:34:41.092Z"
+    }
+  ],
+  "backofficeCredentials": [
+    {
+      "userId": "admin-001",
+      "username": "admin",
+      "role": "super_admin",
+      "passwordSalt": "e1bae5b6dfe1dde131e694ee982531be",
+      "passwordHash": "233b07f9a05bcebc1d542895f4d93d0bafbb393c6d16bb939fe98dfea50275685aaedc2791e0378e805f0483cb37be95c21aff7c45dd50fbbd49e71196b7130d",
+      "usesDefaultPassword": true,
+      "passwordUpdatedAt": "2026-05-21T10:34:41.092Z"
+    }
+  ],
   "callbackLog": [],
   "deviceRuntime": [
     [

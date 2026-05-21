@@ -7,6 +7,7 @@ import type { AppLoginResult } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
 import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import { useSmsCooldown } from "../../composables/useSmsCooldown";
 import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?raw";
 import MobileShell from "../../layouts/MobileShell.vue";
@@ -221,7 +222,7 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="身份识别" title="登录小柜大爱" subtitle="输入已认证手机号，系统会识别你的服务入口。">
+  <MobileShell eyebrow="身份识别" title="登录小柜大爱" subtitle="手机号验证后进入对应服务入口。">
     <GlassCard tone="neutral" class="login-card">
       <view class="vm-stack">
         <view class="login-card__visual">
@@ -232,52 +233,66 @@ onShow(() => {
           </view>
         </view>
 
-        <view class="login-status-row">
-          <text class="vm-status vm-status--certified">已认证</text>
-          <text class="vm-status vm-status--pending">审核中</text>
-          <text class="vm-status vm-status--available">可领取</text>
+        <view class="login-guide">
+          <view class="login-guide__item">
+            <MenuIcon name="phone" size="sm" tone="accent" />
+            <text>手机号验证</text>
+          </view>
+          <view class="login-guide__item">
+            <MenuIcon name="success" size="sm" tone="accent" />
+            <text>自动识别身份</text>
+          </view>
         </view>
 
         <view class="vm-field">
           <text class="vm-field__label">手机号</text>
-          <input
-            v-model="phone"
-            class="vm-field__input"
-            type="number"
-            maxlength="11"
-            placeholder="请输入手机号"
-          />
+          <view class="vm-field-shell">
+            <MenuIcon name="phone" size="sm" tone="neutral" />
+            <input
+              v-model="phone"
+              class="vm-field-shell__input"
+              type="number"
+              maxlength="11"
+              placeholder="请输入手机号"
+            />
+          </view>
         </view>
 
         <view class="vm-field">
           <view class="field-header">
             <text class="vm-field__label">验证码</text>
-            <text class="vm-field__helper">验证码为登录必填项</text>
+            <text class="vm-field__helper">已认证手机号可获取</text>
           </view>
-          <input
-            v-model="code"
-            class="vm-field__input"
-            type="number"
-            maxlength="6"
-            placeholder="请输入验证码"
-          />
+          <view class="vm-field-shell">
+            <MenuIcon name="code" size="sm" tone="neutral" />
+            <input
+              v-model="code"
+              class="vm-field-shell__input"
+              type="number"
+              maxlength="6"
+              placeholder="请输入验证码"
+            />
+            <button
+              class="vm-field-shell__button"
+              :disabled="sendingCode || isCoolingDown || !hasAcceptedDisclaimer"
+              :loading="sendingCode"
+              @tap="sendCode"
+            >
+              {{ sendCodeLabel }}
+            </button>
+          </view>
         </view>
 
         <view class="entry-actions">
-          <button
-            class="vm-button vm-button--ghost"
-            :disabled="sendingCode || isCoolingDown || !hasAcceptedDisclaimer"
-            :loading="sendingCode"
-            @tap="sendCode"
-          >
-            {{ sendCodeLabel }}
-          </button>
           <button class="vm-button" :disabled="!hasAcceptedDisclaimer" :loading="submitting" @tap="submit">登录 / 身份识别</button>
         </view>
 
-        <button class="disclaimer-link" @tap="openDisclaimer">
-          {{ hasAcceptedDisclaimer ? "已同意《智能货柜用户免责声明》，点击查看" : "阅读《智能货柜用户免责声明》" }}
-        </button>
+        <view class="login-footnote">
+          <button class="disclaimer-link" @tap="openDisclaimer">
+            {{ hasAcceptedDisclaimer ? "已同意《智能货柜用户免责声明》" : "阅读并同意免责声明" }}
+          </button>
+          <button class="register-link" @tap="goRegister">首次使用？去注册</button>
+        </view>
 
         <view v-if="previewCode" class="debug-box">
           <text class="debug-box__label">当前验证码</text>
@@ -406,19 +421,48 @@ onShow(() => {
   gap: 16rpx;
 }
 
-.login-status-row {
+.login-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14rpx;
+}
+
+.login-guide__item {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 12rpx;
+  min-height: 74rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
+  color: var(--vm-text);
+  font-size: 24rpx;
+  font-weight: 700;
 }
 
 .disclaimer-link {
-  width: 100%;
+  width: fit-content;
   padding: 6rpx 0;
   color: var(--vm-accent-strong);
   font-size: 24rpx;
   line-height: 1.6;
   text-align: left;
+}
+
+.register-link {
+  padding: 6rpx 0;
+  color: var(--vm-warning);
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+
+.login-footnote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  flex-wrap: wrap;
 }
 
 .debug-box,

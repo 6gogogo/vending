@@ -71,7 +71,8 @@ const categorySummaries = computed(() =>
     return {
       ...category,
       quantity: items.reduce((sum, item) => sum + item.quantity, 0),
-      kinds: items.length
+      kinds: items.length,
+      icon: category.tone
     };
   })
 );
@@ -237,7 +238,7 @@ onShow(() => {
           class="category-card"
           :class="`category-card--${item.tone}`"
         >
-          <text class="category-card__mark">{{ item.label.slice(0, 1) }}</text>
+          <MenuIcon :name="item.icon" size="md" tone="accent" />
           <text class="category-card__title">{{ item.label }}</text>
           <text class="category-card__meta">{{ item.quantity }} 件可领</text>
         </view>
@@ -584,18 +585,6 @@ onShow(() => {
 .category-card--daily {
   background: #f0f6ea;
   border-color: var(--vm-success-line);
-}
-
-.category-card__mark {
-  display: grid;
-  place-items: center;
-  width: 58rpx;
-  height: 58rpx;
-  border-radius: 18rpx;
-  background: rgba(255, 255, 255, 0.76);
-  color: var(--vm-accent-strong);
-  font-size: 28rpx;
-  font-weight: 900;
 }
 
 .category-card__title {

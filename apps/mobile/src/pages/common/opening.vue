@@ -7,6 +7,7 @@ import type { CabinetEventRecord } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
 import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { getErrorMessage } from "../../utils/error-message";
 
@@ -178,6 +179,14 @@ onUnload(() => {
   <MobileShell eyebrow="开门中" :title="statusText" :subtitle="hintText">
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <view class="opening-panel">
+          <MenuIcon :name="event?.status === 'opened' ? 'door' : 'scan'" size="lg" tone="accent" />
+          <view class="opening-panel__copy">
+            <text class="opening-panel__title">{{ statusText }}</text>
+            <text class="opening-panel__body">{{ hintText }}</text>
+          </view>
+        </view>
+
         <FlowSteps :steps="flowSteps" />
 
         <view class="status-box">
@@ -206,6 +215,35 @@ onUnload(() => {
   border-radius: 24rpx;
   background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line);
+}
+
+.opening-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-success-line);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.opening-panel__copy {
+  display: grid;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.opening-panel__title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: var(--vm-text);
+}
+
+.opening-panel__body {
+  font-size: 22rpx;
+  line-height: 1.55;
+  color: var(--vm-text-soft);
 }
 
 .status-box__label {

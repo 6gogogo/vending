@@ -141,6 +141,17 @@ const heroSupport = computed(() => {
     ]
   };
 });
+const mapFocusStatusLabel = computed(() => {
+  if (sessionStore.user?.role === "merchant") {
+    return "可补货";
+  }
+
+  if (sessionStore.user?.role === "admin") {
+    return "可操作";
+  }
+
+  return "可领取";
+});
 
 const markerEntries = computed(() =>
   mappableDevices.value.map((device, index) => ({
@@ -465,6 +476,23 @@ onShow(() => {
           </view>
 
           <template v-if="viewMode === 'map'">
+            <!-- #ifdef H5 -->
+            <view class="nearby-map nearby-map--compact nearby-map-preview" @tap="mapExpanded = true">
+              <view class="nearby-map-preview__road nearby-map-preview__road--main" />
+              <view class="nearby-map-preview__road nearby-map-preview__road--cross" />
+              <view class="nearby-map-preview__river" />
+              <view
+                v-for="(device, index) in mappableDevices"
+                :key="device.deviceCode"
+                class="nearby-map-preview__pin"
+                :class="{ 'nearby-map-preview__pin--active': device.deviceCode === highlightedDeviceCode }"
+                :style="{ left: `${22 + (index * 23) % 55}%`, top: `${28 + (index * 19) % 40}%` }"
+                @tap.stop="focusDevice(device.deviceCode)"
+              />
+              <view class="nearby-map-preview__user" />
+            </view>
+            <!-- #endif -->
+            <!-- #ifndef H5 -->
             <map
               class="nearby-map nearby-map--compact"
               :longitude="mapCenter.longitude"
@@ -475,6 +503,7 @@ onShow(() => {
               @tap="mapExpanded = true"
               @markertap="handleMarkerTap"
             />
+            <!-- #endif -->
 
             <view class="nearby-map-card__summary">
               <view class="nearby-location-banner">
@@ -508,7 +537,7 @@ onShow(() => {
                   {{ distanceEnabled ? `距离 ${formatDistance(highlightedDevice.distanceMeters)}` : "按默认顺序展示" }}
                 </text>
               </view>
-              <text class="vm-status vm-status--success">可领取</text>
+              <text class="vm-status vm-status--success">{{ mapFocusStatusLabel }}</text>
             </button>
 
             <view class="nearby-map-card__tools">
@@ -621,6 +650,23 @@ onShow(() => {
           <button class="vm-button vm-button--ghost" @tap="mapExpanded = false">关闭</button>
         </view>
 
+        <!-- #ifdef H5 -->
+        <view class="nearby-map nearby-map--expanded nearby-map-preview nearby-map-preview--expanded">
+          <view class="nearby-map-preview__road nearby-map-preview__road--main" />
+          <view class="nearby-map-preview__road nearby-map-preview__road--cross" />
+          <view class="nearby-map-preview__river" />
+          <view
+            v-for="(device, index) in mappableDevices"
+            :key="device.deviceCode"
+            class="nearby-map-preview__pin"
+            :class="{ 'nearby-map-preview__pin--active': device.deviceCode === highlightedDeviceCode }"
+            :style="{ left: `${22 + (index * 23) % 55}%`, top: `${28 + (index * 19) % 40}%` }"
+            @tap.stop="focusDevice(device.deviceCode)"
+          />
+          <view class="nearby-map-preview__user" />
+        </view>
+        <!-- #endif -->
+        <!-- #ifndef H5 -->
         <map
           class="nearby-map nearby-map--expanded"
           :longitude="mapCenter.longitude"
@@ -630,6 +676,7 @@ onShow(() => {
           :show-location="true"
           @markertap="handleMarkerTap"
         />
+        <!-- #endif -->
 
         <view class="nearby-map-card__tools">
           <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--warning" @tap="scanAndOpen">扫码开柜</button>
@@ -811,6 +858,96 @@ onShow(() => {
 
 .nearby-map--expanded {
   height: 760rpx;
+}
+
+.nearby-map-preview {
+  position: relative;
+  background:
+    linear-gradient(90deg, rgba(46, 125, 70, 0.08) 1px, transparent 1px) 0 0 / 86rpx 86rpx,
+    linear-gradient(0deg, rgba(46, 125, 70, 0.08) 1px, transparent 1px) 0 0 / 86rpx 86rpx,
+    linear-gradient(135deg, #f3f8ef 0%, #fff7ec 100%);
+}
+
+.nearby-map-preview__road,
+.nearby-map-preview__river,
+.nearby-map-preview__pin,
+.nearby-map-preview__user {
+  position: absolute;
+}
+
+.nearby-map-preview__road {
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 0 0 1rpx rgba(46, 125, 70, 0.08);
+}
+
+.nearby-map-preview__road--main {
+  left: -12%;
+  top: 46%;
+  width: 124%;
+  height: 34rpx;
+  transform: rotate(-9deg);
+}
+
+.nearby-map-preview__road--cross {
+  left: 46%;
+  top: -12%;
+  width: 30rpx;
+  height: 124%;
+  transform: rotate(16deg);
+}
+
+.nearby-map-preview__river {
+  left: -18%;
+  bottom: 12%;
+  width: 136%;
+  height: 44rpx;
+  border-radius: 999rpx;
+  background: rgba(110, 184, 214, 0.22);
+  transform: rotate(8deg);
+}
+
+.nearby-map-preview__pin {
+  width: 30rpx;
+  height: 30rpx;
+  border-radius: 50% 50% 50% 0;
+  background: var(--vm-accent);
+  box-shadow: 0 8rpx 18rpx rgba(46, 125, 70, 0.2);
+  transform: rotate(-45deg);
+}
+
+.nearby-map-preview__pin::after {
+  content: "";
+  position: absolute;
+  inset: 9rpx;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.nearby-map-preview__pin--active {
+  width: 38rpx;
+  height: 38rpx;
+  background: var(--vm-warning);
+  box-shadow: 0 10rpx 24rpx rgba(255, 138, 43, 0.26);
+}
+
+.nearby-map-preview__pin--active::after {
+  inset: 11rpx;
+}
+
+.nearby-map-preview__user {
+  left: 50%;
+  top: 52%;
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 6rpx solid #ffffff;
+  box-shadow: 0 8rpx 18rpx rgba(59, 130, 246, 0.2);
+}
+
+.nearby-map-preview--expanded .nearby-map-preview__pin {
+  transform: rotate(-45deg) scale(1.28);
 }
 
 .nearby-map-card__tools {

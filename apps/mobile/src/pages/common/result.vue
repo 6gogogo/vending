@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { resolveHomePath } from "../../utils/role-routing";
@@ -67,9 +68,7 @@ onLoad((query) => {
     <GlassCard :tone="status === 'success' ? 'accent' : status === 'warning' ? 'warning' : 'quiet'">
       <view class="vm-stack">
         <view class="result-hero" :class="`result-hero--${status}`">
-          <view class="result-hero__icon">
-            <text>{{ resultMeta.symbol }}</text>
-          </view>
+          <MenuIcon :name="status === 'success' ? 'success' : 'warning'" size="lg" :tone="status === 'success' ? 'accent' : 'warning'" />
           <view class="result-hero__copy">
             <text class="result-icon">{{ resultMeta.label }}</text>
             <text class="result-hint">{{ resultMeta.suggestion }}</text>
@@ -105,23 +104,6 @@ onLoad((query) => {
 .result-hero {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-}
-
-.result-hero__icon {
-  display: grid;
-  place-items: center;
-  width: 86rpx;
-  height: 86rpx;
-  border-radius: 50%;
-  background: var(--vm-success);
-  color: #ffffff;
-  font-size: 46rpx;
-  font-weight: 900;
-}
-
-.result-hero--warning .result-hero__icon,
-.result-hero--danger .result-hero__icon {
-  background: var(--vm-warning);
 }
 
 .result-hero__copy {

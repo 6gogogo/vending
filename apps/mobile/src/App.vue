@@ -14,7 +14,3 @@ onLaunch(() => {
   sessionStore.bootstrap();
 });
 </script>
-
-<template>
-  <slot />
-</template>

@@ -5,9 +5,12 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import type { DeviceRecord, MerchantGoodsTemplate } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
 
@@ -30,6 +33,11 @@ const selectedTemplate = computed(() =>
 
 const selectedDevice = computed(() =>
   devices.value.find((entry) => entry.deviceCode === selectedDeviceCode.value)
+);
+const selectedTemplateCategoryLabel = computed(() =>
+  selectedTemplate.value
+    ? selectedTemplate.value.categoryName ?? categoryLabelMap[selectedTemplate.value.category]
+    : ""
 );
 const filteredTemplates = computed(() => {
   const query = templateKeyword.value.trim().toLowerCase();
@@ -67,6 +75,23 @@ const estimatedExpireDate = computed(() => {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 });
+const restockFlowSteps = computed(() => [
+  {
+    label: "选择物品",
+    description: selectedTemplate.value?.goodsName ?? "先选择要补货的商品模板",
+    state: selectedTemplateId.value ? ("done" as const) : ("current" as const)
+  },
+  {
+    label: "填写批次",
+    description: selectedDevice.value ? `${selectedDevice.value.name} · ${quantity.value || 0} 件` : "填写柜机、数量、日期和批次号",
+    state: selectedTemplateId.value && selectedDeviceCode.value && quantity.value > 0 ? ("current" as const) : ("todo" as const)
+  },
+  {
+    label: "提交登记",
+    description: estimatedExpireDate.value ? `预计到期 ${estimatedExpireDate.value}` : "提交后生成可追溯批次",
+    state: "todo" as const
+  }
+]);
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -102,6 +127,10 @@ const load = async () => {
 const selectTemplate = (template: MerchantGoodsTemplate) => {
   selectedTemplateId.value = template.id;
   quantity.value = template.defaultQuantity;
+};
+
+const adjustQuantity = (delta: number) => {
+  quantity.value = Math.max(0, Number(quantity.value || 0) + delta);
 };
 
 const submit = async () => {
@@ -177,9 +206,28 @@ onLoad((query) => {
 
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <FlowSteps :steps="restockFlowSteps" />
+
+        <view class="selected-product-card">
+          <MenuIcon name="box" size="lg" tone="accent" />
+          <view class="selected-product-card__main">
+            <text class="selected-product-card__title">{{ selectedTemplate?.goodsName ?? "请选择补货物品" }}</text>
+            <text class="selected-product-card__meta">
+              {{ selectedTemplate ? `${selectedTemplateCategoryLabel} · 默认 ${selectedTemplate.defaultQuantity} 件 · 保质期 ${selectedTemplate.defaultShelfLifeDays} 天` : "选择后会自动带出默认数量和保质期。" }}
+            </text>
+          </view>
+          <text class="vm-status" :class="selectedTemplate ? 'vm-status--success' : 'vm-status--pending'">
+            {{ selectedTemplate ? "已选中" : "待选择" }}
+          </text>
+        </view>
+      </view>
+    </GlassCard>
+
+    <GlassCard tone="quiet">
+      <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">选择货品模板</text>
-          <text class="vm-subtitle">请先选择后端公共模板，数量和保质期会自动带入。</text>
+          <text class="vm-subtitle">优先搜索商品名，选中后自动带入数量和保质期。</text>
         </view>
 
         <view class="vm-field">
@@ -195,6 +243,7 @@ onLoad((query) => {
             :class="{ 'template-item--active': selectedTemplateId === item.id }"
             @tap="selectTemplate(item)"
           >
+            <MenuIcon :name="item.category === 'food' ? 'food' : item.category === 'daily' ? 'daily' : 'drink'" size="md" tone="accent" />
             <view class="template-item__main">
               <text class="template-item__title">{{ item.goodsName }}</text>
               <text class="template-item__meta">{{ item.defaultQuantity }} 件 · {{ item.defaultShelfLifeDays }} 天</text>
@@ -207,7 +256,7 @@ onLoad((query) => {
       </view>
     </GlassCard>
 
-    <GlassCard tone="quiet">
+    <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">补货明细</text>
@@ -236,7 +285,12 @@ onLoad((query) => {
 
         <view class="vm-field">
           <text class="vm-field__label">补货数量</text>
-          <input v-model.number="quantity" class="vm-field__input" type="number" placeholder="请输入本次补货件数" />
+          <view class="quantity-stepper">
+            <button class="quantity-stepper__button" @tap="adjustQuantity(-1)">-</button>
+            <input v-model.number="quantity" class="quantity-stepper__input" type="number" placeholder="0" />
+            <button class="quantity-stepper__button" @tap="adjustQuantity(1)">+</button>
+            <text class="quantity-stepper__unit">件</text>
+          </view>
         </view>
 
         <view class="vm-field">
@@ -322,6 +376,70 @@ onLoad((query) => {
 .template-item--active {
   border-color: var(--vm-info-line);
   background: var(--vm-info-bg);
+}
+
+.selected-product-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-success-line);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.selected-product-card__main {
+  display: grid;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.selected-product-card__title {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: var(--vm-text);
+}
+
+.selected-product-card__meta {
+  font-size: 22rpx;
+  line-height: 1.55;
+  color: var(--vm-text-soft);
+}
+
+.quantity-stepper {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  overflow: hidden;
+  min-height: 92rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid var(--vm-line-strong);
+  background: #ffffff;
+}
+
+.quantity-stepper__button {
+  width: 88rpx;
+  min-height: 92rpx;
+  color: var(--vm-accent-strong);
+  background: var(--vm-accent-soft);
+  font-size: 34rpx;
+  font-weight: 800;
+}
+
+.quantity-stepper__input {
+  width: 100%;
+  min-height: 92rpx;
+  text-align: center;
+  font-size: 32rpx;
+  font-weight: 900;
+  color: var(--vm-text);
+}
+
+.quantity-stepper__unit {
+  padding-right: 24rpx;
+  color: var(--vm-text-soft);
+  font-size: 24rpx;
 }
 
 .picker-value {

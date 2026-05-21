@@ -74,18 +74,25 @@ onShow(() => {
 
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <view class="profile-card">
+          <view class="profile-card__avatar">
+            <MenuIcon name="users" size="lg" tone="contrast" />
+          </view>
+          <view class="profile-card__main">
+            <text class="profile-card__name">{{ sessionStore.user?.name ?? "-" }}</text>
+            <text class="profile-card__phone">{{ sessionStore.user?.phone ?? "-" }}</text>
+          </view>
+          <text class="vm-status vm-status--certified">{{ roleLabelMap[sessionStore.user?.role ?? 'special'] }}</text>
+        </view>
+
         <view class="info-list">
           <view class="info-item">
-            <text class="info-item__label">账号身份</text>
-            <text class="info-item__value">{{ roleLabelMap[sessionStore.user?.role ?? 'special'] }}</text>
+            <text class="info-item__label">服务入口</text>
+            <text class="info-item__value">{{ sessionStore.user?.role === "merchant" ? "商户补货" : sessionStore.user?.role === "admin" ? "运营管理" : "公益领取" }}</text>
           </view>
           <view class="info-item">
-            <text class="info-item__label">姓名</text>
-            <text class="info-item__value">{{ sessionStore.user?.name ?? "-" }}</text>
-          </view>
-          <view class="info-item">
-            <text class="info-item__label">手机号</text>
-            <text class="info-item__value">{{ sessionStore.user?.phone ?? "-" }}</text>
+            <text class="info-item__label">账号状态</text>
+            <text class="info-item__value">已认证</text>
           </view>
         </view>
       </view>
@@ -146,6 +153,51 @@ onShow(() => {
 .help-preview {
   display: grid;
   gap: 16rpx;
+}
+
+.profile-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18rpx;
+  padding: 24rpx;
+  border-radius: 26rpx;
+  border: 1rpx solid var(--vm-success-line);
+  background: linear-gradient(135deg, var(--vm-accent), #69b85f);
+  box-shadow: 0 16rpx 34rpx rgba(46, 125, 70, 0.16);
+}
+
+.profile-card__avatar {
+  display: grid;
+  place-items: center;
+  width: 92rpx;
+  height: 92rpx;
+  border-radius: 28rpx;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1rpx solid rgba(255, 255, 255, 0.22);
+}
+
+.profile-card__main {
+  display: grid;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.profile-card__name {
+  font-size: 34rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.profile-card__phone {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.profile-card .vm-status {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
 }
 
 .section-heading {

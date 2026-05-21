@@ -14,6 +14,7 @@ import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap } from "../../constants/labels";
@@ -643,6 +644,7 @@ onLoad((query) => {
 
         <view v-if="goodsList.length" class="goods-list">
           <view v-for="goods in goodsList" :key="goods.goodsId" class="goods-item">
+            <MenuIcon :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'" size="md" tone="accent" />
             <view class="goods-item__main">
               <text class="goods-item__name">{{ goods.name }}</text>
               <text class="goods-item__meta">
@@ -733,6 +735,11 @@ onLoad((query) => {
   border-radius: 24rpx;
   background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line);
+}
+
+.goods-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .selection-banner {
@@ -883,7 +890,7 @@ onLoad((query) => {
 }
 
 .vm-page--accessible .goods-item {
-  flex-direction: column;
+  grid-template-columns: 1fr;
   align-items: stretch;
 }
 

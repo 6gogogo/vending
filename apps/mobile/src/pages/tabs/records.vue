@@ -6,6 +6,7 @@ import type { InventoryMovement, OperationLogRecord, RegistrationApplication, Us
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
@@ -154,9 +155,12 @@ onShow(() => {
     <GlassCard tone="quiet">
       <view v-if="sessionStore.user?.role === 'special'" class="vm-stack">
         <view v-if="records.length" class="simple-list">
-          <view v-for="record in records" :key="record.id" class="simple-card">
-            <text class="simple-card__title">{{ record.goodsName }}</text>
-            <text class="simple-card__meta">{{ record.deviceCode }} · {{ record.happenedAt.slice(0, 16).replace("T", " ") }}</text>
+          <view v-for="record in records" :key="record.id" class="simple-card simple-card--timeline">
+            <MenuIcon :name="record.type === 'manual-deduction' ? 'warning' : 'success'" size="md" :tone="record.type === 'manual-deduction' ? 'warning' : 'accent'" />
+            <view class="simple-card__main">
+              <text class="simple-card__title">{{ record.goodsName }}</text>
+              <text class="simple-card__meta">{{ record.deviceCode }} · {{ record.happenedAt.slice(0, 16).replace("T", " ") }}</text>
+            </view>
             <text class="vm-status" :class="record.type === 'manual-deduction' ? 'vm-status--warning' : 'vm-status--success'">
               {{ record.type === "manual-deduction" ? `补扣 ${record.quantity} 件` : `领取 ${record.quantity} 件` }}
             </text>
@@ -181,10 +185,13 @@ onShow(() => {
         </view>
 
         <view v-if="merchantBatches.length" class="simple-list">
-          <view v-for="batch in merchantBatches" :key="batch.batchId" class="simple-card">
-            <text class="simple-card__title">{{ batch.goodsName }}</text>
-            <text class="simple-card__meta">{{ batch.deviceName }} · 当前剩余 {{ batch.remainingQuantity }}/{{ batch.quantity }} 件</text>
-            <text class="simple-card__meta">{{ batch.expiresAt ? `到期 ${batch.expiresAt.slice(0, 10)}` : "未设置保质期" }}</text>
+          <view v-for="batch in merchantBatches" :key="batch.batchId" class="simple-card simple-card--timeline">
+            <MenuIcon name="box" size="md" tone="accent" />
+            <view class="simple-card__main">
+              <text class="simple-card__title">{{ batch.goodsName }}</text>
+              <text class="simple-card__meta">{{ batch.deviceName }} · 当前剩余 {{ batch.remainingQuantity }}/{{ batch.quantity }} 件</text>
+              <text class="simple-card__meta">{{ batch.expiresAt ? `到期 ${batch.expiresAt.slice(0, 10)}` : "未设置保质期" }}</text>
+            </view>
           </view>
         </view>
         <EmptyState v-else :title="loading ? '正在加载批次' : '当前没有补货批次'" description="完成首次补货后，这里会展示补货记录。" />
@@ -274,6 +281,17 @@ onShow(() => {
   border-radius: 24rpx;
   background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line);
+}
+
+.simple-card--timeline {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.simple-card__main {
+  display: grid;
+  gap: 8rpx;
+  min-width: 0;
 }
 
 .simple-card--button {

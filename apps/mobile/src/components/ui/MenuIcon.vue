@@ -1,9 +1,11 @@
 <script setup lang="ts">
 type MenuIconName =
+  | "home"
   | "review"
   | "users"
   | "device"
   | "logs"
+  | "record"
   | "template"
   | "restock"
   | "trace"
@@ -12,6 +14,17 @@ type MenuIconName =
   | "nearby"
   | "scan"
   | "settings"
+  | "phone"
+  | "code"
+  | "drink"
+  | "food"
+  | "daily"
+  | "gift"
+  | "success"
+  | "warning"
+  | "calendar"
+  | "box"
+  | "door"
   | "logout"
   | "desktop";
 
@@ -33,7 +46,13 @@ withDefaults(
 
 <template>
   <view class="menu-icon" :class="[`menu-icon--${tone}`, `menu-icon--${size}`]" aria-hidden="true">
-    <template v-if="name === 'review'">
+    <template v-if="name === 'home'">
+      <view class="menu-icon__outline home__roof" />
+      <view class="menu-icon__outline home__body" />
+      <view class="menu-icon__fill home__door" />
+    </template>
+
+    <template v-else-if="name === 'review'">
       <view class="menu-icon__outline review__sheet" />
       <view class="menu-icon__line review__line review__line--1" />
       <view class="menu-icon__line review__line review__line--2" />
@@ -63,7 +82,7 @@ withDefaults(
       <view class="menu-icon__line logs__line logs__line--3" />
     </template>
 
-    <template v-else-if="name === 'template'">
+    <template v-else-if="name === 'record' || name === 'template'">
       <view class="menu-icon__outline template__sheet template__sheet--back" />
       <view class="menu-icon__outline template__sheet template__sheet--front" />
       <view class="menu-icon__line template__line template__line--1" />
@@ -122,6 +141,75 @@ withDefaults(
       <view class="menu-icon__dot settings__knob settings__knob--1" />
       <view class="menu-icon__dot settings__knob settings__knob--2" />
       <view class="menu-icon__dot settings__knob settings__knob--3" />
+    </template>
+
+    <template v-else-if="name === 'phone'">
+      <view class="menu-icon__outline phone__body" />
+      <view class="menu-icon__line phone__speaker" />
+      <view class="menu-icon__dot phone__button" />
+    </template>
+
+    <template v-else-if="name === 'code'">
+      <view class="menu-icon__outline code__shield" />
+      <view class="menu-icon__line code__tick code__tick--short" />
+      <view class="menu-icon__line code__tick code__tick--long" />
+    </template>
+
+    <template v-else-if="name === 'drink'">
+      <view class="menu-icon__outline drink__cup" />
+      <view class="menu-icon__line drink__straw" />
+      <view class="menu-icon__line drink__wave" />
+    </template>
+
+    <template v-else-if="name === 'food'">
+      <view class="menu-icon__outline food__box" />
+      <view class="menu-icon__line food__lid food__lid--left" />
+      <view class="menu-icon__line food__lid food__lid--right" />
+    </template>
+
+    <template v-else-if="name === 'daily'">
+      <view class="menu-icon__outline daily__bottle" />
+      <view class="menu-icon__fill daily__cap" />
+      <view class="menu-icon__line daily__label" />
+    </template>
+
+    <template v-else-if="name === 'gift'">
+      <view class="menu-icon__outline gift__box" />
+      <view class="menu-icon__line gift__ribbon gift__ribbon--v" />
+      <view class="menu-icon__line gift__ribbon gift__ribbon--h" />
+    </template>
+
+    <template v-else-if="name === 'success'">
+      <view class="menu-icon__fill result__circle" />
+      <view class="menu-icon__line result__tick result__tick--short" />
+      <view class="menu-icon__line result__tick result__tick--long" />
+    </template>
+
+    <template v-else-if="name === 'warning'">
+      <view class="menu-icon__outline warning__triangle" />
+      <view class="menu-icon__line warning__line" />
+      <view class="menu-icon__dot warning__dot" />
+    </template>
+
+    <template v-else-if="name === 'calendar'">
+      <view class="menu-icon__outline calendar__sheet" />
+      <view class="menu-icon__line calendar__top" />
+      <view class="menu-icon__dot calendar__dot calendar__dot--one" />
+      <view class="menu-icon__dot calendar__dot calendar__dot--two" />
+    </template>
+
+    <template v-else-if="name === 'box'">
+      <view class="menu-icon__outline box__base" />
+      <view class="menu-icon__line box__lid box__lid--left" />
+      <view class="menu-icon__line box__lid box__lid--right" />
+      <view class="menu-icon__line box__plus box__plus--h" />
+      <view class="menu-icon__line box__plus box__plus--v" />
+    </template>
+
+    <template v-else-if="name === 'door'">
+      <view class="menu-icon__outline door__frame" />
+      <view class="menu-icon__outline door__panel" />
+      <view class="menu-icon__dot door__knob" />
     </template>
 
     <template v-else-if="name === 'logout'">
@@ -245,6 +333,32 @@ withDefaults(
 .menu-icon__dot {
   background: currentColor;
   border-radius: 50%;
+}
+
+.home__roof {
+  width: 42%;
+  height: 42%;
+  left: 29%;
+  top: 20%;
+  border-radius: 12%;
+  transform: rotate(45deg);
+  background: transparent;
+}
+
+.home__body {
+  width: 46%;
+  height: 40%;
+  left: 27%;
+  top: 40%;
+  border-radius: 12%;
+}
+
+.home__door {
+  width: 12%;
+  height: 22%;
+  left: 44%;
+  top: 58%;
+  border-radius: 999rpx 999rpx 0 0;
 }
 
 .review__sheet,
@@ -653,6 +767,272 @@ withDefaults(
 .settings__knob--3 {
   left: 39%;
   top: 59%;
+}
+
+.phone__body {
+  width: 42%;
+  height: 64%;
+  left: 29%;
+  top: 18%;
+  border-radius: 18%;
+}
+
+.phone__speaker {
+  width: 16%;
+  height: 4rpx;
+  left: 42%;
+  top: 28%;
+}
+
+.phone__button {
+  width: 8%;
+  height: 8%;
+  left: 46%;
+  bottom: 24%;
+}
+
+.code__shield {
+  width: 46%;
+  height: 56%;
+  left: 27%;
+  top: 20%;
+  border-radius: 30% 30% 42% 42%;
+  background: transparent;
+}
+
+.code__tick,
+.result__tick {
+  height: 4rpx;
+  background: #ffffff;
+  transform-origin: left center;
+}
+
+.code__tick {
+  background: currentColor;
+}
+
+.code__tick--short {
+  width: 12%;
+  left: 39%;
+  top: 52%;
+  transform: rotate(42deg);
+}
+
+.code__tick--long {
+  width: 22%;
+  left: 47%;
+  top: 56%;
+  transform: rotate(-42deg);
+}
+
+.drink__cup {
+  width: 42%;
+  height: 54%;
+  left: 29%;
+  top: 28%;
+  border-radius: 16% 16% 30% 30%;
+}
+
+.drink__straw {
+  width: 4rpx;
+  height: 34%;
+  left: 56%;
+  top: 16%;
+  transform: rotate(12deg);
+}
+
+.drink__wave {
+  width: 22%;
+  height: 4rpx;
+  left: 39%;
+  top: 50%;
+}
+
+.food__box,
+.gift__box,
+.box__base {
+  width: 50%;
+  height: 40%;
+  left: 25%;
+  top: 38%;
+  border-radius: 16%;
+  background: transparent;
+}
+
+.food__lid,
+.box__lid {
+  width: 20%;
+  height: 4rpx;
+  top: 34%;
+}
+
+.food__lid--left,
+.box__lid--left {
+  left: 28%;
+  transform: rotate(25deg);
+}
+
+.food__lid--right,
+.box__lid--right {
+  right: 28%;
+  transform: rotate(-25deg);
+}
+
+.daily__bottle {
+  width: 34%;
+  height: 56%;
+  left: 33%;
+  top: 26%;
+  border-radius: 20% 20% 28% 28%;
+}
+
+.daily__cap {
+  width: 20%;
+  height: 12%;
+  left: 40%;
+  top: 17%;
+  border-radius: 8rpx 8rpx 0 0;
+}
+
+.daily__label {
+  width: 20%;
+  height: 4rpx;
+  left: 40%;
+  top: 54%;
+}
+
+.gift__ribbon--v {
+  width: 4rpx;
+  height: 40%;
+  left: 50%;
+  top: 38%;
+}
+
+.gift__ribbon--h {
+  width: 50%;
+  height: 4rpx;
+  left: 25%;
+  top: 53%;
+}
+
+.result__circle {
+  width: 60%;
+  height: 60%;
+  left: 20%;
+  top: 20%;
+  border-radius: 50%;
+}
+
+.result__tick--short {
+  width: 14%;
+  left: 37%;
+  top: 52%;
+  transform: rotate(42deg);
+}
+
+.result__tick--long {
+  width: 25%;
+  left: 48%;
+  top: 58%;
+  transform: rotate(-42deg);
+}
+
+.warning__triangle {
+  width: 56%;
+  height: 52%;
+  left: 22%;
+  top: 24%;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: transparent;
+  border-radius: 8%;
+}
+
+.warning__line {
+  width: 4rpx;
+  height: 24%;
+  left: 50%;
+  top: 38%;
+  transform: translateX(-50%);
+}
+
+.warning__dot {
+  width: 8%;
+  height: 8%;
+  left: 46%;
+  top: 66%;
+}
+
+.calendar__sheet {
+  width: 54%;
+  height: 50%;
+  left: 23%;
+  top: 28%;
+  border-radius: 14%;
+}
+
+.calendar__top {
+  width: 36%;
+  height: 4rpx;
+  left: 32%;
+  top: 40%;
+}
+
+.calendar__dot {
+  width: 8%;
+  height: 8%;
+  top: 55%;
+}
+
+.calendar__dot--one {
+  left: 38%;
+}
+
+.calendar__dot--two {
+  left: 54%;
+}
+
+.box__plus {
+  background: #ffffff;
+  z-index: 1;
+}
+
+.box__plus--h {
+  width: 12%;
+  height: 4rpx;
+  right: 22%;
+  top: 28%;
+}
+
+.box__plus--v {
+  width: 4rpx;
+  height: 12%;
+  right: 28%;
+  top: 22%;
+}
+
+.door__frame {
+  width: 50%;
+  height: 62%;
+  left: 25%;
+  top: 18%;
+  border-radius: 14%;
+  background: transparent;
+}
+
+.door__panel {
+  width: 34%;
+  height: 52%;
+  left: 37%;
+  top: 24%;
+  border-radius: 12%;
+  background: transparent;
+}
+
+.door__knob {
+  width: 7%;
+  height: 7%;
+  left: 61%;
+  top: 50%;
 }
 
 .logout__sign {
