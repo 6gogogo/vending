@@ -12,6 +12,7 @@ import type {
   UserRecord
 } from "@vm/shared-types";
 
+import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { resolveSystemLogFile } from "../../common/store/persistence";
 import { getBusinessDayKey } from "../../common/time/business-day";
@@ -23,7 +24,10 @@ const MAX_SYSTEM_AUDIT_LINE_LENGTH = 256 * 1024;
 
 @Injectable()
 export class OperationLogsService {
-  constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
+  constructor(
+    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService
+  ) {}
 
   list(filters?: {
     category?: OperationLogCategory;
@@ -306,24 +310,22 @@ export class OperationLogsService {
     const deviceCode = this.readString(log.metadata?.deviceCode, "缺少柜机编号。");
     const goodsId = this.readString(log.metadata?.goodsId, "缺少货品编号。");
     const quantity = this.readNumber(log.metadata?.quantity, "缺少数量信息。");
-    const removed = this.store.removeBatchQuantity(batchId, quantity);
-
-    if (!removed) {
-      throw new NotFoundException("未找到可撤销的批次记录。");
-    }
-
     const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
-
-    this.store.inventory.unshift(this.buildUndoMovement({
-      userId: actorUserId,
-      deviceCode,
-      goodsId,
-      goodsName: goods?.name ?? goodsId,
-      category: goods?.category ?? "daily",
-      quantity: removed.actualQuantity,
-      unitPrice: goods?.price ?? 0,
-      type: "manual-deduction"
-    }));
+    const change = this.inventoryBatchChanges.undoRestockBatchChange({
+      batchId,
+      quantity,
+      movement: this.buildUndoMovement({
+        userId: actorUserId,
+        deviceCode,
+        goodsId,
+        goodsName: goods?.name ?? goodsId,
+        category: goods?.category ?? "daily",
+        quantity,
+        unitPrice: goods?.price ?? 0,
+        type: "manual-deduction"
+      })
+    });
+    const undoQuantity = change.movements[0]?.quantity ?? quantity;
 
     const undoLog = this.store.logOperation({
       category: "inventory",
@@ -344,13 +346,13 @@ export class OperationLogsService {
         deviceCode,
         goodsId,
         goodsName: goods?.name ?? goodsId,
-        quantity: removed.actualQuantity,
+        quantity: undoQuantity,
         sourceLogId: log.id,
         undoState: "not_undoable"
       }
     });
 
-    this.markBatchConsumptionTracesReverted(log.id, undoLog.id);
+    this.inventoryBatchChanges.markConsumptionTracesReverted(log.id, undoLog.id);
     this.markAsUndone(log, actorUserId, undoLog.id);
     return undoLog;
   }
@@ -361,21 +363,22 @@ export class OperationLogsService {
     const consumedBatches = Array.isArray(log.metadata?.consumedBatches)
       ? (log.metadata?.consumedBatches as Array<{ batchId: string; quantity: number }>)
       : [];
-
-    this.store.restoreGoodsBatchConsumption(deviceCode, consumedBatches);
-    const restoredQuantity = consumedBatches.reduce((sum, entry) => sum + entry.quantity, 0);
     const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
-
-    this.store.inventory.unshift(this.buildUndoMovement({
-      userId: actorUserId,
+    const change = this.inventoryBatchChanges.undoConsumptiveBatchChange({
       deviceCode,
-      goodsId,
-      goodsName: goods?.name ?? goodsId,
-      category: goods?.category ?? "daily",
-      quantity: restoredQuantity,
-      unitPrice: goods?.price ?? 0,
-      type: "manual-restock"
-    }));
+      consumedBatches,
+      movement: this.buildUndoMovement({
+        userId: actorUserId,
+        deviceCode,
+        goodsId,
+        goodsName: goods?.name ?? goodsId,
+        category: goods?.category ?? "daily",
+        quantity: 0,
+        unitPrice: goods?.price ?? 0,
+        type: "manual-restock"
+      })
+    });
+    const restoredQuantity = change.movements[0]?.quantity ?? 0;
 
     const undoLog = this.store.logOperation({
       category: "inventory",
@@ -402,7 +405,7 @@ export class OperationLogsService {
       }
     });
 
-    this.markBatchConsumptionTracesReverted(log.id, undoLog.id);
+    this.inventoryBatchChanges.markConsumptionTracesReverted(log.id, undoLog.id);
     this.markAsUndone(log, actorUserId, undoLog.id);
     return undoLog;
   }
@@ -493,24 +496,23 @@ export class OperationLogsService {
     const goodsId = this.readString(log.metadata?.goodsId, "缺少货品编号。");
     const deviceCode = this.readString(log.metadata?.deviceCode, "缺少柜机编号。");
     const quantity = this.readNumber(log.metadata?.quantity, "缺少数量信息。");
-    const removed = this.store.removeBatchQuantity(batchId, quantity);
-
-    if (!removed) {
-      throw new NotFoundException("未找到可撤销的批次。");
-    }
-
     const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
-    this.store.inventory.unshift(this.buildUndoMovement({
-      userId: actorUserId,
-      deviceCode,
-      goodsId,
-      goodsName: goods?.name ?? goodsId,
-      category: goods?.category ?? "daily",
-      quantity: removed.actualQuantity,
-      unitPrice: goods?.price ?? 0,
-      type: "manual-deduction",
-      batchId
-    }));
+    const change = this.inventoryBatchChanges.undoRestockBatchChange({
+      batchId,
+      quantity,
+      movement: this.buildUndoMovement({
+        userId: actorUserId,
+        deviceCode,
+        goodsId,
+        goodsName: goods?.name ?? goodsId,
+        category: goods?.category ?? "daily",
+        quantity,
+        unitPrice: goods?.price ?? 0,
+        type: "manual-deduction",
+        batchId
+      })
+    });
+    const undoQuantity = change.movements[0]?.quantity ?? quantity;
 
     const undoLog = this.store.logOperation({
       category: "goods",
@@ -532,7 +534,7 @@ export class OperationLogsService {
         goodsId,
         goodsName: goods?.name ?? goodsId,
         deviceCode,
-        quantity: removed.actualQuantity,
+        quantity: undoQuantity,
         undoState: "not_undoable"
       }
     });
@@ -546,24 +548,23 @@ export class OperationLogsService {
     const goodsId = this.readString(log.metadata?.goodsId, "缺少货品编号。");
     const deviceCode = this.readString(log.metadata?.deviceCode, "缺少柜机编号。");
     const quantity = this.readNumber(log.metadata?.quantity, "缺少数量信息。");
-    const restored = this.store.restoreBatchQuantity(batchId, quantity);
-
-    if (!restored) {
-      throw new NotFoundException("未找到可恢复的批次。");
-    }
-
     const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
-    this.store.inventory.unshift(this.buildUndoMovement({
-      userId: actorUserId,
-      deviceCode,
-      goodsId,
-      goodsName: goods?.name ?? goodsId,
-      category: goods?.category ?? "daily",
+    const change = this.inventoryBatchChanges.restoreRemovedBatch({
+      batchId,
       quantity,
-      unitPrice: goods?.price ?? 0,
-      type: "manual-restock",
-      batchId
-    }));
+      movement: this.buildUndoMovement({
+        userId: actorUserId,
+        deviceCode,
+        goodsId,
+        goodsName: goods?.name ?? goodsId,
+        category: goods?.category ?? "daily",
+        quantity,
+        unitPrice: goods?.price ?? 0,
+        type: "manual-restock",
+        batchId
+      })
+    });
+    const undoQuantity = change.movements[0]?.quantity ?? quantity;
 
     const undoLog = this.store.logOperation({
       category: "goods",
@@ -585,12 +586,12 @@ export class OperationLogsService {
         goodsId,
         goodsName: goods?.name ?? goodsId,
         deviceCode,
-        quantity,
+        quantity: undoQuantity,
         undoState: "not_undoable"
       }
     });
 
-    this.markBatchConsumptionTracesReverted(log.id, undoLog.id);
+    this.inventoryBatchChanges.markConsumptionTracesReverted(log.id, undoLog.id);
     this.markAsUndone(log, actorUserId, undoLog.id);
     return undoLog;
   }
@@ -603,19 +604,6 @@ export class OperationLogsService {
       undoneByUserId: actorUserId,
       undoLogId
     };
-  }
-
-  private markBatchConsumptionTracesReverted(sourceLogId: string, undoLogId: string) {
-    const now = new Date().toISOString();
-
-    for (const trace of this.store.batchConsumptionTraces) {
-      if (trace.sourceLogId !== sourceLogId || trace.revertedAt) {
-        continue;
-      }
-
-      trace.revertedAt = now;
-      trace.revertedByLogId = undoLogId;
-    }
   }
 
   private buildUndoMovement(payload: {

@@ -19,6 +19,7 @@ const selectedDeviceCode = ref("");
 const templateKeyword = ref("");
 const quantity = ref(0);
 const productionDate = ref(new Date().toISOString().slice(0, 10));
+const batchNo = ref("");
 const note = ref("");
 const submitting = ref(false);
 const presetDeviceCode = ref("");
@@ -133,7 +134,7 @@ const submit = async () => {
       deviceCode: selectedDeviceCode.value,
       quantity: quantity.value,
       productionDate: productionDate.value,
-      note: note.value || undefined,
+      note: [batchNo.value ? `批次号：${batchNo.value.trim()}` : "", note.value.trim()].filter(Boolean).join("；") || undefined,
       confirmed: true
     });
 
@@ -166,10 +167,10 @@ onLoad((query) => {
 </script>
 
 <template>
-  <MobileShell eyebrow="按模板补货" title="登记补货" subtitle="选择柜机、模板、数量和生产日期，系统会自动推导保质期。">
+  <MobileShell eyebrow="补货登记" title="登记补货" subtitle="选择柜机、商品、数量、生产日期和批次号。">
     <template #hero-actions>
       <view class="hero-action-grid">
-        <button class="vm-button" @tap="submit" :loading="submitting">提交补货登记</button>
+        <button class="vm-button vm-button--warning" @tap="submit" :loading="submitting">提交补货登记</button>
         <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">后端商品模板</button>
       </view>
     </template>
@@ -245,9 +246,15 @@ onLoad((query) => {
           </picker>
         </view>
 
-        <view class="vm-field">
-          <text class="vm-field__label">备注（选填）</text>
-          <input v-model="note" class="vm-field__input" placeholder="例如：上午批次、临期处理补投" />
+        <view class="restock-field-grid">
+          <view class="vm-field">
+            <text class="vm-field__label">批次号（选填）</text>
+            <input v-model="batchNo" class="vm-field__input" placeholder="例如：20240519001" />
+          </view>
+          <view class="vm-field">
+            <text class="vm-field__label">备注（选填）</text>
+            <input v-model="note" class="vm-field__input" placeholder="例如：上午批次、临期处理补投" />
+          </view>
         </view>
 
         <view class="summary-panel">
@@ -255,11 +262,12 @@ onLoad((query) => {
           <text class="summary-panel__body">模板：{{ selectedTemplate?.goodsName ?? "未选择" }}</text>
           <text class="summary-panel__body">柜机：{{ selectedDevice?.name ?? "未选择" }}</text>
           <text class="summary-panel__body">数量：{{ quantity || 0 }} 件</text>
+          <text class="summary-panel__body">批次号：{{ batchNo || "系统生成" }}</text>
           <text class="summary-panel__body">预计到期：{{ estimatedExpireDate || "等待计算" }}</text>
         </view>
 
         <view class="action-grid">
-          <button class="vm-button" :loading="submitting" @tap="submit">提交补货登记</button>
+          <button class="vm-button vm-button--warning" :loading="submitting" @tap="submit">提交补货登记</button>
           <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">查看后端模板</button>
         </view>
       </view>
@@ -293,7 +301,8 @@ onLoad((query) => {
 .hero-action-grid,
 .overview-grid,
 .template-list,
-.action-grid {
+.action-grid,
+.restock-field-grid {
   display: grid;
   gap: 16rpx;
 }

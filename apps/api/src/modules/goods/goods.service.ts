@@ -10,10 +10,10 @@ import type {
   GoodsDetailSnapshot,
   GoodsOverviewItem,
   GoodsOverviewSnapshot,
-  InventoryMovement,
   UserRole
 } from "@vm/shared-types";
 
+import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { SmartVmGateway } from "../devices/smartvm.gateway";
 
@@ -21,6 +21,7 @@ import { SmartVmGateway } from "../devices/smartvm.gateway";
 export class GoodsService {
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
     @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway
   ) {}
 
@@ -331,42 +332,38 @@ export class GoodsService {
       throw new BadRequestException("批次数量必须大于 0。");
     }
 
-    this.store.ensureDeviceGoodsEntry(payload.deviceCode, {
-      goodsId: goods.goodsId,
-      goodsCode: goods.goodsCode,
-      name: goods.name,
-      category: goods.category,
-      price: goods.price,
-      imageUrl: goods.imageUrl
+    const happenedAt = new Date().toISOString();
+    const change = this.inventoryBatchChanges.recordRestockMovement({
+      movement: {
+        id: this.store.createId("movement"),
+        userId: payload.sourceUserId ?? actorUserId ?? this.store.users.find((entry) => entry.role === "admin")?.id ?? "system",
+        deviceCode: payload.deviceCode,
+        goodsId: goods.goodsId,
+        goodsName: goods.name,
+        category: goods.category,
+        quantity: payload.quantity,
+        unitPrice: goods.price,
+        type: "manual-restock",
+        happenedAt,
+        expiresAt: payload.expiresAt
+      },
+      deviceGoods: goods,
+      batch: {
+        expiresAt: payload.expiresAt,
+        sourceType: payload.sourceType ?? "admin",
+        sourceUserId: payload.sourceUserId ?? actorUserId,
+        sourceUserName:
+          payload.sourceUserName ??
+          this.store.users.find((entry) => entry.id === (payload.sourceUserId ?? actorUserId))?.name,
+        note: payload.note,
+        createdAt: happenedAt
+      }
     });
+    const batch = change.createdBatches[0];
 
-    const batch = this.store.createGoodsBatch({
-      goodsId,
-      deviceCode: payload.deviceCode,
-      quantity: payload.quantity,
-      expiresAt: payload.expiresAt,
-      sourceType: payload.sourceType ?? "admin",
-      sourceUserId: payload.sourceUserId ?? actorUserId,
-      sourceUserName:
-        payload.sourceUserName ??
-        this.store.users.find((entry) => entry.id === (payload.sourceUserId ?? actorUserId))?.name,
-      note: payload.note
-    });
-
-    this.store.inventory.unshift({
-      id: this.store.createId("movement"),
-      userId: payload.sourceUserId ?? actorUserId ?? this.store.users.find((entry) => entry.role === "admin")?.id ?? "system",
-      batchId: batch.batchId,
-      deviceCode: payload.deviceCode,
-      goodsId: goods.goodsId,
-      goodsName: goods.name,
-      category: goods.category,
-      quantity: payload.quantity,
-      unitPrice: goods.price,
-      type: "manual-restock",
-      happenedAt: batch.createdAt,
-      expiresAt: payload.expiresAt
-    });
+    if (!batch) {
+      throw new BadRequestException("新增补货批次未产生库存变化。");
+    }
 
     this.store.logOperation({
       category: "goods",
@@ -421,38 +418,34 @@ export class GoodsService {
       throw new BadRequestException("去除数量必须大于 0。");
     }
 
-    const removed = this.store.removeBatchQuantity(batchId, payload.quantity);
+    const batch = this.store.getGoodsBatches().find((entry) => entry.batchId === batchId);
 
-    if (!removed) {
+    if (!batch) {
       throw new NotFoundException("未找到对应批次。");
     }
 
-    const goods = this.findCatalogItem(removed.batch.goodsId);
-
-    const movement: InventoryMovement = {
+    const goods = this.findCatalogItem(batch.goodsId);
+    const movement = {
       id: this.store.createId("movement"),
       userId: actorUserId ?? this.store.users.find((entry) => entry.role === "admin")?.id ?? "system",
-      batchId: removed.batch.batchId,
-      consumedBatches: [
-        {
-          batchId: removed.batch.batchId,
-          quantity: removed.actualQuantity,
-          expiresAt: removed.batch.expiresAt,
-          sourceUserId: removed.batch.sourceUserId,
-          sourceUserName: removed.batch.sourceUserName,
-          selectionReason: "specified"
-        }
-      ],
-      deviceCode: removed.batch.deviceCode,
+      deviceCode: batch.deviceCode,
       goodsId: goods.goodsId,
       goodsName: goods.name,
       category: goods.category,
-      quantity: removed.actualQuantity,
+      quantity: payload.quantity,
       unitPrice: goods.price,
-      type: "manual-deduction",
+      type: "manual-deduction" as const,
       happenedAt: new Date().toISOString()
     };
-    this.store.inventory.unshift(movement);
+    const change = this.inventoryBatchChanges.recordSpecificBatchDeduction({
+      batchId,
+      quantity: payload.quantity,
+      movement,
+      trace: {
+        enabled: false
+      }
+    });
+    const removedQuantity = change.movements[0]?.quantity ?? payload.quantity;
 
     const log = this.store.logOperation({
       category: "goods",
@@ -466,26 +459,17 @@ export class GoodsService {
       },
       secondarySubject: {
         type: "device",
-        id: removed.batch.deviceCode,
-        label: this.getDeviceLabel(removed.batch.deviceCode)
+        id: batch.deviceCode,
+        label: this.getDeviceLabel(batch.deviceCode)
       },
       metadata: {
         goodsId: goods.goodsId,
         goodsName: goods.name,
-        deviceCode: removed.batch.deviceCode,
-        quantity: removed.actualQuantity,
-        batchId: removed.batch.batchId,
+        deviceCode: batch.deviceCode,
+        quantity: removedQuantity,
+        batchId: batch.batchId,
         note: payload.note ?? "",
-        consumedBatches: [
-          {
-            batchId: removed.batch.batchId,
-            quantity: removed.actualQuantity,
-            expiresAt: removed.batch.expiresAt,
-            sourceUserId: removed.batch.sourceUserId,
-            sourceUserName: removed.batch.sourceUserName,
-            selectionReason: "specified"
-          }
-        ],
+        consumedBatches: change.consumedBatches,
         confirmation: {
           confirmed: true,
           confirmedAt: new Date().toISOString(),
@@ -495,30 +479,20 @@ export class GoodsService {
         undoState: "undoable"
       }
     });
-    this.store.recordBatchConsumption({
-      id: this.store.createId("consumption-trace"),
-      batchId: removed.batch.batchId,
-      goodsId: goods.goodsId,
-      goodsName: goods.name,
-      deviceCode: removed.batch.deviceCode,
-      movementId: movement.id,
+    this.inventoryBatchChanges.recordConsumptionTraces({
+      movement,
+      consumedBatches: change.consumedBatches,
       sourceLogId: log.id,
-      operationType: movement.type,
-      sourceUserId: removed.batch.sourceUserId,
-      sourceUserName: removed.batch.sourceUserName,
-      consumerUserId: movement.userId,
       consumerUserName: this.store.users.find((entry) => entry.id === movement.userId)?.name,
-      quantity: removed.actualQuantity,
-      happenedAt: movement.happenedAt,
       note: payload.note ?? "管理员手工去除批次"
     });
 
     return {
-      batchId: removed.batch.batchId,
+      batchId: batch.batchId,
       goodsId: goods.goodsId,
-      deviceCode: removed.batch.deviceCode,
-      removedQuantity: removed.actualQuantity,
-      remainingQuantity: removed.batch.remainingQuantity
+      deviceCode: batch.deviceCode,
+      removedQuantity,
+      remainingQuantity: this.store.getGoodsBatches().find((entry) => entry.batchId === batchId)?.remainingQuantity ?? 0
     };
   }
 

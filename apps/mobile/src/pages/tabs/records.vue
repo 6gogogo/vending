@@ -43,11 +43,11 @@ const adminView = ref<"users" | "reviews" | "logs">("users");
 
 const title = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return "领取详情";
+    return "领取记录";
   }
 
   if (sessionStore.user?.role === "merchant") {
-    return "货物流向";
+    return "补货记录";
   }
 
   return "人员日志";
@@ -176,7 +176,7 @@ onShow(() => {
           </view>
         </view>
         <view v-else class="summary-card">
-          <text class="summary-card__title">{{ loading ? "正在统计货物流向" : "当前暂无被领取数据" }}</text>
+          <text class="summary-card__title">{{ loading ? "正在统计补货记录" : "当前暂无被领取数据" }}</text>
           <text class="summary-card__meta">累计帮助人次 {{ merchantCumulativeHelpTimes }} 次</text>
         </view>
 
@@ -187,7 +187,7 @@ onShow(() => {
             <text class="simple-card__meta">{{ batch.expiresAt ? `到期 ${batch.expiresAt.slice(0, 10)}` : "未设置保质期" }}</text>
           </view>
         </view>
-        <EmptyState v-else :title="loading ? '正在加载批次' : '当前没有补货批次'" description="完成首次补货后，这里会展示货物流向。" />
+        <EmptyState v-else :title="loading ? '正在加载批次' : '当前没有补货批次'" description="完成首次补货后，这里会展示补货记录。" />
 
         <view v-if="merchantLogs.length" class="simple-list">
           <view v-for="log in merchantLogs.slice(0, 5)" :key="log.id" class="simple-card">
@@ -213,7 +213,7 @@ onShow(() => {
           <view v-if="pendingApplications.length" class="simple-list">
             <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
               <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
-              <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "普通用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }}</text>
+              <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "受助用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }}</text>
               <input v-model="rejectReasons[item.id]" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
               <view class="action-row">
                 <button class="vm-button" @tap="reviewApplication(item.id, 'approved')">通过</button>

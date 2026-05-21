@@ -133,6 +133,8 @@ const currentGroup = computed(() =>
   typeof route.meta.group === "string" ? route.meta.group : "总览"
 );
 
+const roleLabel = computed(() => (sessionStore.user?.backofficeRole === "merchant" ? "商家" : "超级管理员"));
+
 const logout = async () => {
   sessionStore.clearSession();
   await router.replace("/login");
@@ -237,7 +239,14 @@ const isActive = (target: string) => {
   <div class="admin-shell workbench">
     <aside class="workbench__sidebar">
       <div class="workbench__brand-panel admin-panel">
-        <span class="admin-kicker">公益智助柜</span>
+        <div class="workbench__brand-head">
+          <span class="workbench__brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M7 3.75h10A2.25 2.25 0 0 1 19.25 6v12A2.25 2.25 0 0 1 17 20.25H7A2.25 2.25 0 0 1 4.75 18V6A2.25 2.25 0 0 1 7 3.75Zm-.75 5.5h11.5V6a.75.75 0 0 0-.75-.75H7a.75.75 0 0 0-.75.75v3.25Zm0 1.5V18c0 .414.336.75.75.75h10a.75.75 0 0 0 .75-.75v-7.25H6.25Zm3.25 1.75h5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5Zm0 3h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1 0-1.5Z" />
+            </svg>
+          </span>
+          <span class="admin-kicker">公益智助柜</span>
+        </div>
         <h1 class="workbench__brand">后台管理台</h1>
         <p class="workbench__brand-copy">面向街道与政府服务场景，按人员、货物、柜机和日志组织日常值守工作。</p>
       </div>
@@ -251,6 +260,7 @@ const isActive = (target: string) => {
             :to="item.to"
             class="workbench__nav-link"
             :class="{ 'workbench__nav-link--active': isActive(item.to) }"
+            :aria-current="isActive(item.to) ? 'page' : undefined"
           >
             <span class="workbench__nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24">
@@ -265,8 +275,10 @@ const isActive = (target: string) => {
       <div class="workbench__status admin-panel">
         <p class="admin-kicker">当前模块</p>
         <h2 class="workbench__status-title">{{ currentGroup }}</h2>
-        <p class="admin-copy workbench__status-copy">{{ sessionStore.user?.name ?? "后台用户" }}</p>
-        <p class="admin-copy workbench__status-copy">角色：{{ sessionStore.user?.backofficeRole === "merchant" ? "商家" : "超级管理员" }}</p>
+        <div class="workbench__operator">
+          <span class="workbench__operator-name">{{ sessionStore.user?.name ?? "后台用户" }}</span>
+          <span class="admin-pill admin-pill--success">{{ roleLabel }}</span>
+        </div>
         <p class="admin-copy workbench__status-copy">登录账号：{{ sessionStore.auth?.username ?? "admin" }}</p>
         <div v-if="sessionStore.auth?.usesDefaultPassword" class="admin-note workbench__password-warning">
           当前仍在使用默认密码 `admin`，建议立即修改。
@@ -324,7 +336,7 @@ const isActive = (target: string) => {
         <div class="workbench__header-side">
           <span class="admin-kicker">工作视图</span>
           <span class="workbench__header-value">{{ currentGroup }}</span>
-          <p class="admin-copy">当前模块的入口、数据和操作会在这一栏联动展示。</p>
+          <p class="admin-copy">当前模块的入口、数据和操作会在这一栏联动展示，重点风险使用颜色和状态标签区分。</p>
         </div>
       </header>
 
@@ -336,6 +348,30 @@ const isActive = (target: string) => {
 </template>
 
 <style scoped>
+.workbench__brand-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workbench__brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--admin-accent);
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(31, 111, 91, 0.18);
+}
+
+.workbench__brand-mark svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
 .workbench__nav-icon {
   display: inline-flex;
   align-items: center;
@@ -344,8 +380,14 @@ const isActive = (target: string) => {
   height: 28px;
   margin-right: 10px;
   border-radius: 8px;
-  background: rgba(29, 79, 145, 0.1);
-  color: var(--admin-accent-strong);
+  background: var(--admin-info-soft);
+  color: var(--admin-info);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.workbench__nav-link--active .workbench__nav-icon {
+  background: var(--admin-accent);
+  color: #ffffff;
 }
 
 .workbench__nav-icon svg {
@@ -354,9 +396,24 @@ const isActive = (target: string) => {
   fill: currentColor;
 }
 
+.workbench__operator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.workbench__operator-name {
+  min-width: 0;
+  color: var(--admin-text);
+  font-weight: 700;
+}
+
 .workbench__password-panel {
   display: grid;
   gap: 10px;
+  padding-top: 4px;
 }
 
 .workbench__password-warning {

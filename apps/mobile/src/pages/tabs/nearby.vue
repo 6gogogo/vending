@@ -24,6 +24,7 @@ const devices = ref<DeviceRecord[]>([]);
 const loading = ref(false);
 const distanceEnabled = ref(false);
 const mapExpanded = ref(false);
+const viewMode = ref<"map" | "list">("map");
 const selectedGoodsId = ref("");
 const highlightedDeviceCode = ref("");
 const currentLocation = ref<{ longitude: number; latitude: number }>();
@@ -45,17 +46,18 @@ const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
 
 const accessibilityEnabled = computed(() => uiPreferencesStore.isAccessibilityEnabled(sessionStore.user?.role));
 const isAccessibleSpecial = computed(() => sessionStore.user?.role === "special" && accessibilityEnabled.value);
+const pageEyebrow = computed(() => (sessionStore.user?.role === "merchant" ? "补货" : "附近柜机"));
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return isAccessibleSpecial.value ? "显示柜机名称、地点和可选货物。" : "查看附近柜机位置、库存和免费额度，再进入领取。";
+    return isAccessibleSpecial.value ? "显示柜机名称、地点和可选货物。" : "地图和列表都能查看，先确认可领取再开柜。";
   }
 
   if (sessionStore.user?.role === "merchant") {
-    return "查看可补货柜机状态，再进入补货登记。";
+    return "选择在线柜机，开门补货或登记商品批次。";
   }
 
-  return "查看所有柜机状态、货品概要与详情入口。";
+  return "查看所有柜机状态、货品概要，再进入运营开门或详情处理。";
 });
 
 const deviceEntries = computed(() =>
@@ -121,11 +123,11 @@ const heroSupport = computed(() => {
 
   if (sessionStore.user?.role === "merchant") {
     return {
-      title: "补货提示",
+      title: "开门提示",
       lines: [
-        "建议先看在线柜机，再安排补货。",
+        "建议先看在线柜机，再安排开门和补货。",
         selectedGoodsName.value ? `当前筛选物资：${selectedGoodsName.value}` : "可按物资名称查找需要补货的柜机。",
-        highlightedDevice.value ? `当前查看：${highlightedDevice.value.name}` : "选中柜机后可直接进入补货登记。"
+        highlightedDevice.value ? `当前查看：${highlightedDevice.value.name}` : "选中柜机后可选择是否有商品入柜。"
       ]
     };
   }
@@ -298,13 +300,13 @@ const openDevice = (deviceCode: string) => {
 
   if (sessionStore.user?.role === "merchant") {
     uni.navigateTo({
-      url: `/pages/merchant/restock?deviceCode=${deviceCode}`
+      url: `/pages/common/operation-open?deviceCode=${deviceCode}`
     });
     return;
   }
 
   uni.navigateTo({
-    url: `/pages/admin/device-detail?deviceCode=${deviceCode}`
+    url: `/pages/common/operation-open?deviceCode=${deviceCode}`
   });
 };
 
@@ -413,6 +415,9 @@ const formatDistance = (distanceMeters?: number) => {
   return `${(distanceMeters / 1000).toFixed(1)} 公里`;
 };
 
+const isLowStockGoods = (goods: { stock?: number; lowStockThreshold?: number }) =>
+  typeof goods.lowStockThreshold === "number" && (goods.stock ?? 0) <= goods.lowStockThreshold;
+
 onShow(() => {
   load();
 });
@@ -421,66 +426,103 @@ onShow(() => {
 <template>
   <MobileShell
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
-    eyebrow="附近柜机"
+    :eyebrow="pageEyebrow"
     :title="roleLabelMap[sessionStore.user?.role ?? 'special']"
     :subtitle="subtitle"
   >
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view v-if="mappableDevices.length && !isAccessibleSpecial" class="nearby-map-card">
-          <map
-            class="nearby-map nearby-map--compact"
-            :longitude="mapCenter.longitude"
-            :latitude="mapCenter.latitude"
-            :markers="mapMarkers"
-            :scale="13"
-            :show-location="true"
-            @tap="mapExpanded = true"
-            @markertap="handleMarkerTap"
-          />
-
-          <view class="nearby-map-card__summary">
-            <view class="nearby-location-banner">
-              <text class="nearby-map-card__title">当前位置与地图提示</text>
-              <text class="nearby-location-banner__value">{{ locationMessage }}</text>
-              <text class="nearby-map-card__hint">
-                {{
-                  distanceEnabled
-                    ? "已按距离排序，点地图大头钉可高亮对应柜机。"
-                    : "未开启定位时仍可使用列表；如需按距离排序，请在小程序和系统设置中允许定位权限。"
-                }}
-              </text>
-            </view>
-
-            <view v-if="highlightedDevice" class="nearby-map-card__focus">
-              <text class="nearby-map-card__focus-title">当前定位</text>
-              <text class="nearby-map-card__focus-value">
-                {{ highlightedDevice.name }} · {{ formatDistance(highlightedDevice.distanceMeters) }}
-              </text>
-            </view>
+          <view class="nearby-search-bar">
+            <picker
+              :range="goodsOptions"
+              range-key="goodsName"
+              :value="Math.max(goodsOptions.findIndex((item) => item.goodsId === selectedGoodsId), 0)"
+              @change="selectedGoodsId = goodsOptions[$event.detail.value]?.goodsId ?? ''"
+            >
+              <view class="nearby-search-bar__input">
+                {{ selectedGoodsName || "搜索地址或柜机名称" }}
+              </view>
+            </picker>
+            <button class="nearby-search-bar__button" @tap="focusNearestGoods">查找</button>
           </view>
 
-          <view class="nearby-map-card__tools">
-            <button class="vm-button" @tap="focusNearestDevice">定位最近柜机</button>
-            <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--ghost" @tap="scanAndOpen">扫码开门</button>
-            <button v-else class="vm-button vm-button--ghost" @tap="mapExpanded = true">放大地图查看</button>
-            <view class="nearby-map-card__search">
-              <picker
-                :range="goodsOptions"
-                range-key="goodsName"
-                :value="Math.max(goodsOptions.findIndex((item) => item.goodsId === selectedGoodsId), 0)"
-                @change="selectedGoodsId = goodsOptions[$event.detail.value]?.goodsId ?? ''"
-              >
-                <view class="nearby-map-card__picker">
-                  {{ selectedGoodsName || "请选择想找的物资" }}
-                </view>
-              </picker>
-              <button class="vm-button" @tap="focusNearestGoods">搜索最近物资</button>
-            </view>
+          <view class="nearby-mode-tabs">
+            <button
+              class="nearby-mode-tabs__item"
+              :class="{ 'nearby-mode-tabs__item--active': viewMode === 'map' }"
+              @tap="viewMode = 'map'"
+            >
+              地图
+            </button>
+            <button
+              class="nearby-mode-tabs__item"
+              :class="{ 'nearby-mode-tabs__item--active': viewMode === 'list' }"
+              @tap="viewMode = 'list'"
+            >
+              列表
+            </button>
           </view>
+
+          <template v-if="viewMode === 'map'">
+            <map
+              class="nearby-map nearby-map--compact"
+              :longitude="mapCenter.longitude"
+              :latitude="mapCenter.latitude"
+              :markers="mapMarkers"
+              :scale="13"
+              :show-location="true"
+              @tap="mapExpanded = true"
+              @markertap="handleMarkerTap"
+            />
+
+            <view class="nearby-map-card__summary">
+              <view class="nearby-location-banner">
+                <text class="nearby-map-card__title">当前位置与地图提示</text>
+                <text class="nearby-location-banner__value">{{ locationMessage }}</text>
+                <text class="nearby-map-card__hint">
+                  {{
+                    distanceEnabled
+                      ? "已按距离排序，点地图大头钉可高亮对应柜机。"
+                      : "未开启定位时仍可使用列表；如需按距离排序，请在小程序和系统设置中允许定位权限。"
+                  }}
+                </text>
+              </view>
+
+              <view v-if="highlightedDevice" class="nearby-map-card__focus">
+                <text class="nearby-map-card__focus-title">当前定位</text>
+                <text class="nearby-map-card__focus-value">
+                  {{ highlightedDevice.name }} · {{ formatDistance(highlightedDevice.distanceMeters) }}
+                </text>
+              </view>
+            </view>
+
+            <button v-if="highlightedDevice" class="map-focus-card" @tap="openDevice(highlightedDevice.deviceCode)">
+              <view class="map-focus-card__media" aria-hidden="true">
+                <view class="map-focus-card__machine" />
+              </view>
+              <view class="map-focus-card__copy">
+                <text class="map-focus-card__title">{{ highlightedDevice.name }}</text>
+                <text class="map-focus-card__meta">{{ highlightedDevice.location }}</text>
+                <text class="map-focus-card__meta">
+                  {{ distanceEnabled ? `距离 ${formatDistance(highlightedDevice.distanceMeters)}` : "按默认顺序展示" }}
+                </text>
+              </view>
+              <text class="vm-status vm-status--success">可领取</text>
+            </button>
+
+            <view class="nearby-map-card__tools">
+              <button class="vm-button" @tap="focusNearestDevice">定位最近柜机</button>
+              <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--warning" @tap="scanAndOpen">扫码开柜</button>
+              <button v-else class="vm-button vm-button--ghost" @tap="mapExpanded = true">放大地图查看</button>
+            </view>
+          </template>
         </view>
 
-        <view v-if="visibleDeviceEntries.length" class="device-list">
+        <view
+          v-if="visibleDeviceEntries.length && (viewMode === 'list' || isAccessibleSpecial || !mappableDevices.length)"
+          class="device-list"
+        >
           <view
             v-for="entry in visibleDeviceEntries"
             :key="entry.device.deviceCode"
@@ -489,6 +531,9 @@ onShow(() => {
             @tap="!isAccessibleSpecial && focusDevice(entry.device.deviceCode)"
           >
             <view class="device-card__head">
+              <view v-if="!isAccessibleSpecial" class="device-card__media" aria-hidden="true">
+                <view class="device-card__machine" />
+              </view>
               <view class="device-card__main">
                 <text class="device-card__title">{{ entry.device.name }}</text>
                 <text class="device-card__meta">{{ entry.device.location }}</text>
@@ -510,7 +555,10 @@ onShow(() => {
             <view v-if="entry.visibleGoods.length" class="goods-list">
               <view v-for="goods in entry.visibleGoods" :key="goods.goodsId" class="goods-item">
                 <view class="goods-item__main">
-                  <text>{{ goods.name }}</text>
+                  <view class="goods-item__title-row">
+                    <text>{{ goods.name }}</text>
+                    <text v-if="!isAccessibleSpecial && isLowStockGoods(goods)" class="vm-status vm-status--low-stock">低库存</text>
+                  </view>
                   <text class="goods-item__meta">
                     {{
                       sessionStore.user?.role === "special"
@@ -539,8 +587,8 @@ onShow(() => {
                   sessionStore.user?.role === "special"
                     ? "进入领取"
                     : sessionStore.user?.role === "merchant"
-                      ? "去补货"
-                  : "查看详情"
+                      ? "补货 / 开门"
+                  : "运营开门"
                 }}
               </button>
               <button v-if="!isAccessibleSpecial" class="vm-button vm-button--ghost" @tap.stop="goFeedback(entry.device.deviceCode)">反馈</button>
@@ -549,7 +597,7 @@ onShow(() => {
         </view>
 
         <EmptyState
-          v-else
+          v-if="!visibleDeviceEntries.length"
           :title="loading ? '正在同步柜机' : isAccessibleSpecial ? '当前没有可选货物' : '当前没有可展示柜机'"
           :description="loading ? '请稍候，系统正在拉取设备信息。' : isAccessibleSpecial ? '系统会按库存自动刷新。' : '请确认后端是否已经接入柜机数据。'"
         />
@@ -584,7 +632,7 @@ onShow(() => {
         />
 
         <view class="nearby-map-card__tools">
-          <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--ghost" @tap="scanAndOpen">扫码开门</button>
+          <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--warning" @tap="scanAndOpen">扫码开柜</button>
           <button class="vm-button vm-button--ghost" @tap="focusNearestDevice">找寻最近柜机</button>
           <view class="nearby-map-card__search">
             <picker
@@ -613,7 +661,8 @@ onShow(() => {
 .nearby-map-card__search,
 .nearby-location-banner,
 .nearby-map-card__summary,
-.nearby-advice {
+.nearby-advice,
+.map-focus-card__copy {
   display: grid;
   gap: 16rpx;
 }
@@ -629,6 +678,63 @@ onShow(() => {
   justify-content: space-between;
 }
 
+.nearby-search-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12rpx;
+  padding: 10rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid var(--vm-line);
+  background: #ffffff;
+  box-shadow: 0 10rpx 24rpx rgba(88, 61, 30, 0.06);
+}
+
+.nearby-search-bar__input {
+  min-height: 62rpx;
+  display: flex;
+  align-items: center;
+  padding: 0 22rpx;
+  color: var(--vm-text-soft);
+  font-size: 24rpx;
+}
+
+.nearby-search-bar__button {
+  min-width: 110rpx;
+  min-height: 62rpx;
+  border-radius: 999rpx;
+  background: var(--vm-accent);
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.nearby-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8rpx;
+  padding: 8rpx;
+  border-radius: 20rpx;
+  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
+}
+
+.nearby-mode-tabs__item {
+  min-height: 58rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16rpx;
+  font-size: 24rpx;
+  color: var(--vm-text-soft);
+}
+
+.nearby-mode-tabs__item--active {
+  background: #ffffff;
+  color: var(--vm-accent-strong);
+  font-weight: 800;
+  box-shadow: 0 8rpx 18rpx rgba(88, 61, 30, 0.08);
+}
+
 .nearby-map-card__title,
 .nearby-advice__title {
   font-size: 28rpx;
@@ -641,7 +747,8 @@ onShow(() => {
 .goods-item__meta,
 .nearby-map-card__focus-value,
 .nearby-location-banner__value,
-.nearby-advice__body {
+.nearby-advice__body,
+.map-focus-card__meta {
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.6;
@@ -733,6 +840,73 @@ onShow(() => {
   color: var(--vm-text-soft);
 }
 
+.map-focus-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18rpx;
+  width: 100%;
+  padding: 18rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-success-line);
+  background: #ffffff;
+  text-align: left;
+}
+
+.map-focus-card__media,
+.device-card__media {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 20rpx;
+  background: linear-gradient(180deg, #fff4e6, #eaf6e4);
+  overflow: hidden;
+}
+
+.map-focus-card__media {
+  width: 110rpx;
+  height: 110rpx;
+}
+
+.map-focus-card__machine,
+.device-card__machine {
+  position: relative;
+  border-radius: 10rpx;
+  background: #2e7d46;
+  box-shadow: inset 0 0 0 5rpx rgba(255, 255, 255, 0.26);
+}
+
+.map-focus-card__machine {
+  width: 58rpx;
+  height: 82rpx;
+}
+
+.map-focus-card__machine::before,
+.device-card__machine::before {
+  content: "";
+  position: absolute;
+  left: 10rpx;
+  top: 14rpx;
+  border-radius: 6rpx;
+  background:
+    linear-gradient(#ff9a33 0 0) 5rpx 9rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#8fcf7f 0 0) 18rpx 9rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#fff0c9 0 0) 5rpx 26rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#ff9a33 0 0) 18rpx 26rpx / 8rpx 8rpx no-repeat,
+    #eef8e8;
+}
+
+.map-focus-card__machine::before {
+  width: 30rpx;
+  height: 48rpx;
+}
+
+.map-focus-card__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
 .device-card {
   display: grid;
   gap: 16rpx;
@@ -758,11 +932,37 @@ onShow(() => {
   gap: 16rpx;
 }
 
+.device-card__head {
+  align-items: flex-start;
+}
+
+.device-card__media {
+  width: 112rpx;
+  height: 112rpx;
+}
+
+.device-card__machine {
+  width: 58rpx;
+  height: 82rpx;
+}
+
+.device-card__machine::before {
+  width: 30rpx;
+  height: 48rpx;
+}
+
 .device-card__main,
 .goods-item__main {
   display: flex;
   flex-direction: column;
   gap: 8rpx;
+}
+
+.goods-item__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
 }
 
 .device-card__title {

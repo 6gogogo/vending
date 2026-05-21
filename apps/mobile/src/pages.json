@@ -62,9 +62,15 @@
       }
     },
     {
+      "path": "pages/common/operation-open",
+      "style": {
+        "navigationBarTitleText": "运营开门"
+      }
+    },
+    {
       "path": "pages/tabs/primary",
       "style": {
-        "navigationBarTitleText": "主入口"
+        "navigationBarTitleText": "首页"
       }
     },
     {
@@ -82,7 +88,7 @@
     {
       "path": "pages/tabs/settings",
       "style": {
-        "navigationBarTitleText": "设置"
+        "navigationBarTitleText": "我的"
       }
     },
     {
@@ -190,13 +196,13 @@
     "list": [
       {
         "pagePath": "pages/tabs/primary",
-        "text": "主入口",
+        "text": "首页",
         "iconPath": "static/tabs/home.png",
         "selectedIconPath": "static/tabs/home-active.png"
       },
       {
         "pagePath": "pages/tabs/nearby",
-        "text": "柜机",
+        "text": "附近柜机",
         "iconPath": "static/tabs/nearby.png",
         "selectedIconPath": "static/tabs/nearby-active.png"
       },
@@ -208,7 +214,7 @@
       },
       {
         "pagePath": "pages/tabs/settings",
-        "text": "设置",
+        "text": "我的",
         "iconPath": "static/tabs/settings-tab.png",
         "selectedIconPath": "static/tabs/settings-tab-active.png"
       }

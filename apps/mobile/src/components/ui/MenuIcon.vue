@@ -201,24 +201,24 @@ withDefaults(
   color: var(--vm-warning);
 }
 
-.vm-page--accessible .menu-icon--accent,
-.vm-page--accessible .menu-icon--neutral,
-.vm-page--accessible .menu-icon--warning {
+:global(.vm-page--accessible) .menu-icon--accent,
+:global(.vm-page--accessible) .menu-icon--neutral,
+:global(.vm-page--accessible) .menu-icon--warning {
   border-width: 3rpx;
 }
 
-.vm-page--accessible .menu-icon--accent {
+:global(.vm-page--accessible) .menu-icon--accent {
   background: var(--vm-info-bg);
   border-color: var(--vm-info-line);
   color: var(--vm-info);
 }
 
-.vm-page--accessible .menu-icon--neutral {
+:global(.vm-page--accessible) .menu-icon--neutral {
   background: #ffffff;
   border-color: var(--vm-line-strong);
 }
 
-.vm-page--accessible .menu-icon--warning {
+:global(.vm-page--accessible) .menu-icon--warning {
   background: var(--vm-warning-bg);
 }
 

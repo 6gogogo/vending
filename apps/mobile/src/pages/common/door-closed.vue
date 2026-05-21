@@ -2,9 +2,11 @@
 import { computed, ref } from "vue";
 import { onLoad, onUnload } from "@dcloudio/uni-app";
 
-import type { CabinetEventRecord, PaymentProvider } from "@vm/shared-types";
+import type { CabinetEventRecord, MerchantGoodsTemplate, PaymentProvider } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import EmptyState from "../../components/ui/EmptyState.vue";
+import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
@@ -20,21 +22,47 @@ const countdown = ref(5);
 const readyToReturn = ref(false);
 const payingProvider = ref<PaymentProvider>();
 const paymentMessage = ref("");
+const templates = ref<MerchantGoodsTemplate[]>([]);
+const templatesLoading = ref(false);
+const restockSubmitting = ref(false);
+const restockSubmitted = ref(false);
+const selectedTemplateId = ref("");
+const restockQuantity = ref(0);
+const productionDate = ref(new Date().toISOString().slice(0, 10));
+const restockBatchNo = ref("");
+const restockNote = ref("");
 
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
 let pollAttempts = 0;
 let mismatchNotified = false;
 
+const isOperationalEvent = computed(
+  () => event.value?.role === "merchant" || event.value?.role === "admin"
+);
+const isInboundOperation = computed(
+  () => isOperationalEvent.value && event.value?.hasInboundGoods === true
+);
+const isNoInboundOperation = computed(
+  () => isOperationalEvent.value && event.value?.hasInboundGoods === false
+);
 const intendedSummary = computed(() =>
-  event.value?.intentItems?.length
-    ? event.value.intentItems.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
-    : "未记录"
+  isInboundOperation.value
+    ? "有商品入柜，需提交模板登记"
+    : isNoInboundOperation.value
+      ? `无商品入柜 · ${event.value?.openReason ?? "未填写理由"}`
+      : event.value?.intentItems?.length
+        ? event.value.intentItems.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
+        : "未记录"
 );
 const settledSummary = computed(() =>
-  event.value?.goods?.length
-    ? event.value.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
-    : "等待平台结算"
+  isInboundOperation.value
+    ? restockSubmitted.value
+      ? "模板登记已提交"
+      : "等待手动模板登记"
+    : event.value?.goods?.length
+      ? event.value.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
+      : "等待平台结算"
 );
 const preSettlementItems = computed(() => event.value?.preSettlement?.items ?? []);
 const settlementMatched = computed(() =>
@@ -43,6 +71,7 @@ const settlementMatched = computed(() =>
 const needsPayment = computed(
   () =>
     Boolean(event.value) &&
+    !isOperationalEvent.value &&
     (event.value?.status === "settled" || event.value?.status === "closed") &&
     (event.value?.amount ?? 0) > 0 &&
     event.value?.paymentNotifyStatus !== "success" &&
@@ -52,11 +81,85 @@ const needsPayment = computed(
 const isFreeSettlement = computed(
   () =>
     Boolean(event.value) &&
+    !isOperationalEvent.value &&
     (event.value?.status === "settled" || event.value?.status === "refunded") &&
     (event.value?.amount ?? 0) <= 0 &&
     event.value?.billingStatus !== "mismatch" &&
     settlementMatched.value
 );
+const selectedTemplate = computed(() =>
+  templates.value.find((entry) => entry.id === selectedTemplateId.value)
+);
+const estimatedExpireDate = computed(() => {
+  const shelfLifeDays = selectedTemplate.value?.defaultShelfLifeDays;
+
+  if (!shelfLifeDays || !productionDate.value) {
+    return "";
+  }
+
+  const date = new Date(`${productionDate.value}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  date.setDate(date.getDate() + shelfLifeDays);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+});
+const canSubmitRestock = computed(
+  () =>
+    Boolean(event.value?.deviceCode) &&
+    Boolean(selectedTemplateId.value) &&
+    Number(restockQuantity.value) > 0 &&
+    Boolean(productionDate.value) &&
+    !restockSubmitted.value
+);
+const returnHintText = computed(() => {
+  if (isInboundOperation.value && !restockSubmitted.value) {
+    return "提交入柜登记后可返回首页。";
+  }
+
+  return readyToReturn.value ? `页面将在 ${countdown.value} 秒后自动返回首页。` : "结算结果确认后会自动返回首页。";
+});
+const returnButtonText = computed(() =>
+  isInboundOperation.value && !restockSubmitted.value ? "提交登记后返回" : "立即返回首页"
+);
+const flowSteps = computed(() => {
+  const settlementDone =
+    restockSubmitted.value ||
+    isFreeSettlement.value ||
+    event.value?.status === "refunded" ||
+    event.value?.paymentNotifyStatus === "success";
+  const settlementWarning =
+    needsPayment.value || Boolean(event.value?.settlementComparison && !event.value.settlementComparison.matched);
+
+  return [
+    {
+      label: isOperationalEvent.value ? "权限校验" : "资格校验",
+      description: "账号与柜机已确认",
+      state: "done" as const
+    },
+    {
+      label: "开柜",
+      description: "柜门已打开并完成操作",
+      state: "done" as const
+    },
+    {
+      label: isOperationalEvent.value ? "操作后关门" : "取货关门",
+      description: "柜门已关闭",
+      state: "done" as const
+    },
+    {
+      label: isInboundOperation.value ? "登记批次" : "完成结算",
+      description: settlementDone ? "已完成" : settlementWarning ? "请按提示处理" : "正在核对结果",
+      state: settlementDone ? ("done" as const) : settlementWarning ? ("warning" as const) : ("current" as const)
+    }
+  ];
+});
 
 const formatCurrency = (amount: number) => `￥${(amount / 100).toFixed(2)}`;
 const formatSettlementBreakdown = (item: {
@@ -83,6 +186,14 @@ const stopCountdown = () => {
 };
 
 const goHome = async () => {
+  if (isInboundOperation.value && !restockSubmitted.value) {
+    uni.showToast({
+      title: "请先提交入柜登记",
+      icon: "none"
+    });
+    return;
+  }
+
   stopPolling();
   stopCountdown();
   await sessionStore.bootstrap();
@@ -126,8 +237,120 @@ const notifyMismatchIfNeeded = () => {
   });
 };
 
+const ensureTemplatesLoaded = async () => {
+  if (templates.value.length || templatesLoading.value) {
+    return;
+  }
+
+  templatesLoading.value = true;
+  try {
+    const response = await mobileApi.merchantTemplates();
+    templates.value = response.filter((entry) => entry.status === "active");
+    selectedTemplateId.value = selectedTemplate.value?.id ?? templates.value[0]?.id ?? "";
+    restockQuantity.value = selectedTemplate.value?.defaultQuantity ?? templates.value[0]?.defaultQuantity ?? 0;
+  } catch (error) {
+    uni.showToast({
+      title: getErrorMessage(error),
+      icon: "none"
+    });
+  } finally {
+    templatesLoading.value = false;
+  }
+};
+
+const selectTemplate = (templateId: string) => {
+  selectedTemplateId.value = templateId;
+  restockQuantity.value = selectedTemplate.value?.defaultQuantity ?? restockQuantity.value;
+};
+
+const submitRestock = async () => {
+  if (!event.value || !canSubmitRestock.value) {
+    uni.showToast({
+      title: "请补全入柜登记",
+      icon: "none"
+    });
+    return;
+  }
+
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: "确认入柜登记",
+      content: `请确认向 ${event.value?.deviceCode} 登记 ${selectedTemplate.value?.goodsName ?? "货品"} x${restockQuantity.value}，预计到期 ${estimatedExpireDate.value || "未设置"}。`,
+      confirmText: "确认提交",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
+  restockSubmitting.value = true;
+  try {
+    await mobileApi.createMerchantRestock({
+      templateId: selectedTemplateId.value,
+      deviceCode: event.value.deviceCode,
+      quantity: restockQuantity.value,
+      productionDate: productionDate.value,
+      note:
+        [
+          restockBatchNo.value ? `批次号：${restockBatchNo.value.trim()}` : "",
+          restockNote.value.trim(),
+          event.value.openReason
+        ]
+          .filter(Boolean)
+          .join("；") || undefined,
+      confirmed: true
+    });
+    restockSubmitted.value = true;
+    statusText.value = "入柜登记完成";
+    hintText.value = "补货批次已写入系统，可在补货记录或后台库存中继续追踪。";
+    startCountdown();
+  } catch (error) {
+    uni.showToast({
+      title: getErrorMessage(error),
+      icon: "none"
+    });
+  } finally {
+    restockSubmitting.value = false;
+  }
+};
+
 const applyEvent = (nextEvent: CabinetEventRecord) => {
   event.value = nextEvent;
+
+  if (
+    nextEvent.hasInboundGoods === true &&
+    (nextEvent.role === "merchant" || nextEvent.role === "admin") &&
+    (nextEvent.status === "closed" || nextEvent.status === "settled" || nextEvent.status === "refunded")
+  ) {
+    statusText.value = restockSubmitted.value ? "入柜登记完成" : "待提交入柜登记";
+    hintText.value = restockSubmitted.value
+      ? "补货批次已写入系统，可继续追踪补货记录。"
+      : "柜门已关闭，请按模板登记本次入柜商品。";
+    stopPolling();
+    readyToReturn.value = restockSubmitted.value;
+    void ensureTemplatesLoaded();
+
+    if (restockSubmitted.value) {
+      startCountdown();
+    }
+
+    return;
+  }
+
+  if (
+    nextEvent.hasInboundGoods === false &&
+    (nextEvent.role === "merchant" || nextEvent.role === "admin") &&
+    (nextEvent.status === "settled" || nextEvent.status === "refunded")
+  ) {
+    statusText.value = "运营开门完成";
+    hintText.value = "平台结算已回调，系统按实际移出商品自动扣减库存；本次不产生支付。";
+    stopPolling();
+    startCountdown();
+    return;
+  }
 
   if (nextEvent.status === "settled" || nextEvent.status === "refunded") {
     statusText.value = nextEvent.billingStatus === "mismatch"
@@ -301,13 +524,85 @@ onUnload(() => {
   <MobileShell eyebrow="闭门确认" :title="statusText" :subtitle="hintText">
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <FlowSteps :steps="flowSteps" />
+
         <view class="status-box">
-          <text class="status-box__label">本次计划领取</text>
+          <text class="status-box__label">{{ isOperationalEvent ? "本次开门类型" : "本次计划领取" }}</text>
           <text class="status-box__value">{{ intendedSummary }}</text>
         </view>
         <view class="status-box">
-          <text class="status-box__label">平台实际结算</text>
+          <text class="status-box__label">{{ isInboundOperation ? "入柜登记状态" : "平台实际结算" }}</text>
           <text class="status-box__value">{{ settledSummary }}</text>
+        </view>
+        <view v-if="isNoInboundOperation" class="free-box">
+          <text class="free-box__title">无需支付</text>
+          <text class="free-box__body">开门理由：{{ event?.openReason ?? "未填写" }}。本次仅记录库存变化，不向用户收费。</text>
+        </view>
+        <view v-if="isInboundOperation" class="restock-box">
+          <view class="billing-box__head">
+            <text class="billing-box__title">模板入柜登记</text>
+            <text class="billing-box__amount">{{ restockSubmitted ? "已提交" : "待提交" }}</text>
+          </view>
+
+          <EmptyState
+            v-if="templatesLoading"
+            title="正在加载模板"
+            description="请稍候，系统正在读取可登记的商品模板。"
+          />
+          <EmptyState
+            v-else-if="!templates.length"
+            title="暂无可用模板"
+            description="请先在商品模板中维护可入柜商品，再回到本页提交登记。"
+          />
+          <template v-else-if="!restockSubmitted">
+            <view class="vm-field">
+              <text class="vm-field__label">商品模板</text>
+              <picker
+                :range="templates"
+                range-key="goodsName"
+                :value="Math.max(templates.findIndex((item) => item.id === selectedTemplateId), 0)"
+                @change="selectTemplate(templates[$event.detail.value]?.id ?? '')"
+              >
+                <view class="vm-field__input picker-value">
+                  {{ selectedTemplate?.goodsName ?? "请选择商品模板" }}
+                </view>
+              </picker>
+            </view>
+            <view class="restock-grid">
+              <view class="vm-field">
+                <text class="vm-field__label">入柜数量</text>
+                <input v-model.number="restockQuantity" class="vm-field__input" type="number" placeholder="件数" />
+              </view>
+              <view class="vm-field">
+                <text class="vm-field__label">生产日期</text>
+                <picker mode="date" :value="productionDate" @change="productionDate = $event.detail.value">
+                  <view class="vm-field__input picker-value">{{ productionDate || "请选择" }}</view>
+                </picker>
+              </view>
+            </view>
+            <view class="vm-field">
+              <text class="vm-field__label">批次号（选填）</text>
+              <input v-model="restockBatchNo" class="vm-field__input" placeholder="例如：20240519001" />
+            </view>
+            <view class="vm-field">
+              <text class="vm-field__label">备注（选填）</text>
+              <input v-model="restockNote" class="vm-field__input" placeholder="例如：上午批次、临期补投" />
+            </view>
+            <view class="summary-panel">
+              <text class="summary-panel__title">提交前确认</text>
+              <text class="summary-panel__body">货品：{{ selectedTemplate?.goodsName ?? "未选择" }}</text>
+              <text class="summary-panel__body">数量：{{ restockQuantity || 0 }} 件</text>
+              <text class="summary-panel__body">批次号：{{ restockBatchNo || "系统生成" }}</text>
+              <text class="summary-panel__body">预计到期：{{ estimatedExpireDate || "等待计算" }}</text>
+            </view>
+            <button class="vm-button" :disabled="!canSubmitRestock" :loading="restockSubmitting" @tap="submitRestock">
+              提交入柜登记
+            </button>
+          </template>
+          <view v-else class="summary-panel">
+            <text class="summary-panel__title">登记已完成</text>
+            <text class="summary-panel__body">本次入柜批次已写入库存，可返回首页继续处理。</text>
+          </view>
         </view>
         <view v-if="preSettlementItems.length" class="billing-box">
           <view class="billing-box__head">
@@ -340,9 +635,9 @@ onUnload(() => {
           <text v-if="paymentMessage" class="payment-box__body">{{ paymentMessage }}</text>
         </view>
         <text class="vm-subtitle">
-          {{ readyToReturn ? `页面将在 ${countdown} 秒后自动返回首页。` : "结算结果确认后会自动返回首页。" }}
+          {{ returnHintText }}
         </text>
-        <button class="vm-button" @tap="goHome">立即返回首页</button>
+        <button class="vm-button" @tap="goHome">{{ returnButtonText }}</button>
       </view>
     </GlassCard>
   </MobileShell>
@@ -366,7 +661,8 @@ onUnload(() => {
 .billing-box__title,
 .free-box__title,
 .warning-box__title,
-.payment-box__title {
+.payment-box__title,
+.summary-panel__title {
   font-size: 22rpx;
   color: var(--vm-text-soft);
 }
@@ -376,7 +672,8 @@ onUnload(() => {
 .billing-row__meta,
 .free-box__body,
 .warning-box__body,
-.payment-box__body {
+.payment-box__body,
+.summary-panel__body {
   font-size: 28rpx;
   color: var(--vm-text);
   line-height: 1.5;
@@ -416,9 +713,39 @@ onUnload(() => {
   border-color: var(--vm-success-line);
 }
 
+.restock-box {
+  display: grid;
+  gap: 18rpx;
+  padding: 6rpx 0 0;
+  border-top: 1rpx solid var(--vm-warning-line);
+}
+
+.restock-grid {
+  display: grid;
+  gap: 16rpx;
+}
+
+.picker-value {
+  display: flex;
+  align-items: center;
+}
+
+.summary-panel {
+  display: grid;
+  gap: 8rpx;
+  padding: 4rpx 0 4rpx 20rpx;
+  border-left: 4rpx solid var(--vm-accent);
+}
+
 .warning-box {
   background: rgba(255, 245, 232, 0.88);
   border-color: rgba(207, 120, 43, 0.18);
+}
+
+@media screen and (min-width: 720px) {
+  .restock-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
 

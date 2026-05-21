@@ -6,7 +6,6 @@ import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
-import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
@@ -65,30 +64,74 @@ const navigate = (url: string) => {
   uni.navigateTo({ url });
 };
 
+const goNearby = () => {
+  uni.switchTab({ url: "/pages/tabs/nearby" });
+};
+
 onShow(() => {
   load();
 });
 </script>
 
 <template>
-  <MobileShell eyebrow="爱心商户" :title="sessionStore.user?.name ?? '爱心商户'" :subtitle="appCopy.merchantWelcome">
+  <MobileShell eyebrow="爱心商户" :title="sessionStore.user?.name ?? '商户工作台'" :subtitle="appCopy.merchantWelcome">
     <template #hero-actions>
       <view class="hero-action-grid">
-        <button class="vm-button" @tap="navigate('/pages/merchant/restock')">立即登记补货</button>
-        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/traces')">查看货物去向</button>
+        <button class="vm-button vm-button--warning" @tap="goNearby">
+          <view class="action-button__content">
+            <MenuIcon name="restock" size="sm" tone="contrast" />
+            <text>选择柜机补货</text>
+          </view>
+        </button>
+        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/traces')">查看补货记录</button>
       </view>
     </template>
 
     <GlassCard tone="accent">
       <view class="vm-stack">
-        <view class="section-heading">
-          <text class="section-heading__title">今日运营概览</text>
-          <text class="vm-subtitle">请先查看补货量和后端模板数量。</text>
+        <view class="merchant-overview">
+          <view class="merchant-overview__top">
+            <view>
+              <text class="merchant-overview__eyebrow">今日概览</text>
+              <text class="merchant-overview__title">江阴校区3号柜机</text>
+              <text class="merchant-overview__subtitle">柜门状态：已关闭 · 可安排补货</text>
+            </view>
+            <view class="merchant-machine" aria-hidden="true">
+              <view class="merchant-machine__body" />
+            </view>
+          </view>
+
+          <view class="merchant-overview__numbers">
+            <view class="merchant-overview__metric">
+              <text class="merchant-overview__value vm-number">{{ summary.donatedUnits }}</text>
+              <text class="merchant-overview__label">累计补货</text>
+            </view>
+            <view class="merchant-overview__metric">
+              <text class="merchant-overview__value vm-number">{{ templateCount }}</text>
+              <text class="merchant-overview__label">商品模板</text>
+            </view>
+            <view class="merchant-overview__metric">
+              <text class="merchant-overview__value vm-number">{{ summary.pendingAlerts }}</text>
+              <text class="merchant-overview__label">待处理</text>
+            </view>
+          </view>
+
+          <button class="merchant-overview__cta" @tap="goNearby">
+            <MenuIcon name="device" size="sm" tone="contrast" />
+            <text>开柜取货 / 补货</text>
+          </button>
         </view>
 
-        <view class="metric-grid">
-          <ServiceMetric label="累计补货件数" :value="summary.donatedUnits" hint="当前账号历史累计" />
-          <ServiceMetric label="后端模板数量" :value="templateCount" hint="可直接用于补货的公共模板" />
+        <view class="merchant-warning-card">
+          <view>
+            <text class="merchant-warning-card__title">{{ summary.pendingAlerts > 0 ? "库存提醒" : "库存状态良好" }}</text>
+            <text class="merchant-warning-card__body">
+              {{ summary.pendingAlerts > 0 ? `当前有 ${summary.pendingAlerts} 条低库存或异常提醒，请优先处理。` : "当前暂无待处理库存提醒，可继续查看补货记录。" }}
+            </text>
+          </view>
+          <text class="vm-status" :class="summary.pendingAlerts > 0 ? 'vm-status--warning' : 'vm-status--success'">
+            {{ summary.pendingAlerts > 0 ? "需处理" : "正常" }}
+          </text>
         </view>
       </view>
     </GlassCard>
@@ -100,46 +143,26 @@ onShow(() => {
           <text class="vm-subtitle">可从这里维护模板、登记补货和查看货物去向。</text>
         </view>
 
-        <view class="menu-grid">
+        <view class="menu-grid menu-grid--tiles">
           <button class="menu-card" @tap="navigate('/pages/merchant/templates')">
-            <view class="menu-card__top">
-              <MenuIcon name="template" size="lg" />
-              <view class="menu-card__title-group">
-                <text class="menu-card__tag">准备</text>
-                <text class="menu-card__title">货品模板</text>
-              </view>
-            </view>
-            <text class="menu-card__desc">维护名称、分类、默认数量与保质天数</text>
+            <MenuIcon name="template" size="lg" />
+            <text class="menu-card__title">货品模板</text>
+            <text class="menu-card__desc">维护属性</text>
           </button>
-          <button class="menu-card" @tap="navigate('/pages/merchant/restock')">
-            <view class="menu-card__top">
-              <MenuIcon name="restock" size="lg" />
-              <view class="menu-card__title-group">
-                <text class="menu-card__tag">执行</text>
-                <text class="menu-card__title">按模板补货</text>
-              </view>
-            </view>
-            <text class="menu-card__desc">选择柜机、数量、生产日期快速登记</text>
+          <button class="menu-card" @tap="goNearby">
+            <MenuIcon name="device" size="lg" />
+            <text class="menu-card__title">柜机开门</text>
+            <text class="menu-card__desc">选择点位</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/merchant/traces')">
-            <view class="menu-card__top">
-              <MenuIcon name="trace" size="lg" />
-              <view class="menu-card__title-group">
-                <text class="menu-card__tag">追踪</text>
-                <text class="menu-card__title">货物去向</text>
-              </view>
-            </view>
-            <text class="menu-card__desc">查看自己补货批次、剩余量和日志去向</text>
+            <MenuIcon name="trace" size="lg" />
+            <text class="menu-card__title">货物去向</text>
+            <text class="menu-card__desc">批次追踪</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/common/feedback')">
-            <view class="menu-card__top">
-              <MenuIcon name="feedback" size="lg" />
-              <view class="menu-card__title-group">
-                <text class="menu-card__tag">反馈</text>
-                <text class="menu-card__title">提交反馈</text>
-              </view>
-            </view>
-            <text class="menu-card__desc">反馈机器故障、服务问题或其他情况</text>
+            <MenuIcon name="feedback" size="lg" tone="warning" />
+            <text class="menu-card__title">异常上报</text>
+            <text class="menu-card__desc">故障反馈</text>
           </button>
         </view>
       </view>
@@ -184,40 +207,176 @@ onShow(() => {
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.6;
+  text-align: center;
+}
+
+.log-item__time {
   text-align: left;
 }
 
 .hero-action-grid,
 .metric-grid,
 .menu-grid,
-.log-list {
+.log-list,
+.merchant-overview {
   display: grid;
   gap: 18rpx;
 }
 
-.menu-card__top,
-.menu-card__title-group {
-  display: flex;
+.action-button__content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  width: 100%;
 }
 
-.menu-card__top {
-  width: 100%;
+.merchant-overview {
+  position: relative;
+  padding: 26rpx;
+  border-radius: 30rpx;
+  border: 1rpx solid rgba(255, 138, 43, 0.28);
+  background:
+    radial-gradient(circle at 88% 12%, rgba(255, 255, 255, 0.24), transparent 30%),
+    linear-gradient(135deg, #ff8a2b, #ffb764);
+  box-shadow: 0 20rpx 48rpx rgba(255, 138, 43, 0.2);
+  overflow: hidden;
+}
+
+.merchant-overview__top,
+.merchant-overview__numbers,
+.merchant-overview__cta,
+.merchant-warning-card {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 18rpx;
 }
 
-.menu-card__title-group {
+.merchant-overview__eyebrow {
+  display: block;
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.merchant-overview__title {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 34rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.merchant-overview__subtitle {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.merchant-machine {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 118rpx;
+  height: 118rpx;
+  border-radius: 28rpx;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.merchant-machine__body {
+  position: relative;
+  width: 64rpx;
+  height: 92rpx;
+  border-radius: 12rpx;
+  background: #2e7d46;
+  box-shadow: inset 0 0 0 5rpx rgba(255, 255, 255, 0.26);
+}
+
+.merchant-machine__body::before {
+  content: "";
+  position: absolute;
+  left: 10rpx;
+  top: 14rpx;
+  width: 36rpx;
+  height: 56rpx;
+  border-radius: 7rpx;
+  background:
+    linear-gradient(#ff9a33 0 0) 6rpx 10rpx / 9rpx 9rpx no-repeat,
+    linear-gradient(#8fcf7f 0 0) 21rpx 10rpx / 9rpx 9rpx no-repeat,
+    linear-gradient(#fff0c9 0 0) 6rpx 30rpx / 9rpx 9rpx no-repeat,
+    linear-gradient(#ff9a33 0 0) 21rpx 30rpx / 9rpx 9rpx no-repeat,
+    #eef8e8;
+}
+
+.merchant-overview__numbers {
+  padding: 20rpx 18rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.merchant-overview__metric {
   flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  gap: 6rpx;
+  display: grid;
+  gap: 8rpx;
+  text-align: center;
+}
+
+.merchant-overview__value {
+  font-size: 44rpx;
+  line-height: 1;
+  font-weight: 900;
+  color: var(--vm-accent-strong);
+}
+
+.merchant-overview__label {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
+}
+
+.merchant-overview__cta {
+  min-height: 100rpx;
+  justify-content: center;
+  border-radius: 24rpx;
+  background: #ffffff;
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 800;
+  color: var(--vm-warning);
+  box-shadow: 0 16rpx 32rpx rgba(102, 51, 0, 0.12);
+}
+
+.merchant-warning-card {
+  align-items: flex-start;
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-warning-line);
+  background: var(--vm-warning-bg);
+}
+
+.merchant-warning-card__title {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.merchant-warning-card__body {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  line-height: 1.55;
+  color: var(--vm-text-soft);
+}
+
+.menu-grid--tiles {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .menu-card,
 .log-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  display: grid;
+  align-items: start;
   gap: 10rpx;
   padding: 24rpx;
   border-radius: 24rpx;
@@ -226,7 +385,9 @@ onShow(() => {
 }
 
 .menu-card {
-  min-height: 132rpx;
+  min-height: 186rpx;
+  justify-items: center;
+  text-align: center;
 }
 
 .menu-card__tag {

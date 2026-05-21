@@ -61,8 +61,8 @@ onShow(() => {
 <template>
   <MobileShell
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
-    eyebrow="设置"
-    title="账号与设置"
+    eyebrow="我的"
+    title="我的账户"
     :subtitle="subtitle"
   >
     <template v-if="sessionStore.user?.role === 'special'" #header-right>
@@ -109,7 +109,7 @@ onShow(() => {
           <button v-if="sessionStore.user?.role === 'admin'" class="vm-button vm-button--ghost action-button" disabled>
             <view class="action-button__content">
               <MenuIcon name="desktop" size="sm" tone="neutral" />
-              <text>需要批量处理时，请在电脑上继续操作</text>
+              <text>批量处理请在电脑端继续</text>
             </view>
           </button>
           <button class="vm-button vm-button--soft action-button" @tap="logout">

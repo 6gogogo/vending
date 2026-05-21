@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 
 import GlassCard from "../../components/ui/GlassCard.vue";
@@ -13,6 +13,29 @@ const title = ref("操作结果");
 const detail = ref("系统已处理本次请求。");
 const actionText = ref("返回首页");
 const backUrl = ref("");
+const resultMeta = computed(() => {
+  if (status.value === "success") {
+    return {
+      label: "领取成功",
+      symbol: "✓",
+      suggestion: "感谢你的信任与爱心。可继续查看领取记录。"
+    };
+  }
+
+  if (status.value === "warning") {
+    return {
+      label: "暂时无法领取",
+      symbol: "!",
+      suggestion: "请先查看原因，如次数已用完或不在开放时段，可稍后再试。"
+    };
+  }
+
+  return {
+    label: "无法完成",
+    symbol: "!",
+    suggestion: "请按提示重新尝试；如果柜机不可用，请联系工作人员。"
+  };
+});
 
 const goHome = async () => {
   if (backUrl.value) {
@@ -43,7 +66,19 @@ onLoad((query) => {
   <MobileShell eyebrow="处理结果" :title="title" :subtitle="detail">
     <GlassCard :tone="status === 'success' ? 'accent' : status === 'warning' ? 'warning' : 'quiet'">
       <view class="vm-stack">
-        <text class="result-icon">{{ status === "success" ? "已完成" : status === "warning" ? "请关注" : "处理失败" }}</text>
+        <view class="result-hero" :class="`result-hero--${status}`">
+          <view class="result-hero__icon">
+            <text>{{ resultMeta.symbol }}</text>
+          </view>
+          <view class="result-hero__copy">
+            <text class="result-icon">{{ resultMeta.label }}</text>
+            <text class="result-hint">{{ resultMeta.suggestion }}</text>
+          </view>
+        </view>
+        <view class="result-detail">
+          <text class="result-detail__label">原因 / 说明</text>
+          <text class="result-detail__body">{{ detail }}</text>
+        </view>
         <button class="vm-button" @tap="goHome">{{ actionText }}</button>
       </view>
     </GlassCard>
@@ -54,6 +89,60 @@ onLoad((query) => {
 .result-icon {
   font-size: 36rpx;
   font-weight: 800;
+  color: var(--vm-text);
+}
+
+.result-hero,
+.result-detail {
+  display: grid;
+  gap: 12rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
+}
+
+.result-hero {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.result-hero__icon {
+  display: grid;
+  place-items: center;
+  width: 86rpx;
+  height: 86rpx;
+  border-radius: 50%;
+  background: var(--vm-success);
+  color: #ffffff;
+  font-size: 46rpx;
+  font-weight: 900;
+}
+
+.result-hero--warning .result-hero__icon,
+.result-hero--danger .result-hero__icon {
+  background: var(--vm-warning);
+}
+
+.result-hero__copy {
+  display: grid;
+  gap: 8rpx;
+}
+
+.result-hint,
+.result-detail__label,
+.result-detail__body {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--vm-text-soft);
+}
+
+.result-detail__label {
+  font-weight: 700;
+  color: var(--vm-accent-strong);
+}
+
+.result-detail__body {
   color: var(--vm-text);
 }
 </style>

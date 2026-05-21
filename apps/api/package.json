@@ -11,6 +11,7 @@
     "db:push": "prisma db push --config prisma.config.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",
     "db:migrate-json": "tsx src/scripts/migrate-json-to-postgres.ts",
+    "smoke:inventory": "tsx src/scripts/smoke-inventory-batch-changes.ts",
     "start:once": "tsx src/main.ts",
     "start:dev": "tsx watch src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

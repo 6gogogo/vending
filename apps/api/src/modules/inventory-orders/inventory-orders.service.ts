@@ -2,7 +2,6 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type {
   CabinetEventRecord,
-  BatchConsumptionLine,
   GoodsCategory,
   InventoryMovement,
   SmartVmAdjustmentPayload,
@@ -10,6 +9,7 @@ import type {
   SmartVmSettlementPayload
 } from "@vm/shared-types";
 
+import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AlertsService } from "../alerts/alerts.service";
 import { DevicesService } from "../devices/devices.service";
@@ -18,6 +18,7 @@ import { DevicesService } from "../devices/devices.service";
 export class InventoryOrdersService {
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
     @Inject(DevicesService) private readonly devicesService: DevicesService,
     @Inject(AlertsService) private readonly alertsService: AlertsService
   ) {}
@@ -70,52 +71,31 @@ export class InventoryOrdersService {
       };
     }
 
+    if (this.shouldSkipAutomaticSettlementInventory(event)) {
+      return {
+        movements: [],
+        duplicated: Boolean(event.settlementComparison)
+      };
+    }
+
+    const movementType = this.resolveSettlementMovementType(event);
     const movements =
       payload.detail?.map((item) =>
         this.createMovementFromLineItem(event, item.goodsId, item.goodsName, item.quantity, item.unitPrice, {
-          orderNo: event.orderNo
+          orderNo: event.orderNo,
+          type: movementType
         })
       ) ?? [];
 
     for (const movement of movements) {
-      this.store.inventory.unshift(movement);
-
       if (movement.type === "pickup") {
-        const sourceBatches = new Map(
-          this.store.getGoodsBatches(movement.deviceCode, movement.goodsId).map((entry) => [entry.batchId, entry])
-        );
-        const consumed = this.store.consumeGoodsBatches(movement.deviceCode, movement.goodsId, movement.quantity);
-        const consumer = this.store.users.find((entry) => entry.id === movement.userId);
-        movement.consumedBatches = consumed.consumed;
-        movement.batchId = consumed.consumed.length === 1 ? consumed.consumed[0]?.batchId : undefined;
-
-        for (const item of consumed.consumed) {
-          const batch =
-            sourceBatches.get(item.batchId) ??
-            this.store.goodsBatches.find((entry) => entry.batchId === item.batchId);
-
-          if (!batch) {
-            continue;
+        this.inventoryBatchChanges.recordConsumptiveMovement({
+          movement,
+          trace: {
+            eventId: event.eventId,
+            orderNo: movement.orderNo
           }
-
-          this.store.recordBatchConsumption({
-            id: this.store.createId("consumption-trace"),
-            batchId: batch.batchId,
-            goodsId: movement.goodsId,
-            goodsName: movement.goodsName,
-            deviceCode: movement.deviceCode,
-            movementId: movement.id,
-            operationType: movement.type,
-            sourceUserId: batch.sourceUserId,
-            sourceUserName: batch.sourceUserName,
-            consumerUserId: movement.userId,
-            consumerUserName: consumer?.name,
-            quantity: item.quantity,
-            happenedAt: movement.happenedAt,
-            orderNo: movement.orderNo,
-            eventId: event.eventId
-          });
-        }
+        });
       } else if (movement.type === "donation") {
         const catalogItem = this.store.ensureGoodsCatalogItem({
           goodsCode: movement.goodsId,
@@ -128,22 +108,15 @@ export class InventoryOrdersService {
             "https://dummyimage.com/160x160/d8e8ff/0b1220.png&text=%E7%89%A9%E8%B5%84",
           status: "active"
         });
-        this.store.ensureDeviceGoodsEntry(movement.deviceCode, {
-          goodsCode: catalogItem.goodsCode,
-          goodsId: catalogItem.goodsId,
-          name: catalogItem.name,
-          category: catalogItem.category,
-          price: catalogItem.price,
-          imageUrl: catalogItem.imageUrl
-        });
-        this.store.createGoodsBatch({
-          goodsId: movement.goodsId,
-          deviceCode: movement.deviceCode,
-          quantity: movement.quantity,
-          expiresAt: movement.expiresAt,
-          sourceType: "merchant",
-          sourceUserId: movement.userId,
-          sourceUserName: this.store.users.find((entry) => entry.id === movement.userId)?.name
+        this.inventoryBatchChanges.recordRestockMovement({
+          movement,
+          deviceGoods: catalogItem,
+          batch: {
+            expiresAt: movement.expiresAt,
+            sourceType: "merchant",
+            sourceUserId: movement.userId,
+            sourceUserName: this.store.users.find((entry) => entry.id === movement.userId)?.name
+          }
         });
 
         if (movement.expiresAt) {
@@ -156,6 +129,8 @@ export class InventoryOrdersService {
             detail: `商品 ${movement.goodsId} 即将超过领取期限，请及时处理。`
           });
         }
+      } else {
+        this.store.inventory.unshift(movement);
       }
 
       const actorUser = this.store.users.find((entry) => entry.id === movement.userId);
@@ -231,17 +206,17 @@ export class InventoryOrdersService {
 
     for (const movement of movements) {
       if (movement.type === "adjustment" && movement.quantity > 0) {
-        const consumed = this.store.consumeGoodsBatches(
-          movement.deviceCode,
-          movement.goodsId,
-          movement.quantity
-        );
-        movement.consumedBatches = consumed.consumed;
-        movement.batchId = consumed.consumed.length === 1 ? consumed.consumed[0]?.batchId : undefined;
-        this.recordAdjustmentBatchConsumption(event, movement, consumed.consumed, payload.orderNo);
+        this.inventoryBatchChanges.recordConsumptiveMovement({
+          movement,
+          trace: {
+            eventId: event.eventId,
+            orderNo: payload.orderNo,
+            note: "柜机补扣回调按保质期最短批次扣减"
+          }
+        });
+      } else {
+        this.store.inventory.unshift(movement);
       }
-
-      this.store.inventory.unshift(movement);
     }
 
     if (payload.amount > 0) {
@@ -452,37 +427,6 @@ export class InventoryOrdersService {
     event.adjustmentRefundedAt = latest?.refundedAt;
   }
 
-  private recordAdjustmentBatchConsumption(
-    event: CabinetEventRecord,
-    movement: InventoryMovement,
-    consumedBatches: BatchConsumptionLine[],
-    orderNo: string
-  ) {
-    const consumer = this.store.users.find((entry) => entry.id === movement.userId);
-
-    for (const item of consumedBatches) {
-      const batch = this.store.goodsBatches.find((entry) => entry.batchId === item.batchId);
-      this.store.recordBatchConsumption({
-        id: this.store.createId("consumption-trace"),
-        batchId: item.batchId,
-        goodsId: movement.goodsId,
-        goodsName: movement.goodsName,
-        deviceCode: movement.deviceCode,
-        movementId: movement.id,
-        operationType: movement.type,
-        sourceUserId: batch?.sourceUserId ?? item.sourceUserId,
-        sourceUserName: batch?.sourceUserName ?? item.sourceUserName,
-        consumerUserId: movement.userId,
-        consumerUserName: consumer?.name,
-        quantity: item.quantity,
-        happenedAt: movement.happenedAt,
-        orderNo,
-        eventId: event.eventId,
-        note: "柜机补扣回调按保质期最短批次扣减"
-      });
-    }
-  }
-
   private createMovementFromLineItem(
     event: CabinetEventRecord,
     goodsId: string,
@@ -498,8 +442,9 @@ export class InventoryOrdersService {
     const localGoods = this.devicesService.findGoods(event.deviceCode, goodsId);
     const category = (localGoods?.category ?? "daily") as GoodsCategory;
     const user = this.store.users.find((entry) => entry.id === event.userId);
+    const movementType = options?.type ?? (event.role === "merchant" ? "donation" : "pickup");
     const expiresAt =
-      event.role === "merchant"
+      movementType === "donation" && event.role === "merchant"
         ? new Date(
             Date.now() + (user?.merchantProfile?.donationWindowDays ?? 2) * 24 * 60 * 60_000
           ).toISOString()
@@ -517,9 +462,21 @@ export class InventoryOrdersService {
       category,
       quantity,
       unitPrice,
-      type: options?.type ?? (event.role === "merchant" ? "donation" : "pickup"),
+      type: movementType,
       happenedAt: new Date().toISOString(),
       expiresAt
     };
+  }
+
+  private shouldSkipAutomaticSettlementInventory(event: CabinetEventRecord) {
+    return event.role !== "special" && event.hasInboundGoods === true;
+  }
+
+  private resolveSettlementMovementType(event: CabinetEventRecord): InventoryMovement["type"] | undefined {
+    if (event.role !== "special" && event.hasInboundGoods === false) {
+      return "pickup";
+    }
+
+    return undefined;
   }
 }

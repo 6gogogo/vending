@@ -5,8 +5,10 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import type { AppLoginResult } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import { useSmsCooldown } from "../../composables/useSmsCooldown";
+import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?raw";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
@@ -20,12 +22,21 @@ const sendingCode = ref(false);
 const submitting = ref(false);
 const loginState = ref<AppLoginResult | null>(null);
 const rejectedReason = ref("");
+const hasAcceptedDisclaimer = ref(false);
+const showDisclaimer = ref(false);
 const { remainingSeconds, isCoolingDown, startCooldown } = useSmsCooldown(60);
 
 const helper = reactive({
   title: "",
   detail: ""
 });
+
+const disclaimerLines = computed(() =>
+  userDisclaimerText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+);
 
 const sendCodeLabel = computed(() =>
   isCoolingDown.value ? `${remainingSeconds.value}s 后重发` : "获取验证码"
@@ -45,6 +56,10 @@ const bootstrap = async () => {
 };
 
 const sendCode = async () => {
+  if (!ensureDisclaimerAccepted()) {
+    return;
+  }
+
   const normalizedPhone = phone.value.trim();
 
   if (!/^1\d{10}$/.test(normalizedPhone)) {
@@ -99,6 +114,10 @@ const sendCode = async () => {
 };
 
 const submit = async () => {
+  if (!ensureDisclaimerAccepted()) {
+    return;
+  }
+
   submitting.value = true;
   loginState.value = null;
   rejectedReason.value = "";
@@ -157,10 +176,43 @@ const goFeedback = () => {
   });
 };
 
+const ensureDisclaimerAccepted = () => {
+  if (hasAcceptedDisclaimer.value) {
+    return true;
+  }
+
+  showDisclaimer.value = true;
+  uni.showToast({
+    title: "请先阅读并同意免责声明",
+    icon: "none"
+  });
+  return false;
+};
+
+const openDisclaimer = () => {
+  showDisclaimer.value = true;
+};
+
+const acceptDisclaimer = () => {
+  hasAcceptedDisclaimer.value = true;
+  showDisclaimer.value = false;
+};
+
+const rejectDisclaimer = () => {
+  showDisclaimer.value = false;
+  uni.navigateBack({
+    fail: () => {
+      uni.redirectTo({ url: "/pages/common/login" });
+    }
+  });
+};
+
 onLoad((query) => {
   if (typeof query.phone === "string" && query.phone) {
     phone.value = query.phone;
   }
+
+  showDisclaimer.value = true;
 });
 
 onShow(() => {
@@ -169,9 +221,23 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="登录" title="手机号验证码登录" subtitle="请输入已通过审核的手机号和验证码。">
-    <GlassCard tone="accent">
+  <MobileShell eyebrow="身份识别" title="登录小柜大爱" subtitle="输入已认证手机号，系统会识别你的服务入口。">
+    <GlassCard tone="neutral" class="login-card">
       <view class="vm-stack">
+        <view class="login-card__visual">
+          <CabinetHeroArt />
+          <view class="login-card__brand">
+            <text class="login-card__title">小柜大爱</text>
+            <text class="login-card__subtitle">让公益更近一点</text>
+          </view>
+        </view>
+
+        <view class="login-status-row">
+          <text class="vm-status vm-status--certified">已认证</text>
+          <text class="vm-status vm-status--pending">审核中</text>
+          <text class="vm-status vm-status--available">可领取</text>
+        </view>
+
         <view class="vm-field">
           <text class="vm-field__label">手机号</text>
           <input
@@ -200,14 +266,18 @@ onShow(() => {
         <view class="entry-actions">
           <button
             class="vm-button vm-button--ghost"
-            :disabled="sendingCode || isCoolingDown"
+            :disabled="sendingCode || isCoolingDown || !hasAcceptedDisclaimer"
             :loading="sendingCode"
             @tap="sendCode"
           >
             {{ sendCodeLabel }}
           </button>
-          <button class="vm-button" :loading="submitting" @tap="submit">进入系统</button>
+          <button class="vm-button" :disabled="!hasAcceptedDisclaimer" :loading="submitting" @tap="submit">登录 / 身份识别</button>
         </view>
+
+        <button class="disclaimer-link" @tap="openDisclaimer">
+          {{ hasAcceptedDisclaimer ? "已同意《智能货柜用户免责声明》，点击查看" : "阅读《智能货柜用户免责声明》" }}
+        </button>
 
         <view v-if="previewCode" class="debug-box">
           <text class="debug-box__label">当前验证码</text>
@@ -237,6 +307,34 @@ onShow(() => {
         </view>
       </view>
     </GlassCard>
+
+    <view v-if="showDisclaimer" class="disclaimer-mask">
+      <view class="disclaimer-dialog">
+        <view class="disclaimer-dialog__header">
+          <text class="disclaimer-dialog__title">智能货柜用户免责声明</text>
+          <text class="disclaimer-dialog__hint">请阅读完整内容后继续使用</text>
+        </view>
+
+        <scroll-view class="disclaimer-dialog__body" scroll-y>
+          <text
+            v-for="(line, index) in disclaimerLines"
+            :key="`${index}-${line}`"
+            class="disclaimer-dialog__line"
+            :class="{
+              'disclaimer-dialog__line--title': line.startsWith('# '),
+              'disclaimer-dialog__line--section': line.startsWith('## ')
+            }"
+          >
+            {{ line.replace(/^#{1,2}\s*/, "") }}
+          </text>
+        </scroll-view>
+
+        <view class="disclaimer-dialog__actions">
+          <button class="vm-button vm-button--ghost" @tap="rejectDisclaimer">不同意</button>
+          <button class="vm-button" @tap="acceptDisclaimer">同意并继续</button>
+        </view>
+      </view>
+    </view>
   </MobileShell>
 </template>
 
@@ -247,6 +345,42 @@ onShow(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
+}
+
+.login-card {
+  padding-top: 18rpx;
+}
+
+.login-card__visual {
+  position: relative;
+  min-height: 270rpx;
+  overflow: hidden;
+  border-radius: 26rpx;
+}
+
+.login-card__visual :deep(.cabinet-art) {
+  min-height: 270rpx;
+  border-radius: 26rpx;
+}
+
+.login-card__brand {
+  position: absolute;
+  left: 30rpx;
+  top: 32rpx;
+  display: grid;
+  gap: 10rpx;
+}
+
+.login-card__title {
+  font-size: 44rpx;
+  line-height: 1.12;
+  font-weight: 900;
+  color: #1f1f1f;
+}
+
+.login-card__subtitle {
+  font-size: 26rpx;
+  color: #4e453d;
 }
 
 .section-heading {
@@ -272,6 +406,21 @@ onShow(() => {
   gap: 16rpx;
 }
 
+.login-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.disclaimer-link {
+  width: 100%;
+  padding: 6rpx 0;
+  color: var(--vm-accent-strong);
+  font-size: 24rpx;
+  line-height: 1.6;
+  text-align: left;
+}
+
 .debug-box,
 .status-box {
   display: grid;
@@ -286,6 +435,82 @@ onShow(() => {
   font-size: 26rpx;
   color: var(--vm-text);
   line-height: 1.5;
+}
+
+.disclaimer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 28rpx calc(40rpx + env(safe-area-inset-bottom));
+  background: rgba(10, 24, 38, 0.48);
+}
+
+.disclaimer-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 680rpx;
+  max-height: 86vh;
+  border-radius: 28rpx;
+  border: 1rpx solid var(--vm-line-strong);
+  background: var(--vm-surface-strong);
+  box-shadow: 0 28rpx 80rpx rgba(10, 24, 38, 0.2);
+  overflow: hidden;
+}
+
+.disclaimer-dialog__header {
+  display: grid;
+  gap: 8rpx;
+  padding: 28rpx 30rpx 22rpx;
+  border-bottom: 1rpx solid var(--vm-line);
+}
+
+.disclaimer-dialog__title {
+  font-size: 34rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.disclaimer-dialog__hint {
+  font-size: 24rpx;
+  color: var(--vm-muted);
+}
+
+.disclaimer-dialog__body {
+  height: 58vh;
+  padding: 24rpx 30rpx;
+}
+
+.disclaimer-dialog__line {
+  display: block;
+  margin-bottom: 16rpx;
+  font-size: 25rpx;
+  line-height: 1.72;
+  color: var(--vm-text);
+}
+
+.disclaimer-dialog__line--title {
+  font-size: 31rpx;
+  font-weight: 800;
+}
+
+.disclaimer-dialog__line--section {
+  margin-top: 8rpx;
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-accent-strong);
+}
+
+.disclaimer-dialog__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+  padding: 22rpx 30rpx 28rpx;
+  border-top: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
 }
 </style>
 

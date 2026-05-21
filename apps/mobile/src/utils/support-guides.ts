@@ -36,7 +36,7 @@ const specialTopics: SupportGuideTopic[] = [
   },
   {
     id: "pickup",
-    title: "验证领取",
+    title: "扫码领取",
     summary: "适合处理领取资格、提醒信息和扫码开门流程。",
     steps: [
       "先在主入口确认当天资格和开放时段。",
@@ -111,7 +111,7 @@ const merchantTopics: SupportGuideTopic[] = [
   },
   {
     id: "trace",
-    title: "货物流向查看",
+    title: "补货记录查看",
     summary: "适合处理累计帮助数据和批次去向查看问题。",
     steps: [
       "到记录页先看按日汇总，再看具体批次。",

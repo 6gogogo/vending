@@ -39,7 +39,7 @@ const form = reactive<RegistrationApplicationProfile>({
 });
 
 const roleOptions = [
-  { value: "special" as const, label: "普通用户" },
+  { value: "special" as const, label: "受助用户" },
   { value: "merchant" as const, label: "爱心商户" },
   { value: "admin" as const, label: "管理员" }
 ];
@@ -308,9 +308,15 @@ onLoad(async (query) => {
 </script>
 
 <template>
-  <MobileShell eyebrow="注册" title="注册并提交审核" subtitle="手机号与验证码放在最前面，信息会按手机号覆盖更新；已存在待审资料时会自动回填。">
+  <MobileShell eyebrow="注册申请" title="提交注册申请" subtitle="填写必要信息，工作人员审核通过后即可使用。">
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <view class="application-steps">
+          <text class="vm-status vm-status--pending">提交资料</text>
+          <text class="vm-status vm-status--pending">等待审核</text>
+          <text class="vm-status vm-status--certified">审核通过后登录</text>
+        </view>
+
         <view class="vm-field">
           <text class="vm-field__label">手机号</text>
           <input
@@ -360,7 +366,7 @@ onLoad(async (query) => {
           <text class="vm-field__label">身份</text>
           <picker :range="roleOptions" range-key="label" :value="selectedRoleIndex" @change="requestedRole = roleOptions[$event.detail.value]?.value ?? 'special'">
             <view class="vm-field__input picker-value">
-              {{ roleOptions[selectedRoleIndex]?.label ?? "普通用户" }}
+              {{ roleOptions[selectedRoleIndex]?.label ?? "受助用户" }}
             </view>
           </picker>
         </view>
@@ -441,6 +447,12 @@ onLoad(async (query) => {
 .action-row {
   display: grid;
   gap: 16rpx;
+}
+
+.application-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
 }
 
 .picker-value {

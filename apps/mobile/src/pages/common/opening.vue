@@ -5,6 +5,7 @@ import { onLoad, onUnload } from "@dcloudio/uni-app";
 import type { CabinetEventRecord } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { getErrorMessage } from "../../utils/error-message";
@@ -18,11 +19,54 @@ const hintText = ref("请保持在柜机旁，系统会根据门状态自动推�
 
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-const selectedSummary = computed(() =>
-  event.value?.intentItems?.length
-    ? event.value.intentItems.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
-    : "暂未记录意向商品"
+const isOperationalEvent = computed(
+  () => event.value?.role === "merchant" || event.value?.role === "admin"
 );
+const operationLabel = computed(() => {
+  if (event.value?.hasInboundGoods === true) {
+    return "有商品入柜";
+  }
+
+  if (event.value?.hasInboundGoods === false) {
+    return `无商品入柜 · ${event.value.openReason ?? "未填写理由"}`;
+  }
+
+  return "本次计划领取";
+});
+const selectedSummary = computed(() =>
+  isOperationalEvent.value
+    ? operationLabel.value
+    : event.value?.intentItems?.length
+      ? event.value.intentItems.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
+      : "暂未记录意向商品"
+);
+const flowSteps = computed(() => {
+  const status = event.value?.status;
+  const hasOpened = status === "opened" || status === "closed" || status === "settled" || status === "refunded";
+
+  return [
+    {
+      label: isOperationalEvent.value ? "权限校验" : "资格校验",
+      description: "已确认账号和柜机信息",
+      state: "done" as const
+    },
+    {
+      label: "开柜",
+      description: status === "opened" ? "柜门已打开" : "正在等待柜门响应",
+      state: hasOpened ? ("done" as const) : ("current" as const)
+    },
+    {
+      label: isOperationalEvent.value ? "操作后关门" : "取货关门",
+      description: hasOpened ? "完成后请及时关闭柜门" : "柜门打开后进行",
+      state: status === "opened" ? ("current" as const) : status === "closed" || status === "settled" || status === "refunded" ? ("done" as const) : ("todo" as const)
+    },
+    {
+      label: "完成结算",
+      description: "关门后自动核对结果",
+      state: "todo" as const
+    }
+  ];
+});
 
 const stopPolling = () => {
   if (pollTimer) {
@@ -56,13 +100,21 @@ const applyEventState = (nextEvent: CabinetEventRecord) => {
 
   if (nextEvent.status === "opening") {
     statusText.value = "柜门正在打开";
-    hintText.value = "请等待柜门完全打开后再取货。";
+    hintText.value = nextEvent.hasInboundGoods === true
+      ? "请等待柜门完全打开后再放入商品。"
+      : nextEvent.hasInboundGoods === false
+        ? "请等待柜门完全打开后完成维修、退货或下架操作。"
+        : "请等待柜门完全打开后再取货。";
     return;
   }
 
   if (nextEvent.status === "opened") {
     statusText.value = "柜门已打开";
-    hintText.value = "取货后请及时关闭柜门，系统会在闭门后继续核对结算结果。";
+    hintText.value = nextEvent.hasInboundGoods === true
+      ? "商品入柜后请及时关闭柜门，闭门后需要提交模板登记。"
+      : nextEvent.hasInboundGoods === false
+        ? "操作完成后请及时关闭柜门，系统会按平台结果自动扣减库存。"
+        : "取货后请及时关闭柜门，系统会在闭门后继续核对结算结果。";
     return;
   }
 
@@ -126,12 +178,14 @@ onUnload(() => {
   <MobileShell eyebrow="开门中" :title="statusText" :subtitle="hintText">
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <FlowSteps :steps="flowSteps" />
+
         <view class="status-box">
           <text class="status-box__label">柜机编号</text>
           <text class="status-box__value">{{ deviceCode || event?.deviceCode || "-" }}</text>
         </view>
         <view class="status-box">
-          <text class="status-box__label">本次计划领取</text>
+          <text class="status-box__label">{{ isOperationalEvent ? "本次开门类型" : "本次计划领取" }}</text>
           <text class="status-box__value">{{ selectedSummary }}</text>
         </view>
         <view class="status-box">

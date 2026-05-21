@@ -27,6 +27,7 @@ type AdminTaskFilter = "all" | "expiry" | "feedback" | "system";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
+const loadError = ref("");
 const records = ref<InventoryMovement[]>([]);
 const templates = ref<MerchantGoodsTemplate[]>([]);
 const pendingApplications = ref<RegistrationApplication[]>([]);
@@ -63,9 +64,40 @@ const activeWindows = computed(() =>
       `${String(item.startHour).padStart(2, "0")}:00-${String(item.endHour).padStart(2, "0")}:00`
   )
 );
+const remainingTotal = computed(() => permissions.value.reduce((sum, item) => sum + item.quantity, 0));
+const usedCount = computed(() => sessionStore.quota?.usedCount ?? 0);
+const todayStatus = computed(() => {
+  if (!activeWindows.value.length) {
+    return "暂未开放";
+  }
+
+  return remainingTotal.value > 0 ? "今日可领取" : "次数已用完";
+});
+const todayStatusClass = computed(() =>
+  activeWindows.value.length && remainingTotal.value > 0 ? "vm-status--available" : "vm-status--warning"
+);
+const todaySuggestion = computed(() => {
+  if (!activeWindows.value.length) {
+    return "请在开放时段内前往柜机，或联系工作人员确认资格。";
+  }
+
+  if (remainingTotal.value <= 0) {
+    return "今日额度已用完，可明天再来或查看领取记录。";
+  }
+
+  return "请扫码开柜，或先查看附近可用柜机。";
+});
 
 const taskButtonText = (task: AlertTask) => (task.grade === "fault" ? "标记已知晓" : "手动完成");
 const activeAlerts = computed(() => alerts.value.filter((item) => item.status !== "resolved"));
+const showInitialLoading = computed(
+  () =>
+    loading.value &&
+    !records.value.length &&
+    !templates.value.length &&
+    !alerts.value.length &&
+    !pendingApplications.value.length
+);
 const resolveAdminTaskFilter = (task: AlertTask): Exclude<AdminTaskFilter, "all"> => {
   if (task.type === "expiry") {
     return "expiry";
@@ -124,7 +156,7 @@ const pageSubtitle = computed(() => {
   }
 
   if (sessionStore.user?.role === "merchant") {
-    return "可在这里查看模板、登记补货和货物流向。";
+    return "先选柜机，再登记商品、数量、保质期和批次。";
   }
 
   return "可在这里按分类处理待办、审核申请和查看柜机。";
@@ -147,8 +179,8 @@ const heroSupport = computed(() => {
     return {
       title: "领取提示",
       lines: [
-        activeWindows.value.length ? `可领取时段：${activeWindows.value.join("、")}` : "当前暂无开放时段，请稍后再查看。",
-        permissions.value.length ? "请先确认今天可领取的物资，再前往柜机。" : "当前没有可领取额度，无需重复提交。",
+        activeWindows.value.length ? `开放时段：${activeWindows.value.join("、")}` : "当前暂无开放时段，请稍后再查看。",
+        todaySuggestion.value,
         activeAlerts.value.length ? `你有 ${activeAlerts.value.length} 条提醒待确认。` : "如遇识别异常或柜机问题，可直接提交反馈。"
       ]
     };
@@ -159,7 +191,7 @@ const heroSupport = computed(() => {
       title: "补货提示",
       lines: [
         `当前已维护模板 ${templates.value.length} 个，累计补货 ${merchantSummary.value.donatedUnits} 件。`,
-        "可先维护商品属性，再登记补货和查看去向。"
+        "补货前先确认柜机在线，再登记商品、数量、生产日期和批次。"
       ]
     };
   }
@@ -283,6 +315,7 @@ const load = async () => {
       if (!maybeNotifyResolvedFeedback()) {
         maybeNotifyUserAlert();
       }
+      loadError.value = "";
       return;
     }
 
@@ -303,6 +336,7 @@ const load = async () => {
       };
       records.value = traceResponse.records;
       alerts.value = [];
+      loadError.value = "";
       return;
     }
 
@@ -331,7 +365,9 @@ const load = async () => {
     alerts.value = alertResponse;
     maybeNotifyResolvedFeedback();
     await adminAiPromise;
+    loadError.value = "";
   } catch (error) {
+    loadError.value = getErrorMessage(error);
     showOperationFailure(error);
   } finally {
     loading.value = false;
@@ -446,33 +482,50 @@ onShow(() => {
       </view>
     </template>
 
+    <template v-if="sessionStore.user?.role === 'special'" #hero-side>
+      <view class="hero-status-panel">
+        <text class="hero-status-panel__label">今日状态</text>
+        <text class="vm-status" :class="todayStatusClass">{{ todayStatus }}</text>
+        <view class="hero-status-panel__metrics">
+          <view>
+            <text class="hero-status-panel__value vm-number">{{ remainingTotal }}</text>
+            <text class="hero-status-panel__meta">剩余次数</text>
+          </view>
+          <view>
+            <text class="hero-status-panel__value vm-number">{{ usedCount }}</text>
+            <text class="hero-status-panel__meta">已领取</text>
+          </view>
+        </view>
+      </view>
+    </template>
+
     <template #hero-actions>
       <view class="hero-action-grid">
         <template v-if="sessionStore.user?.role === 'special'">
-          <button class="vm-button action-button" @tap="goNearby">
+          <button class="vm-button vm-button--warning action-button" @tap="goScanPickup">
             <view class="action-button__content">
-              <MenuIcon name="nearby" size="sm" tone="contrast" />
-              <text>就近找柜机</text>
+              <MenuIcon name="scan" size="sm" tone="contrast" />
+              <text>扫码开柜</text>
             </view>
           </button>
-          <button class="vm-button vm-button--ghost action-button" @tap="goScanPickup">
+          <button class="vm-button vm-button--ghost action-button" @tap="goNearby">
             <view class="action-button__content">
-              <MenuIcon name="scan" size="sm" tone="neutral" />
-              <text>扫码开门</text>
+              <MenuIcon name="nearby" size="sm" tone="neutral" />
+              <text>就近找柜机</text>
             </view>
           </button>
         </template>
         <template v-else-if="sessionStore.user?.role === 'merchant'">
-          <button class="vm-button action-button" @tap="navigate('/pages/merchant/restock')">
+          <button class="vm-button vm-button--warning action-button" @tap="goNearby">
             <view class="action-button__content">
-              <MenuIcon name="restock" size="sm" tone="contrast" />
-              <text>立即登记补货</text>
+              <MenuIcon name="device" size="sm" tone="contrast" />
+              <text>选择柜机补货</text>
             </view>
           </button>
           <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/merchant/templates')">
             <view class="action-button__content">
               <MenuIcon name="template" size="sm" tone="neutral" />
-              <text>管理商品属性</text>
+              <text>商品模板</text>
             </view>
           </button>
         </template>
@@ -493,15 +546,38 @@ onShow(() => {
       </view>
     </template>
 
+    <GlassCard v-if="loadError" tone="warning" compact>
+      <view class="state-banner">
+        <view class="state-banner__copy">
+          <text class="state-banner__title">数据同步失败</text>
+          <text class="state-banner__body">{{ loadError }}</text>
+        </view>
+        <button class="vm-button vm-button--ghost state-banner__button" :disabled="loading" @tap="load">
+          {{ loading ? "重试中" : "重试" }}
+        </button>
+      </view>
+    </GlassCard>
+
+    <GlassCard v-if="showInitialLoading" tone="quiet" compact>
+      <view class="loading-panel">
+        <text class="loading-panel__title">正在同步当前账号数据</text>
+        <view class="loading-panel__bar loading-panel__bar--wide" />
+        <view class="loading-panel__bar loading-panel__bar--mid" />
+      </view>
+    </GlassCard>
+
     <GlassCard tone="accent" v-if="sessionStore.user?.role === 'special'">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">今日资格与提醒</text>
-          <text class="vm-subtitle">请先确认可领取物资、开放时段和提醒事项。</text>
+          <view class="section-heading__row">
+            <text class="section-heading__title">今日是否可领取</text>
+            <text class="vm-status" :class="todayStatusClass">{{ todayStatus }}</text>
+          </view>
+          <text class="vm-subtitle">{{ todaySuggestion }}</text>
         </view>
         <view class="metric-grid">
-          <ServiceMetric label="可领物资" :value="permissions.length" hint="当前时段内允许领取的种类" tone="accent" />
-          <ServiceMetric label="开放时段" :value="activeWindows.length" hint="仅在开放时段内可领取" />
+          <ServiceMetric label="可领取次数" :value="remainingTotal" hint="今日剩余额度" tone="accent" />
+          <ServiceMetric label="已领取" :value="usedCount" hint="今日已完成领取" />
           <ServiceMetric label="提醒事项" :value="activeAlerts.length" hint="识别差异或核对提醒会在这里显示" tone="warning" />
         </view>
         <view class="info-list">
@@ -518,9 +594,58 @@ onShow(() => {
         </view>
         <EmptyState v-else title="当前没有可领取额度" description="请等待时段开始或联系工作人员核对资格。" />
         <view class="action-grid">
-          <button class="vm-button vm-button--ghost" @tap="goScanPickup">扫码开门</button>
-          <button class="vm-button" @tap="goNearby">去附近柜机领取</button>
-          <button class="vm-button vm-button--ghost" @tap="goRecords">查看领取详情</button>
+          <button class="vm-button vm-button--warning" @tap="goScanPickup">扫码开柜</button>
+          <button class="vm-button vm-button--ghost" @tap="goNearby">附近柜机</button>
+          <button class="vm-button vm-button--ghost action-grid__wide" @tap="goRecords">查看领取记录</button>
+        </view>
+      </view>
+    </GlassCard>
+
+    <GlassCard tone="accent" v-else-if="sessionStore.user?.role === 'merchant'">
+      <view class="vm-stack">
+        <view class="section-heading">
+          <view class="section-heading__row">
+            <text class="section-heading__title">商户工作台</text>
+            <text class="vm-status vm-status--certified">已认证</text>
+          </view>
+          <text class="vm-subtitle">先选择柜机，再完成补货登记。</text>
+        </view>
+
+        <view class="metric-grid">
+          <ServiceMetric label="总库存" :value="merchantSummary.donatedUnits" hint="累计补货件数" tone="accent" />
+          <ServiceMetric label="需补货" :value="merchantSummary.pendingAlerts" hint="低库存或异常提醒" tone="warning" />
+          <ServiceMetric label="模板" :value="templates.length" hint="可选商品模板" />
+        </view>
+
+        <view class="merchant-action-grid">
+          <button class="merchant-action-card merchant-action-card--primary" @tap="goNearby">
+            <MenuIcon name="restock" size="lg" tone="contrast" />
+            <view class="merchant-action-card__copy">
+              <text class="merchant-action-card__title">开始补货</text>
+              <text class="merchant-action-card__body">选择在线柜机并开门</text>
+            </view>
+          </button>
+          <button class="merchant-action-card" @tap="navigate('/pages/merchant/restock')">
+            <MenuIcon name="template" size="lg" tone="accent" />
+            <view class="merchant-action-card__copy">
+              <text class="merchant-action-card__title">补货登记</text>
+              <text class="merchant-action-card__body">登记数量、日期和批次</text>
+            </view>
+          </button>
+          <button class="merchant-action-card" @tap="goRecords">
+            <MenuIcon name="trace" size="lg" tone="accent" />
+            <view class="merchant-action-card__copy">
+              <text class="merchant-action-card__title">补货记录</text>
+              <text class="merchant-action-card__body">查看批次和去向</text>
+            </view>
+          </button>
+          <button class="merchant-action-card" @tap="navigate('/pages/common/feedback')">
+            <MenuIcon name="feedback" size="lg" tone="warning" />
+            <view class="merchant-action-card__copy">
+              <text class="merchant-action-card__title">异常上报</text>
+              <text class="merchant-action-card__body">低库存、柜机异常</text>
+            </view>
+          </button>
         </view>
       </view>
     </GlassCard>
@@ -544,7 +669,7 @@ onShow(() => {
               :class="{ 'task-filter-chip--active': adminTaskFilter === item.key }"
               @tap="adminTaskFilter = item.key"
             >
-              {{ item.label }}*{{ item.count }}
+              {{ item.label }} {{ item.count }}
             </button>
           </view>
         </view>
@@ -616,7 +741,7 @@ onShow(() => {
             <view class="simple-list">
               <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
                 <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
-                <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "普通用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }}</text>
+                <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "受助用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }}</text>
                 <input v-model="rejectReasons[item.id]" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
                 <view class="action-grid">
                   <button class="vm-button" @tap="reviewApplication(item.id, 'approved')">通过</button>
@@ -690,6 +815,13 @@ onShow(() => {
   gap: 10rpx;
 }
 
+.section-heading__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
 .section-heading__title {
   font-size: 30rpx;
   font-weight: 700;
@@ -702,9 +834,19 @@ onShow(() => {
 .info-list,
 .hero-action-grid,
 .task-filter-grid,
-.ai-list {
+.ai-list,
+.merchant-action-grid {
   display: grid;
   gap: 16rpx;
+}
+
+.hero-action-grid,
+.action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.action-grid__wide {
+  grid-column: 1 / -1;
 }
 
 .action-button__content {
@@ -715,17 +857,22 @@ onShow(() => {
   width: 100%;
 }
 
+.action-button {
+  min-height: 104rpx;
+}
+
 .compact-reminder,
-.hero-note {
+.hero-note,
+.hero-status-panel,
+.state-banner,
+.loading-panel {
   display: grid;
   gap: 10rpx;
 }
 
 .compact-reminder {
-  padding: 18rpx 20rpx;
-  border-radius: 20rpx;
-  border: 1rpx solid var(--vm-info-line);
-  background: var(--vm-surface-soft);
+  padding: 4rpx 0 4rpx 18rpx;
+  border-left: 4rpx solid var(--vm-accent);
 }
 
 .compact-reminder__label {
@@ -741,10 +888,87 @@ onShow(() => {
   line-height: 1.6;
 }
 
+.hero-status-panel {
+  align-content: center;
+  min-height: 100%;
+  padding: 22rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.48);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12rpx 28rpx rgba(31, 106, 58, 0.12);
+}
+
+.hero-status-panel__label,
+.state-banner__title,
+.loading-panel__title {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--vm-text);
+}
+
+.hero-status-panel__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.hero-status-panel__value {
+  display: block;
+  font-size: 44rpx;
+  line-height: 1;
+  color: var(--vm-accent-strong);
+}
+
+.hero-status-panel__meta,
+.state-banner__body {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--vm-text-soft);
+}
+
+.state-banner {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.state-banner__copy {
+  min-width: 0;
+}
+
+.state-banner__button {
+  min-height: 76rpx;
+  padding: 0 24rpx;
+  font-size: 26rpx;
+}
+
+.loading-panel__bar {
+  height: 18rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(90deg, #edf2f6 0%, #ffffff 52%, #edf2f6 100%);
+  background-size: 220% 100%;
+  animation: primary-loading 1200ms ease-in-out infinite;
+}
+
+.loading-panel__bar--wide {
+  width: 84%;
+}
+
+.loading-panel__bar--mid {
+  width: 58%;
+}
+
 .hero-note__title {
   font-size: 28rpx;
   font-weight: 700;
   color: var(--vm-text);
+}
+
+.simple-list,
+.info-list {
+  gap: 0;
+  border-top: 1rpx solid var(--vm-line);
 }
 
 .simple-list__row,
@@ -752,16 +976,21 @@ onShow(() => {
 .simple-card {
   display: grid;
   gap: 10rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 24rpx;
-  background: var(--vm-surface-soft);
-  border: 1rpx solid var(--vm-line);
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid var(--vm-line);
+  background: transparent;
 }
 
 .simple-list__row,
 .info-item {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.simple-list__row:last-child,
+.info-item:last-child,
+.simple-card:last-child {
+  border-bottom: 0;
 }
 
 .simple-list__meta,
@@ -806,6 +1035,51 @@ onShow(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.merchant-action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.merchant-action-card {
+  display: grid;
+  gap: 14rpx;
+  align-content: start;
+  min-height: 182rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
+  text-align: left;
+}
+
+.merchant-action-card--primary {
+  background: linear-gradient(135deg, var(--vm-warning), #ffb764);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 16rpx 32rpx rgba(255, 138, 43, 0.18);
+}
+
+.merchant-action-card__copy {
+  display: grid;
+  gap: 6rpx;
+}
+
+.merchant-action-card__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.merchant-action-card--primary .merchant-action-card__title,
+.merchant-action-card--primary .merchant-action-card__body {
+  color: #ffffff;
+}
+
+.merchant-action-card__body {
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--vm-text-soft);
+}
+
 .task-filter-chip {
   min-height: 82rpx;
   padding: 0 20rpx;
@@ -825,10 +1099,9 @@ onShow(() => {
 .ai-summary-card {
   display: grid;
   gap: 16rpx;
-  padding: 24rpx;
-  border-radius: 26rpx;
+  padding: 4rpx 0 4rpx 20rpx;
   background: var(--vm-info-bg);
-  border: 1rpx solid var(--vm-info-line);
+  border-left: 4rpx solid var(--vm-info);
 }
 
 .ai-summary-card__title,
@@ -841,6 +1114,55 @@ onShow(() => {
 .ai-summary-card__title {
   font-size: 26rpx;
   font-weight: 700;
+}
+
+@keyframes primary-loading {
+  from {
+    background-position: 100% 50%;
+  }
+
+  to {
+    background-position: 0 50%;
+  }
+}
+
+:global(.vm-page--accessible) .hero-action-grid,
+:global(.vm-page--accessible) .action-grid,
+:global(.vm-page--accessible) .metric-grid,
+:global(.vm-page--accessible) .task-filter-grid,
+:global(.vm-page--accessible) .merchant-action-grid,
+:global(.vm-page--accessible) .state-banner {
+  grid-template-columns: 1fr;
+}
+
+:global(.vm-page--accessible) .hero-status-panel {
+  padding: 22rpx;
+  border: 4rpx solid var(--vm-line-strong);
+  background: #ffffff;
+}
+
+:global(.vm-page--accessible) .hero-status-panel__value {
+  font-size: 58rpx;
+}
+
+:global(.vm-page--accessible) .hero-status-panel__meta,
+:global(.vm-page--accessible) .state-banner__body {
+  font-size: 28rpx;
+  color: var(--vm-text);
+}
+
+:global(.vm-page--accessible) .loading-panel__bar {
+  animation: none;
+}
+
+@media screen and (min-width: 720px) {
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  :global(.vm-page--accessible) .metric-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 

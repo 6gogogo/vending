@@ -22,6 +22,7 @@ type BucketKey = "completeUsers" | "partialUsers" | "unservedUsers";
 
 const dashboard = ref<DashboardSnapshot>();
 const loading = ref(false);
+const loadError = ref("");
 const activeBucket = ref<BucketKey>();
 const resolvingTaskId = ref<string>();
 const activeTask = ref<NonNullable<typeof pendingTasks.value>[number]>();
@@ -30,6 +31,20 @@ let visibilityHandler: (() => void) | undefined;
 
 const summaryLogs = computed(() => dashboard.value?.summaryLogs ?? []);
 const pendingTasks = computed(() => dashboard.value?.pendingTasks ?? []);
+const serviceFollowUpCount = computed(() => {
+  const overview = dashboard.value?.serviceOverview;
+
+  return (overview?.partialUsers.count ?? 0) + (overview?.unservedUsers.count ?? 0);
+});
+const serviceTotalCount = computed(() => {
+  const overview = dashboard.value?.serviceOverview;
+
+  return (
+    (overview?.completeUsers.count ?? 0) +
+    (overview?.partialUsers.count ?? 0) +
+    (overview?.unservedUsers.count ?? 0)
+  );
+});
 
 const bucketMeta: Record<BucketKey, { title: string; hint: string; tone: "accent" | "warning" | "neutral" }> = {
   completeUsers: {
@@ -103,6 +118,9 @@ const load = async () => {
   try {
     // 后台首页首先要回答“今天还有谁没被服务到、还有哪些问题没处理完”。
     dashboard.value = await adminApi.dashboard();
+    loadError.value = "";
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : "加载运营总览失败";
   } finally {
     loading.value = false;
   }
@@ -184,14 +202,46 @@ onUnmounted(() => {
 
 <template>
   <section class="admin-page">
+    <div v-if="loadError" class="admin-alert admin-alert--danger dashboard-load-error">
+      <div>
+        <strong>运营总览加载失败</strong>
+        <p class="admin-copy">{{ loadError }}</p>
+      </div>
+      <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
+        {{ loading ? "重试中" : "重试" }}
+      </button>
+    </div>
+
+    <article v-if="loading && !dashboard" class="admin-panel admin-loading">
+      <span class="admin-kicker">正在同步</span>
+      <div class="admin-skeleton admin-skeleton--wide"></div>
+      <div class="admin-skeleton admin-skeleton--mid"></div>
+      <div class="admin-skeleton admin-skeleton--short"></div>
+    </article>
+
     <section v-if="dashboard" class="admin-page__section">
+      <article class="dashboard-command admin-panel">
+        <div class="dashboard-command__main">
+          <span class="admin-kicker">今日看板</span>
+          <h3 class="dashboard-command__title">先确认服务覆盖，再处理风险任务</h3>
+          <p class="admin-subtitle">
+            今日已统计 {{ serviceTotalCount }} 人，仍有 {{ serviceFollowUpCount }} 人需要继续跟进；任务池每 15 秒自动刷新一次。
+          </p>
+        </div>
+        <div class="dashboard-command__side">
+          <span class="admin-pill admin-pill--success">自动刷新 15s</span>
+          <strong class="dashboard-command__value admin-code">{{ serviceFollowUpCount }}</strong>
+          <span class="admin-copy">需跟进人员</span>
+        </div>
+      </article>
+
       <div class="admin-grid admin-grid--stats-4">
         <button class="dashboard-stat-button" @click="openBucket('completeUsers')">
           <StatTile
             :title="bucketMeta.completeUsers.title"
             :value="dashboard.serviceOverview.completeUsers.count"
             :hint="bucketMeta.completeUsers.hint"
-            action-label="展开名单 >"
+            action-label="查看名单"
             :tone="bucketMeta.completeUsers.tone"
           />
         </button>
@@ -200,7 +250,7 @@ onUnmounted(() => {
             :title="bucketMeta.partialUsers.title"
             :value="dashboard.serviceOverview.partialUsers.count"
             :hint="bucketMeta.partialUsers.hint"
-            action-label="展开名单 >"
+            action-label="查看名单"
             :tone="bucketMeta.partialUsers.tone"
           />
         </button>
@@ -209,7 +259,7 @@ onUnmounted(() => {
             :title="bucketMeta.unservedUsers.title"
             :value="dashboard.serviceOverview.unservedUsers.count"
             :hint="bucketMeta.unservedUsers.hint"
-            action-label="展开名单 >"
+            action-label="查看名单"
           />
         </button>
         <StatTile
@@ -490,12 +540,63 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.dashboard-load-error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 18px;
+  align-items: stretch;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(31, 111, 91, 0.1), rgba(36, 95, 147, 0.06) 48%, rgba(255, 255, 255, 0) 100%),
+    var(--admin-panel);
+}
+
+.dashboard-command__main {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.dashboard-command__title {
+  margin: 0;
+  font-size: 1.18rem;
+  line-height: 1.28;
+}
+
+.dashboard-command__side {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 8px;
+  padding-left: 18px;
+  border-left: 1px solid var(--admin-line);
+}
+
+.dashboard-command__value {
+  font-size: 2.2rem;
+  line-height: 1;
+  color: var(--admin-accent-strong);
+}
+
 .dashboard-stat-button {
   padding: 0;
   border: 0;
   background: transparent;
   cursor: pointer;
   text-align: left;
+}
+
+.dashboard-stat-button:hover :deep(.stat-tile),
+.dashboard-stat-button:focus-visible :deep(.stat-tile) {
+  border-color: var(--admin-line-strong);
+  box-shadow: var(--admin-shadow-soft);
 }
 
 .dashboard-task-cell {
@@ -543,8 +644,8 @@ onUnmounted(() => {
 .dashboard-grade-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 2px;
 }
 
 .dashboard-grade-strip__item {
@@ -569,6 +670,22 @@ onUnmounted(() => {
 @media (max-width: 720px) {
   .dashboard-grade-strip {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-load-error,
+  .dashboard-command {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-load-error {
+    align-items: stretch;
+  }
+
+  .dashboard-command__side {
+    padding-left: 0;
+    padding-top: 12px;
+    border-left: 0;
+    border-top: 1px solid var(--admin-line);
   }
 
   .dashboard-drawer-backdrop {

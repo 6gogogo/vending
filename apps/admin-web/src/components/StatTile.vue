@@ -26,13 +26,24 @@ withDefaults(
 
 <style scoped>
 .stat-tile {
+  position: relative;
   display: grid;
-  gap: 6px;
-  min-height: 104px;
-  padding: 14px 16px;
+  gap: 7px;
+  min-height: 118px;
+  padding: 16px;
   border: 1px solid var(--admin-line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--admin-panel);
+  overflow: hidden;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.stat-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--admin-line-strong);
 }
 
 .stat-tile__title {
@@ -45,7 +56,7 @@ withDefaults(
 
 .stat-tile__value {
   font-family: var(--admin-code-font);
-  font-size: 1.68rem;
+  font-size: 1.9rem;
   line-height: 1.1;
   color: var(--admin-text);
 }
@@ -57,14 +68,19 @@ withDefaults(
 }
 
 .stat-tile__action {
+  align-self: end;
   color: var(--admin-accent-strong);
   font-size: 0.82rem;
   font-weight: 700;
 }
 
 .stat-tile--accent {
-  border-color: #c7d5e8;
-  background: #f3f7fc;
+  border-color: #bdd9d0;
+  background: var(--admin-accent-soft);
+}
+
+.stat-tile--accent::before {
+  background: var(--admin-accent);
 }
 
 .stat-tile--success {
@@ -72,8 +88,16 @@ withDefaults(
   background: #f1f8f4;
 }
 
+.stat-tile--success::before {
+  background: var(--admin-success);
+}
+
 .stat-tile--warning {
-  border-color: #e4d2a7;
-  background: #faf6ed;
+  border-color: #e8cf9e;
+  background: #fff7e8;
+}
+
+.stat-tile--warning::before {
+  background: var(--admin-warning);
 }
 </style>

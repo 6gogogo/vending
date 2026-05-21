@@ -433,6 +433,8 @@ export interface CabinetAccessRule {
   allowExpirySetup: boolean;
 }
 
+export type CabinetOpenPurpose = "pickup" | "restock" | "service";
+
 export interface CabinetOpenRequest {
   phone: string;
   deviceCode: string;
@@ -441,6 +443,9 @@ export interface CabinetOpenRequest {
   payStyle?: string;
   category?: GoodsCategory;
   openMode?: "manual" | "scan";
+  operationType?: CabinetOpenPurpose;
+  hasInboundGoods?: boolean;
+  openReason?: string;
   intentItems?: Array<{
     goodsId: string;
     quantity: number;
@@ -457,6 +462,9 @@ export interface CabinetOpenResult {
   reservationId?: string;
   role: UserRole;
   openMode?: "manual" | "scan";
+  operationType?: CabinetOpenPurpose;
+  hasInboundGoods?: boolean;
+  openReason?: string;
   remainingQuota?: Partial<Record<string, number>>;
   acceptedIntentItems?: Array<{
     goodsId: string;
@@ -519,6 +527,9 @@ export interface CabinetOpenPreviewResult {
   deviceCode: string;
   doorNum: string;
   role: UserRole;
+  operationType?: CabinetOpenPurpose;
+  hasInboundGoods?: boolean;
+  openReason?: string;
   remainingQuota?: Partial<Record<string, number>>;
   acceptedIntentItems: Array<{
     goodsId: string;
@@ -555,6 +566,9 @@ export interface CabinetEventRecord {
   deviceCode: string;
   doorNum: string;
   openMode?: "manual" | "scan";
+  operationType?: CabinetOpenPurpose;
+  hasInboundGoods?: boolean;
+  openReason?: string;
   status: CabinetEventStatus;
   createdAt: string;
   updatedAt: string;

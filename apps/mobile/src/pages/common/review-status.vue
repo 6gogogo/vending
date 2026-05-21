@@ -5,6 +5,7 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import type { RegistrationPhoneLookup } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { getErrorMessage } from "../../utils/error-message";
@@ -90,9 +91,14 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="审核状态" title="注册资料状态" subtitle="待审核与已驳回账号都可以在这里查看当前状态。">
+  <MobileShell eyebrow="审核状态" title="申请已提交" subtitle="工作人员会尽快完成审核，请留意短信或稍后再查。">
+    <CabinetHeroArt />
+
     <GlassCard :tone="lookup?.state === 'rejected' ? 'warning' : 'accent'">
       <view class="vm-stack">
+        <text class="vm-status" :class="lookup?.state === 'rejected' ? 'vm-status--warning' : 'vm-status--pending'">
+          {{ lookup?.state === "rejected" ? "需修改" : "审核中" }}
+        </text>
         <text class="status-title">{{ statusTitle }}</text>
         <text class="vm-subtitle">{{ statusDetail }}</text>
 
@@ -100,7 +106,7 @@ onShow(() => {
           <text class="status-box__item">手机号：{{ lookup.phone }}</text>
           <text class="status-box__item">
             账号类型：
-            {{ lookup.fixedRole === "special" ? "普通用户" : lookup.fixedRole === "merchant" ? "爱心商户" : lookup.fixedRole === "admin" ? "管理员" : "待选择" }}
+            {{ lookup.fixedRole === "special" ? "受助用户" : lookup.fixedRole === "merchant" ? "爱心商户" : lookup.fixedRole === "admin" ? "管理员" : "待选择" }}
           </text>
           <text v-if="lookup.application?.updatedAt" class="status-box__item">
             更新时间：{{ lookup.application.updatedAt.slice(0, 16).replace("T", " ") }}

@@ -68,8 +68,8 @@ const showUtilityBar = computed(
     class="vm-page shell"
     :class="[`shell--${resolvedMode}`, { 'vm-page--accessible': accessibilityEnabled, 'shell--accessible': accessibilityEnabled }]"
   >
-    <view class="shell__shape shell__shape--sun" />
-    <view class="shell__shape shell__shape--leaf" />
+    <view class="shell__garden shell__garden--left" aria-hidden="true" />
+    <view class="shell__garden shell__garden--right" aria-hidden="true" />
     <view class="shell__body">
       <view v-if="showUtilityBar" class="shell__utility vm-fade-up" :class="{ 'shell__utility--accessible': accessibilityEnabled }">
         <view class="shell__utility-left">
@@ -109,6 +109,10 @@ const showUtilityBar = computed(
           <text class="shell__compact-subtitle">{{ subtitle }}</text>
           <slot name="hero-extra" />
         </view>
+        <view class="shell__compact-mark" aria-hidden="true">
+          <view class="shell__compact-leaf shell__compact-leaf--one" />
+          <view class="shell__compact-leaf shell__compact-leaf--two" />
+        </view>
         <view v-if="$slots['header-right']" class="shell__compact-side">
           <slot name="header-right" />
         </view>
@@ -129,63 +133,66 @@ const showUtilityBar = computed(
 .shell {
   position: relative;
   overflow: hidden;
-  background: var(--vm-page-gradient);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 242, 0.96) 0, rgba(255, 250, 242, 0) 330rpx),
+    linear-gradient(135deg, rgba(46, 125, 70, 0.08), rgba(255, 138, 43, 0.06) 42%, rgba(255, 255, 255, 0) 72%),
+    var(--vm-page-gradient);
 }
 
 .shell--care {
-  --vm-bg: #f7f9fc;
-  --vm-bg-soft: #eef2f7;
+  --vm-bg: #fff7ec;
+  --vm-bg-soft: #fff1df;
   --vm-surface: rgba(255, 255, 255, 0.96);
   --vm-surface-strong: #ffffff;
-  --vm-surface-soft: rgba(248, 250, 253, 0.94);
-  --vm-line: rgba(20, 58, 102, 0.1);
-  --vm-line-strong: rgba(20, 58, 102, 0.18);
-  --vm-text: #1b2d43;
-  --vm-muted: #6a7688;
-  --vm-text-soft: #7f8998;
-  --vm-accent: #2f7d5b;
-  --vm-accent-strong: #245f45;
-  --vm-shadow: 0 26rpx 76rpx rgba(45, 95, 147, 0.1);
-  --vm-button-shadow: 0 18rpx 42rpx rgba(47, 125, 91, 0.14);
-  --vm-page-gradient: #f7f9fc;
+  --vm-surface-soft: rgba(255, 250, 242, 0.94);
+  --vm-line: rgba(88, 61, 30, 0.1);
+  --vm-line-strong: rgba(88, 61, 30, 0.18);
+  --vm-text: #1f1f1f;
+  --vm-muted: #6c6257;
+  --vm-text-soft: #857b71;
+  --vm-accent: #2e7d46;
+  --vm-accent-strong: #1f6a3a;
+  --vm-shadow: 0 18rpx 44rpx rgba(88, 61, 30, 0.08);
+  --vm-button-shadow: 0 18rpx 38rpx rgba(46, 125, 70, 0.16);
+  --vm-page-gradient: linear-gradient(180deg, #fffaf3 0%, #f7fbf2 54%, #fff7ec 100%);
   --vm-card-bg: #ffffff;
   --vm-card-accent-bg: var(--vm-accent-bg);
   --vm-card-warning-bg: var(--vm-warning-bg);
-  --vm-card-quiet-bg: #f4f7fb;
+  --vm-card-quiet-bg: #fffaf2;
   --vm-card-highlight: var(--vm-accent);
   --vm-hero-bg: #ffffff;
-  --vm-hero-border: rgba(20, 58, 102, 0.12);
-  --vm-hero-shadow: 0 30rpx 90rpx rgba(45, 95, 147, 0.11);
+  --vm-hero-border: rgba(46, 125, 70, 0.14);
+  --vm-hero-shadow: 0 18rpx 48rpx rgba(46, 125, 70, 0.16);
   --vm-pill-bg: var(--vm-accent-soft);
   --vm-pill-text: var(--vm-accent-strong);
 }
 
 .shell--ops {
-  --vm-bg: #f3f7fc;
-  --vm-bg-soft: #eef4fb;
+  --vm-bg: #fff7ec;
+  --vm-bg-soft: #fff1df;
   --vm-surface: rgba(255, 255, 255, 0.96);
   --vm-surface-strong: #ffffff;
-  --vm-surface-soft: rgba(246, 249, 253, 0.94);
-  --vm-line: rgba(30, 65, 102, 0.1);
-  --vm-line-strong: rgba(30, 65, 102, 0.18);
-  --vm-text: #15293b;
-  --vm-muted: #5b7187;
-  --vm-text-soft: #6d8196;
-  --vm-accent: #2f7d5b;
-  --vm-accent-strong: #245f45;
-  --vm-warning: #c8821d;
-  --vm-danger: #c45442;
-  --vm-shadow: 0 26rpx 76rpx rgba(28, 59, 95, 0.1);
-  --vm-button-shadow: 0 18rpx 42rpx rgba(47, 125, 91, 0.14);
-  --vm-page-gradient: #f5f8fb;
+  --vm-surface-soft: rgba(255, 250, 242, 0.94);
+  --vm-line: rgba(88, 61, 30, 0.1);
+  --vm-line-strong: rgba(88, 61, 30, 0.18);
+  --vm-text: #1f1f1f;
+  --vm-muted: #6c6257;
+  --vm-text-soft: #857b71;
+  --vm-accent: #2e7d46;
+  --vm-accent-strong: #1f6a3a;
+  --vm-warning: #ff8a2b;
+  --vm-danger: #d94f41;
+  --vm-shadow: 0 18rpx 44rpx rgba(88, 61, 30, 0.08);
+  --vm-button-shadow: 0 18rpx 38rpx rgba(46, 125, 70, 0.16);
+  --vm-page-gradient: linear-gradient(180deg, #fffaf3 0%, #fff8ee 54%, #f7fbf2 100%);
   --vm-card-bg: #ffffff;
   --vm-card-accent-bg: var(--vm-accent-bg);
   --vm-card-warning-bg: var(--vm-warning-bg);
-  --vm-card-quiet-bg: #f2f6fb;
+  --vm-card-quiet-bg: #fffaf2;
   --vm-card-highlight: var(--vm-accent);
   --vm-hero-bg: #ffffff;
-  --vm-hero-border: rgba(30, 65, 102, 0.12);
-  --vm-hero-shadow: 0 30rpx 90rpx rgba(28, 59, 95, 0.12);
+  --vm-hero-border: rgba(255, 138, 43, 0.18);
+  --vm-hero-shadow: 0 18rpx 48rpx rgba(88, 61, 30, 0.1);
   --vm-pill-bg: var(--vm-accent-soft);
   --vm-pill-text: var(--vm-accent-strong);
 }
@@ -196,6 +203,69 @@ const showUtilityBar = computed(
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+}
+
+.shell__garden {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.shell__garden::before,
+.shell__garden::after {
+  content: "";
+  position: absolute;
+  border-radius: 100% 0 100% 0;
+  background: rgba(46, 125, 70, 0.12);
+  transform-origin: 50% 100%;
+}
+
+.shell__garden--left {
+  left: -34rpx;
+  top: 128rpx;
+  width: 130rpx;
+  height: 150rpx;
+}
+
+.shell__garden--right {
+  right: -44rpx;
+  bottom: 74rpx;
+  width: 170rpx;
+  height: 200rpx;
+}
+
+.shell__garden--left::before {
+  width: 72rpx;
+  height: 42rpx;
+  left: 8rpx;
+  top: 24rpx;
+  transform: rotate(34deg);
+}
+
+.shell__garden--left::after {
+  width: 58rpx;
+  height: 36rpx;
+  left: 54rpx;
+  top: 76rpx;
+  background: rgba(255, 138, 43, 0.1);
+  transform: rotate(-38deg);
+}
+
+.shell__garden--right::before {
+  width: 92rpx;
+  height: 54rpx;
+  right: 20rpx;
+  bottom: 24rpx;
+  transform: rotate(-26deg);
+}
+
+.shell__garden--right::after {
+  width: 70rpx;
+  height: 44rpx;
+  right: 78rpx;
+  bottom: 86rpx;
+  background: rgba(255, 138, 43, 0.11);
+  transform: rotate(30deg);
 }
 
 .shell__utility {
@@ -244,13 +314,47 @@ const showUtilityBar = computed(
 }
 
 .shell__compact {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18rpx;
+  min-height: 174rpx;
+  padding: 28rpx;
+  border: 1rpx solid var(--vm-hero-border);
+  border-radius: 30rpx;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 250, 242, 0.9)),
+    var(--vm-hero-bg);
+  box-shadow: var(--vm-hero-shadow);
+  overflow: hidden;
+}
+
+.shell__compact::before,
+.shell__compact::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.shell__compact::before {
+  inset: 0 0 auto 0;
+  height: 7rpx;
+  background: linear-gradient(90deg, var(--vm-accent), rgba(255, 138, 43, 0.9));
+}
+
+.shell__compact::after {
+  right: 26rpx;
+  bottom: -34rpx;
+  width: 170rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  background: rgba(46, 125, 70, 0.07);
 }
 
 .shell__compact-main {
+  position: relative;
+  z-index: 2;
   min-width: 0;
   flex: 1;
   display: flex;
@@ -263,21 +367,23 @@ const showUtilityBar = computed(
 }
 
 .shell__compact-side {
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
   flex-shrink: 0;
-  padding-top: 34rpx;
+  padding-top: 8rpx;
 }
 
 .shell__compact-eyebrow {
   font-size: 22rpx;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   color: var(--vm-accent-strong);
 }
 
 .shell__compact-title {
-  font-size: 44rpx;
+  font-size: 48rpx;
   line-height: 1.18;
   font-weight: 800;
   color: var(--vm-text);
@@ -289,16 +395,57 @@ const showUtilityBar = computed(
   color: var(--vm-muted);
 }
 
+.shell__compact-mark {
+  position: absolute;
+  right: 34rpx;
+  bottom: 24rpx;
+  z-index: 1;
+  width: 96rpx;
+  height: 80rpx;
+  pointer-events: none;
+}
+
+.shell__compact-leaf {
+  position: absolute;
+  border-radius: 100% 0 100% 0;
+  background: rgba(46, 125, 70, 0.18);
+}
+
+.shell__compact-leaf--one {
+  width: 58rpx;
+  height: 34rpx;
+  right: 26rpx;
+  bottom: 26rpx;
+  transform: rotate(-32deg);
+}
+
+.shell__compact-leaf--two {
+  width: 42rpx;
+  height: 28rpx;
+  right: 2rpx;
+  bottom: 8rpx;
+  background: rgba(255, 138, 43, 0.16);
+  transform: rotate(28deg);
+}
+
 .shell__hero {
   position: relative;
   display: grid;
   gap: 20rpx;
   padding: 28rpx 28rpx 26rpx;
   border: 1rpx solid var(--vm-hero-border);
-  border-radius: 34rpx;
-  background: var(--vm-hero-bg);
+  border-radius: 28rpx;
+  background:
+    linear-gradient(135deg, rgba(46, 125, 70, 0.98), rgba(113, 178, 90, 0.92)),
+    var(--vm-hero-bg);
   box-shadow: var(--vm-hero-shadow);
   overflow: hidden;
+}
+
+.shell--ops .shell__hero {
+  background:
+    linear-gradient(135deg, rgba(255, 138, 43, 0.98), rgba(255, 183, 100, 0.92)),
+    var(--vm-hero-bg);
 }
 
 .shell__hero::before,
@@ -430,44 +577,30 @@ const showUtilityBar = computed(
   gap: 16rpx;
 }
 
+.shell__hero .vm-pill {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.shell__hero .shell__eyebrow,
+.shell__hero .vm-title,
+.shell__hero .vm-subtitle {
+  color: #ffffff;
+}
+
 .shell__content {
   position: relative;
   z-index: 2;
 }
 
-.shell__shape {
-  position: absolute;
-  border-radius: 999rpx;
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.shell__shape--sun {
-  top: -120rpx;
-  right: -120rpx;
-  width: 360rpx;
-  height: 360rpx;
-  background: rgba(47, 125, 91, 0.1);
-}
-
-.shell__shape--leaf {
-  bottom: 160rpx;
-  left: -120rpx;
-  width: 280rpx;
-  height: 280rpx;
-  background: rgba(58, 120, 216, 0.08);
-}
-
-.shell--ops .shell__shape--sun {
-  background: rgba(58, 120, 216, 0.1);
-}
-
-.shell--ops .shell__shape--leaf {
-  background: rgba(20, 58, 102, 0.08);
-}
-
 .shell--accessible .shell__body {
   gap: 30rpx;
+}
+
+.shell--accessible .shell__garden,
+.shell--accessible .shell__compact-mark {
+  display: none;
 }
 
 .shell--accessible .shell__utility {
@@ -624,10 +757,6 @@ const showUtilityBar = computed(
 
 .vm-page--accessible .shell__compact-access-body {
   font-size: 28rpx;
-}
-
-.vm-page--accessible .shell__shape {
-  opacity: 0;
 }
 
 @media screen and (min-width: 720px) {

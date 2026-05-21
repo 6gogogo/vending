@@ -12,6 +12,7 @@ import type {
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
+import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
@@ -172,6 +173,28 @@ const openGuideText = computed(() =>
     ? "当前通过扫码识别柜机，确认货品后可直接发起开柜，最终结算会以平台识别结果为准。"
     : "建议站在柜机旁再操作，先选好计划领取的货品，取货后及时关门。"
 );
+const pickupFlowSteps = computed(() => [
+  {
+    label: "资格校验",
+    description: scanMode.value ? "已扫码识别柜机" : distanceBanner.value.title,
+    state: manualDistanceState.value === "far" ? ("warning" as const) : ("done" as const)
+  },
+  {
+    label: "开柜",
+    description: selectedItems.value.length ? "已选择货品，可发起开柜" : "请先选择本次领取物品",
+    state: selectedItems.value.length ? ("current" as const) : ("todo" as const)
+  },
+  {
+    label: "取货关门",
+    description: "取货后请及时关门",
+    state: "todo" as const
+  },
+  {
+    label: "完成结算",
+    description: "系统按关门后识别结果结算",
+    state: "todo" as const
+  }
+]);
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -564,6 +587,8 @@ onLoad((query) => {
   <MobileShell eyebrow="柜机详情" :title="deviceName" :subtitle="location || deviceAddress || '请先确认柜机位置和货品信息'">
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <FlowSteps v-if="!accessibilityEnabled" :steps="pickupFlowSteps" />
+
         <view v-if="!accessibilityEnabled" class="section-heading">
           <text class="section-heading__title">本次领取计划</text>
           <text class="vm-subtitle">请先选择本次要领取的货品，再确认开柜。</text>
@@ -645,7 +670,7 @@ onLoad((query) => {
         />
 
         <view class="action-stack">
-          <button class="vm-button" :loading="submitting" @tap="submit">
+          <button class="vm-button vm-button--warning" :loading="submitting" @tap="submit">
             {{ scanMode ? "确认货品并扫码开柜" : "确认货品并手动开柜" }}
           </button>
           <button v-if="reservationSettings?.enabled" class="vm-button vm-button--ghost" :loading="submitting" @tap="createReservation">

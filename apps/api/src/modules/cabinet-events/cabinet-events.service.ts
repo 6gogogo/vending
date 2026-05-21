@@ -12,12 +12,14 @@ import type {
   CabinetEventRecord,
   CabinetIntentItem,
   CabinetOpenPreviewResult,
+  CabinetOpenPurpose,
   CabinetOpenRequest,
   CabinetPreSettlement,
   CabinetPreSettlementItem,
   CabinetSettlementComparison,
   CabinetSettlementComparisonItem,
   GoodsCategory,
+  OperationLogCategory,
   SmartVmAdjustmentPayload,
   SmartVmDoorStatusPayload,
   SmartVmPaymentPayload,
@@ -52,12 +54,24 @@ export class CabinetEventsService {
   ) {}
 
   previewOpenSettlement(payload: CabinetOpenRequest): CabinetOpenPreviewResult {
-    const { user, quotaSummary, intentItems, preSettlement, doorNum } = this.prepareOpenContext(payload);
+    const {
+      user,
+      quotaSummary,
+      intentItems,
+      preSettlement,
+      doorNum,
+      operationType,
+      hasInboundGoods,
+      openReason
+    } = this.prepareOpenContext(payload);
 
     return {
       deviceCode: payload.deviceCode,
       doorNum,
       role: user.role,
+      operationType,
+      hasInboundGoods,
+      openReason,
       remainingQuota: quotaSummary?.remainingToday,
       acceptedIntentItems: intentItems.map((item) => ({
         goodsId: item.goodsId,
@@ -69,7 +83,18 @@ export class CabinetEventsService {
   }
 
   async openCabinet(payload: CabinetOpenRequest) {
-    const { user, quotaSummary, intentItems, preSettlement, doorNum, reservation } = this.prepareOpenContext(payload);
+    const {
+      user,
+      quotaSummary,
+      intentItems,
+      preSettlement,
+      doorNum,
+      reservation,
+      operationType,
+      hasInboundGoods,
+      openReason
+    } = this.prepareOpenContext(payload);
+    const logCategory = this.getOpenLogCategory(user.role, operationType);
 
     const eventId = this.store.createId("event");
     let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
@@ -86,7 +111,7 @@ export class CabinetEventsService {
     } catch (error) {
       const detail = this.smartVmGateway.extractErrorMessage(error);
       this.store.logOperation({
-        category: user.role === "merchant" ? "restock" : "pickup",
+        category: logCategory,
         type: "open-cabinet",
         status: "failed",
         actor: {
@@ -112,6 +137,9 @@ export class CabinetEventsService {
           deviceCode: payload.deviceCode,
           doorNum,
           payStyle: payload.payStyle,
+          operationType,
+          hasInboundGoods,
+          openReason,
           undoState: "not_undoable"
         }
       });
@@ -127,11 +155,17 @@ export class CabinetEventsService {
       deviceCode: payload.deviceCode,
       doorNum,
       openMode: payload.openMode ?? "manual",
+      operationType,
+      hasInboundGoods,
+      openReason,
       status: "created",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       amount: 0,
-      billingStatus: preSettlement ? "pending" : undefined,
+      billingStatus: preSettlement || this.isNoChargeOperationalOpen({
+        role: user.role,
+        hasInboundGoods
+      }) ? "pending" : undefined,
       reservationId: reservation?.id,
       intentItems,
       preSettlement,
@@ -144,7 +178,7 @@ export class CabinetEventsService {
       openedAfterLastCommand: false
     });
     this.store.logOperation({
-      category: user.role === "merchant" ? "restock" : "pickup",
+      category: logCategory,
       type: "open-cabinet",
       status: "pending",
       actor: {
@@ -171,6 +205,9 @@ export class CabinetEventsService {
         deviceCode: payload.deviceCode,
         category: payload.category,
         openMode: payload.openMode ?? "manual",
+        operationType,
+        hasInboundGoods,
+        openReason,
         intentItems,
         preSettlement,
         reservationId: reservation?.id
@@ -185,6 +222,9 @@ export class CabinetEventsService {
       reservationId: reservation?.id,
       role: user.role,
       openMode: payload.openMode ?? "manual",
+      operationType,
+      hasInboundGoods,
+      openReason,
       remainingQuota: quotaSummary?.remainingToday,
       acceptedIntentItems: intentItems.map((item) => ({
         goodsId: item.goodsId,
@@ -432,7 +472,7 @@ export class CabinetEventsService {
 
     if (!settlementAlreadyRecorded.duplicated) {
       this.store.logOperation({
-        category: event.role === "merchant" ? "restock" : "pickup",
+        category: this.getOpenLogCategory(event.role, event.operationType),
         type: "settlement-callback",
         status: "success",
         actor: {
@@ -459,6 +499,9 @@ export class CabinetEventsService {
           amount: event.amount,
           platformAmount: payload.amount,
           billingStatus: event.billingStatus,
+          operationType: event.operationType,
+          hasInboundGoods: event.hasInboundGoods,
+          openReason: event.openReason,
           undoState: "not_undoable"
         }
       });
@@ -469,12 +512,21 @@ export class CabinetEventsService {
       event.amount <= 0 &&
       settlementComparison.matched &&
       event.billingDeltaType !== "supplement";
+    const shouldAutoForwardNoChargeOperationalSettlement =
+      this.isNoChargeOperationalOpen(event) &&
+      event.amount <= 0;
 
     if (
       event.paymentNotifyStatus !== "success" &&
-      (this.shouldAutoForwardSettlementPaymentSuccess() || shouldAutoForwardFreeSettlement)
+      (
+        this.shouldAutoForwardSettlementPaymentSuccess() ||
+        shouldAutoForwardFreeSettlement ||
+        shouldAutoForwardNoChargeOperationalSettlement
+      )
     ) {
-      event.paymentNotifyMessage = shouldAutoForwardFreeSettlement
+      event.paymentNotifyMessage = shouldAutoForwardNoChargeOperationalSettlement
+        ? "运营开门不向用户收费，系统将自动回写平台付款成功。"
+        : shouldAutoForwardFreeSettlement
         ? "本次预结算金额为 0，系统将自动回写平台付款成功。"
         : "已收到结算回调，系统将自动回写平台付款成功。";
       void this.tryAutoForwardPaymentSuccess(
@@ -941,18 +993,15 @@ export class CabinetEventsService {
       throw new UnauthorizedException("该手机号未登记，无法开柜。");
     }
 
-    if (user.role === "admin") {
-      throw new BadRequestException("管理员账号不能直接开柜。");
-    }
-
     const doorNum = payload.doorNum ?? "1";
     this.reservationsService.assertUserCanUseRelatedFeatures(user.id);
     const reservation = payload.reservationId
       ? this.reservationsService.getReservationForOpen(user.id, payload.reservationId, payload.deviceCode)
       : undefined;
+    const operationContext = this.resolveOpenOperation(payload, user.role);
     const intentItems = this.resolveIntentItems(
       payload.deviceCode,
-      reservation?.items ?? payload.intentItems ?? [],
+      user.role === "special" ? reservation?.items ?? payload.intentItems ?? [] : [],
       payload.category ?? "daily"
     );
     const quotaSummary =
@@ -978,8 +1027,63 @@ export class CabinetEventsService {
       quotaSummary,
       intentItems,
       preSettlement,
-      reservation
+      reservation,
+      ...operationContext
     };
+  }
+
+  private resolveOpenOperation(
+    payload: CabinetOpenRequest,
+    role: CabinetEventRecord["role"]
+  ): {
+    operationType: CabinetOpenPurpose;
+    hasInboundGoods?: boolean;
+    openReason?: string;
+  } {
+    if (role === "special") {
+      return {
+        operationType: "pickup"
+      };
+    }
+
+    if (typeof payload.hasInboundGoods !== "boolean") {
+      throw new BadRequestException("请选择本次开门是否有商品入柜。");
+    }
+
+    const openReason = payload.openReason?.trim();
+
+    if (!payload.hasInboundGoods && !openReason) {
+      throw new BadRequestException("无商品入柜开门必须填写开门理由。");
+    }
+
+    return {
+      operationType: payload.hasInboundGoods ? "restock" : "service",
+      hasInboundGoods: payload.hasInboundGoods,
+      openReason: openReason || (payload.hasInboundGoods ? "补货入柜" : undefined)
+    };
+  }
+
+  private isNoChargeOperationalOpen(
+    event: Pick<CabinetEventRecord, "role"> & {
+      hasInboundGoods?: CabinetEventRecord["hasInboundGoods"];
+    }
+  ) {
+    return event.role !== "special" && typeof event.hasInboundGoods === "boolean";
+  }
+
+  private getOpenLogCategory(
+    role: CabinetEventRecord["role"],
+    operationType?: CabinetOpenPurpose
+  ): OperationLogCategory {
+    if (operationType === "restock") {
+      return "restock";
+    }
+
+    if (role === "admin" || operationType === "service") {
+      return "device";
+    }
+
+    return "pickup";
   }
 
   private resolveIntentItems(
@@ -1126,6 +1230,33 @@ export class CabinetEventsService {
         unitPrice: Math.max(0, Math.round(Number(item.unitPrice)))
       })) ?? [];
 
+    if (this.isNoChargeOperationalOpen(event)) {
+      const totalQuantity = lines.reduce((sum, item) => sum + item.quantity, 0);
+      const originalAmount = lines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+
+      return {
+        platformAmount,
+        totalQuantity,
+        freeQuantity: totalQuantity,
+        paidQuantity: 0,
+        originalAmount: originalAmount || platformAmount,
+        freeAmount: originalAmount || platformAmount,
+        payableAmount: 0,
+        items: lines.map((item) => ({
+          goodsId: item.goodsId,
+          goodsName: item.goodsName,
+          category: item.category,
+          quantity: item.quantity,
+          freeQuantity: item.quantity,
+          paidQuantity: 0,
+          unitPrice: item.unitPrice,
+          originalAmount: item.quantity * item.unitPrice,
+          freeAmount: item.quantity * item.unitPrice,
+          paidAmount: 0
+        }))
+      };
+    }
+
     if (!lines.length || event.role !== "special") {
       const totalQuantity = lines.reduce((sum, item) => sum + item.quantity, 0);
       const originalAmount = lines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -1219,6 +1350,13 @@ export class CabinetEventsService {
     event.billingDeltaType =
       deltaAmount > 0 ? "supplement" : deltaAmount < 0 ? "refund" : "none";
 
+    if (this.isNoChargeOperationalOpen(event)) {
+      event.billingStatus = "free";
+      event.billingDeltaAmount = 0;
+      event.billingDeltaType = "none";
+      return;
+    }
+
     if (event.role !== "special") {
       return;
     }
@@ -1267,6 +1405,20 @@ export class CabinetEventsService {
         unitPrice: item.unitPrice,
         amount: item.unitPrice * item.quantity
       })) ?? [];
+
+    if (this.isNoChargeOperationalOpen(event)) {
+      return {
+        matched: true,
+        comparedAt: new Date().toISOString(),
+        summary: event.hasInboundGoods
+          ? "本次为入柜开门，库存以人工模板登记为准，不进行用户选择比对。"
+          : "本次为运营开门，平台结算商品用于自动扣减库存，不进行用户选择比对。",
+        intendedItems: [],
+        settledItems,
+        missingItems: [],
+        extraItems: []
+      } satisfies CabinetSettlementComparison;
+    }
 
     const intendedMap = new Map(intendedItems.map((item) => [item.goodsId, item]));
     const settledMap = new Map(settledItems.map((item) => [item.goodsId, item]));

@@ -6,6 +6,7 @@ import type {
   UserRole
 } from "@vm/shared-types";
 
+import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AlertsService } from "../alerts/alerts.service";
 
@@ -13,6 +14,7 @@ import { AlertsService } from "../alerts/alerts.service";
 export class MerchantGoodsTemplatesService {
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
     @Inject(AlertsService) private readonly alertsService: AlertsService
   ) {}
 
@@ -181,7 +183,7 @@ export class MerchantGoodsTemplatesService {
       throw new BadRequestException("补货登记前需要先确认补货明细。");
     }
 
-    const owner = this.getMerchant(ownerUserId);
+    const owner = this.getRestockActor(ownerUserId);
     const template = this.findTemplate(payload.templateId);
 
     if (template.status !== "active") {
@@ -202,48 +204,44 @@ export class MerchantGoodsTemplatesService {
 
     const goods = this.ensureCatalogItemFromTemplate(template);
     const expiresAt = this.calculateExpiresAt(payload.productionDate, template.defaultShelfLifeDays);
+    const happenedAt = new Date().toISOString();
 
-    this.store.ensureDeviceGoodsEntry(device.deviceCode, {
-      goodsId: goods.goodsId,
-      goodsCode: goods.goodsCode,
-      name: goods.name,
-      category: goods.category,
-      price: goods.price,
-      imageUrl: goods.imageUrl
+    const change = this.inventoryBatchChanges.recordRestockMovement({
+      movement: {
+        id: this.store.createId("movement"),
+        userId: owner.id,
+        deviceCode: device.deviceCode,
+        goodsId: goods.goodsId,
+        goodsName: goods.name,
+        category: goods.category,
+        quantity,
+        unitPrice: goods.price,
+        type: "donation",
+        happenedAt,
+        expiresAt
+      },
+      deviceGoods: goods,
+      batch: {
+        expiresAt,
+        sourceType: owner.role === "admin" ? "admin" : "merchant",
+        sourceUserId: owner.id,
+        sourceUserName: owner.name,
+        note: payload.note,
+        createdAt: happenedAt
+      }
     });
+    const batch = change.createdBatches[0];
 
-    const batch = this.store.createGoodsBatch({
-      goodsId: goods.goodsId,
-      deviceCode: device.deviceCode,
-      quantity,
-      expiresAt,
-      sourceType: "merchant",
-      sourceUserId: owner.id,
-      sourceUserName: owner.name,
-      note: payload.note
-    });
-
-    this.store.inventory.unshift({
-      id: this.store.createId("movement"),
-      userId: owner.id,
-      batchId: batch.batchId,
-      deviceCode: device.deviceCode,
-      goodsId: goods.goodsId,
-      goodsName: goods.name,
-      category: goods.category,
-      quantity,
-      unitPrice: goods.price,
-      type: "donation",
-      happenedAt: batch.createdAt,
-      expiresAt
-    });
+    if (!batch) {
+      throw new BadRequestException("补货登记未产生库存变化。");
+    }
 
     this.store.logOperation({
       category: "restock",
       type: "merchant-restock-template",
       status: "success",
       actor: {
-        type: "merchant",
+        type: owner.role === "admin" ? "admin" : "merchant",
         id: owner.id,
         name: owner.name,
         role: owner.role
@@ -281,7 +279,7 @@ export class MerchantGoodsTemplatesService {
 
     this.alertsService.create({
       type: "expiry",
-      title: "商户补货批次待到期跟进",
+      title: owner.role === "admin" ? "管理员入柜批次待到期跟进" : "商户补货批次待到期跟进",
       deviceCode: device.deviceCode,
       targetUserId: owner.id,
       goodsId: goods.goodsId,
@@ -517,6 +515,18 @@ export class MerchantGoodsTemplatesService {
 
   private buildCatalogTemplateId(goodsId: string) {
     return `catalog-${goodsId}`;
+  }
+
+  private getRestockActor(ownerUserId: string) {
+    const actor = this.store.users.find(
+      (entry) => entry.id === ownerUserId && (entry.role === "merchant" || entry.role === "admin")
+    );
+
+    if (!actor) {
+      throw new ForbiddenException("当前账号不能提交入柜登记。");
+    }
+
+    return actor;
   }
 
   private getMerchant(ownerUserId: string) {

@@ -14,7 +14,6 @@ import { useSessionStore } from "../../stores/session";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
-const opening = ref(false);
 const deviceCode = ref("");
 const detail = ref<DeviceMonitoringDetail>();
 
@@ -60,17 +59,10 @@ const refresh = async () => {
   }
 };
 
-const remoteOpen = async () => {
-  opening.value = true;
-  try {
-    await mobileApi.remoteOpenDevice(deviceCode.value);
-    await load();
-    showOperationSuccess();
-  } catch (error) {
-    showOperationFailure(error);
-  } finally {
-    opening.value = false;
-  }
+const openOperationFlow = () => {
+  uni.navigateTo({
+    url: `/pages/common/operation-open?deviceCode=${encodeURIComponent(deviceCode.value)}`
+  });
 };
 
 const showTaskDetail = (title: string, detailText: string) => {
@@ -118,7 +110,7 @@ onLoad((query) => {
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="refresh">手动刷新</button>
-        <button class="vm-button vm-button--ghost" :loading="opening" @tap="remoteOpen">远程开门</button>
+        <button class="vm-button vm-button--ghost" @tap="openOperationFlow">运营开门</button>
       </view>
     </template>
 

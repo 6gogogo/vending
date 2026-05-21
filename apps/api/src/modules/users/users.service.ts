@@ -17,6 +17,7 @@ import {
   getEffectivePoliciesForUser,
   summarizeBusinessDayForUser
 } from "../../common/policies/special-access-policy.utils";
+import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { addDaysToDateKey, getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { DevicesService } from "../devices/devices.service";
@@ -42,6 +43,7 @@ interface BatchUpdatePayload {
 export class UsersService {
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
     @Inject(DevicesService) private readonly devicesService: DevicesService
   ) {}
 
@@ -862,38 +864,28 @@ export class UsersService {
           "https://dummyimage.com/160x160/d8e8ff/0b1220.png&text=%E7%89%A9%E8%B5%84",
         status: "active"
       });
-      this.store.ensureDeviceGoodsEntry(payload.deviceCode, {
-        goodsCode: catalogItem.goodsCode,
-        goodsId: catalogItem.goodsId,
-        name: catalogItem.name,
-        category: catalogItem.category,
-        price: catalogItem.price,
-        imageUrl: catalogItem.imageUrl
+      const change = this.inventoryBatchChanges.recordRestockMovement({
+        movement,
+        deviceGoods: catalogItem,
+        batch: {
+          sourceType: "admin",
+          sourceUserId: actorUserId,
+          sourceUserName: this.store.users.find((entry) => entry.id === actorUserId)?.name,
+          note: payload.note
+        }
       });
-      const batch = this.store.createGoodsBatch({
-        goodsId: payload.goodsId,
-        deviceCode: payload.deviceCode,
-        quantity: payload.quantity,
-        sourceType: "admin",
-        sourceUserId: actorUserId,
-        sourceUserName: this.store.users.find((entry) => entry.id === actorUserId)?.name,
-        note: payload.note
-      });
-      createdBatchId = batch.batchId;
-      movement.batchId = batch.batchId;
-      movement.expiresAt = batch.expiresAt;
+      createdBatchId = change.createdBatches[0]?.batchId;
     } else {
-      consumedBatches = this.store.consumeGoodsBatches(
-        payload.deviceCode,
-        payload.goodsId,
-        payload.quantity,
-        payload.batchConsumptions
-      ).consumed;
-      movement.batchId = consumedBatches.length === 1 ? consumedBatches[0]?.batchId : undefined;
-      movement.consumedBatches = consumedBatches;
+      const change = this.inventoryBatchChanges.recordConsumptiveMovement({
+        movement,
+        requestedBatches: payload.batchConsumptions,
+        trace: {
+          enabled: false
+        }
+      });
+      consumedBatches = change.consumedBatches;
     }
 
-    this.store.inventory.unshift(movement);
     const log = this.store.logOperation({
       category: "inventory",
       type: payload.direction === "restock" ? "manual-restock" : "manual-deduction",
@@ -941,27 +933,13 @@ export class UsersService {
 
     if (payload.direction === "deduct") {
       const adminUser = actorUserId ? this.store.users.find((entry) => entry.id === actorUserId) : undefined;
-      for (const item of consumedBatches) {
-        this.store.recordBatchConsumption({
-          id: this.store.createId("consumption-trace"),
-          batchId: item.batchId,
-          goodsId: movement.goodsId,
-          goodsName: movement.goodsName,
-          deviceCode: movement.deviceCode,
-          movementId: movement.id,
-          sourceLogId: log.id,
-          operationType: movement.type,
-          consumerUserId: movement.userId,
-          consumerUserName: user.name,
-          sourceUserId: item.sourceUserId,
-          sourceUserName: item.sourceUserName,
-          quantity: item.quantity,
-          happenedAt: movement.happenedAt,
-          orderNo: movement.orderNo,
-          eventId: movement.eventId,
-          note: payload.note ?? (adminUser ? `管理员 ${adminUser.name} 手工补扣` : "管理员手工补扣")
-        });
-      }
+      this.inventoryBatchChanges.recordConsumptionTraces({
+        movement,
+        consumedBatches,
+        sourceLogId: log.id,
+        consumerUserName: user.name,
+        note: payload.note ?? (adminUser ? `管理员 ${adminUser.name} 手工补扣` : "管理员手工补扣")
+      });
     }
 
     return movement;

@@ -28,7 +28,7 @@ const form = reactive<RegistrationApplicationProfile>({
 
 const role = computed<UserRole>(() => sessionStore.draft?.requestedRole ?? "special");
 const titleMap: Record<UserRole, string> = {
-  special: "完善普通用户资料",
+  special: "完善受助用户资料",
   merchant: "完善爱心商户资料",
   admin: "完善管理员资料"
 };

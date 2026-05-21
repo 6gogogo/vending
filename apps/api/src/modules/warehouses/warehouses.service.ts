@@ -3,18 +3,21 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import type {
   GoodsBatchRecord,
   GoodsCatalogItem,
-  InventoryTransferRecord,
   StocktakeRecord,
   WarehouseInventorySnapshot,
   WarehouseInventoryItem,
   WarehouseRecord
 } from "@vm/shared-types";
 
+import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 
 @Injectable()
 export class WarehousesService {
-  constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
+  constructor(
+    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService
+  ) {}
 
   list() {
     return this.store.warehouses.slice();
@@ -94,68 +97,24 @@ export class WarehousesService {
       throw new BadRequestException("当前货品存在多个保质期批次，请按批次选择后再调拨。");
     }
 
-    if (to.type === "device") {
-      this.store.ensureDeviceGoodsEntry(to.code, {
-        goodsCode: goods.goodsCode,
-        goodsId: goods.goodsId,
-        name: goods.name,
-        category: goods.category,
-        price: goods.price,
-        imageUrl: goods.imageUrl
-      });
-    }
-
-    const sourceBatches = new Map(
-      this.store.getGoodsBatches(from.code, goods.goodsId).map((entry) => [entry.batchId, entry])
-    );
-    const consumed = selectedBatch
-      ? this.consumeSpecificGoodsBatch(selectedBatch.batchId, payload.quantity)
-      : this.store.consumeGoodsBatches(from.code, goods.goodsId, payload.quantity);
-
-    const movedBatches = consumed.consumed.map((entry) => {
-      const sourceBatch = sourceBatches.get(entry.batchId);
-      const created = this.store.createGoodsBatch({
-        goodsId: goods.goodsId,
-        deviceCode: to.code,
-        quantity: entry.quantity,
-        expiresAt: sourceBatch?.expiresAt,
-        sourceType: "system",
-        sourceUserId: actorUserId,
-        sourceUserName: this.getActorName(actorUserId),
-        note: payload.note || `调拨自 ${from.name}`
-      });
-
-      return {
-        sourceBatchId: entry.batchId,
-        quantity: entry.quantity,
-        expiresAt: sourceBatch?.expiresAt,
-        createdBatchId: created.batchId
-      };
-    });
-
-    const record: InventoryTransferRecord = {
+    const change = this.inventoryBatchChanges.recordTransfer({
       id: this.store.createId("transfer"),
-      fromType: from.type,
-      fromCode: from.code,
-      fromName: from.name,
-      toType: to.type,
-      toCode: to.code,
-      toName: to.name,
-      goodsId: goods.goodsId,
-      goodsName: goods.name,
-      quantity: consumed.actualQuantity,
+      from,
+      to,
+      goods,
+      quantity: payload.quantity,
       happenedAt: new Date().toISOString(),
+      sourceBatchId: selectedBatch?.batchId,
       actorUserId,
       actorUserName: this.getActorName(actorUserId),
-      note: payload.note,
-      batches: movedBatches.map((entry) => ({
-        sourceBatchId: entry.sourceBatchId,
-        quantity: entry.quantity,
-        expiresAt: entry.expiresAt
-      }))
-    };
+      note: payload.note
+    });
+    const record = change.transfers[0];
 
-    this.store.inventoryTransfers.unshift(record);
+    if (!record) {
+      throw new BadRequestException("调拨未产生库存变化。");
+    }
+
     this.store.logOperation({
       category: "inventory",
       type: "inventory-transfer",
@@ -176,7 +135,7 @@ export class WarehousesService {
         toCode: to.code,
         goodsId: goods.goodsId,
         goodsName: goods.name,
-        quantity: consumed.actualQuantity,
+        quantity: record.quantity,
         sourceBatchId: selectedBatch?.batchId,
         sourceBatchExpiresAt: selectedBatch?.expiresAt,
         note: payload.note ?? "",
@@ -223,27 +182,14 @@ export class WarehousesService {
         .getGoodsBatches(device.deviceCode, goodsId)
         .filter((entry) => entry.remainingQuantity > 0).length;
 
-      if (delta < 0) {
-        this.store.consumeGoodsBatches(device.deviceCode, goodsId, Math.abs(delta));
-      } else if (delta > 0) {
-        this.store.ensureDeviceGoodsEntry(device.deviceCode, {
-          goodsCode: goods.goodsCode,
-          goodsId: goods.goodsId,
-          name: goods.name,
-          category: goods.category,
-          price: goods.price,
-          imageUrl: goods.imageUrl
-        });
-        this.store.createGoodsBatch({
-          goodsId,
-          deviceCode: device.deviceCode,
-          quantity: delta,
-          sourceType: "system",
-          sourceUserId: actorUserId,
-          sourceUserName: this.getActorName(actorUserId),
-          note: payload.note || "盘点补录"
-        });
-      }
+      this.inventoryBatchChanges.applyStocktakeCorrection({
+        deviceCode: device.deviceCode,
+        goods,
+        delta,
+        sourceUserId: actorUserId,
+        sourceUserName: this.getActorName(actorUserId),
+        note: payload.note
+      });
 
       return {
         goodsId,
@@ -408,35 +354,6 @@ export class WarehousesService {
     }
 
     return left.createdAt.localeCompare(right.createdAt);
-  }
-
-  private consumeSpecificGoodsBatch(batchId: string, quantity: number) {
-    const batch = this.store.getGoodsBatches().find((entry) => entry.batchId === batchId);
-
-    if (!batch || batch.remainingQuantity <= 0) {
-      throw new BadRequestException("未找到对应来源批次，或该批次已无库存。");
-    }
-
-    if (batch.remainingQuantity < quantity) {
-      throw new BadRequestException("调拨数量超过所选批次当前库存。");
-    }
-
-    const removed = this.store.removeBatchQuantity(batchId, quantity);
-
-    if (!removed || removed.actualQuantity !== quantity) {
-      throw new BadRequestException("调拨数量超过所选批次当前库存。");
-    }
-
-    return {
-      actualQuantity: removed.actualQuantity,
-      consumed: [
-        {
-          batchId,
-          quantity: removed.actualQuantity
-        }
-      ],
-      shortage: 0
-    };
   }
 
   private resolveLocation(code: string) {

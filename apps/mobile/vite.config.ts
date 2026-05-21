@@ -7,5 +7,13 @@ const uniPlugin =
     : (uniPluginModule as { default: typeof uniPluginModule }).default;
 
 export default defineConfig({
-  plugins: uniPlugin()
+  plugins: uniPlugin(),
+  resolve:
+    process.env.UNI_PLATFORM === "h5"
+      ? {
+          alias: {
+            vue: "@dcloudio/uni-h5-vue"
+          }
+        }
+      : undefined
 });

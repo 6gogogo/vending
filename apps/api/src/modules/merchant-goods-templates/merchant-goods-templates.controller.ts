@@ -16,7 +16,7 @@ export class MerchantGoodsTemplatesController {
   ) {}
 
   @Get("merchant-goods-templates")
-  @AllowedRoles("merchant")
+  @AllowedRoles("merchant", "admin")
   list() {
     return ok(this.merchantGoodsTemplatesService.list());
   }
@@ -76,7 +76,7 @@ export class MerchantGoodsTemplatesController {
   }
 
   @Post("merchant-restocks")
-  @AllowedRoles("merchant")
+  @AllowedRoles("merchant", "admin")
   createRestock(
     @Body()
     body: {

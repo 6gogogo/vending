@@ -2,6 +2,7 @@
 import { onShow } from "@dcloudio/uni-app";
 
 import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue";
+import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
@@ -39,8 +40,8 @@ onShow(() => {
 <template>
   <MobileShell
     eyebrow="公益智助柜"
-    title="欢迎使用公益智助柜"
-    subtitle="先登录或注册，再根据账号身份进入对应功能；如遇到问题，可直接走反馈通道。"
+    title="小柜大爱"
+    subtitle="让公益更近一点。请先完成手机号身份识别。"
   >
     <template #header-right>
       <AccessibilityModeMenu
@@ -49,30 +50,38 @@ onShow(() => {
       />
     </template>
 
-    <GlassCard tone="accent">
+    <GlassCard tone="neutral" class="entry-card">
       <view class="vm-stack">
+        <view class="entry-card__visual">
+          <CabinetHeroArt />
+          <view class="entry-card__brand">
+            <text class="entry-card__title">小柜大爱</text>
+            <text class="entry-card__subtitle">让公益更近一点</text>
+          </view>
+        </view>
+
         <view class="section-heading">
-          <text class="section-heading__title">开始使用</text>
-          <text class="vm-subtitle">首次使用请先注册，已审核通过的手机号可直接登录。</text>
+          <text class="section-heading__title">选择下一步</text>
+          <text class="vm-subtitle">已认证可直接登录，首次使用请提交注册申请。</text>
         </view>
 
         <view class="entry-actions">
           <button class="vm-button action-button" @tap="navigate('/pages/common/app-login')">
             <view class="action-button__content">
               <MenuIcon name="scan" size="sm" tone="contrast" />
-              <text>登录</text>
+              <text>登录 / 身份识别</text>
             </view>
           </button>
           <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/common/register')">
             <view class="action-button__content">
               <MenuIcon name="users" size="sm" tone="neutral" />
-              <text>注册</text>
+              <text>提交注册申请</text>
             </view>
           </button>
           <button class="vm-button vm-button--soft action-button" @tap="navigate('/pages/common/feedback')">
             <view class="action-button__content">
               <MenuIcon name="feedback" size="sm" tone="accent" />
-              <text>反馈通道</text>
+              <text>联系工作人员</text>
             </view>
           </button>
         </view>
@@ -82,13 +91,13 @@ onShow(() => {
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">使用说明</text>
-          <text class="vm-subtitle">请先完成注册并等待审核，通过后即可登录。</text>
+          <text class="section-heading__title">温馨提示</text>
+          <text class="vm-subtitle">审核通过后，首页会显示今日是否可领取和开放时段。</text>
         </view>
         <view class="tips-list">
-          <text class="tips-list__item">1. 登录只对已登记且已通过审核的手机号开放。</text>
-          <text class="tips-list__item">2. 注册时先选账号类型，再填写手机号、验证码和身份信息。</text>
-          <text class="tips-list__item">3. 待审核资料可按手机号覆盖更新；如有疑问可走反馈通道。</text>
+          <text class="tips-list__item">1. 已认证手机号可直接进入。</text>
+          <text class="tips-list__item">2. 审核中可随时查看状态。</text>
+          <text class="tips-list__item">3. 遇到柜机或资格问题，可联系工作人员。</text>
         </view>
       </view>
     </GlassCard>
@@ -100,6 +109,42 @@ onShow(() => {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
+}
+
+.entry-card {
+  padding-top: 18rpx;
+}
+
+.entry-card__visual {
+  position: relative;
+  min-height: 280rpx;
+  overflow: hidden;
+  border-radius: 26rpx;
+}
+
+.entry-card__visual :deep(.cabinet-art) {
+  min-height: 280rpx;
+  border-radius: 26rpx;
+}
+
+.entry-card__brand {
+  position: absolute;
+  left: 30rpx;
+  top: 34rpx;
+  display: grid;
+  gap: 10rpx;
+}
+
+.entry-card__title {
+  font-size: 48rpx;
+  line-height: 1.1;
+  font-weight: 900;
+  color: #1f1f1f;
+}
+
+.entry-card__subtitle {
+  font-size: 26rpx;
+  color: #4e453d;
 }
 
 .section-heading__title {

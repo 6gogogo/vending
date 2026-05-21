@@ -148,7 +148,7 @@ onLoad((query) => {
         </view>
 
         <button class="vm-button" :loading="submitting" @tap="submit">提交反馈</button>
-        <button class="vm-button vm-button--ghost" @tap="back">{{ loggedIn ? "返回设置" : "返回入口" }}</button>
+        <button class="vm-button vm-button--ghost" @tap="back">{{ loggedIn ? "返回我的" : "返回入口" }}</button>
       </view>
     </GlassCard>
   </MobileShell>

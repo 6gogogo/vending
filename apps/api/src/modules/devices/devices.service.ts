@@ -2,6 +2,7 @@ import { BadGatewayException, BadRequestException, Inject, Injectable, NotFoundE
 
 import type { DeviceGoods, DeviceMonitoringDetail, DeviceRecord, DeviceStatus, GoodsCategory } from "@vm/shared-types";
 
+import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { SmartVmGateway } from "./smartvm.gateway";
@@ -10,6 +11,7 @@ import { SmartVmGateway } from "./smartvm.gateway";
 export class DevicesService {
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
     @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway
   ) {}
 
@@ -578,7 +580,7 @@ export class DevicesService {
   adjustStock(deviceCode: string, goodsId: string, delta: number) {
     if (delta > 0) {
       const existing = this.store.getGoodsBatches(deviceCode, goodsId).at(0);
-      this.store.createGoodsBatch({
+      this.inventoryBatchChanges.recordBatchOnly({
         goodsId,
         deviceCode,
         quantity: delta,
@@ -589,7 +591,11 @@ export class DevicesService {
       return;
     }
 
-    this.store.consumeGoodsBatches(deviceCode, goodsId, Math.abs(delta));
+    this.inventoryBatchChanges.consumeBatchesOnly({
+      deviceCode,
+      goodsId,
+      quantity: Math.abs(delta)
+    });
   }
 
   addOrUpdateGoods(deviceCode: string, goods: DeviceGoods) {
@@ -835,7 +841,7 @@ export class DevicesService {
           status: "active"
         });
         if (goods.stock > 0) {
-          this.store.createGoodsBatch({
+          this.inventoryBatchChanges.recordBatchOnly({
             goodsId: goods.goodsId,
             deviceCode: existing.deviceCode,
             quantity: goods.stock,
@@ -895,7 +901,7 @@ export class DevicesService {
         status: "active"
       });
       if (goods.stock > 0) {
-        this.store.createGoodsBatch({
+        this.inventoryBatchChanges.recordBatchOnly({
           goodsId: goods.goodsId,
           deviceCode: created.deviceCode,
           quantity: goods.stock,
