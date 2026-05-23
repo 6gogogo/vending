@@ -32,55 +32,69 @@ defineProps<{
 
 <style scoped>
 .flow-steps {
+  position: relative;
   display: grid;
-  gap: 14rpx;
+  grid-template-columns: repeat(auto-fit, minmax(120rpx, 1fr));
+  gap: 10rpx;
+  padding: 18rpx 10rpx 8rpx;
+}
+
+.flow-steps::before {
+  content: "";
+  position: absolute;
+  left: 58rpx;
+  right: 58rpx;
+  top: 42rpx;
+  height: 4rpx;
+  border-radius: 999rpx;
+  background: var(--vm-line-strong);
 }
 
 .flow-step {
+  position: relative;
+  z-index: 1;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 14rpx;
-  align-items: start;
-  padding: 18rpx 20rpx;
-  border-radius: 22rpx;
-  border: 1rpx solid var(--vm-line);
-  background: var(--vm-surface-soft);
+  justify-items: center;
+  gap: 10rpx;
+  min-width: 0;
+  padding: 0 4rpx;
+  text-align: center;
 }
 
 .flow-step__mark {
   display: grid;
   place-items: center;
-  width: 48rpx;
-  height: 48rpx;
+  width: 54rpx;
+  height: 54rpx;
   border-radius: 50%;
   background: #ffffff;
   border: 2rpx solid var(--vm-line-strong);
   color: var(--vm-text-soft);
   font-size: 24rpx;
   font-weight: 800;
+  box-shadow: 0 8rpx 18rpx rgba(88, 61, 30, 0.08);
 }
 
 .flow-step__copy {
   display: grid;
-  gap: 6rpx;
+  gap: 5rpx;
   min-width: 0;
 }
 
 .flow-step__label {
-  font-size: 26rpx;
+  font-size: 24rpx;
   font-weight: 800;
   color: var(--vm-text);
 }
 
 .flow-step__description {
-  font-size: 22rpx;
+  font-size: 19rpx;
   line-height: 1.5;
   color: var(--vm-text-soft);
 }
 
 .flow-step--done {
-  background: var(--vm-success-bg);
-  border-color: var(--vm-success-line);
+  color: var(--vm-success);
 }
 
 .flow-step--done .flow-step__mark {
@@ -90,8 +104,7 @@ defineProps<{
 }
 
 .flow-step--current {
-  background: var(--vm-accent-bg);
-  border-color: var(--vm-accent-line);
+  color: var(--vm-accent);
 }
 
 .flow-step--current .flow-step__mark {
@@ -101,8 +114,7 @@ defineProps<{
 }
 
 .flow-step--warning {
-  background: var(--vm-warning-bg);
-  border-color: var(--vm-warning-line);
+  color: var(--vm-warning);
 }
 
 .flow-step--warning .flow-step__mark {
@@ -112,8 +124,7 @@ defineProps<{
 }
 
 :global(.vm-page--accessible) .flow-step {
-  border-width: 3rpx;
-  padding: 22rpx;
+  padding: 8rpx;
 }
 
 :global(.vm-page--accessible) .flow-step__mark {

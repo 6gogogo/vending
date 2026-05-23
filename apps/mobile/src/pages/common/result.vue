@@ -86,7 +86,7 @@ onLoad((query) => {
 
 <style scoped>
 .result-icon {
-  font-size: 36rpx;
+  font-size: 38rpx;
   font-weight: 800;
   color: var(--vm-text);
 }
@@ -104,6 +104,22 @@ onLoad((query) => {
 .result-hero {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
+  min-height: 156rpx;
+}
+
+.result-hero--success {
+  border-color: var(--vm-success-line);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(237, 248, 233, 0.96));
+}
+
+.result-hero--warning {
+  border-color: var(--vm-warning-line);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 243, 226, 0.96));
+}
+
+.result-hero--danger {
+  border-color: var(--vm-danger-line);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 240, 238, 0.96));
 }
 
 .result-hero__copy {

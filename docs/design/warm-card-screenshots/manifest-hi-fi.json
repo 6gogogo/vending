@@ -1,0 +1,162 @@
+[
+  {
+    "label": "00-login",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\00-login.png",
+    "url": "http://127.0.0.1:4099/?shot=00-login-1779374865430#/pages/common/app-login",
+    "text": "登录\n身份识别\n登录小柜大爱\n手机号验证后进入对应服务入口。\n小柜大爱\n让公益更近一点\n手机号验证\n自动识别身份\n手机号\n请输入手机号\n验证码\n已认证手机号可获取\n请输入验证码\n获取验证码\n登录 / 身份识别\n阅读并同意免责声明\n首次使用？去注册",
+    "height": 888,
+    "bytes": 150688
+  },
+  {
+    "label": "01-review-pending",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\01-review-pending.png",
+    "url": "http://127.0.0.1:4099/?shot=01-review-pending-1779374871483#/pages/common/review-status?phone=13900000099",
+    "text": "审核状态\n审核状态\n申请记录\n申请提交后会进入人工审核，请留意短信通知。\n审核进行中\n该手机号已有待审核资料，重新提交将覆盖之前的信息。\n审核中\n审核通过后可直接登录使用。\n手机号：13900000099\n账号类型： 受助用户\n更新时间：2026-05-21 12:22\n返回登录页",
+    "height": 888,
+    "bytes": 164884
+  },
+  {
+    "label": "02-special-home",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\02-special-home.png",
+    "url": "http://127.0.0.1:4099/?shot=02-special-home-1779374877564#/pages/tabs/primary",
+    "text": "首页\n受助用户\n受助用户\n林阿姨\n先确认今日资格，再去最近柜机领取；如果遇到异常，也可以直接反馈。\n提醒\n当前暂无开放时段，系统会按业务时间自动刷新资格。\n今日状态\n暂未开放\n0\n剩余次数\n0\n已领取\n扫码开柜\n就近找柜机\n今日是否可领取\n暂未开放\n请在开放时段内前往柜机，或联系工作人员确认资格。\n可领取次数\n0\n今日剩余额度\n已领取\n0\n今日已完成领取\n提醒事项\n0\n识别差异或核对提醒会在这里显示\n当前时段\n当前暂无可领取时段\n当前没有可领取额度\n请等待时段开始或联系工作人员核对资格。\n扫码开柜\n附近柜机\n查看领",
+    "height": 1353,
+    "bytes": 203560
+  },
+  {
+    "label": "03-special-nearby",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\03-special-nearby.png",
+    "url": "http://127.0.0.1:4099/?shot=03-special-nearby-1779374883650#/pages/tabs/nearby",
+    "text": "附近柜机\n附近柜机\n受助用户\n地图和列表都能查看，先确认可领取再开柜。\n牛奶\n查找\n地图\n列表\n当前位置与地图提示\n未获得定位权限，已按默认顺序展示柜机\n未开启定位时仍可使用列表；如需按距离排序，请在小程序和系统设置中允许定位权限。\n当前定位\n测试平台柜机 91120149 · 未开启定位\n测试平台柜机 91120149\n比赛测试平台指定柜机\n按默认顺序展示\n可领取\n定位最近柜机\n扫码开柜\n找柜机提示\n未开启定位时也能查看柜机，开启定位后会更容易找到最近的一台。\n正在查找：牛奶\n当前查看：测试平台柜机 911201",
+    "height": 1102,
+    "bytes": 149740
+  },
+  {
+    "label": "04-special-device-detail",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\04-special-device-detail.png",
+    "url": "http://127.0.0.1:4099/?shot=04-special-device-detail-1779374890523#/pages/special/device-detail?deviceCode=91120149&scan=1",
+    "text": "柜机详情\n柜机详情\n测试平台柜机 91120149\n比赛测试平台指定柜机\n✓\n资格校验\n已扫码识别柜机\n2\n开柜\n请先选择本次领取物品\n3\n取货关门\n取货后请及时关门\n4\n完成结算\n系统按关门后识别结果结算\n本次领取计划\n请先选择本次要领取的货品，再确认开柜。\n已选种类\n0\n已加入本次计划的货品种类\n已选件数\n0\n免费 0 件，付费 0 件\n可选货品\n1\n当前柜机仍有库存的货品种类\n扫码模式\n暂未选择货品\n当前通过扫码识别柜机，确认货品后可直接发起开柜，最终结算会以平台识别结果为准。\n当前选择预计免费，正式结算仍以",
+    "height": 1150,
+    "bytes": 203012
+  },
+  {
+    "label": "05-result-success",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\05-result-success.png",
+    "url": "http://127.0.0.1:4099/?shot=05-result-success-1779374896587#/pages/common/result?status=success&title=%E9%A2%86%E5%8F%96%E6%88%90%E5%8A%9F&detail=%E6%9C%AC%E6%AC%A1%E9%A2%86%E5%8F%96%201%20%E4%BB%B6%EF%BC%8C%E6%84%9F%E8%B0%A2%E4%BD%A0%E7%9A%84%E4%BF%A1%E4%BB%BB%E4%B8%8E%E7%88%B1%E6%83%9C%E3%80%82&actionText=%E6%9F%A5%E7%9C%8B%E9%A2%86%E5%8F%96%E8%AE%B0%E5%BD%95",
+    "text": "处理结果\n处理结果\n领取成功\n本次领取 1 件，感谢你的信任与爱惜。\n领取成功\n感谢你的信任与爱心。可继续查看领取记录。\n原因 / 说明\n本次领取 1 件，感谢你的信任与爱惜。\n查看领取记录",
+    "height": 888,
+    "bytes": 179552
+  },
+  {
+    "label": "06-result-warning",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\06-result-warning.png",
+    "url": "http://127.0.0.1:4099/?shot=06-result-warning-1779374902654#/pages/common/result?status=warning&title=%E6%9A%82%E6%97%B6%E6%97%A0%E6%B3%95%E9%A2%86%E5%8F%96&detail=%E5%89%A9%E4%BD%99%E6%AC%A1%E6%95%B0%E5%B7%B2%E7%94%A8%E5%AE%8C%EF%BC%8C%E5%8F%AF%E6%98%8E%E6%97%A5%E5%BC%80%E6%94%BE%E6%97%B6%E6%AE%B5%E5%86%8D%E6%9D%A5%E3%80%82&actionText=%E8%BF%94%E5%9B%9E%E9%A6%96%E9%A1%B5",
+    "text": "处理结果\n处理结果\n暂时无法领取\n剩余次数已用完，可明日开放时段再来。\n暂时无法领取\n请先查看原因，如次数已用完或不在开放时段，可稍后再试。\n原因 / 说明\n剩余次数已用完，可明日开放时段再来。\n返回首页",
+    "height": 888,
+    "bytes": 174336
+  },
+  {
+    "label": "07-special-records",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\07-special-records.png",
+    "url": "http://127.0.0.1:4099/?shot=07-special-records-1779374908714#/pages/tabs/records",
+    "text": "记录\n记录\n领取记录\n查看本人在哪些柜机领取过什么货物。\n三明治\nCAB-1001 · 2026-04-08 01:06\n领取 1 件\n牛奶\nCAB-1001 · 2026-04-08 01:08\n领取 1 件\n首页\n附近柜机\n记录\n我的",
+    "height": 938,
+    "bytes": 144060
+  },
+  {
+    "label": "08-special-mine",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\08-special-mine.png",
+    "url": "http://127.0.0.1:4099/?shot=08-special-mine-1779374914772#/pages/tabs/settings",
+    "text": "我的\n我的\n我的账户\n可查看账号信息、提交反馈、切换无障碍模式或退出登录。\n切换关怀版\n林阿姨\n13800000002\n受助用户\n服务入口\n公益领取\n账号状态\n已认证\n打开帮助中心\n反馈问题\n退出登录\n遇到问题\n这里整理了常见流程、排查提示，也可以继续让 AI 帮你分析。\n登录与验证码\n适合处理验证码、登录失败和手机号核对问题。\n扫码领取\n适合处理领取资格、提醒信息和扫码开门流程。\n附近柜机与地图\n适合处理定位不准、找柜机和地图按钮使用问题。\n查看完整指引并使用 AI 助手\n首页\n附近柜机\n记录\n我的",
+    "height": 1054,
+    "bytes": 169692
+  },
+  {
+    "label": "09-merchant-home",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\09-merchant-home.png",
+    "url": "http://127.0.0.1:4099/?shot=09-merchant-home-1779374920833#/pages/tabs/primary",
+    "text": "首页\n爱心商户\n王店长\n先选柜机，再登记商品、数量、保质期和批次。\n选择柜机补货\n商品模板\n商户工作台\n已认证\n先选择柜机，再完成补货登记。\n总库存\n6\n累计补货件数\n需补货\n0\n低库存或异常提醒\n模板\n12\n可选商品模板\n开始补货\n选择在线柜机并开门\n补货登记\n登记数量、日期和批次\n补货记录\n查看批次和去向\n异常上报\n低库存、柜机异常\n最近货物流动\n补货和去向记录会同步到这里。\n三明治\nCAB-1001 · 2026-04-08 00:22\n流转 4 件\n牛奶\nCAB-1001 · 2026-04-08 00:2",
+    "height": 1146,
+    "bytes": 196492
+  },
+  {
+    "label": "10-merchant-nearby",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\10-merchant-nearby.png",
+    "url": "http://127.0.0.1:4099/?shot=10-merchant-nearby-1779374926943#/pages/tabs/nearby",
+    "text": "附近柜机\n补货\n爱心商户\n选择在线柜机，开门补货或登记商品批次。\n牛奶\n查找\n地图\n列表\n当前位置与地图提示\n未获得定位权限，已按默认顺序展示柜机\n未开启定位时仍可使用列表；如需按距离排序，请在小程序和系统设置中允许定位权限。\n当前定位\n测试平台柜机 91120149 · 未开启定位\n测试平台柜机 91120149\n比赛测试平台指定柜机\n按默认顺序展示\n可补货\n定位最近柜机\n放大地图查看\n开门提示\n建议先看在线柜机，再安排开门和补货。\n当前筛选物资：牛奶\n当前查看：测试平台柜机 91120149\n首页\n补货\n记录\n",
+    "height": 1084,
+    "bytes": 147508
+  },
+  {
+    "label": "11-merchant-restock",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\11-merchant-restock.png",
+    "url": "http://127.0.0.1:4099/?shot=11-merchant-restock-1779374933823#/pages/merchant/restock?deviceCode=91120149",
+    "text": "补货登记\n补货登记\n登记补货\n选择柜机、商品、数量、生产日期和批次号。\n提交补货登记\n商品模板\n✓\n选择物品\n三得利乌龙茶_500ml\n2\n填写批次\n测试平台柜机 91120149 · 1 件\n3\n提交登记\n预计到期 2026-05-23\n三得利乌龙茶_500ml\n日用品 · 默认 1 件 · 保质期 2 天\n已选中\n补货明细\n请确认柜机、数量和生产日期后再提交。\n默认件数\n1\n选中模板后自动带入\n保质期\n2\n单位为天\n预计到期\n2026-05-23\n按生产日期自动推导\n补货柜机\n测试平台柜机 91120149\n补",
+    "height": 1798,
+    "bytes": 213752
+  },
+  {
+    "label": "12-merchant-records",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\12-merchant-records.png",
+    "url": "http://127.0.0.1:4099/?shot=12-merchant-records-1779374939874#/pages/tabs/records",
+    "text": "记录\n记录\n补货记录\n按日查看货物被领取的件数、帮助人数和累计帮助人次。\n2026-04-08\n当天被领取 3 件\n帮助人数 2 人\n帮助人次 2 次\n累计帮助人次 2 次\n三明治\n扬名西点位 · 当前剩余 0/4 件\n到期 2026-04-09\n牛奶\n扬名西点位 · 当前剩余 1/2 件\n到期 2026-04-09\n商户鲜食爱心商户向扬名西点位补充了三明治 x4。\n2026-04-08 00:22\n首页\n补货\n记录\n我的",
+    "height": 938,
+    "bytes": 125104
+  },
+  {
+    "label": "13-merchant-mine",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\13-merchant-mine.png",
+    "url": "http://127.0.0.1:4099/?shot=13-merchant-mine-1779374945913#/pages/tabs/settings",
+    "text": "我的\n我的\n我的账户\n可查看账号信息、提交反馈，并在需要时退出登录。\n王店长\n13800000004\n爱心商户\n服务入口\n商户补货\n账号状态\n已认证\n打开帮助中心\n反馈问题\n退出登录\n遇到问题\n这里整理了常见流程、排查提示，也可以继续让 AI 帮你分析。\n商品属性维护\n适合处理商品信息录入、图片和规格维护问题。\n补货登记\n适合处理补货数量、生产日期和柜机选择问题。\n补货记录查看\n适合处理累计帮助数据和批次去向查看问题。\n查看完整指引并使用 AI 助手\n首页\n补货\n记录\n我的",
+    "height": 1033,
+    "bytes": 163060
+  },
+  {
+    "label": "14-admin-home-tab",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\14-admin-home-tab.png",
+    "url": "http://127.0.0.1:4099/?shot=14-admin-home-tab-1779374951944#/pages/tabs/primary",
+    "text": "首页\n管理员\n街道管理员\n可在这里按分类处理待办、审核申请和查看柜机。\n处理待审申请\n查看柜机状态\n待办总览\n先看分类数量，再按轻重缓急安排处理。\n待处理事件\n7\n优先处理故障、反馈和预警\n注册审批\n1\n等待管理员审核\n全部 7\n临期 0\n用户反馈 0\n系统提示 7\nAI 助手安排建议\n帮助你快速判断今天先处理什么。\nAI 助手暂时不可用\n尚未配置 OPENAI_API_KEY，无法启用 AI 能力。\n待处理事件\n支持按分类筛选，处理前先核对柜机、商品和用户信息。\n柜机低库存提醒\n系统提示\n扬名西点位 · 牛奶\n商",
+    "height": 1781,
+    "bytes": 178488
+  },
+  {
+    "label": "15-admin-home",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\15-admin-home.png",
+    "url": "http://127.0.0.1:4099/?shot=15-admin-home-1779374958014#/pages/admin/home",
+    "text": "管理员端\n管理员端\n街道管理员\n可在这里查看审核申请、柜机状态和运行记录。\n先处理待审\n查看柜机状态\n今日管理概览\n请先查看待审申请、人员数量、柜机数量和日志数量。\n待审申请\n1\n新注册用户等待处理\n人员总数\n6\n包含普通用户、商户和管理员\n柜机数\n3\n当前已接入的柜机数量\n日志量\n41\n用于快速回看近期操作\n请先处理待审申请当前有 1 条待审申请，建议先处理审核，再回看柜机和日志。\n管理入口\n菜单按典型工作顺序排列，先审资料，再看人员、柜机和日志。\n优先\n审核工作台\n处理待审、驳回和已通过的注册申请\n人员\n人员管",
+    "height": 1037,
+    "bytes": 183432
+  },
+  {
+    "label": "16-admin-reviews",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\16-admin-reviews.png",
+    "url": "http://127.0.0.1:4099/?shot=16-admin-reviews-1779374964044#/pages/admin/reviews",
+    "text": "审核工作台\n审核工作台\n注册审核\n先处理待审，再回看通过与驳回记录。\n今日审核\n有 1 条申请需要处理\n1\n待审核\n4\n已通过\n1\n已驳回\n申请列表\n待审用户\n待审核\n13900000099 · 受助用户\n提交于 2026-05-21 12:22\n备注：H5 视觉预览待审核样例\n驳回时填写原因（选填）\n通过\n驳回\n鲜食爱心商户\n已通过\n13800000004 · 爱心商户\n提交于 2026-04-12 17:23\n社区烘焙坊\n已通过\n13800000006 · 爱心商户\n提交于 2026-04-12 15:48\n备",
+    "height": 1287,
+    "bytes": 174268
+  },
+  {
+    "label": "17-admin-devices",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\17-admin-devices.png",
+    "url": "http://127.0.0.1:4099/?shot=17-admin-devices-1779374970097#/pages/admin/devices",
+    "text": "柜机列表\n柜机列表\n柜机监控入口\n先看异常和待处理，再进入单柜机处理。\n柜机运行概览\n有 7 个待处理动作\n3\n在线\n7\n待处理\n0\n今日领取\n扬名东点位\n在线\n扬名街道东侧公益柜\n编号 CAB-1002 · 最近在线 2026-04-08 02:35\n待处理\n3\n今日领取\n0\n任务状态\n需处理\n查看详情 >\n扬名西点位\n在线\n扬名街道西侧公益柜\n编号 CAB-1001 · 最近在线 2026-04-08 02:30\n待处理\n3\n今日领取\n0\n任务状态\n需处理\n查看详情 >\n测试平台柜机 91120149\n在线\n比",
+    "height": 1087,
+    "bytes": 143608
+  },
+  {
+    "label": "18-admin-records",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\18-admin-records.png",
+    "url": "http://127.0.0.1:4099/?shot=18-admin-records-1779374976126#/pages/tabs/records",
+    "text": "记录\n记录\n人员日志\n可切换查看人员信息、审批申请和处理记录。\n人员\n审批\n日志\n社区烘焙坊\n13800000006 · 爱心商户\n未补充资料\n街道管理员\n13800000001 · 管理员\n扬名街道\n林阿姨\n13800000002 · 受助用户\n扬名街道\n陈师傅\n13800000003 · 受助用户\n扬名街道\n赵阿姨\n13800000005 · 受助用户\n扬名街道\n王店长\n13800000004 · 爱心商户\n扬名街道\n首页\n柜机\n记录\n我的",
+    "height": 1197,
+    "bytes": 110224
+  },
+  {
+    "label": "19-admin-mine",
+    "file": "F:\\Data\\work document\\codex\\vending machine\\docs\\design\\warm-card-screenshots\\19-admin-mine.png",
+    "url": "http://127.0.0.1:4099/?shot=19-admin-mine-1779374982138#/pages/tabs/settings",
+    "text": "我的\n我的\n我的账户\n可查看账号信息、提交反馈，并在需要时退出登录。\n街道管理员\n13800000001\n管理员\n服务入口\n运营管理\n账号状态\n已认证\n打开帮助中心\n反馈问题\n批量处理请在电脑端继续\n退出登录\n遇到问题\n这里整理了常见流程、排查提示，也可以继续让 AI 帮你分析。\n待办事件处理\n适合处理临期、用户反馈和系统提示分类事件。\n人员审批与日志\n适合处理注册审批、驳回原因和日志核对问题。\n柜机巡检与列表\n适合处理在线状态、待处理红点和进入详情页问题。\n查看完整指引并使用 AI 助手\n首页\n柜机\n记录\n我的",
+    "height": 1087,
+    "bytes": 166840
+  }
+]

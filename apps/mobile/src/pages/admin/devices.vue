@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import type { DeviceRecord, DeviceStatus } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { getErrorMessage } from "../../utils/error-message";
 import { useSessionStore } from "../../stores/session";
@@ -17,6 +18,10 @@ const deviceCards = ref<Array<{
   pendingCount: number;
   todayPickupCount: number;
 }>>([]);
+
+const onlineCount = computed(() => deviceCards.value.filter((item) => item.device.status === "online").length);
+const pendingTotal = computed(() => deviceCards.value.reduce((sum, item) => sum + item.pendingCount, 0));
+const pickupTotal = computed(() => deviceCards.value.reduce((sum, item) => sum + item.todayPickupCount, 0));
 
 const statusLabelMap: Record<DeviceStatus, string> = {
   online: "在线",
@@ -93,7 +98,33 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="柜机列表" title="柜机监控入口" subtitle="查看在线情况、待处理任务和今日领取数，点详情进入单柜机处理。">
+  <MobileShell eyebrow="柜机列表" title="柜机监控入口" subtitle="先看异常和待处理，再进入单柜机处理。">
+    <GlassCard tone="accent">
+      <view class="device-overview">
+        <view class="device-overview__head">
+          <MenuIcon name="device" size="lg" />
+          <view>
+            <text class="device-overview__title">柜机运行概览</text>
+            <text class="device-overview__hint">{{ pendingTotal > 0 ? `有 ${pendingTotal} 个待处理动作` : "当前无待处理动作" }}</text>
+          </view>
+        </view>
+        <view class="overview-grid">
+          <view class="overview-metric">
+            <text class="overview-metric__value vm-number">{{ onlineCount }}</text>
+            <text class="overview-metric__label">在线</text>
+          </view>
+          <view class="overview-metric overview-metric--warning">
+            <text class="overview-metric__value vm-number">{{ pendingTotal }}</text>
+            <text class="overview-metric__label">待处理</text>
+          </view>
+          <view class="overview-metric">
+            <text class="overview-metric__value vm-number">{{ pickupTotal }}</text>
+            <text class="overview-metric__label">今日领取</text>
+          </view>
+        </view>
+      </view>
+    </GlassCard>
+
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view v-if="deviceCards.length" class="device-list">
@@ -105,8 +136,17 @@ onShow(() => {
           >
             <view v-if="item.pendingCount" class="device-item__dot" />
             <view class="device-item__header">
-              <text class="device-item__title">{{ item.device.name }}</text>
-              <text class="vm-status" :class="`vm-status--${statusToneMap[item.device.status]}`">{{ statusLabelMap[item.device.status] }}</text>
+              <view class="device-item__media" aria-hidden="true">
+                <view class="device-item__machine" />
+              </view>
+              <view class="device-item__main">
+                <view class="device-item__title-row">
+                  <text class="device-item__title">{{ item.device.name }}</text>
+                  <text class="vm-status" :class="`vm-status--${statusToneMap[item.device.status]}`">{{ statusLabelMap[item.device.status] }}</text>
+                </view>
+                <text class="device-item__meta">{{ item.device.location }}</text>
+                <text class="device-item__meta">编号 {{ item.device.deviceCode }} · 最近在线 {{ item.device.lastSeenAt.slice(0, 16).replace("T", " ") }}</text>
+              </view>
             </view>
             <view class="device-item__stats">
               <view class="device-item__stat">
@@ -116,6 +156,12 @@ onShow(() => {
               <view class="device-item__stat">
                 <text class="device-item__label">今日领取</text>
                 <text class="device-item__value">{{ item.todayPickupCount }}</text>
+              </view>
+              <view class="device-item__stat">
+                <text class="device-item__label">任务状态</text>
+                <text class="device-item__value" :class="{ 'device-item__value--warning': item.pendingCount > 0 }">
+                  {{ item.pendingCount > 0 ? "需处理" : "正常" }}
+                </text>
               </view>
             </view>
             <text class="device-item__link">查看详情 ></text>
@@ -128,20 +174,80 @@ onShow(() => {
 </template>
 
 <style scoped>
+.device-overview,
+.device-overview__head,
+.overview-grid,
 .device-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16rpx;
+}
+
+.device-overview__head {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.device-overview__title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.device-overview__hint,
+.device-item__meta {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  line-height: 1.55;
+  color: var(--vm-text-soft);
+}
+
+.overview-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.overview-metric {
+  display: grid;
+  gap: 8rpx;
+  justify-items: center;
+  min-height: 112rpx;
+  padding: 18rpx 10rpx;
+  border-radius: 22rpx;
+  border: 1rpx solid var(--vm-success-line);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.overview-metric--warning {
+  border-color: var(--vm-warning-line);
+  background: var(--vm-warning-bg);
+}
+
+.overview-metric__value {
+  font-size: 40rpx;
+  line-height: 1;
+  font-weight: 900;
+  color: var(--vm-accent-strong);
+}
+
+.overview-metric--warning .overview-metric__value {
+  color: var(--vm-warning);
+}
+
+.overview-metric__label {
+  font-size: 22rpx;
+  color: var(--vm-text-soft);
 }
 
 .device-item {
   position: relative;
   display: grid;
   gap: 16rpx;
-  min-height: 240rpx;
+  min-height: 248rpx;
   padding: 24rpx;
   border-radius: 26rpx;
-  background: var(--vm-surface-soft);
+  background: rgba(255, 255, 255, 0.9);
   border: 1rpx solid var(--vm-line);
   text-align: left;
 }
@@ -157,18 +263,21 @@ onShow(() => {
   box-shadow: 0 0 0 6rpx rgba(239, 68, 68, 0.12);
 }
 
-.device-item__header,
 .device-item__stats {
   display: grid;
   gap: 12rpx;
 }
 
 .device-item__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18rpx;
   min-width: 0;
 }
 
 .device-item__stats {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .device-item__stat {
@@ -182,6 +291,17 @@ onShow(() => {
   color: var(--vm-text);
 }
 
+.device-item__title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12rpx;
+  align-items: center;
+}
+
+.device-item__main {
+  min-width: 0;
+}
+
 .device-item__label,
 .device-item__link {
   font-size: 22rpx;
@@ -189,7 +309,7 @@ onShow(() => {
 }
 
 .device-item__value {
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: 700;
   color: var(--vm-text);
 }
@@ -200,6 +320,41 @@ onShow(() => {
 
 .device-item__link {
   color: var(--vm-accent-strong);
+}
+
+.device-item__media {
+  display: grid;
+  place-items: center;
+  width: 110rpx;
+  height: 110rpx;
+  border-radius: 22rpx;
+  background: linear-gradient(180deg, #fff4e6, #eaf6e4);
+  overflow: hidden;
+}
+
+.device-item__machine {
+  position: relative;
+  width: 58rpx;
+  height: 82rpx;
+  border-radius: 10rpx;
+  background: #2e7d46;
+  box-shadow: inset 0 0 0 5rpx rgba(255, 255, 255, 0.26);
+}
+
+.device-item__machine::before {
+  content: "";
+  position: absolute;
+  left: 10rpx;
+  top: 14rpx;
+  width: 30rpx;
+  height: 48rpx;
+  border-radius: 6rpx;
+  background:
+    linear-gradient(#ff9a33 0 0) 5rpx 9rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#8fcf7f 0 0) 18rpx 9rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#fff0c9 0 0) 5rpx 26rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#ff9a33 0 0) 18rpx 26rpx / 8rpx 8rpx no-repeat,
+    #eef8e8;
 }
 </style>
 

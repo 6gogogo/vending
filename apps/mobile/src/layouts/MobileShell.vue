@@ -110,6 +110,10 @@ const showUtilityBar = computed(
           <slot name="hero-extra" />
         </view>
         <view class="shell__compact-mark" aria-hidden="true">
+          <view class="shell__compact-cabinet">
+            <view class="shell__compact-cabinet-screen" />
+          </view>
+          <view class="shell__compact-person" />
           <view class="shell__compact-leaf shell__compact-leaf--one" />
           <view class="shell__compact-leaf shell__compact-leaf--two" />
         </view>
@@ -319,12 +323,13 @@ const showUtilityBar = computed(
   align-items: flex-start;
   justify-content: space-between;
   gap: 18rpx;
-  min-height: 174rpx;
-  padding: 28rpx;
+  min-height: 188rpx;
+  padding: 30rpx 30rpx 28rpx;
   border: 1rpx solid var(--vm-hero-border);
   border-radius: 30rpx;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 250, 242, 0.9)),
+    radial-gradient(circle at 88% 78%, rgba(46, 125, 70, 0.11), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.99), rgba(255, 250, 242, 0.94)),
     var(--vm-hero-bg);
   box-shadow: var(--vm-hero-shadow);
   overflow: hidden;
@@ -360,6 +365,7 @@ const showUtilityBar = computed(
   display: flex;
   flex-direction: column;
   gap: 10rpx;
+  padding-right: 148rpx;
 }
 
 .shell__compact-access {
@@ -383,7 +389,7 @@ const showUtilityBar = computed(
 }
 
 .shell__compact-title {
-  font-size: 48rpx;
+  font-size: 50rpx;
   line-height: 1.18;
   font-weight: 800;
   color: var(--vm-text);
@@ -397,12 +403,67 @@ const showUtilityBar = computed(
 
 .shell__compact-mark {
   position: absolute;
-  right: 34rpx;
-  bottom: 24rpx;
+  right: 28rpx;
+  bottom: 20rpx;
   z-index: 1;
-  width: 96rpx;
-  height: 80rpx;
+  width: 170rpx;
+  height: 132rpx;
   pointer-events: none;
+}
+
+.shell__compact-cabinet {
+  position: absolute;
+  right: 42rpx;
+  bottom: 8rpx;
+  width: 74rpx;
+  height: 104rpx;
+  border-radius: 16rpx;
+  background: #2e7d46;
+  box-shadow: 0 12rpx 28rpx rgba(46, 125, 70, 0.18);
+}
+
+.shell__compact-cabinet::before {
+  content: "";
+  position: absolute;
+  inset: 8rpx;
+  border-radius: 12rpx;
+  border: 3rpx solid rgba(255, 255, 255, 0.34);
+}
+
+.shell__compact-cabinet-screen {
+  position: absolute;
+  left: 12rpx;
+  top: 14rpx;
+  width: 38rpx;
+  height: 72rpx;
+  border-radius: 8rpx;
+  background:
+    linear-gradient(#ff9a33 0 0) 8rpx 12rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#8fcf7f 0 0) 23rpx 12rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#fff0c9 0 0) 8rpx 34rpx / 8rpx 8rpx no-repeat,
+    linear-gradient(#ff9a33 0 0) 23rpx 34rpx / 8rpx 8rpx no-repeat,
+    #eef8e8;
+}
+
+.shell__compact-person {
+  position: absolute;
+  right: 16rpx;
+  bottom: 10rpx;
+  width: 18rpx;
+  height: 42rpx;
+  border-radius: 12rpx 12rpx 8rpx 8rpx;
+  background: #ff8a2b;
+}
+
+.shell__compact-person::before {
+  content: "";
+  position: absolute;
+  left: 2rpx;
+  top: -18rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: #ffbf8a;
 }
 
 .shell__compact-leaf {
@@ -414,16 +475,16 @@ const showUtilityBar = computed(
 .shell__compact-leaf--one {
   width: 58rpx;
   height: 34rpx;
-  right: 26rpx;
-  bottom: 26rpx;
+  left: 12rpx;
+  bottom: 34rpx;
   transform: rotate(-32deg);
 }
 
 .shell__compact-leaf--two {
   width: 42rpx;
   height: 28rpx;
-  right: 2rpx;
-  bottom: 8rpx;
+  left: 44rpx;
+  bottom: 72rpx;
   background: rgba(255, 138, 43, 0.16);
   transform: rotate(28deg);
 }
@@ -639,6 +700,10 @@ const showUtilityBar = computed(
 
 .shell--accessible .shell__compact-side {
   padding-top: 0;
+}
+
+.shell--accessible .shell__compact-main {
+  padding-right: 0;
 }
 
 .shell--accessible .shell__compact-access {

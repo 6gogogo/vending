@@ -95,10 +95,13 @@ onShow(() => {
         </view>
 
         <view class="ops-banner">
-          <text class="ops-banner__title">{{ loading ? "正在刷新数据" : "请先处理待审申请" }}</text>
-          <text class="ops-banner__body">
-            {{ loading ? "请稍候，系统正在同步最新审核、设备和日志数据。" : priorityText }}
-          </text>
+          <MenuIcon :name="metrics.pendingApplications > 0 ? 'warning' : 'success'" size="md" :tone="metrics.pendingApplications > 0 ? 'warning' : 'accent'" />
+          <view>
+            <text class="ops-banner__title">{{ loading ? "正在刷新数据" : metrics.pendingApplications > 0 ? "请先处理待审申请" : "运营状态稳定" }}</text>
+            <text class="ops-banner__body">
+              {{ loading ? "请稍候，系统正在同步最新审核、设备和日志数据。" : priorityText }}
+            </text>
+          </view>
         </view>
       </view>
     </GlassCard>
@@ -188,6 +191,12 @@ onShow(() => {
   gap: 18rpx;
 }
 
+.hero-action-grid,
+.metric-grid,
+.menu-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .menu-card__top,
 .menu-card__title-group {
   display: flex;
@@ -208,9 +217,6 @@ onShow(() => {
 
 .ops-banner,
 .menu-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
   gap: 10rpx;
   padding: 24rpx;
   border-radius: 24rpx;
@@ -218,8 +224,20 @@ onShow(() => {
   background: var(--vm-surface-soft);
 }
 
+.ops-banner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
 .menu-card {
-  min-height: 132rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.menu-card {
+  min-height: 164rpx;
 }
 
 .menu-card__tag {

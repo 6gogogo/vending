@@ -840,6 +840,10 @@ onShow(() => {
   gap: 16rpx;
 }
 
+.metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .hero-action-grid,
 .action-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -872,19 +876,19 @@ onShow(() => {
 
 .compact-reminder {
   padding: 4rpx 0 4rpx 18rpx;
-  border-left: 4rpx solid var(--vm-accent);
+  border-left: 4rpx solid rgba(255, 255, 255, 0.54);
 }
 
 .compact-reminder__label {
   font-size: 20rpx;
   letter-spacing: 0.08em;
-  color: var(--vm-accent-strong);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .compact-reminder__body,
 .hero-note__body {
   font-size: 22rpx;
-  color: var(--vm-text-soft);
+  color: rgba(255, 255, 255, 0.9);
   line-height: 1.6;
 }
 
@@ -1043,9 +1047,9 @@ onShow(() => {
   display: grid;
   gap: 14rpx;
   align-content: start;
-  min-height: 182rpx;
-  padding: 24rpx;
-  border-radius: 24rpx;
+  min-height: 166rpx;
+  padding: 22rpx;
+  border-radius: 22rpx;
   border: 1rpx solid var(--vm-line);
   background: var(--vm-surface-soft);
   text-align: left;

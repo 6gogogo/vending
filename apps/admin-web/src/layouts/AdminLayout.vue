@@ -134,6 +134,11 @@ const currentGroup = computed(() =>
 );
 
 const roleLabel = computed(() => (sessionStore.user?.backofficeRole === "merchant" ? "商家" : "超级管理员"));
+const todayLabel = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+}).format(new Date());
 
 const logout = async () => {
   sessionStore.clearSession();
@@ -242,12 +247,15 @@ const isActive = (target: string) => {
         <div class="workbench__brand-head">
           <span class="workbench__brand-mark" aria-hidden="true">
             <svg viewBox="0 0 24 24">
-              <path d="M7 3.75h10A2.25 2.25 0 0 1 19.25 6v12A2.25 2.25 0 0 1 17 20.25H7A2.25 2.25 0 0 1 4.75 18V6A2.25 2.25 0 0 1 7 3.75Zm-.75 5.5h11.5V6a.75.75 0 0 0-.75-.75H7a.75.75 0 0 0-.75.75v3.25Zm0 1.5V18c0 .414.336.75.75.75h10a.75.75 0 0 0 .75-.75v-7.25H6.25Zm3.25 1.75h5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5Zm0 3h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1 0-1.5Z" />
+              <path d="M12 2.75 4.25 6.9 12 11.1l7.75-4.2z" />
+              <path d="M3.5 8.1v8.2L11.2 21v-8.25z" />
+              <path d="M12.8 21l7.7-4.7V8.1l-7.7 4.65z" />
+              <path d="m7.1 6.95 4.9-2.62 4.9 2.62-4.9 2.66z" class="workbench__brand-mark-cut" />
             </svg>
           </span>
-          <span class="admin-kicker">公益智助柜</span>
+          <span class="admin-kicker">小柜大爱</span>
         </div>
-        <h1 class="workbench__brand">后台管理台</h1>
+        <h1 class="workbench__brand">运营后台</h1>
         <p class="workbench__brand-copy">面向街道与政府服务场景，按人员、货物、柜机和日志组织日常值守工作。</p>
       </div>
 
@@ -327,6 +335,28 @@ const isActive = (target: string) => {
     </aside>
 
     <main class="workbench__main">
+      <header class="workbench__topbar admin-panel">
+        <div class="workbench__breadcrumb">
+          <span class="workbench__topbar-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 3 4 7.2l8 4.35 8-4.35z" />
+              <path d="M4 8.85v8.05l7.25 4.1v-8.05z" />
+              <path d="M12.75 21 20 16.9V8.85l-7.25 4.1z" />
+            </svg>
+          </span>
+          <strong>小柜大爱</strong>
+          <span>/</span>
+          <span>{{ currentGroup }}</span>
+          <span>/</span>
+          <span>{{ currentMeta.eyebrow }}</span>
+        </div>
+        <div class="workbench__topbar-actions">
+          <span class="workbench__topbar-chip">业务日 {{ todayLabel }}</span>
+          <span class="workbench__topbar-chip">{{ roleLabel }}</span>
+          <RouterLink class="workbench__topbar-link" to="/data-monitor">数据监控</RouterLink>
+        </div>
+      </header>
+
       <header class="workbench__header admin-panel">
         <div>
           <span class="admin-kicker">{{ currentMeta.eyebrow }}</span>
@@ -358,18 +388,87 @@ const isActive = (target: string) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   border-radius: 8px;
-  background: var(--admin-accent);
+  background: linear-gradient(135deg, var(--admin-accent-strong), var(--admin-accent));
   color: #ffffff;
-  box-shadow: 0 10px 22px rgba(31, 111, 91, 0.18);
+  box-shadow: 0 10px 22px rgba(8, 91, 76, 0.2);
 }
 
 .workbench__brand-mark svg {
-  width: 20px;
-  height: 20px;
+  width: 25px;
+  height: 25px;
   fill: currentColor;
+}
+
+.workbench__brand-mark-cut {
+  fill: #d8fff2;
+  opacity: 0.9;
+}
+
+.workbench__topbar {
+  min-height: 54px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+}
+
+.workbench__breadcrumb,
+.workbench__topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workbench__breadcrumb {
+  color: var(--admin-text-muted);
+  font-size: 0.86rem;
+}
+
+.workbench__breadcrumb strong {
+  color: var(--admin-text);
+  font-size: 0.94rem;
+}
+
+.workbench__topbar-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--admin-accent);
+  color: #fff;
+}
+
+.workbench__topbar-mark svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.workbench__topbar-chip,
+.workbench__topbar-link {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--admin-text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.workbench__topbar-link {
+  color: var(--admin-accent-strong);
 }
 
 .workbench__nav-icon {
@@ -411,9 +510,18 @@ const isActive = (target: string) => {
 }
 
 .workbench__password-panel {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: calc(100% + 10px);
+  z-index: 10;
   display: grid;
   gap: 10px;
-  padding-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--admin-shadow);
 }
 
 .workbench__password-warning {
@@ -424,5 +532,17 @@ const isActive = (target: string) => {
   background: #fff1ef;
   border-color: #e4b7b2;
   color: #a5443f;
+}
+
+@media (max-width: 900px) {
+  .workbench__topbar,
+  .workbench__topbar-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workbench__breadcrumb {
+    flex-wrap: wrap;
+  }
 }
 </style>

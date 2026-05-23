@@ -113,7 +113,7 @@ onShow(() => {
               <text>反馈问题</text>
             </view>
           </button>
-          <button v-if="sessionStore.user?.role === 'admin'" class="vm-button vm-button--ghost action-button" disabled>
+          <button v-if="sessionStore.user?.role === 'admin'" class="vm-button vm-button--ghost action-button action-button--wide" disabled>
             <view class="action-button__content">
               <MenuIcon name="desktop" size="sm" tone="neutral" />
               <text>批量处理请在电脑端继续</text>
@@ -153,6 +153,10 @@ onShow(() => {
 .help-preview {
   display: grid;
   gap: 16rpx;
+}
+
+.action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .profile-card {
@@ -211,6 +215,13 @@ onShow(() => {
   justify-content: center;
   gap: 14rpx;
   width: 100%;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.action-button--wide {
+  grid-column: 1 / -1;
 }
 
 .info-item {

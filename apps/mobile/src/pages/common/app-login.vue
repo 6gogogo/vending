@@ -212,8 +212,6 @@ onLoad((query) => {
   if (typeof query.phone === "string" && query.phone) {
     phone.value = query.phone;
   }
-
-  showDisclaimer.value = true;
 });
 
 onShow(() => {
@@ -274,7 +272,7 @@ onShow(() => {
             />
             <button
               class="vm-field-shell__button"
-              :disabled="sendingCode || isCoolingDown || !hasAcceptedDisclaimer"
+              :disabled="sendingCode || isCoolingDown"
               :loading="sendingCode"
               @tap="sendCode"
             >
@@ -284,7 +282,7 @@ onShow(() => {
         </view>
 
         <view class="entry-actions">
-          <button class="vm-button" :disabled="!hasAcceptedDisclaimer" :loading="submitting" @tap="submit">登录 / 身份识别</button>
+          <button class="vm-button" :loading="submitting" @tap="submit">登录 / 身份识别</button>
         </view>
 
         <view class="login-footnote">
@@ -363,19 +361,19 @@ onShow(() => {
 }
 
 .login-card {
-  padding-top: 18rpx;
+  padding-top: 16rpx;
 }
 
 .login-card__visual {
   position: relative;
-  min-height: 270rpx;
+  min-height: 238rpx;
   overflow: hidden;
-  border-radius: 26rpx;
+  border-radius: 24rpx;
 }
 
 .login-card__visual :deep(.cabinet-art) {
-  min-height: 270rpx;
-  border-radius: 26rpx;
+  min-height: 238rpx;
+  border-radius: 24rpx;
 }
 
 .login-card__brand {
@@ -387,14 +385,14 @@ onShow(() => {
 }
 
 .login-card__title {
-  font-size: 44rpx;
+  font-size: 42rpx;
   line-height: 1.12;
   font-weight: 900;
   color: #1f1f1f;
 }
 
 .login-card__subtitle {
-  font-size: 26rpx;
+  font-size: 24rpx;
   color: #4e453d;
 }
 
@@ -431,9 +429,9 @@ onShow(() => {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  min-height: 74rpx;
-  padding: 14rpx 16rpx;
-  border-radius: 20rpx;
+  min-height: 68rpx;
+  padding: 12rpx 14rpx;
+  border-radius: 18rpx;
   border: 1rpx solid var(--vm-line);
   background: var(--vm-surface-soft);
   color: var(--vm-text);

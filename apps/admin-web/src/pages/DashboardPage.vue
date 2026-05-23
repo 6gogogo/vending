@@ -45,6 +45,22 @@ const serviceTotalCount = computed(() => {
     (overview?.unservedUsers.count ?? 0)
   );
 });
+const serviceMixStyle = computed(() => {
+  const overview = dashboard.value?.serviceOverview;
+  const total = Math.max(1, serviceTotalCount.value);
+  const complete = ((overview?.completeUsers.count ?? 0) / total) * 100;
+  const partial = complete + ((overview?.partialUsers.count ?? 0) / total) * 100;
+
+  return {
+    "--service-complete": `${complete}%`,
+    "--service-partial": `${partial}%`
+  };
+});
+const highPriorityTasks = computed(() =>
+  pendingTasks.value
+    .filter((task) => task.grade === "fault" || task.grade === "warning")
+    .slice(0, 4)
+);
 
 const bucketMeta: Record<BucketKey, { title: string; hint: string; tone: "accent" | "warning" | "neutral" }> = {
   completeUsers: {
@@ -268,6 +284,70 @@ onUnmounted(() => {
           hint="缺货、临期、设备异常与用户反馈"
           tone="warning"
         />
+      </div>
+
+      <div class="dashboard-visual-grid">
+        <article class="dashboard-chart-card admin-panel">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">服务趋势</span>
+              <h3 class="admin-panel__title">今日服务与跟进走势</h3>
+            </div>
+            <span class="admin-pill admin-pill--success">实时</span>
+          </div>
+          <svg class="dashboard-line-chart" viewBox="0 0 460 180" aria-hidden="true">
+            <path class="dashboard-line-chart__grid" d="M22 32H438M22 72H438M22 112H438M22 152H438" />
+            <path class="dashboard-line-chart__axis" d="M22 20V160H448" />
+            <path class="dashboard-line-chart__line dashboard-line-chart__line--main" d="M24 132 C 66 114, 82 96, 118 100 S 182 146, 222 104 S 290 70, 328 92 S 386 126, 438 54" />
+            <path class="dashboard-line-chart__line dashboard-line-chart__line--sub" d="M24 142 C 72 138, 96 126, 128 132 S 188 150, 232 126 S 304 110, 342 118 S 398 134, 438 104" />
+          </svg>
+          <div class="dashboard-chart-legend">
+            <span><i class="dashboard-chart-legend__dot"></i>已完成服务</span>
+            <span><i class="dashboard-chart-legend__dot dashboard-chart-legend__dot--sub"></i>待跟进</span>
+          </div>
+        </article>
+
+        <article class="dashboard-mix-card admin-panel">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">业务分布</span>
+              <h3 class="admin-panel__title">服务完成度结构</h3>
+            </div>
+          </div>
+          <div class="dashboard-mix-card__body">
+            <div class="dashboard-donut" :style="serviceMixStyle">
+              <span>{{ serviceTotalCount }}</span>
+            </div>
+            <div class="dashboard-mix-card__legend">
+              <span><i></i>完全服务 {{ dashboard.serviceOverview.completeUsers.count }}</span>
+              <span><i></i>部分服务 {{ dashboard.serviceOverview.partialUsers.count }}</span>
+              <span><i></i>未服务 {{ dashboard.serviceOverview.unservedUsers.count }}</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="dashboard-mini-card admin-panel">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">待办 TOPS</span>
+              <h3 class="admin-panel__title">高优先级任务</h3>
+            </div>
+          </div>
+          <div v-if="highPriorityTasks.length" class="dashboard-mini-list">
+            <button
+              v-for="task in highPriorityTasks"
+              :key="task.id"
+              class="dashboard-mini-list__row"
+              @click="openTaskDetail(task)"
+            >
+              <span>{{ task.title }}</span>
+              <strong>{{ taskGradeLabel(task.grade) }}</strong>
+            </button>
+          </div>
+          <div v-else class="admin-empty admin-empty--compact">
+            <div class="admin-empty__title">没有高优先级任务</div>
+          </div>
+        </article>
       </div>
 
       <div class="dashboard-grade-strip">
@@ -648,6 +728,159 @@ onUnmounted(() => {
   margin-top: 2px;
 }
 
+.dashboard-visual-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(240px, 0.62fr) minmax(260px, 0.78fr);
+  gap: 12px;
+}
+
+.dashboard-chart-card,
+.dashboard-mix-card,
+.dashboard-mini-card {
+  padding: 14px;
+  min-width: 0;
+}
+
+.dashboard-line-chart {
+  width: 100%;
+  height: 170px;
+  display: block;
+}
+
+.dashboard-line-chart__grid {
+  fill: none;
+  stroke: #edf2f4;
+  stroke-width: 1;
+}
+
+.dashboard-line-chart__axis {
+  fill: none;
+  stroke: #ccd8da;
+  stroke-width: 1.2;
+}
+
+.dashboard-line-chart__line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-width: 3.2;
+}
+
+.dashboard-line-chart__line--main {
+  stroke: var(--admin-accent);
+}
+
+.dashboard-line-chart__line--sub {
+  stroke: var(--admin-warning);
+  stroke-width: 2.4;
+}
+
+.dashboard-chart-legend,
+.dashboard-mix-card__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--admin-muted);
+  font-size: 0.8rem;
+}
+
+.dashboard-chart-legend__dot,
+.dashboard-mix-card__legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: var(--admin-accent);
+}
+
+.dashboard-chart-legend__dot--sub,
+.dashboard-mix-card__legend span:nth-child(3) i {
+  background: var(--admin-warning);
+}
+
+.dashboard-mix-card__body {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.dashboard-donut {
+  position: relative;
+  width: 128px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--admin-accent-strong) 0 var(--service-complete),
+    #14a39a var(--service-complete) var(--service-partial),
+    var(--admin-warning) var(--service-partial) 100%
+  );
+}
+
+.dashboard-donut span {
+  width: 74px;
+  height: 74px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--admin-text);
+  font-family: var(--admin-code-font);
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.dashboard-mix-card__legend {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-mix-card__legend span:nth-child(2) i {
+  background: #14a39a;
+}
+
+.dashboard-mini-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-mini-list__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--admin-text);
+  text-align: left;
+}
+
+.dashboard-mini-list__row:hover {
+  border-color: rgba(8, 91, 76, 0.28);
+  background: #f7fbf9;
+}
+
+.dashboard-mini-list__row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-mini-list__row strong {
+  color: var(--admin-warning);
+  white-space: nowrap;
+}
+
+.admin-empty--compact {
+  min-height: 98px;
+  align-content: center;
+}
+
 .dashboard-grade-strip__item {
   display: grid;
   gap: 4px;
@@ -668,6 +901,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 720px) {
+  .dashboard-visual-grid,
   .dashboard-grade-strip {
     grid-template-columns: 1fr;
   }

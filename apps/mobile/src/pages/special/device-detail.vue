@@ -723,6 +723,10 @@ onLoad((query) => {
   gap: 16rpx;
 }
 
+.overview-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .selection-banner,
 .goods-item,
 .settlement-preview,
@@ -731,8 +735,8 @@ onLoad((query) => {
   justify-content: space-between;
   align-items: center;
   gap: 18rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 24rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 22rpx;
   background: var(--vm-surface-soft);
   border: 1rpx solid var(--vm-line);
 }

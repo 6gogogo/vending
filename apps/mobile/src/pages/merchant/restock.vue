@@ -200,7 +200,7 @@ onLoad((query) => {
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button vm-button--warning" @tap="submit" :loading="submitting">提交补货登记</button>
-        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">后端商品模板</button>
+        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">商品模板</button>
       </view>
     </template>
 
@@ -219,39 +219,6 @@ onLoad((query) => {
           <text class="vm-status" :class="selectedTemplate ? 'vm-status--success' : 'vm-status--pending'">
             {{ selectedTemplate ? "已选中" : "待选择" }}
           </text>
-        </view>
-      </view>
-    </GlassCard>
-
-    <GlassCard tone="quiet">
-      <view class="vm-stack">
-        <view class="section-heading">
-          <text class="section-heading__title">选择货品模板</text>
-          <text class="vm-subtitle">优先搜索商品名，选中后自动带入数量和保质期。</text>
-        </view>
-
-        <view class="vm-field">
-          <text class="vm-field__label">搜索商品名称</text>
-          <input v-model="templateKeyword" class="vm-field__input" placeholder="输入名称、编号、分类或规格" />
-        </view>
-
-        <view class="template-list">
-          <button
-            v-for="item in filteredTemplates"
-            :key="item.id"
-            class="template-item"
-            :class="{ 'template-item--active': selectedTemplateId === item.id }"
-            @tap="selectTemplate(item)"
-          >
-            <MenuIcon :name="item.category === 'food' ? 'food' : item.category === 'daily' ? 'daily' : 'drink'" size="md" tone="accent" />
-            <view class="template-item__main">
-              <text class="template-item__title">{{ item.goodsName }}</text>
-              <text class="template-item__meta">{{ item.defaultQuantity }} 件 · {{ item.defaultShelfLifeDays }} 天</text>
-            </view>
-            <text class="vm-status" :class="selectedTemplateId === item.id ? 'vm-status--online' : 'vm-status--muted'">
-              {{ selectedTemplateId === item.id ? "已选中" : "可选" }}
-            </text>
-          </button>
         </view>
       </view>
     </GlassCard>
@@ -326,6 +293,39 @@ onLoad((query) => {
         </view>
       </view>
     </GlassCard>
+
+    <GlassCard tone="quiet">
+      <view class="vm-stack">
+        <view class="section-heading">
+          <text class="section-heading__title">更换货品模板</text>
+          <text class="vm-subtitle">当前已选商品会自动带入数量和保质期，需要调整时再从这里切换。</text>
+        </view>
+
+        <view class="vm-field">
+          <text class="vm-field__label">搜索商品名称</text>
+          <input v-model="templateKeyword" class="vm-field__input" placeholder="输入名称、编号、分类或规格" />
+        </view>
+
+        <view class="template-list template-list--compact">
+          <button
+            v-for="item in filteredTemplates"
+            :key="item.id"
+            class="template-item"
+            :class="{ 'template-item--active': selectedTemplateId === item.id }"
+            @tap="selectTemplate(item)"
+          >
+            <MenuIcon :name="item.category === 'food' ? 'food' : item.category === 'daily' ? 'daily' : 'drink'" size="md" tone="accent" />
+            <view class="template-item__main">
+              <text class="template-item__title">{{ item.goodsName }}</text>
+              <text class="template-item__meta">{{ item.defaultQuantity }} 件 · {{ item.defaultShelfLifeDays }} 天</text>
+            </view>
+            <text class="vm-status" :class="selectedTemplateId === item.id ? 'vm-status--online' : 'vm-status--muted'">
+              {{ selectedTemplateId === item.id ? "已选中" : "可选" }}
+            </text>
+          </button>
+        </view>
+      </view>
+    </GlassCard>
   </MobileShell>
 </template>
 
@@ -361,14 +361,31 @@ onLoad((query) => {
   gap: 16rpx;
 }
 
+.overview-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hero-action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.restock-field-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.template-list--compact {
+  max-height: 520rpx;
+  overflow: hidden;
+}
+
 .template-item,
 .summary-panel {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 18rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 24rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 22rpx;
   border: 1rpx solid var(--vm-line);
   background: var(--vm-surface-soft);
 }
@@ -383,8 +400,8 @@ onLoad((query) => {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 18rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 24rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 22rpx;
   border: 1rpx solid var(--vm-success-line);
   background: rgba(255, 255, 255, 0.9);
 }
@@ -412,15 +429,15 @@ onLoad((query) => {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   overflow: hidden;
-  min-height: 92rpx;
-  border-radius: 20rpx;
+  min-height: 88rpx;
+  border-radius: 18rpx;
   border: 1rpx solid var(--vm-line-strong);
   background: #ffffff;
 }
 
 .quantity-stepper__button {
   width: 88rpx;
-  min-height: 92rpx;
+  min-height: 88rpx;
   color: var(--vm-accent-strong);
   background: var(--vm-accent-soft);
   font-size: 34rpx;
@@ -429,7 +446,7 @@ onLoad((query) => {
 
 .quantity-stepper__input {
   width: 100%;
-  min-height: 92rpx;
+  min-height: 88rpx;
   text-align: center;
   font-size: 32rpx;
   font-weight: 900;

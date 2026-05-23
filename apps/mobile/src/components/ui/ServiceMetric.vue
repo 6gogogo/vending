@@ -25,10 +25,11 @@ withDefaults(
 .service-metric {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
-  min-height: 164rpx;
-  padding: 22rpx;
-  border-radius: 22rpx;
+  justify-content: center;
+  gap: 9rpx;
+  min-height: 132rpx;
+  padding: 20rpx 18rpx;
+  border-radius: 20rpx;
   border: 1rpx solid var(--vm-line-strong);
   box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.55);
 }
@@ -46,19 +47,19 @@ withDefaults(
 }
 
 .service-metric__label {
-  font-size: 22rpx;
+  font-size: 21rpx;
   color: var(--vm-muted);
 }
 
 .service-metric__value {
-  font-size: 50rpx;
+  font-size: 44rpx;
   line-height: 1;
   color: var(--vm-accent-strong);
   font-weight: 800;
 }
 
 .service-metric__hint {
-  font-size: 22rpx;
+  font-size: 19rpx;
   color: var(--vm-text-soft);
   line-height: 1.5;
 }

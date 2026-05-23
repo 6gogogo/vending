@@ -832,3 +832,341 @@ input[type="checkbox"] {
     scroll-behavior: auto !important;
   }
 }
+
+/* PC 后台样例风格还原层：深绿品牌、低圆角、紧凑数据密度。 */
+:root {
+  --admin-bg: #f6f8f9;
+  --admin-bg-strong: #eef3f4;
+  --admin-panel: #ffffff;
+  --admin-panel-muted: #f7faf9;
+  --admin-panel-strong: #fbfcfc;
+  --admin-line: #dde6e7;
+  --admin-line-strong: #c9d6d8;
+  --admin-text: #0f1727;
+  --admin-text-muted: #374151;
+  --admin-muted: #647181;
+  --admin-accent: #0b8b79;
+  --admin-accent-strong: #085b4c;
+  --admin-accent-soft: #e6f4f1;
+  --admin-info: #1677c7;
+  --admin-info-soft: #eef7ff;
+  --admin-success: #22c55e;
+  --admin-warning: #f5a623;
+  --admin-danger: #ef4444;
+  --admin-nav-bg: #ffffff;
+  --admin-nav-panel: #ffffff;
+  --admin-nav-line: #e6eeee;
+  --admin-nav-text: #1f2937;
+  --admin-nav-muted: #667085;
+  --admin-shadow: 0 1px 2px rgba(15, 23, 39, 0.05), 0 10px 28px rgba(15, 23, 39, 0.04);
+  --admin-shadow-soft: 0 1px 2px rgba(15, 23, 39, 0.06), 0 8px 18px rgba(15, 23, 39, 0.05);
+  --admin-focus: 0 0 0 3px rgba(11, 139, 121, 0.16);
+  --admin-code-font: "DIN Alternate", "Roboto Mono", "Consolas", "SFMono-Regular", monospace;
+}
+
+body {
+  background:
+    linear-gradient(180deg, #fbfcfd 0, #f6f8f9 280px),
+    var(--admin-bg);
+  color: var(--admin-text);
+  font-size: 14px;
+}
+
+.admin-shell {
+  width: min(1920px, 100%);
+  padding: 16px 20px 22px;
+}
+
+.workbench {
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.workbench__main {
+  gap: 12px;
+}
+
+.workbench__sidebar {
+  top: 16px;
+  min-height: calc(100vh - 32px);
+  padding: 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-panel {
+  border-color: var(--admin-line);
+  border-radius: 8px;
+  box-shadow: var(--admin-shadow);
+}
+
+.workbench__brand-panel,
+.workbench__status {
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workbench__brand {
+  margin: 6px 0 0;
+  color: var(--admin-text);
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.workbench__brand-copy {
+  display: none;
+}
+
+.workbench__nav {
+  align-content: start;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.workbench__nav-group {
+  gap: 2px;
+}
+
+.workbench__nav-title {
+  padding: 4px 8px;
+  color: var(--admin-nav-muted);
+  font-size: 0.7rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.workbench__nav-link {
+  min-height: 36px;
+  padding: 0 9px;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--admin-nav-text);
+}
+
+.workbench__nav-link::before {
+  display: none;
+}
+
+.workbench__nav-link:hover {
+  border-color: var(--admin-nav-line);
+  background: var(--admin-panel-muted);
+  box-shadow: none;
+}
+
+.workbench__nav-link--active {
+  border-color: rgba(8, 91, 76, 0.2);
+  background: linear-gradient(180deg, #0c6f5d 0%, #075043 100%);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.workbench__nav-link--active .workbench__nav-icon {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.workbench__nav-label {
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.workbench__status {
+  position: relative;
+  align-self: end;
+  border-top: 1px solid var(--admin-line);
+  border-radius: 0;
+}
+
+.workbench__status-title {
+  margin-top: 6px;
+  font-size: 0.92rem;
+}
+
+.workbench__header {
+  padding: 14px 16px;
+  background: #fff;
+  box-shadow: var(--admin-shadow);
+}
+
+.workbench__header-side {
+  min-width: 260px;
+}
+
+.admin-page-title {
+  margin-top: 4px;
+  color: var(--admin-text);
+  font-size: clamp(1.18rem, 1.05rem + 0.38vw, 1.5rem);
+  font-weight: 800;
+}
+
+.admin-kicker {
+  color: var(--admin-accent-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.admin-copy,
+.admin-subtitle {
+  color: var(--admin-muted);
+  font-size: 0.84rem;
+}
+
+.admin-button {
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #0b8b79 0%, #075043 100%);
+  box-shadow: none;
+  font-size: 0.84rem;
+}
+
+.admin-button:hover {
+  background: linear-gradient(180deg, #0a7768 0%, #063e35 100%);
+  box-shadow: 0 8px 16px rgba(8, 91, 76, 0.16);
+}
+
+.admin-button--ghost {
+  background: #fff;
+  color: var(--admin-accent-strong);
+  border-color: var(--admin-line-strong);
+}
+
+.admin-button--ghost:hover {
+  background: var(--admin-accent-soft);
+  border-color: rgba(8, 91, 76, 0.24);
+  box-shadow: none;
+}
+
+.admin-button--danger {
+  background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+}
+
+.admin-pill {
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 0.75rem;
+}
+
+.admin-pill--success {
+  background: #e9f8ef;
+  border-color: #b7ebc9;
+  color: #0f8a45;
+}
+
+.admin-pill--warning {
+  background: #fff7e8;
+  border-color: #f5d28f;
+  color: #c07400;
+}
+
+.admin-pill--danger {
+  background: #fff0f0;
+  border-color: #ffc7c7;
+  color: #d93030;
+}
+
+.admin-grid,
+.admin-page,
+.admin-page__section {
+  gap: 12px;
+}
+
+.admin-panel-block {
+  padding: 14px;
+}
+
+.admin-panel__head {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.admin-panel__title,
+.admin-page__section-title {
+  color: var(--admin-text);
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.admin-list {
+  gap: 7px;
+}
+
+.admin-list__row {
+  padding: 10px;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.admin-list__row:hover {
+  background: #f8fbfa;
+  border-color: #cfe0dd;
+}
+
+.admin-table {
+  border-color: var(--admin-line);
+  border-radius: 8px;
+  font-size: 0.84rem;
+}
+
+.admin-table thead th {
+  background: #f8fafb;
+  color: #667085;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 9px 10px;
+}
+
+.admin-table tbody tr:hover {
+  background: #f7fbf9;
+}
+
+.admin-input,
+.admin-select {
+  min-height: 34px;
+  border-color: var(--admin-line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.admin-input:focus,
+.admin-select:focus,
+.admin-input:focus-visible,
+.admin-select:focus-visible {
+  border-color: var(--admin-accent);
+}
+
+.admin-note,
+.admin-alert,
+.admin-empty {
+  border-radius: 8px;
+}
+
+.admin-empty {
+  background: #fafcfc;
+}
+
+@media (max-width: 1180px) {
+  .admin-shell {
+    padding: 12px;
+  }
+
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench__sidebar {
+    position: static;
+    min-height: 0;
+  }
+}

@@ -253,18 +253,30 @@ onShow(() => {
   gap: 16rpx;
 }
 
-.segment {
-  min-height: 80rpx;
+.segmented {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8rpx;
+  padding: 8rpx;
   border-radius: 22rpx;
-  border: 1rpx solid var(--vm-line-strong);
-  background: var(--vm-surface-soft);
+  border: 1rpx solid var(--vm-line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.segment {
+  min-height: 64rpx;
+  border-radius: 18rpx;
+  border: 1rpx solid transparent;
+  background: transparent;
   font-size: 26rpx;
+  color: var(--vm-text-soft);
 }
 
 .segment--active {
-  border-color: var(--vm-info-line);
-  background: var(--vm-info-bg);
-  color: var(--vm-info);
+  border-color: var(--vm-success-line);
+  background: #ffffff;
+  color: var(--vm-accent-strong);
+  font-weight: 800;
+  box-shadow: 0 8rpx 18rpx rgba(88, 61, 30, 0.08);
 }
 
 .action-row {
@@ -279,7 +291,7 @@ onShow(() => {
   gap: 8rpx;
   padding: 22rpx 24rpx;
   border-radius: 24rpx;
-  background: var(--vm-surface-soft);
+  background: rgba(255, 255, 255, 0.9);
   border: 1rpx solid var(--vm-line);
 }
 
@@ -301,6 +313,7 @@ onShow(() => {
 .simple-card__title,
 .summary-card__title {
   font-size: 28rpx;
+  font-weight: 700;
   color: var(--vm-text);
 }
 
