@@ -1,18 +1,54 @@
 <script setup lang="ts">
-withDefaults(
+import { computed } from "vue";
+
+const props = withDefaults(
   defineProps<{
     title: string;
     value: string | number;
     hint?: string;
     actionLabel?: string;
     tone?: "neutral" | "accent" | "warning" | "success";
+    sparkline?: number[];
+    sparklineLabel?: string;
   }>(),
   {
     hint: "",
     actionLabel: "",
-    tone: "neutral"
+    tone: "neutral",
+    sparkline: () => [],
+    sparklineLabel: ""
   }
 );
+
+const sparklinePoints = computed(() => {
+  const values = props.sparkline.filter((value) => Number.isFinite(value));
+
+  if (values.length < 2) {
+    return "";
+  }
+
+  const width = 92;
+  const height = 36;
+  const padding = 4;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const sameValue = min === max;
+  const plotWidth = width - padding * 2;
+  const plotHeight = height - padding * 2;
+
+  return values
+    .map((value, index) => {
+      const x = padding + (index / (values.length - 1)) * plotWidth;
+      const y = sameValue
+        ? height / 2
+        : padding + plotHeight - ((value - min) / (max - min)) * plotHeight;
+
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+});
+
+const hasSparkline = computed(() => Boolean(sparklinePoints.value));
 </script>
 
 <template>
@@ -26,8 +62,14 @@ withDefaults(
         <strong class="stat-tile__value">{{ value }}</strong>
         <span v-if="hint" class="stat-tile__hint">{{ hint }}</span>
       </div>
-      <svg class="stat-tile__spark" viewBox="0 0 92 36" aria-hidden="true">
-        <path d="M2 28 C 14 22, 18 24, 27 18 S 42 10, 51 18 S 67 31, 78 18 S 87 9, 90 12" />
+      <svg
+        v-if="hasSparkline"
+        class="stat-tile__spark"
+        viewBox="0 0 92 36"
+        role="img"
+        :aria-label="sparklineLabel || `${title}近 7 日趋势`"
+      >
+        <polyline :points="sparklinePoints" />
       </svg>
     </div>
     <span v-if="actionLabel" class="stat-tile__action">{{ actionLabel }}</span>
@@ -102,10 +144,12 @@ withDefaults(
   color: var(--admin-accent);
 }
 
-.stat-tile__spark path {
+.stat-tile__spark path,
+.stat-tile__spark polyline {
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
+  stroke-linejoin: round;
   stroke-width: 3;
 }
 

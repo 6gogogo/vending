@@ -3232,6 +3232,36 @@
         "backofficeRole": "super_admin",
         "createdAt": "2026-05-22T06:21:00.074Z"
       }
+    ],
+    [
+      "session-mpin59fikz5cm",
+      {
+        "token": "session-mpin59fikz5cm",
+        "userId": "admin-001",
+        "role": "admin",
+        "backofficeRole": "super_admin",
+        "createdAt": "2026-05-23T17:47:16.350Z"
+      }
+    ],
+    [
+      "session-mpinao56mzpte",
+      {
+        "token": "session-mpinao56mzpte",
+        "userId": "admin-001",
+        "role": "admin",
+        "backofficeRole": "super_admin",
+        "createdAt": "2026-05-23T17:51:28.698Z"
+      }
+    ],
+    [
+      "session-mpinfafzuvbs1",
+      {
+        "token": "session-mpinfafzuvbs1",
+        "userId": "admin-001",
+        "role": "admin",
+        "backofficeRole": "super_admin",
+        "createdAt": "2026-05-23T17:55:04.223Z"
+      }
     ]
   ],
   "draftSessions": [],

@@ -19,6 +19,12 @@ import {
 } from "../utils/business-context";
 
 type BucketKey = "completeUsers" | "partialUsers" | "unservedUsers";
+type TrendMarker = {
+  x: number;
+  y: number;
+  value: number;
+  label: string;
+};
 
 const dashboard = ref<DashboardSnapshot>();
 const loading = ref(false);
@@ -60,6 +66,81 @@ const highPriorityTasks = computed(() =>
   pendingTasks.value
     .filter((task) => task.grade === "fault" || task.grade === "warning")
     .slice(0, 4)
+);
+const serviceTrend = computed(() => dashboard.value?.serviceTrend ?? []);
+const completeUsersTrend = computed(() => serviceTrend.value.map((point) => point.completeUsers));
+const partialUsersTrend = computed(() => serviceTrend.value.map((point) => point.partialUsers));
+const unservedUsersTrend = computed(() => serviceTrend.value.map((point) => point.unservedUsers));
+const pendingTasksTrend = computed(() => serviceTrend.value.map((point) => point.pendingTasks));
+const servedUsersTrend = computed(() =>
+  serviceTrend.value.map((point) => point.completeUsers + point.partialUsers)
+);
+const followUpUsersTrend = computed(() =>
+  serviceTrend.value.map((point) => point.partialUsers + point.unservedUsers)
+);
+
+const trendChartBounds = {
+  left: 24,
+  right: 438,
+  top: 28,
+  bottom: 152
+};
+
+const trendMaxValue = computed(() => {
+  const values = [...servedUsersTrend.value, ...followUpUsersTrend.value].filter((value) =>
+    Number.isFinite(value)
+  );
+
+  return Math.max(1, ...values);
+});
+
+const hasServiceTrendChart = computed(() => serviceTrend.value.length >= 2);
+const createTrendPlot = (
+  values: number[],
+  trend: DashboardSnapshot["serviceTrend"],
+  maxValue: number
+): { points: string; markers: TrendMarker[] } => {
+  if (values.length < 2) {
+    return { points: "", markers: [] };
+  }
+
+  const width = trendChartBounds.right - trendChartBounds.left;
+  const height = trendChartBounds.bottom - trendChartBounds.top;
+  const markers = values.map((rawValue, index) => {
+    const value = Number.isFinite(rawValue) ? rawValue : 0;
+    const x = trendChartBounds.left + (index / (values.length - 1)) * width;
+    const y = trendChartBounds.bottom - (value / maxValue) * height;
+
+    return {
+      x,
+      y,
+      value,
+      label: trend[index]?.label ?? ""
+    };
+  });
+
+  return {
+    points: markers.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "),
+    markers
+  };
+};
+const servedTrendPlot = computed(() =>
+  createTrendPlot(servedUsersTrend.value, serviceTrend.value, trendMaxValue.value)
+);
+const followUpTrendPlot = computed(() =>
+  createTrendPlot(followUpUsersTrend.value, serviceTrend.value, trendMaxValue.value)
+);
+const trendChartLabel = computed(() =>
+  serviceTrend.value.length
+    ? serviceTrend.value
+        .map(
+          (point) =>
+            `${point.label} 已服务 ${point.completeUsers + point.partialUsers} 人，需跟进 ${
+              point.partialUsers + point.unservedUsers
+            } 人`
+        )
+        .join("；")
+    : "近 7 日服务趋势暂无数据"
 );
 
 const bucketMeta: Record<BucketKey, { title: string; hint: string; tone: "accent" | "warning" | "neutral" }> = {
@@ -259,6 +340,8 @@ onUnmounted(() => {
             :hint="bucketMeta.completeUsers.hint"
             action-label="查看名单"
             :tone="bucketMeta.completeUsers.tone"
+            :sparkline="completeUsersTrend"
+            sparkline-label="近 7 日完全服务人数趋势"
           />
         </button>
         <button class="dashboard-stat-button" @click="openBucket('partialUsers')">
@@ -268,6 +351,8 @@ onUnmounted(() => {
             :hint="bucketMeta.partialUsers.hint"
             action-label="查看名单"
             :tone="bucketMeta.partialUsers.tone"
+            :sparkline="partialUsersTrend"
+            sparkline-label="近 7 日部分服务人数趋势"
           />
         </button>
         <button class="dashboard-stat-button" @click="openBucket('unservedUsers')">
@@ -276,6 +361,8 @@ onUnmounted(() => {
             :value="dashboard.serviceOverview.unservedUsers.count"
             :hint="bucketMeta.unservedUsers.hint"
             action-label="查看名单"
+            :sparkline="unservedUsersTrend"
+            sparkline-label="近 7 日未服务人数趋势"
           />
         </button>
         <StatTile
@@ -283,6 +370,8 @@ onUnmounted(() => {
           :value="dashboard.pendingTasks.length"
           hint="缺货、临期、设备异常与用户反馈"
           tone="warning"
+          :sparkline="pendingTasksTrend"
+          sparkline-label="近 7 日待处理事件趋势"
         />
       </div>
 
@@ -295,15 +384,57 @@ onUnmounted(() => {
             </div>
             <span class="admin-pill admin-pill--success">实时</span>
           </div>
-          <svg class="dashboard-line-chart" viewBox="0 0 460 180" aria-hidden="true">
+          <svg
+            v-if="hasServiceTrendChart"
+            class="dashboard-line-chart"
+            viewBox="0 0 460 180"
+            role="img"
+            :aria-label="trendChartLabel"
+          >
             <path class="dashboard-line-chart__grid" d="M22 32H438M22 72H438M22 112H438M22 152H438" />
             <path class="dashboard-line-chart__axis" d="M22 20V160H448" />
-            <path class="dashboard-line-chart__line dashboard-line-chart__line--main" d="M24 132 C 66 114, 82 96, 118 100 S 182 146, 222 104 S 290 70, 328 92 S 386 126, 438 54" />
-            <path class="dashboard-line-chart__line dashboard-line-chart__line--sub" d="M24 142 C 72 138, 96 126, 128 132 S 188 150, 232 126 S 304 110, 342 118 S 398 134, 438 104" />
+            <polyline
+              v-if="servedTrendPlot.points"
+              class="dashboard-line-chart__line dashboard-line-chart__line--main"
+              :points="servedTrendPlot.points"
+            />
+            <polyline
+              v-if="followUpTrendPlot.points"
+              class="dashboard-line-chart__line dashboard-line-chart__line--sub"
+              :points="followUpTrendPlot.points"
+            />
+            <g class="dashboard-line-chart__points dashboard-line-chart__points--main">
+              <circle
+                v-for="point in servedTrendPlot.markers"
+                :key="`served-${point.label}`"
+                :cx="point.x"
+                :cy="point.y"
+                r="3.2"
+              >
+                <title>{{ point.label }} 已服务 {{ point.value }} 人</title>
+              </circle>
+            </g>
+            <g class="dashboard-line-chart__points dashboard-line-chart__points--sub">
+              <circle
+                v-for="point in followUpTrendPlot.markers"
+                :key="`follow-${point.label}`"
+                :cx="point.x"
+                :cy="point.y"
+                r="2.8"
+              >
+                <title>{{ point.label }} 需跟进 {{ point.value }} 人</title>
+              </circle>
+            </g>
           </svg>
+          <div v-if="hasServiceTrendChart" class="dashboard-line-chart__labels">
+            <span v-for="point in serviceTrend" :key="point.label">{{ point.label }}</span>
+          </div>
+          <div v-else class="admin-empty admin-empty--compact">
+            <div class="admin-empty__title">暂无近 7 日服务趋势</div>
+          </div>
           <div class="dashboard-chart-legend">
-            <span><i class="dashboard-chart-legend__dot"></i>已完成服务</span>
-            <span><i class="dashboard-chart-legend__dot dashboard-chart-legend__dot--sub"></i>待跟进</span>
+            <span><i class="dashboard-chart-legend__dot"></i>已服务人数（完全+部分）</span>
+            <span><i class="dashboard-chart-legend__dot dashboard-chart-legend__dot--sub"></i>需跟进人数（部分+未服务）</span>
           </div>
         </article>
 
@@ -762,6 +893,7 @@ onUnmounted(() => {
 .dashboard-line-chart__line {
   fill: none;
   stroke-linecap: round;
+  stroke-linejoin: round;
   stroke-width: 3.2;
 }
 
@@ -772,6 +904,31 @@ onUnmounted(() => {
 .dashboard-line-chart__line--sub {
   stroke: var(--admin-warning);
   stroke-width: 2.4;
+}
+
+.dashboard-line-chart__points circle {
+  fill: #fff;
+  stroke-width: 2;
+}
+
+.dashboard-line-chart__points--main circle {
+  stroke: var(--admin-accent);
+}
+
+.dashboard-line-chart__points--sub circle {
+  stroke: var(--admin-warning);
+}
+
+.dashboard-line-chart__labels {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: -8px;
+  padding: 0 18px 4px 20px;
+  color: var(--admin-muted);
+  font-family: var(--admin-code-font);
+  font-size: 0.7rem;
+  text-align: center;
 }
 
 .dashboard-chart-legend,

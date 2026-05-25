@@ -7,8 +7,11 @@ import type {
   DataMonitorRangePoint,
   DataMonitorRegionBreakdown,
   DataMonitorSnapshot,
+  DashboardServiceTrendPoint,
   DashboardSnapshot,
-  TrendPoint
+  TrendPoint,
+  AlertTask,
+  UserRecord
 } from "@vm/shared-types";
 
 import {
@@ -97,6 +100,7 @@ export class AnalyticsService {
         outOfStockKinds: goodsOverview.outOfStockKinds
       },
       weeklyTrend: this.buildWeeklyTrend(),
+      serviceTrend: this.buildWeeklyServiceTrend(activeSpecialUsers, allPendingTasks),
       taskGradeSummary: {
         fault: allPendingTasks.filter((entry) => entry.grade === "fault").length,
         feedback: allPendingTasks.filter((entry) => entry.grade === "feedback").length,
@@ -196,6 +200,53 @@ export class AnalyticsService {
         donations: this.store.inventory
           .filter((entry) => entry.type === "donation" && getBusinessDayKey(entry.happenedAt) === key)
           .reduce((sum, entry) => sum + entry.quantity, 0)
+      });
+    }
+
+    return points;
+  }
+
+  private buildWeeklyServiceTrend(activeSpecialUsers: UserRecord[], allPendingTasks: AlertTask[]): DashboardServiceTrendPoint[] {
+    const points: DashboardServiceTrendPoint[] = [];
+
+    for (let index = 6; index >= 0; index -= 1) {
+      const day = new Date();
+      day.setDate(day.getDate() - index);
+      const key = getBusinessDayKey(day);
+      const buckets = {
+        completeUsers: 0,
+        partialUsers: 0,
+        unservedUsers: 0
+      };
+
+      activeSpecialUsers.forEach((user) => {
+        const summary = summarizeBusinessDayForUser(
+          user,
+          this.store.specialAccessPolicies,
+          this.store.inventory,
+          this.store.goodsCatalog,
+          key
+        );
+
+        if (summary.totalGoods <= 0) {
+          return;
+        }
+
+        if (summary.completionStatus === "complete") {
+          buckets.completeUsers += 1;
+        } else if (summary.completionStatus === "partial") {
+          buckets.partialUsers += 1;
+        } else if (summary.completionStatus === "unserved") {
+          buckets.unservedUsers += 1;
+        }
+      });
+
+      points.push({
+        label: key.slice(5),
+        completeUsers: buckets.completeUsers,
+        partialUsers: buckets.partialUsers,
+        unservedUsers: buckets.unservedUsers,
+        pendingTasks: allPendingTasks.filter((entry) => getBusinessDayKey(entry.dueAt) === key).length
       });
     }
 

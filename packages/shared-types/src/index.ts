@@ -1040,10 +1040,19 @@ export interface TrendPoint {
   donations: number;
 }
 
+export interface DashboardServiceTrendPoint {
+  label: string;
+  completeUsers: number;
+  partialUsers: number;
+  unservedUsers: number;
+  pendingTasks: number;
+}
+
 export interface DashboardSnapshot {
   businessDateKey: string;
   stats: DashboardStats;
   weeklyTrend: TrendPoint[];
+  serviceTrend: DashboardServiceTrendPoint[];
   taskGradeSummary: Record<AlertGrade, number>;
   serviceOverview: {
     completeUsers: ServiceOverviewBucket;
