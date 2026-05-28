@@ -34,17 +34,17 @@ defineProps<{
 .flow-steps {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120rpx, 1fr));
-  gap: 10rpx;
-  padding: 18rpx 10rpx 8rpx;
+  grid-template-columns: repeat(auto-fit, minmax(132rpx, 1fr));
+  gap: 12rpx;
+  padding: 18rpx 6rpx 8rpx;
 }
 
 .flow-steps::before {
   content: "";
   position: absolute;
-  left: 58rpx;
-  right: 58rpx;
-  top: 42rpx;
+  left: 64rpx;
+  right: 64rpx;
+  top: 43rpx;
   height: 4rpx;
   border-radius: 999rpx;
   background: var(--vm-line-strong);
@@ -55,7 +55,7 @@ defineProps<{
   z-index: 1;
   display: grid;
   justify-items: center;
-  gap: 10rpx;
+  gap: 11rpx;
   min-width: 0;
   padding: 0 4rpx;
   text-align: center;
@@ -77,19 +77,22 @@ defineProps<{
 
 .flow-step__copy {
   display: grid;
-  gap: 5rpx;
+  gap: 6rpx;
   min-width: 0;
+  justify-items: center;
 }
 
 .flow-step__label {
-  font-size: 24rpx;
+  font-size: 23rpx;
+  line-height: 1.24;
   font-weight: 800;
   color: var(--vm-text);
 }
 
 .flow-step__description {
+  max-width: 138rpx;
   font-size: 19rpx;
-  line-height: 1.5;
+  line-height: 1.42;
   color: var(--vm-text-soft);
 }
 

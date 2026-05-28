@@ -1,27 +1,34 @@
 import { Body, Controller, Get, Inject, Param, Post, Req, Res, UseGuards } from "@nestjs/common";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { WarehousesService } from "./warehouses.service";
 
 @Controller()
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
+@AllowedBackofficePermissions("warehouse:view")
 export class WarehousesController {
   constructor(@Inject(WarehousesService) private readonly warehousesService: WarehousesService) {}
 
   @Get("warehouses")
+  @AllowedBackofficePermissions("warehouse:view", "goods:view")
   list() {
     return ok(this.warehousesService.list());
   }
 
   @Get("warehouse-inventory")
+  @AllowedBackofficePermissions("warehouse:view", "goods:view")
   inventory() {
     return ok(this.warehousesService.getInventory());
   }
 
   @Post("inventory-transfers")
+  @AllowedBackofficePermissions("warehouse:view", "goods:view")
   transfer(
     @Body()
     body: {

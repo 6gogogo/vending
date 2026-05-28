@@ -1,4 +1,10 @@
 import { createRouter, createWebHistory } from "vue-router";
+import {
+  isBackofficePermission,
+  type BackofficePermission,
+  type BackofficeRole,
+  type BackofficeScope
+} from "@vm/shared-types";
 
 import { useAdminSessionStore } from "../stores/session";
 import AdminLayout from "../layouts/AdminLayout.vue";
@@ -12,11 +18,31 @@ import LogsPage from "../pages/LogsPage.vue";
 import LogDetailPage from "../pages/LogDetailPage.vue";
 import MerchantBackofficePage from "../pages/MerchantBackofficePage.vue";
 import OperationsPage from "../pages/OperationsPage.vue";
+import PlatformOverviewPage from "../pages/PlatformOverviewPage.vue";
 import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
 import SystemSettingsPage from "../pages/SystemSettingsPage.vue";
 import UserDetailPage from "../pages/UserDetailPage.vue";
 import UsersPage from "../pages/UsersPage.vue";
 import WarehousePage from "../pages/WarehousePage.vue";
+
+const resolveDefaultBackofficePath = () => {
+  const sessionStore = useAdminSessionStore();
+  return sessionStore.defaultPath;
+};
+
+const resolveRequiredPermissions = (meta: Record<string, unknown>): BackofficePermission[] => {
+  const permission = meta.permission;
+  const permissions = meta.permissions;
+  const required = [
+    ...(typeof permission === "string" && isBackofficePermission(permission) ? [permission] : []),
+    ...(Array.isArray(permissions) ? permissions.filter(
+      (entry): entry is BackofficePermission =>
+        typeof entry === "string" && isBackofficePermission(entry)
+    ) : [])
+  ];
+
+  return Array.from(new Set(required));
+};
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -32,8 +58,18 @@ export const router = createRouter({
         {
           path: "",
           redirect: () => {
-            const sessionStore = useAdminSessionStore();
-            return sessionStore.user?.backofficeRole === "merchant" ? "/merchant" : "/dashboard";
+            return resolveDefaultBackofficePath();
+          }
+        },
+        {
+          path: "/platform",
+          component: PlatformOverviewPage,
+          meta: {
+            group: "服务商后台",
+            eyebrow: "平台总览",
+            title: "客户实例总览",
+            description: "按客户实例查看运行状态、使用规模和跨实例汇总数据。",
+            permission: "platform-overview:view"
           }
         },
         {
@@ -44,7 +80,7 @@ export const router = createRouter({
             eyebrow: "商家工作台",
             title: "商家补货与订单",
             description: "查看自己的补货、货品模板、领取去向和待处理任务。",
-            backofficeRoles: ["merchant"]
+            permission: "merchant-workbench:view"
           }
         },
         {
@@ -55,7 +91,7 @@ export const router = createRouter({
             eyebrow: "运营总览",
             title: "运营主控台",
             description: "查看服务覆盖、待办、柜机索引和汇总日志。",
-            backofficeRoles: ["super_admin"]
+            permission: "dashboard:view"
           }
         },
         {
@@ -66,7 +102,7 @@ export const router = createRouter({
             eyebrow: "货物总览",
             title: "货物总览与预警模板",
             description: "查看各商品种类数量、柜机分布，并批量设置货品预警模板。",
-            backofficeRoles: ["super_admin"]
+            permission: "goods:view"
           }
         },
         {
@@ -77,7 +113,7 @@ export const router = createRouter({
             eyebrow: "数据监控",
             title: "按日数据监控",
             description: "使用日历与柱状图查看每日服务、货品、事件和日志变化。",
-            backofficeRoles: ["super_admin"]
+            permission: "analytics:data-monitor:view"
           }
         },
         {
@@ -88,7 +124,7 @@ export const router = createRouter({
             eyebrow: "本地仓库",
             title: "本地仓库与盘点",
             description: "处理本地仓库库存、调拨、盘点和 Excel 导出。",
-            backofficeRoles: ["super_admin"]
+            permission: "warehouse:view"
           }
         },
         {
@@ -99,7 +135,7 @@ export const router = createRouter({
             eyebrow: "AI 工作台",
             title: "AI 运营助手",
             description: "生成异常诊断、日报、补货布局建议、反馈草稿和策略建议。",
-            backofficeRoles: ["super_admin"]
+            permission: "ai-insights:view"
           }
         },
         {
@@ -110,7 +146,7 @@ export const router = createRouter({
             eyebrow: "统一设置",
             title: "系统调控与接口配置",
             description: "统一维护后端 .env 中的大模型、短信、账户接入、支付和柜机平台参数。",
-            backofficeRoles: ["super_admin"]
+            permission: "system-settings:view"
           }
         },
         {
@@ -121,7 +157,7 @@ export const router = createRouter({
             eyebrow: "货物详情",
             title: "货物批次与阈值设置",
             description: "查看单个货品的批次、来源、保质期和柜机级阈值。",
-            backofficeRoles: ["super_admin"]
+            permission: "goods:view"
           }
         },
         {
@@ -132,7 +168,7 @@ export const router = createRouter({
             eyebrow: "柜机监控",
             title: "柜机监控矩阵",
             description: "按柜机巡检在线、门状态、库存和异常。",
-            backofficeRoles: ["super_admin"]
+            permission: "devices:view"
           }
         },
         {
@@ -143,7 +179,7 @@ export const router = createRouter({
             eyebrow: "柜机详情",
             title: "单柜机值守页",
             description: "查看门状态、库存、事件、日志并执行刷新或远程开门。",
-            backofficeRoles: ["super_admin"]
+            permission: "devices:view"
           }
         },
         {
@@ -154,7 +190,7 @@ export const router = createRouter({
             eyebrow: "人员管理",
             title: "人员台账与批量设置",
             description: "按分类检索人员，新增编辑基础信息，并批量绑定特殊群体策略模板。",
-            backofficeRoles: ["super_admin"]
+            permission: "users:view"
           }
         },
         {
@@ -165,7 +201,7 @@ export const router = createRouter({
             eyebrow: "人员详情",
             title: "单人员详情与操作记录",
             description: "按角色查看人员信息、业务日时段完成情况、记录与手工补扣。",
-            backofficeRoles: ["super_admin"]
+            permission: "users:view"
           }
         },
         {
@@ -176,7 +212,7 @@ export const router = createRouter({
             eyebrow: "日志总览",
             title: "系统操作日志",
             description: "按时间倒序查看动作句式日志，并按主体筛选。",
-            backofficeRoles: ["super_admin"]
+            permission: "operation-logs:view"
           }
         },
         {
@@ -187,7 +223,7 @@ export const router = createRouter({
             eyebrow: "日志详情",
             title: "单条日志详情",
             description: "查看时间、动作人、主体对象、结果和详细说明。",
-            backofficeRoles: ["super_admin"]
+            permission: "operation-logs:view"
           }
         }
       ]
@@ -200,7 +236,8 @@ router.beforeEach(async (to) => {
 
   if (to.path === "/login") {
     if (sessionStore.isAuthenticated) {
-      return sessionStore.user?.backofficeRole === "merchant" ? "/merchant" : "/dashboard";
+      const defaultPath = resolveDefaultBackofficePath();
+      return defaultPath === "/login" ? true : defaultPath;
     }
 
     return true;
@@ -234,7 +271,11 @@ router.beforeEach(async (to) => {
           user: {
             id: string;
             role: "admin" | "merchant";
-            backofficeRole: "super_admin" | "merchant";
+            backofficeRole: BackofficeRole;
+            scope: BackofficeScope;
+            tenantId?: string;
+            tenantName?: string;
+            permissions: BackofficePermission[];
             name: string;
             phone: string;
             tags: string[];
@@ -259,14 +300,13 @@ router.beforeEach(async (to) => {
     }
   }
 
-  const allowedBackofficeRoles = to.meta.backofficeRoles;
+  const requiredPermissions = resolveRequiredPermissions(to.meta);
 
   if (
-    Array.isArray(allowedBackofficeRoles) &&
-    sessionStore.user?.backofficeRole &&
-    !allowedBackofficeRoles.includes(sessionStore.user.backofficeRole)
+    requiredPermissions.length &&
+    !requiredPermissions.every((permission) => sessionStore.can(permission))
   ) {
-    return sessionStore.user.backofficeRole === "merchant" ? "/merchant" : "/dashboard";
+    return resolveDefaultBackofficePath();
   }
 
   return true;

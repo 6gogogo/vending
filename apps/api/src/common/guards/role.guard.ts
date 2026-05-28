@@ -7,9 +7,13 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 
-import type { BackofficeRole, UserRole } from "@vm/shared-types";
+import type { BackofficePermission, BackofficeRole, UserRole } from "@vm/shared-types";
 
-import { ALLOWED_ROLES_KEY } from "./allowed-roles.decorator";
+import {
+  ALLOWED_BACKOFFICE_PERMISSIONS_KEY,
+  ALLOWED_BACKOFFICE_ROLES_KEY,
+  ALLOWED_ROLES_KEY
+} from "./allowed-roles.decorator";
 import { InMemoryStoreService } from "../store/in-memory-store.service";
 
 @Injectable()
@@ -25,8 +29,20 @@ export class RoleGuard implements CanActivate {
       context.getHandler(),
       context.getClass()
     ]);
+    const allowedBackofficeRoles = this.reflector.getAllAndOverride<BackofficeRole[]>(
+      ALLOWED_BACKOFFICE_ROLES_KEY,
+      [context.getHandler(), context.getClass()]
+    );
+    const allowedBackofficePermissions = this.reflector.getAllAndOverride<BackofficePermission[]>(
+      ALLOWED_BACKOFFICE_PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()]
+    );
 
-    if (!allowedRoles?.length) {
+    if (
+      !allowedRoles?.length &&
+      !allowedBackofficeRoles?.length &&
+      !allowedBackofficePermissions?.length
+    ) {
       return true;
     }
 
@@ -35,7 +51,14 @@ export class RoleGuard implements CanActivate {
       query: Record<string, string | undefined>;
       body?: Record<string, unknown>;
       userRole?: UserRole;
-      authUser?: { id: string; role: UserRole; name: string; backofficeRole?: BackofficeRole };
+      authUser?: {
+        id: string;
+        role: UserRole;
+        name: string;
+        backofficeRole?: BackofficeRole;
+        tenantId?: string;
+        permissions?: BackofficePermission[];
+      };
     }>();
 
     const authHeader = request.headers.authorization ?? request.headers.Authorization;
@@ -43,10 +66,30 @@ export class RoleGuard implements CanActivate {
       ? authHeader.slice("Bearer ".length)
       : undefined;
     const sessionUser = this.store.getSessionUser(bearerToken);
+    const session = this.store.getSession(bearerToken);
 
     if (sessionUser) {
-      if (!allowedRoles.includes(sessionUser.role)) {
+      if (allowedRoles?.length && !allowedRoles.includes(sessionUser.role)) {
         throw new ForbiddenException("当前角色无权访问该接口。");
+      }
+
+      const requiresBackofficeAccount =
+        Boolean(allowedBackofficeRoles?.length) || Boolean(allowedBackofficePermissions?.length);
+      const backofficePermissions = this.store.getBackofficeSessionPermissions(session);
+
+      if (requiresBackofficeAccount && !session?.backofficeRole) {
+        throw new ForbiddenException("当前接口需要后台账号登录后访问。");
+      }
+
+      if (allowedBackofficeRoles?.length && !allowedBackofficeRoles.includes(session!.backofficeRole!)) {
+        throw new ForbiddenException("当前后台账号无权访问该接口。");
+      }
+
+      if (
+        allowedBackofficePermissions?.length &&
+        !allowedBackofficePermissions.some((permission) => backofficePermissions.includes(permission))
+      ) {
+        throw new ForbiddenException("当前后台账号无权访问该接口。");
       }
 
       request.userRole = sessionUser.role;
@@ -54,8 +97,18 @@ export class RoleGuard implements CanActivate {
         id: sessionUser.id,
         role: sessionUser.role,
         name: sessionUser.name,
-        backofficeRole: this.store.getSession(bearerToken)?.backofficeRole
+        backofficeRole: session?.backofficeRole,
+        tenantId: session?.tenantId,
+        permissions: backofficePermissions
       };
+      return true;
+    }
+
+    if (allowedBackofficeRoles?.length || allowedBackofficePermissions?.length) {
+      throw new ForbiddenException("当前接口需要后台账号登录后访问。");
+    }
+
+    if (!allowedRoles?.length) {
       return true;
     }
 

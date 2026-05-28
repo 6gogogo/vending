@@ -1,6 +1,11 @@
 import { Body, Controller, Get, Headers, Inject, Patch, Post } from "@nestjs/common";
 
-import type { BackofficeRole, RegistrationApplicationProfile, UserRole } from "@vm/shared-types";
+import type {
+  BackofficePermission,
+  BackofficeRole,
+  RegistrationApplicationProfile,
+  UserRole
+} from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import { AuthService } from "./auth.service";
@@ -101,6 +106,8 @@ export class AuthController {
       username: string;
       password: string;
       role?: BackofficeRole;
+      tenantId?: string;
+      permissions?: BackofficePermission[];
     }
   ) {
     return ok(

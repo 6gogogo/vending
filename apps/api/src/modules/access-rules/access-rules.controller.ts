@@ -1,7 +1,10 @@
 import { Body, Controller, Get, Inject, Patch, Query, UseGuards } from "@nestjs/common";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AccessRulesService } from "./access-rules.service";
 
@@ -12,6 +15,7 @@ export class AccessRulesController {
   @Get()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   list() {
     return ok(this.accessRulesService.list());
   }
@@ -24,6 +28,7 @@ export class AccessRulesController {
   @Patch()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   update(
     @Query("role") role: "special" | "merchant",
     @Body() body: { dailyLimit?: number; categoryLimit?: Record<string, number> }

@@ -46,13 +46,13 @@ page {
   --vm-hero-shadow: 0 18rpx 46rpx rgba(88, 61, 30, 0.1);
   --vm-pill-bg: var(--vm-accent-soft);
   --vm-pill-text: var(--vm-accent-strong);
-  --vm-font-number: "Space Grotesk", "Noto Sans SC", sans-serif;
+  --vm-font-number: "DIN Alternate", "Arial", "PingFang SC", "Microsoft YaHei", sans-serif;
   --vm-radius-card: 24rpx;
   --vm-radius-panel: 22rpx;
   --vm-radius-control: 20rpx;
   --vm-shadow-soft: 0 12rpx 32rpx rgba(88, 61, 30, 0.07);
   --vm-shadow-strong: 0 22rpx 54rpx rgba(88, 61, 30, 0.12);
-  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   color: var(--vm-text);
   background: var(--vm-page-gradient);
 }
@@ -65,16 +65,21 @@ page {
 view,
 text,
 button,
-input {
+input,
+textarea,
+picker {
   box-sizing: border-box;
+  min-width: 0;
 }
 
 button {
   margin: 0;
   padding: 0;
-  line-height: inherit;
+  border: 0;
+  line-height: 1.25;
   background: transparent;
   font: inherit;
+  text-align: center;
   cursor: pointer;
 }
 
@@ -84,6 +89,7 @@ button::after {
 
 input {
   font: inherit;
+  line-height: 1.35;
 }
 
 .vm-page {
@@ -362,7 +368,7 @@ input {
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
   font-size: 22rpx;
-  line-height: 1;
+  line-height: 1.18;
   white-space: nowrap;
 }
 
@@ -408,8 +414,8 @@ input {
 }
 
 .vm-title {
-  font-size: 50rpx;
-  line-height: 1.12;
+  font-size: 46rpx;
+  line-height: 1.16;
   letter-spacing: 0;
   font-weight: 800;
 }
@@ -429,13 +435,15 @@ input {
   align-items: center;
   justify-content: center;
   gap: 12rpx;
-  min-height: 88rpx;
+  width: 100%;
+  min-height: 84rpx;
   padding: 0 28rpx;
   border-radius: 18rpx;
   border: 1rpx solid transparent;
   background: linear-gradient(180deg, #329050, var(--vm-accent));
   color: #ffffff;
-  font-size: 29rpx;
+  font-size: 28rpx;
+  line-height: 1.25;
   font-weight: 700;
   box-shadow: var(--vm-button-shadow);
   transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
@@ -484,17 +492,19 @@ input {
 
 .vm-field__label {
   font-size: 24rpx;
+  line-height: 1.35;
   color: var(--vm-muted);
 }
 
 .vm-field__input {
-  min-height: 88rpx;
+  min-height: 84rpx;
   padding: 0 24rpx;
   border: 1rpx solid var(--vm-line-strong);
   border-radius: 18rpx;
   background: var(--vm-surface-strong);
   color: var(--vm-text);
-  font-size: 28rpx;
+  font-size: 27rpx;
+  line-height: 1.35;
 }
 
 .vm-field-shell {
@@ -502,7 +512,7 @@ input {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 14rpx;
-  min-height: 88rpx;
+  min-height: 84rpx;
   padding: 0 18rpx;
   border: 1rpx solid var(--vm-line-strong);
   border-radius: 18rpx;
@@ -516,9 +526,10 @@ input {
 
 .vm-field-shell__input {
   width: 100%;
-  min-height: 88rpx;
+  min-height: 84rpx;
   color: var(--vm-text);
-  font-size: 28rpx;
+  font-size: 27rpx;
+  line-height: 1.35;
 }
 
 .vm-field-shell__button {

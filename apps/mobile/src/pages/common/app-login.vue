@@ -5,10 +5,8 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import type { AppLoginResult } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
-import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
-import { useSmsCooldown } from "../../composables/useSmsCooldown";
 import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?raw";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
@@ -25,7 +23,6 @@ const loginState = ref<AppLoginResult | null>(null);
 const rejectedReason = ref("");
 const hasAcceptedDisclaimer = ref(false);
 const showDisclaimer = ref(false);
-const { remainingSeconds, isCoolingDown, startCooldown } = useSmsCooldown(60);
 
 const helper = reactive({
   title: "",
@@ -37,10 +34,6 @@ const disclaimerLines = computed(() =>
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-);
-
-const sendCodeLabel = computed(() =>
-  isCoolingDown.value ? `${remainingSeconds.value}s 后重发` : "获取验证码"
 );
 
 const bootstrap = async () => {
@@ -71,19 +64,10 @@ const sendCode = async () => {
     return;
   }
 
-  if (isCoolingDown.value) {
-    uni.showToast({
-      title: `请在 ${remainingSeconds.value}s 后重试`,
-      icon: "none"
-    });
-    return;
-  }
-
   sendingCode.value = true;
   try {
     const response = await mobileApi.requestCode(normalizedPhone, "app-login");
     previewCode.value = response.previewCode ?? "";
-    startCooldown();
     uni.showToast({
       title: "验证码已发送",
       icon: "none"
@@ -220,26 +204,12 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="身份识别" title="登录小柜大爱" subtitle="手机号验证后进入对应服务入口。">
+  <MobileShell eyebrow="小柜大爱" title="小柜大爱" subtitle="让公益更近一点">
     <GlassCard tone="neutral" class="login-card">
       <view class="vm-stack">
-        <view class="login-card__visual">
-          <CabinetHeroArt />
-          <view class="login-card__brand">
-            <text class="login-card__title">小柜大爱</text>
-            <text class="login-card__subtitle">让公益更近一点</text>
-          </view>
-        </view>
-
-        <view class="login-guide">
-          <view class="login-guide__item">
-            <MenuIcon name="phone" size="sm" tone="accent" />
-            <text>手机号验证</text>
-          </view>
-          <view class="login-guide__item">
-            <MenuIcon name="success" size="sm" tone="accent" />
-            <text>自动识别身份</text>
-          </view>
+        <view class="login-heading">
+          <text class="login-heading__title">登录</text>
+          <text class="login-heading__body">请输入手机号和验证码</text>
         </view>
 
         <view class="vm-field">
@@ -272,11 +242,11 @@ onShow(() => {
             />
             <button
               class="vm-field-shell__button"
-              :disabled="sendingCode || isCoolingDown"
+              :disabled="sendingCode"
               :loading="sendingCode"
               @tap="sendCode"
             >
-              {{ sendCodeLabel }}
+              获取验证码
             </button>
           </view>
         </view>
@@ -286,10 +256,10 @@ onShow(() => {
         </view>
 
         <view class="login-footnote">
-          <button class="disclaimer-link" @tap="openDisclaimer">
+          <text class="disclaimer-link" @tap="openDisclaimer">
             {{ hasAcceptedDisclaimer ? "已同意《智能货柜用户免责声明》" : "阅读并同意免责声明" }}
-          </button>
-          <button class="register-link" @tap="goRegister">首次使用？去注册</button>
+          </text>
+          <text class="register-link" @tap="goRegister">首次使用？去注册</text>
         </view>
 
         <view v-if="previewCode" class="debug-box">
@@ -361,39 +331,28 @@ onShow(() => {
 }
 
 .login-card {
-  padding-top: 16rpx;
+  padding-top: 34rpx;
 }
 
-.login-card__visual {
-  position: relative;
-  min-height: 238rpx;
-  overflow: hidden;
-  border-radius: 24rpx;
-}
-
-.login-card__visual :deep(.cabinet-art) {
-  min-height: 238rpx;
-  border-radius: 24rpx;
-}
-
-.login-card__brand {
-  position: absolute;
-  left: 30rpx;
-  top: 32rpx;
+.login-heading {
   display: grid;
-  gap: 10rpx;
+  justify-items: center;
+  gap: 8rpx;
+  padding: 4rpx 0 10rpx;
+  text-align: center;
 }
 
-.login-card__title {
-  font-size: 42rpx;
-  line-height: 1.12;
+.login-heading__title {
+  font-size: 40rpx;
+  line-height: 1.16;
   font-weight: 900;
-  color: #1f1f1f;
+  color: var(--vm-text);
 }
 
-.login-card__subtitle {
+.login-heading__body {
   font-size: 24rpx;
-  color: #4e453d;
+  line-height: 1.5;
+  color: var(--vm-text-soft);
 }
 
 .section-heading {
@@ -419,29 +378,12 @@ onShow(() => {
   gap: 16rpx;
 }
 
-.login-guide {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14rpx;
-}
-
-.login-guide__item {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  min-height: 68rpx;
-  padding: 12rpx 14rpx;
-  border-radius: 18rpx;
-  border: 1rpx solid var(--vm-line);
-  background: var(--vm-surface-soft);
-  color: var(--vm-text);
-  font-size: 24rpx;
-  font-weight: 700;
-}
-
 .disclaimer-link {
   width: fit-content;
   padding: 6rpx 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--vm-accent-strong);
   font-size: 24rpx;
   line-height: 1.6;
@@ -450,6 +392,9 @@ onShow(() => {
 
 .register-link {
   padding: 6rpx 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--vm-warning);
   font-size: 24rpx;
   line-height: 1.6;

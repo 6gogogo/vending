@@ -1,11 +1,34 @@
 import { defineStore } from "pinia";
+import {
+  resolveBackofficePermissions,
+  type BackofficePermission,
+  type BackofficeRole,
+  type BackofficeScope
+} from "@vm/shared-types";
 
 const storageKey = "vm-admin-session";
+const defaultBackofficeRoutes: Array<{ permission: BackofficePermission; path: string }> = [
+  { permission: "platform-overview:view", path: "/platform" },
+  { permission: "dashboard:view", path: "/dashboard" },
+  { permission: "merchant-workbench:view", path: "/merchant" },
+  { permission: "goods:view", path: "/goods" },
+  { permission: "devices:view", path: "/operations" },
+  { permission: "warehouse:view", path: "/warehouse" },
+  { permission: "users:view", path: "/users" },
+  { permission: "operation-logs:view", path: "/logs" },
+  { permission: "analytics:data-monitor:view", path: "/data-monitor" },
+  { permission: "ai-insights:view", path: "/ai" },
+  { permission: "system-settings:view", path: "/settings" }
+];
 
 interface AdminSessionUser {
   id: string;
   role: "admin" | "merchant";
-  backofficeRole: "super_admin" | "merchant";
+  backofficeRole: BackofficeRole;
+  scope: BackofficeScope;
+  tenantId?: string;
+  tenantName?: string;
+  permissions?: BackofficePermission[];
   name: string;
   phone: string;
   tags: string[];
@@ -50,7 +73,31 @@ export const useAdminSessionStore = defineStore("admin-session", {
   getters: {
     isAuthenticated: (state) => Boolean(state.token && state.user),
     isSuperAdmin: (state) => state.user?.backofficeRole === "super_admin",
+    isProvider: (state) => state.user?.scope === "provider",
+    isAdmin: (state) => state.user?.backofficeRole === "admin",
     isMerchant: (state) => state.user?.backofficeRole === "merchant",
+    permissions: (state) =>
+      state.user
+        ? resolveBackofficePermissions(state.user.backofficeRole, state.user.permissions)
+        : [],
+    can: (state) => (permission: BackofficePermission) =>
+      state.user
+        ? resolveBackofficePermissions(state.user.backofficeRole, state.user.permissions).includes(permission)
+        : false,
+    canAny: (state) => (permissions: BackofficePermission[]) =>
+      state.user
+        ? permissions.some((permission) =>
+            resolveBackofficePermissions(state.user!.backofficeRole, state.user!.permissions).includes(permission)
+          )
+        : false,
+    defaultPath: (state) => {
+      if (!state.user) {
+        return "/login";
+      }
+
+      const permissions = resolveBackofficePermissions(state.user.backofficeRole, state.user.permissions);
+      return defaultBackofficeRoutes.find((entry) => permissions.includes(entry.permission))?.path ?? "/login";
+    },
     needsValidation: (state) => Boolean(state.token && state.token !== state.validatedToken)
   },
   actions: {

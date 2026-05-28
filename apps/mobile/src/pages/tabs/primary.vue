@@ -49,12 +49,26 @@ const adminTaskLabelMap: Record<Exclude<AdminTaskFilter, "all">, string> = {
   system: "系统提示"
 };
 
+const quotaGoodsNameMap = computed(() => {
+  const map = new Map<string, string>();
+
+  for (const policyWindow of sessionStore.quota?.activeWindows ?? []) {
+    for (const item of policyWindow.goodsLimits) {
+      map.set(item.goodsId, item.goodsName);
+    }
+  }
+
+  return map;
+});
+
 const permissions = computed(() =>
   Object.entries(sessionStore.quota?.remainingByGoods ?? {}).map(([goodsId, quantity]) => ({
     goodsId,
     quantity,
     goodsName:
-      records.value.find((item) => item.goodsId === goodsId)?.goodsName ?? goodsId
+      quotaGoodsNameMap.value.get(goodsId) ??
+      records.value.find((item) => item.goodsId === goodsId)?.goodsName ??
+      goodsId
   }))
 );
 
@@ -71,21 +85,21 @@ const todayStatus = computed(() => {
     return "暂未开放";
   }
 
-  return remainingTotal.value > 0 ? "今日可领取" : "次数已用完";
+  return remainingTotal.value > 0 ? "今日可领取" : "免费额度已用完";
 });
 const todayStatusClass = computed(() =>
   activeWindows.value.length && remainingTotal.value > 0 ? "vm-status--available" : "vm-status--warning"
 );
 const todaySuggestion = computed(() => {
   if (!activeWindows.value.length) {
-    return "请在开放时段内前往柜机，或联系工作人员确认资格。";
+    return "开放时段开始后可前往柜机，必要时可联系工作人员确认资格。";
   }
 
   if (remainingTotal.value <= 0) {
-    return "今日额度已用完，可明天再来或查看领取记录。";
+    return "今天免费额度已用完，仍可选择柜机，超出部分会按商品价格结算。";
   }
 
-  return "请扫码开柜，或先查看附近可用柜机。";
+  return "可先查看附近柜机，也可以到柜机前扫码开门。";
 });
 
 const taskButtonText = (task: AlertTask) => (task.grade === "fault" ? "标记已知晓" : "手动完成");
@@ -152,7 +166,7 @@ const adminTaskOverviewText = computed(() =>
 
 const pageSubtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return "先确认今日资格，再去最近柜机领取；如果遇到异常，也可以直接反馈。";
+    return "可以先看今日资格，再选择附近柜机；首次使用时按页面提示一步步操作即可。";
   }
 
   if (sessionStore.user?.role === "merchant") {
@@ -592,7 +606,7 @@ onShow(() => {
             <text class="vm-status vm-status--success">剩余 {{ item.quantity }} 件</text>
           </view>
         </view>
-        <EmptyState v-else title="当前没有可领取额度" description="请等待时段开始或联系工作人员核对资格。" />
+        <EmptyState v-else title="当前没有免费额度" description="仍可选择柜机，超出免费额度的部分会按商品价格结算。" />
         <view class="action-grid">
           <button class="vm-button vm-button--warning" @tap="goScanPickup">扫码开柜</button>
           <button class="vm-button vm-button--ghost" @tap="goNearby">附近柜机</button>
@@ -817,7 +831,7 @@ onShow(() => {
 
 .section-heading__row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16rpx;
 }
@@ -991,6 +1005,12 @@ onShow(() => {
   align-items: center;
 }
 
+.simple-list__row > text:first-child {
+  font-size: 26rpx;
+  line-height: 1.35;
+  color: var(--vm-text);
+}
+
 .simple-list__row:last-child,
 .info-item:last-child,
 .simple-card:last-child {
@@ -1085,12 +1105,17 @@ onShow(() => {
 }
 
 .task-filter-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   min-height: 82rpx;
   padding: 0 20rpx;
   border-radius: 22rpx;
   border: 1rpx solid var(--vm-line-strong);
   background: var(--vm-surface-soft);
   font-size: 24rpx;
+  line-height: 1.25;
   color: var(--vm-text);
 }
 

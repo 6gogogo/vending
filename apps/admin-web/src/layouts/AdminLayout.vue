@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import type { BackofficePermission } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
@@ -9,7 +10,7 @@ interface NavItem {
   to: string;
   label: string;
   icon: string;
-  roles?: Array<"super_admin" | "merchant">;
+  permission: BackofficePermission;
 }
 
 const route = useRoute();
@@ -26,12 +27,23 @@ const passwordForm = reactive({
 
 const navSections: Array<{ title: string; items: NavItem[] }> = [
   {
+    title: "服务商后台",
+    items: [
+      {
+        to: "/platform",
+        label: "客户实例",
+        permission: "platform-overview:view",
+        icon: "M5.75 4A2.75 2.75 0 0 0 3 6.75v10.5A2.75 2.75 0 0 0 5.75 20h12.5A2.75 2.75 0 0 0 21 17.25V6.75A2.75 2.75 0 0 0 18.25 4zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v10.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25V6.75c0-.69.56-1.25 1.25-1.25m1.25 3a.75.75 0 0 0 0 1.5h4a.75.75 0 0 0 0-1.5zm0 3.25a.75.75 0 0 0 0 1.5h10a.75.75 0 0 0 0-1.5zm0 3.25a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5z"
+      }
+    ]
+  },
+  {
     title: "商家后台",
     items: [
       {
         to: "/merchant",
         label: "商家工作台",
-        roles: ["merchant"],
+        permission: "merchant-workbench:view",
         icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
       }
     ]
@@ -42,26 +54,31 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       {
         to: "/dashboard",
         label: "运营总览",
+        permission: "dashboard:view",
         icon: "M4 6.75A2.75 2.75 0 0 1 6.75 4h10.5A2.75 2.75 0 0 1 20 6.75v10.5A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25zm2.75.75a.75.75 0 0 0-.75.75v2.5h5v-3.25zm6.5 0v3.25h5v-2.5a.75.75 0 0 0-.75-.75zM6 12.25v4.5c0 .414.336.75.75.75h5V12.25zm6.5 0v5.25h4.75a.75.75 0 0 0 .75-.75v-4.5z"
       },
       {
         to: "/goods",
         label: "货物总览",
+        permission: "goods:view",
         icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
       },
       {
         to: "/operations",
         label: "柜机监控",
+        permission: "devices:view",
         icon: "M6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11A2.5 2.5 0 0 1 6.5 4m0 1.5c-.552 0-1 .448-1 1v11c0 .552.448 1 1 1h11c.552 0 1-.448 1-1v-11c0-.552-.448-1-1-1zm2.25 2.75a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5zm0 3.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5zm0 3.5a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5z"
       },
       {
         to: "/data-monitor",
         label: "数据监控",
+        permission: "analytics:data-monitor:view",
         icon: "M5.75 18A2.75 2.75 0 0 1 3 15.25v-6.5A2.75 2.75 0 0 1 5.75 6h12.5A2.75 2.75 0 0 1 21 8.75v6.5A2.75 2.75 0 0 1 18.25 18zm4.5-7a.75.75 0 0 0-1.5 0v3a.75.75 0 0 0 1.5 0zm2.5-1.5a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0zm2.5 2a.75.75 0 0 0-1.5 0v2.5a.75.75 0 0 0 1.5 0z"
       },
       {
         to: "/warehouse",
         label: "本地仓库",
+        permission: "warehouse:view",
         icon: "M12 3.75l7.5 3.5v9.5L12 20.25l-7.5-3.5v-9.5zm0 1.65L6.03 8.18l5.97 2.78l5.97-2.78zm-6 4v6.4l5.25 2.45v-6.4zm6.75 8.85L18 15.8V9.4l-5.25 2.45z"
       }
     ]
@@ -72,11 +89,13 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       {
         to: "/users",
         label: "人员管理",
+        permission: "users:view",
         icon: "M12 4.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 0 1 0-7m-5.25 11A3.75 3.75 0 0 1 10.5 11.75h3A3.75 3.75 0 0 1 17.25 15.5v2.25a.75.75 0 0 1-1.5 0V15.5a2.25 2.25 0 0 0-2.25-2.25h-3A2.25 2.25 0 0 0 8.25 15.5v2.25a.75.75 0 0 1-1.5 0z"
       },
       {
         to: "/logs",
         label: "日志总览",
+        permission: "operation-logs:view",
         icon: "M6.75 4h8.69c.464 0 .909.184 1.237.513l2.81 2.81c.329.328.513.773.513 1.237v8.69A2.75 2.75 0 0 1 17.25 20H6.75A2.75 2.75 0 0 1 4 17.25V6.75A2.75 2.75 0 0 1 6.75 4m0 1.5c-.69 0-1.25.56-1.25 1.25v10.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25V9.31L14.69 5.5zm2 4a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5zm0 3.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5z"
       }
     ]
@@ -87,6 +106,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       {
         to: "/ai",
         label: "AI 工作台",
+        permission: "ai-insights:view",
         icon: "M10.29 3.86a1.75 1.75 0 0 1 3.42 0l.18.86a7.85 7.85 0 0 1 1.7.7l.76-.45a1.75 1.75 0 0 1 2.33.63l.42.74a1.75 1.75 0 0 1-.44 2.26l-.68.57q.08.4.08.83t-.08.83l.68.57a1.75 1.75 0 0 1 .44 2.26l-.42.74a1.75 1.75 0 0 1-2.33.63l-.76-.45a7.9 7.9 0 0 1-1.7.7l-.18.86a1.75 1.75 0 0 1-3.42 0l-.18-.86a7.84 7.84 0 0 1-1.7-.7l-.76.45a1.75 1.75 0 0 1-2.33-.63l-.42-.74a1.75 1.75 0 0 1 .44-2.26l.68-.57A4.3 4.3 0 0 1 5.75 12q0-.43.08-.83l-.68-.57a1.75 1.75 0 0 1-.44-2.26l.42-.74a1.75 1.75 0 0 1 2.33-.63l.76.45c.54-.3 1.11-.53 1.7-.7zm1.71 5.39a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5"
       }
     ]
@@ -97,28 +117,21 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       {
         to: "/settings",
         label: "统一设置",
+        permission: "system-settings:view",
         icon: "M10.29 3.86a1.75 1.75 0 0 1 3.42 0l.16.76c.52.14 1.02.34 1.49.62l.68-.41a1.75 1.75 0 0 1 2.35.61l.46.79a1.75 1.75 0 0 1-.43 2.25l-.6.5c.05.34.08.68.08 1.02s-.03.68-.08 1.02l.6.5a1.75 1.75 0 0 1 .43 2.25l-.46.79a1.75 1.75 0 0 1-2.35.61l-.68-.41c-.47.28-.97.49-1.49.62l-.16.76a1.75 1.75 0 0 1-3.42 0l-.16-.76a6.6 6.6 0 0 1-1.49-.62l-.68.41a1.75 1.75 0 0 1-2.35-.61l-.46-.79a1.75 1.75 0 0 1 .43-2.25l.6-.5A6.7 6.7 0 0 1 6.1 12c0-.34.03-.68.08-1.02l-.6-.5a1.75 1.75 0 0 1-.43-2.25l.46-.79a1.75 1.75 0 0 1 2.35-.61l.68.41c.47-.28.97-.49 1.49-.62zm1.71 5.14a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5"
       }
     ]
   },
 ];
 
-const visibleNavSections = computed(() => {
-  const role = sessionStore.user?.backofficeRole ?? "super_admin";
-
-  return navSections
+const visibleNavSections = computed(() =>
+  navSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => {
-        if (item.roles) {
-          return item.roles.includes(role);
-        }
-
-        return role === "super_admin";
-      })
+      items: section.items.filter((item) => sessionStore.can(item.permission))
     }))
-    .filter((section) => section.items.length > 0);
-});
+    .filter((section) => section.items.length > 0)
+);
 
 const currentMeta = computed(() => ({
   eyebrow: typeof route.meta.eyebrow === "string" ? route.meta.eyebrow : "后台工作台",
@@ -133,7 +146,17 @@ const currentGroup = computed(() =>
   typeof route.meta.group === "string" ? route.meta.group : "总览"
 );
 
-const roleLabel = computed(() => (sessionStore.user?.backofficeRole === "merchant" ? "商家" : "超级管理员"));
+const roleLabel = computed(() => {
+  if (sessionStore.user?.backofficeRole === "merchant") {
+    return "商家";
+  }
+
+  if (sessionStore.user?.backofficeRole === "admin") {
+    return "客户管理员";
+  }
+
+  return "服务商";
+});
 const todayLabel = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
   month: "2-digit",
@@ -236,6 +259,10 @@ const isActive = (target: string) => {
     return route.path.startsWith("/settings");
   }
 
+  if (target === "/platform") {
+    return route.path.startsWith("/platform");
+  }
+
   return route.path === target;
 };
 </script>
@@ -287,9 +314,12 @@ const isActive = (target: string) => {
           <span class="workbench__operator-name">{{ sessionStore.user?.name ?? "后台用户" }}</span>
           <span class="admin-pill admin-pill--success">{{ roleLabel }}</span>
         </div>
-        <p class="admin-copy workbench__status-copy">登录账号：{{ sessionStore.auth?.username ?? "admin" }}</p>
+        <p class="admin-copy workbench__status-copy">
+          登录账号：{{ sessionStore.auth?.username ?? "admin" }}
+          <span v-if="sessionStore.user?.tenantName"> · {{ sessionStore.user.tenantName }}</span>
+        </p>
         <div v-if="sessionStore.auth?.usesDefaultPassword" class="admin-note workbench__password-warning">
-          当前仍在使用默认密码 `admin`，建议立即修改。
+          当前仍在使用默认密码，建议立即修改。
         </div>
         <button class="admin-button admin-button--ghost" @click="togglePasswordPanel">
           {{ showPasswordPanel ? "收起改密" : "修改密码" }}
@@ -353,7 +383,13 @@ const isActive = (target: string) => {
         <div class="workbench__topbar-actions">
           <span class="workbench__topbar-chip">业务日 {{ todayLabel }}</span>
           <span class="workbench__topbar-chip">{{ roleLabel }}</span>
-          <RouterLink class="workbench__topbar-link" to="/data-monitor">数据监控</RouterLink>
+          <RouterLink
+            v-if="sessionStore.can('analytics:data-monitor:view')"
+            class="workbench__topbar-link"
+            to="/data-monitor"
+          >
+            数据监控
+          </RouterLink>
         </div>
       </header>
 

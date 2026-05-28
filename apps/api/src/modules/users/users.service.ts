@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 
 import type {
   AccessQuota,
+  BackofficeRole,
   BatchConsumptionLine,
   InventoryMovement,
   SpecialAccessPolicyGoodsLimit,
@@ -47,12 +48,14 @@ export class UsersService {
     @Inject(DevicesService) private readonly devicesService: DevicesService
   ) {}
 
-  list(role?: UserRole) {
+  list(role?: UserRole, viewerBackofficeRole?: BackofficeRole) {
     const users = role
       ? this.store.users.filter((user) => user.role === role)
       : this.store.users;
 
-    return users.map((user) => this.decorateUser(user));
+    return users
+      .filter((user) => this.canViewUser(user, viewerBackofficeRole))
+      .map((user) => this.decorateUser(user));
   }
 
   findByPhone(phone: string) {
@@ -74,9 +77,11 @@ export class UsersService {
     options?: {
       monthKey?: string;
       dateKey?: string;
-    }
+    },
+    viewerBackofficeRole?: BackofficeRole
   ): UserManagementDetail {
     const user = this.findById(userId);
+    this.assertCanViewUser(user, viewerBackofficeRole);
     const recentRecords = this.store.inventory
       .filter((entry) => entry.userId === userId)
       .sort((left, right) => right.happenedAt.localeCompare(left.happenedAt))
@@ -290,9 +295,11 @@ export class UsersService {
       tags?: string[];
       quota?: AccessQuota;
     },
-    actorUserId?: string
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole
   ) {
     const user = this.findById(userId);
+    this.assertCanViewUser(user, actorBackofficeRole);
     const before = structuredClone(user);
 
     if (payload.phone !== undefined) {
@@ -359,8 +366,9 @@ export class UsersService {
     return user;
   }
 
-  removeUser(userId: string, actorUserId?: string) {
+  removeUser(userId: string, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
     const user = this.findById(userId);
+    this.assertCanViewUser(user, actorBackofficeRole);
 
     if (user.id === actorUserId) {
       throw new BadRequestException("不能删除当前登录账号。");
@@ -368,7 +376,12 @@ export class UsersService {
 
     if (
       user.role === "admin" &&
-      this.store.users.filter((entry) => entry.role === "admin" && entry.status === "active").length <= 1
+      this.store.users.filter(
+        (entry) =>
+          entry.role === "admin" &&
+          entry.status === "active" &&
+          !this.store.isHiddenBackofficeUser(entry)
+      ).length <= 1
     ) {
       throw new BadRequestException("至少需要保留一个启用的管理员账号。");
     }
@@ -394,6 +407,12 @@ export class UsersService {
     for (let index = this.store.adminCredentials.length - 1; index >= 0; index -= 1) {
       if (this.store.adminCredentials[index].userId === removed.id) {
         this.store.adminCredentials.splice(index, 1);
+      }
+    }
+
+    for (let index = this.store.backofficeCredentials.length - 1; index >= 0; index -= 1) {
+      if (this.store.backofficeCredentials[index].userId === removed.id) {
+        this.store.backofficeCredentials.splice(index, 1);
       }
     }
 
@@ -489,9 +508,10 @@ export class UsersService {
     };
   }
 
-  batchUpdate(payload: BatchUpdatePayload, actorUserId?: string) {
+  batchUpdate(payload: BatchUpdatePayload, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
     const updated = payload.userIds.map((userId) => {
       const user = this.findById(userId);
+      this.assertCanViewUser(user, actorBackofficeRole);
       const before = structuredClone(user);
 
       if (payload.patch.status !== undefined) {
@@ -562,9 +582,11 @@ export class UsersService {
       status: UserAccessPolicy["status"];
       sourcePolicyId?: string;
     },
-    actorUserId?: string
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole
   ) {
     const user = this.findById(userId);
+    this.assertCanViewUser(user, actorBackofficeRole);
 
     if (user.role !== "special") {
       throw new BadRequestException("只有普通用户支持设置取货策略。");
@@ -681,8 +703,14 @@ export class UsersService {
     return created;
   }
 
-  deleteAccessPolicy(userId: string, policyId: string, actorUserId?: string) {
+  deleteAccessPolicy(
+    userId: string,
+    policyId: string,
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole
+  ) {
     const user = this.findById(userId);
+    this.assertCanViewUser(user, actorBackofficeRole);
 
     if (user.role !== "special") {
       throw new BadRequestException("只有普通用户支持删除取货策略。");
@@ -721,8 +749,14 @@ export class UsersService {
     return existing;
   }
 
-  applyAccessPolicyNow(userId: string, policyId: string, actorUserId?: string) {
+  applyAccessPolicyNow(
+    userId: string,
+    policyId: string,
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole
+  ) {
     const user = this.findById(userId);
+    this.assertCanViewUser(user, actorBackofficeRole);
 
     if (user.role !== "special") {
       throw new BadRequestException("只有普通用户支持立即生效。");
@@ -819,7 +853,8 @@ export class UsersService {
         quantity: number;
       }>;
     },
-    actorUserId?: string
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole
   ) {
     if (!payload.confirmed) {
       throw new BadRequestException("补货或补扣前需要先确认操作。");
@@ -830,6 +865,7 @@ export class UsersService {
     }
 
     const user = this.findById(userId);
+    this.assertCanViewUser(user, actorBackofficeRole);
     const localGoods = this.devicesService.findGoods(payload.deviceCode, payload.goodsId);
     const movementId = this.store.createId("movement");
     const happenedAt = new Date().toISOString();
@@ -943,6 +979,16 @@ export class UsersService {
     }
 
     return movement;
+  }
+
+  private canViewUser(user: UserRecord, viewerBackofficeRole?: BackofficeRole) {
+    return viewerBackofficeRole === "super_admin" || !this.store.isHiddenBackofficeUser(user);
+  }
+
+  private assertCanViewUser(user: UserRecord, viewerBackofficeRole?: BackofficeRole) {
+    if (!this.canViewUser(user, viewerBackofficeRole)) {
+      throw new NotFoundException("未找到对应用户。");
+    }
   }
 
   private decorateUser(user: UserRecord): UserRecord {

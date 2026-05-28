@@ -1,6 +1,90 @@
 {
   "users": [
     {
+      "id": "merchant-mpnrxaf3m3uid",
+      "role": "merchant",
+      "phone": "13868793213",
+      "name": "流程测试爱心店",
+      "status": "active",
+      "regionId": "region-001",
+      "regionName": "扬名街道",
+      "tags": [],
+      "mobileProfileCompleted": true,
+      "profile": {
+        "note": "UI 全流程测试商户",
+        "contactName": "流程测试店长",
+        "address": "公益路 27 号"
+      },
+      "merchantProfile": {
+        "donationWindowDays": 2,
+        "defaultDeviceCodes": []
+      }
+    },
+    {
+      "id": "special-mpnrxaewbufck",
+      "role": "special",
+      "phone": "13968793213",
+      "name": "流程测试受助",
+      "status": "active",
+      "neighborhood": "扬名街道",
+      "regionId": "region-001",
+      "regionName": "扬名街道",
+      "tags": [],
+      "mobileProfileCompleted": true,
+      "profile": {
+        "note": "UI 全流程测试账号"
+      }
+    },
+    {
+      "id": "merchant-mpnr9xkes0z87",
+      "role": "merchant",
+      "phone": "13867703479",
+      "name": "流程测试爱心店",
+      "status": "active",
+      "regionId": "region-001",
+      "regionName": "扬名街道",
+      "tags": [],
+      "mobileProfileCompleted": true,
+      "profile": {
+        "note": "UI 全流程测试商户",
+        "contactName": "流程测试店长",
+        "address": "公益路 27 号"
+      },
+      "merchantProfile": {
+        "donationWindowDays": 2,
+        "defaultDeviceCodes": []
+      }
+    },
+    {
+      "id": "special-mpnr9xk5vtipz",
+      "role": "special",
+      "phone": "13967703479",
+      "name": "流程测试受助",
+      "status": "active",
+      "neighborhood": "扬名街道",
+      "regionId": "region-001",
+      "regionName": "扬名街道",
+      "tags": [],
+      "mobileProfileCompleted": true,
+      "profile": {
+        "note": "UI 全流程测试账号"
+      }
+    },
+    {
+      "id": "backoffice-super-admin",
+      "role": "admin",
+      "phone": "13900000000",
+      "name": "服务商平台账号",
+      "status": "active",
+      "regionName": "系统管理",
+      "neighborhood": "系统管理",
+      "tags": [
+        "super-admin",
+        "hidden-backoffice"
+      ],
+      "mobileProfileCompleted": false
+    },
+    {
       "id": "merchant-1776008894951-9353",
       "role": "merchant",
       "phone": "13800000006",
@@ -410,7 +494,8 @@
               "price": 500,
               "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653903367695_e2b0a1.jpeg",
               "category": "daily",
-              "stock": 0
+              "stock": 3,
+              "expiresAt": "2026-05-28T16:00:00.000Z"
             }
           ]
         }
@@ -766,6 +851,124 @@
   ],
   "registrationApplications": [
     {
+      "id": "application-mpnrxugro1qdm",
+      "phone": "13768819285",
+      "requestedRole": "special",
+      "profile": {
+        "name": "待审视觉测试",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道",
+        "note": "H5 对齐审查待审核样例"
+      },
+      "status": "pending",
+      "createdAt": "2026-05-27T08:00:19.323Z",
+      "updatedAt": "2026-05-27T08:00:19.323Z"
+    },
+    {
+      "id": "application-mpnrxaef7ehmp",
+      "phone": "13868793213",
+      "requestedRole": "merchant",
+      "profile": {
+        "name": "流程测试店长",
+        "merchantName": "流程测试爱心店",
+        "contactName": "流程测试店长",
+        "address": "公益路 27 号",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道",
+        "note": "UI 全流程测试商户"
+      },
+      "status": "approved",
+      "createdAt": "2026-05-27T07:59:53.319Z",
+      "updatedAt": "2026-05-27T07:59:53.343Z",
+      "linkedUserId": "merchant-mpnrxaf3m3uid"
+    },
+    {
+      "id": "application-mpnrxadzbkhqu",
+      "phone": "13968793213",
+      "requestedRole": "special",
+      "profile": {
+        "name": "流程测试受助",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道",
+        "note": "UI 全流程测试账号"
+      },
+      "status": "approved",
+      "createdAt": "2026-05-27T07:59:53.303Z",
+      "updatedAt": "2026-05-27T07:59:53.336Z",
+      "linkedUserId": "special-mpnrxaewbufck"
+    },
+    {
+      "id": "application-mpnr9xjpzdr0y",
+      "phone": "13867703479",
+      "requestedRole": "merchant",
+      "profile": {
+        "name": "流程测试店长",
+        "merchantName": "流程测试爱心店",
+        "contactName": "流程测试店长",
+        "address": "公益路 27 号",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道",
+        "note": "UI 全流程测试商户"
+      },
+      "status": "approved",
+      "createdAt": "2026-05-27T07:41:43.573Z",
+      "updatedAt": "2026-05-27T07:41:43.598Z",
+      "linkedUserId": "merchant-mpnr9xkes0z87"
+    },
+    {
+      "id": "application-mpnr9xj7u2oqs",
+      "phone": "13967703479",
+      "requestedRole": "special",
+      "profile": {
+        "name": "流程测试受助",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道",
+        "note": "UI 全流程测试账号"
+      },
+      "status": "approved",
+      "createdAt": "2026-05-27T07:41:43.555Z",
+      "updatedAt": "2026-05-27T07:41:43.589Z",
+      "linkedUserId": "special-mpnr9xk5vtipz"
+    },
+    {
+      "id": "application-mpnqel719aq2f",
+      "phone": "13826052707",
+      "requestedRole": "merchant",
+      "profile": {
+        "name": "流程测试店长",
+        "merchantName": "流程测试爱心店",
+        "contactName": "流程测试店长",
+        "address": "公益路 27 号",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道",
+        "note": "UI 全流程测试商户"
+      },
+      "status": "pending",
+      "createdAt": "2026-05-27T07:17:21.229Z",
+      "updatedAt": "2026-05-27T07:17:21.229Z"
+    },
+    {
+      "id": "application-mpnqel6nxru6m",
+      "phone": "13926052707",
+      "requestedRole": "special",
+      "profile": {
+        "name": "流程测试受助",
+        "regionId": "region-001",
+        "regionName": "扬名街道",
+        "neighborhood": "扬名街道",
+        "note": "UI 全流程测试账号"
+      },
+      "status": "pending",
+      "createdAt": "2026-05-27T07:17:21.215Z",
+      "updatedAt": "2026-05-27T07:17:21.215Z"
+    },
+    {
       "id": "application-mpfgni0960u1e",
       "phone": "13900000099",
       "requestedRole": "special",
@@ -918,6 +1121,21 @@
     }
   ],
   "goodsBatches": [
+    {
+      "batchId": "batch-mpnrxag5tjizm",
+      "goodsId": "9110016",
+      "deviceCode": "91120149",
+      "locationType": "device",
+      "locationName": "测试平台柜机 91120149",
+      "quantity": 3,
+      "remainingQuantity": 3,
+      "expiresAt": "2026-05-28T16:00:00.000Z",
+      "createdAt": "2026-05-27T07:59:53.381Z",
+      "sourceType": "merchant",
+      "sourceUserId": "merchant-mpnrxaf3m3uid",
+      "sourceUserName": "流程测试爱心店",
+      "note": "UI 全流程测试补货"
+    },
     {
       "batchId": "batch-1776057183627-7974",
       "goodsId": "goods-1002",
@@ -1148,6 +1366,20 @@
   ],
   "inventory": [
     {
+      "id": "movement-mpnrxag5j2r31",
+      "userId": "merchant-mpnrxaf3m3uid",
+      "deviceCode": "91120149",
+      "goodsId": "9110016",
+      "goodsName": "三得利乌龙茶_500ml",
+      "category": "daily",
+      "quantity": 3,
+      "unitPrice": 500,
+      "type": "donation",
+      "happenedAt": "2026-05-27T07:59:53.381Z",
+      "expiresAt": "2026-05-28T16:00:00.000Z",
+      "batchId": "batch-mpnrxag5tjizm"
+    },
+    {
       "id": "movement-1776014446126-6407",
       "userId": "admin-001",
       "deviceCode": "CAB-1001",
@@ -1236,6 +1468,24 @@
     "maxTimeouts": 3
   },
   "alerts": [
+    {
+      "id": "alert-mpnrxag5b626d",
+      "createdAt": "2026-05-27T07:59:53.381Z",
+      "status": "open",
+      "grade": "warning",
+      "type": "expiry",
+      "title": "商户补货批次待到期跟进",
+      "deviceCode": "91120149",
+      "targetUserId": "merchant-mpnrxaf3m3uid",
+      "goodsId": "9110016",
+      "goodsName": "三得利乌龙茶_500ml",
+      "dueAt": "2026-05-28T16:00:00.000Z",
+      "detail": "用户 流程测试爱心店；商品 三得利乌龙茶_500ml；柜机 测试平台柜机 91120149；测试平台柜机 91120149 的 三得利乌龙茶_500ml 批次已入柜，请在到期前关注去向。",
+      "deviceName": "测试平台柜机 91120149",
+      "targetUserName": "流程测试爱心店",
+      "goodsSummary": "三得利乌龙茶_500ml",
+      "previewDetail": "用户 流程测试爱心店 · 商品 三得利乌龙茶_500ml · 柜机 测试平台柜机 91120149"
+    },
     {
       "id": "alert-1776063858584-812",
       "createdAt": "2026-04-13T07:04:18.584Z",
@@ -1474,6 +1724,195 @@
     }
   ],
   "logs": [
+    {
+      "category": "alert",
+      "type": "create-alert",
+      "status": "warning",
+      "actor": {
+        "type": "system",
+        "name": "系统巡检"
+      },
+      "primarySubject": {
+        "type": "alert",
+        "id": "alert-mpnrxag5b626d",
+        "label": "商户补货批次待到期跟进"
+      },
+      "secondarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "metadata": {
+        "undoState": "not_undoable",
+        "dueAt": "2026-05-28T16:00:00.000Z",
+        "deviceCode": "91120149",
+        "goodsId": "9110016",
+        "goodsName": "三得利乌龙茶_500ml",
+        "grade": "warning",
+        "deviceName": "测试平台柜机 91120149",
+        "goodsSummary": "三得利乌龙茶_500ml"
+      },
+      "id": "log-mpnrxag64vp4x",
+      "occurredAt": "2026-05-27T07:59:53.382Z",
+      "description": "系统为测试平台柜机 91120149创建了商户补货批次待到期跟进。",
+      "detail": "柜机 测试平台柜机 91120149；相关商品 三得利乌龙茶_500ml；预警 商户补货批次待到期跟进；状态 需关注"
+    },
+    {
+      "category": "restock",
+      "type": "merchant-restock-template",
+      "status": "success",
+      "actor": {
+        "type": "merchant",
+        "id": "merchant-mpnrxaf3m3uid",
+        "name": "流程测试爱心店",
+        "role": "merchant"
+      },
+      "primarySubject": {
+        "type": "device",
+        "id": "91120149",
+        "label": "测试平台柜机 91120149"
+      },
+      "secondarySubject": {
+        "type": "goods",
+        "id": "9110016",
+        "label": "三得利乌龙茶_500ml"
+      },
+      "detail": "流程测试爱心店 使用模板向 测试平台柜机 91120149 补充了 三得利乌龙茶_500ml x3。",
+      "description": "流程测试爱心店 向 测试平台柜机 91120149 补充了 三得利乌龙茶_500ml x3。",
+      "metadata": {
+        "undoState": "not_undoable",
+        "templateId": "catalog-9110016",
+        "batchId": "batch-mpnrxag5tjizm",
+        "confirmation": {
+          "confirmed": true,
+          "confirmedAt": "2026-05-27T07:59:53.381Z",
+          "confirmedByUserId": "merchant-mpnrxaf3m3uid",
+          "batchSelection": "new_batch"
+        },
+        "goodsId": "9110016",
+        "goodsName": "三得利乌龙茶_500ml",
+        "deviceCode": "91120149",
+        "quantity": 3,
+        "expiresAt": "2026-05-28T16:00:00.000Z",
+        "productionDate": "2026-05-27",
+        "deviceName": "测试平台柜机 91120149",
+        "goodsSummary": "三得利乌龙茶_500ml"
+      },
+      "id": "log-mpnrxag5yrte5",
+      "occurredAt": "2026-05-27T07:59:53.381Z"
+    },
+    {
+      "category": "user",
+      "type": "review-registration-approve",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "user",
+        "id": "merchant-mpnrxaf3m3uid",
+        "label": "流程测试爱心店"
+      },
+      "detail": "管理员通过了 流程测试爱心店 的移动端注册申请。",
+      "description": "管理员通过了 流程测试爱心店 的注册申请。",
+      "metadata": {
+        "undoState": "not_undoable",
+        "applicationId": "application-mpnrxaef7ehmp",
+        "phone": "13868793213",
+        "requestedRole": "merchant",
+        "targetUserId": "merchant-mpnrxaf3m3uid",
+        "targetUserName": "流程测试爱心店"
+      },
+      "id": "log-mpnrxaf3zlc0h",
+      "occurredAt": "2026-05-27T07:59:53.343Z"
+    },
+    {
+      "category": "user",
+      "type": "review-registration-approve",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "user",
+        "id": "special-mpnrxaewbufck",
+        "label": "流程测试受助"
+      },
+      "detail": "管理员通过了 流程测试受助 的移动端注册申请。",
+      "description": "管理员通过了 流程测试受助 的注册申请。",
+      "metadata": {
+        "undoState": "not_undoable",
+        "applicationId": "application-mpnrxadzbkhqu",
+        "phone": "13968793213",
+        "requestedRole": "special",
+        "targetUserId": "special-mpnrxaewbufck",
+        "targetUserName": "流程测试受助"
+      },
+      "id": "log-mpnrxaewyso7d",
+      "occurredAt": "2026-05-27T07:59:53.336Z"
+    },
+    {
+      "category": "user",
+      "type": "review-registration-approve",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "user",
+        "id": "merchant-mpnr9xkes0z87",
+        "label": "流程测试爱心店"
+      },
+      "detail": "管理员通过了 流程测试爱心店 的移动端注册申请。",
+      "description": "管理员通过了 流程测试爱心店 的注册申请。",
+      "metadata": {
+        "undoState": "not_undoable",
+        "applicationId": "application-mpnr9xjpzdr0y",
+        "phone": "13867703479",
+        "requestedRole": "merchant",
+        "targetUserId": "merchant-mpnr9xkes0z87",
+        "targetUserName": "流程测试爱心店"
+      },
+      "id": "log-mpnr9xkeva18x",
+      "occurredAt": "2026-05-27T07:41:43.598Z"
+    },
+    {
+      "category": "user",
+      "type": "review-registration-approve",
+      "status": "success",
+      "actor": {
+        "type": "admin",
+        "id": "admin-001",
+        "name": "街道管理员",
+        "role": "admin"
+      },
+      "primarySubject": {
+        "type": "user",
+        "id": "special-mpnr9xk5vtipz",
+        "label": "流程测试受助"
+      },
+      "detail": "管理员通过了 流程测试受助 的移动端注册申请。",
+      "description": "管理员通过了 流程测试受助 的注册申请。",
+      "metadata": {
+        "undoState": "not_undoable",
+        "applicationId": "application-mpnr9xj7u2oqs",
+        "phone": "13967703479",
+        "requestedRole": "special",
+        "targetUserId": "special-mpnr9xk5vtipz",
+        "targetUserName": "流程测试受助"
+      },
+      "id": "log-mpnr9xk5yvbqq",
+      "occurredAt": "2026-05-27T07:41:43.589Z"
+    },
     {
       "id": "log-1776063858584-7874",
       "occurredAt": "2026-04-13T07:04:18.584Z",
@@ -2800,18 +3239,18 @@
       "13800000001",
       {
         "code": "123456",
-        "expiresAt": "2026-05-21T14:52:41.574Z",
-        "requestedAt": "2026-05-21T14:47:41.574Z",
-        "resendAvailableAt": "2026-05-21T14:48:41.574Z"
+        "expiresAt": "2026-05-27T07:22:21.178Z",
+        "requestedAt": "2026-05-27T07:17:21.178Z",
+        "resendAvailableAt": "2026-05-27T07:18:21.178Z"
       }
     ],
     [
       "13800000002",
       {
         "code": "123456",
-        "expiresAt": "2026-05-21T14:52:41.554Z",
-        "requestedAt": "2026-05-21T14:47:41.554Z",
-        "resendAvailableAt": "2026-05-21T14:48:41.554Z"
+        "expiresAt": "2026-05-27T08:04:53.388Z",
+        "requestedAt": "2026-05-27T07:59:53.388Z",
+        "resendAvailableAt": "2026-05-27T08:00:53.388Z"
       }
     ],
     [
@@ -2827,9 +3266,9 @@
       "13800000004",
       {
         "code": "123456",
-        "expiresAt": "2026-05-21T14:52:41.565Z",
-        "requestedAt": "2026-05-21T14:47:41.565Z",
-        "resendAvailableAt": "2026-05-21T14:48:41.565Z"
+        "expiresAt": "2026-05-27T08:04:53.402Z",
+        "requestedAt": "2026-05-27T07:59:53.402Z",
+        "resendAvailableAt": "2026-05-27T08:00:53.402Z"
       }
     ],
     [
@@ -2846,6 +3285,78 @@
         "expiresAt": "2026-05-21T12:27:11.395Z",
         "requestedAt": "2026-05-21T12:22:11.395Z",
         "resendAvailableAt": "2026-05-21T12:23:11.395Z"
+      }
+    ],
+    [
+      "13926052707",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T07:22:21.207Z",
+        "requestedAt": "2026-05-27T07:17:21.207Z",
+        "resendAvailableAt": "2026-05-27T07:18:21.207Z"
+      }
+    ],
+    [
+      "13826052707",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T07:22:21.222Z",
+        "requestedAt": "2026-05-27T07:17:21.222Z",
+        "resendAvailableAt": "2026-05-27T07:18:21.222Z"
+      }
+    ],
+    [
+      "13967703479",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T07:46:43.547Z",
+        "requestedAt": "2026-05-27T07:41:43.547Z",
+        "resendAvailableAt": "2026-05-27T07:42:43.547Z"
+      }
+    ],
+    [
+      "13867703479",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T07:46:43.564Z",
+        "requestedAt": "2026-05-27T07:41:43.564Z",
+        "resendAvailableAt": "2026-05-27T07:42:43.564Z"
+      }
+    ],
+    [
+      "13968793213",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T08:04:53.295Z",
+        "requestedAt": "2026-05-27T07:59:53.295Z",
+        "resendAvailableAt": "2026-05-27T08:00:53.295Z"
+      }
+    ],
+    [
+      "13868793213",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T08:04:53.312Z",
+        "requestedAt": "2026-05-27T07:59:53.312Z",
+        "resendAvailableAt": "2026-05-27T08:00:53.312Z"
+      }
+    ],
+    [
+      "13768819285",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T08:05:19.311Z",
+        "requestedAt": "2026-05-27T08:00:19.311Z",
+        "resendAvailableAt": "2026-05-27T08:01:19.311Z"
+      }
+    ],
+    [
+      "13981802102",
+      {
+        "code": "123456",
+        "expiresAt": "2026-05-27T11:41:42.173Z",
+        "requestedAt": "2026-05-27T11:36:42.173Z",
+        "resendAvailableAt": "2026-05-27T11:37:42.173Z"
       }
     ]
   ],
@@ -3262,6 +3773,93 @@
         "backofficeRole": "super_admin",
         "createdAt": "2026-05-23T17:55:04.223Z"
       }
+    ],
+    [
+      "session-mpnqel5z16k13",
+      {
+        "token": "session-mpnqel5z16k13",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-05-27T07:17:21.191Z"
+      }
+    ],
+    [
+      "session-mpnr932xvylwj",
+      {
+        "token": "session-mpnr932xvylwj",
+        "userId": "admin-001",
+        "role": "admin",
+        "backofficeRole": "admin",
+        "tenantId": "tenant-a",
+        "createdAt": "2026-05-27T07:41:04.089Z"
+      }
+    ],
+    [
+      "session-mpnr939vc8hag",
+      {
+        "token": "session-mpnr939vc8hag",
+        "userId": "admin-001",
+        "role": "admin",
+        "createdAt": "2026-05-27T07:41:04.339Z"
+      }
+    ],
+    [
+      "session-mpnr9xifgzod9",
+      {
+        "token": "session-mpnr9xifgzod9",
+        "userId": "admin-001",
+        "role": "admin",
+        "backofficeRole": "admin",
+        "tenantId": "tenant-a",
+        "createdAt": "2026-05-27T07:41:43.527Z"
+      }
+    ],
+    [
+      "session-mpnrxactq5ip6",
+      {
+        "token": "session-mpnrxactq5ip6",
+        "userId": "admin-001",
+        "role": "admin",
+        "backofficeRole": "admin",
+        "tenantId": "tenant-a",
+        "createdAt": "2026-05-27T07:59:53.261Z"
+      }
+    ],
+    [
+      "session-mpnrxafas2275",
+      {
+        "token": "session-mpnrxafas2275",
+        "userId": "special-mpnrxaewbufck",
+        "role": "special",
+        "createdAt": "2026-05-27T07:59:53.350Z"
+      }
+    ],
+    [
+      "session-mpnrxafha8ubf",
+      {
+        "token": "session-mpnrxafha8ubf",
+        "userId": "merchant-mpnrxaf3m3uid",
+        "role": "merchant",
+        "createdAt": "2026-05-27T07:59:53.357Z"
+      }
+    ],
+    [
+      "session-mpnrxagjy5z1t",
+      {
+        "token": "session-mpnrxagjy5z1t",
+        "userId": "special-001",
+        "role": "special",
+        "createdAt": "2026-05-27T07:59:53.395Z"
+      }
+    ],
+    [
+      "session-mpnrxagwi5209",
+      {
+        "token": "session-mpnrxagwi5209",
+        "userId": "merchant-001",
+        "role": "merchant",
+        "createdAt": "2026-05-27T07:59:53.408Z"
+      }
     ]
   ],
   "draftSessions": [],
@@ -3277,13 +3875,43 @@
   ],
   "backofficeCredentials": [
     {
+      "userId": "merchant-mpnrxaf3m3uid",
+      "username": "merchant",
+      "role": "merchant",
+      "tenantId": "tenant-a",
+      "passwordSalt": "291f0a4172ac8aa4268e1a3ce4ff9bf3",
+      "passwordHash": "df99bdf6d7d682911e3365e772aa1f3a47d5e34aaa327f910ebdef873a125d489df24b08aef2b019ca18f87f2e8561d434bf67e71d9ceae0191c59367e3e2c4f",
+      "usesDefaultPassword": true,
+      "passwordUpdatedAt": "2026-05-27T11:31:04.624Z"
+    },
+    {
+      "userId": "merchant-1776008894951-9353",
+      "username": "merchant",
+      "role": "merchant",
+      "tenantId": "tenant-a",
+      "passwordSalt": "2661b41404b142e03236e4af9d951ea2",
+      "passwordHash": "cd2e0b97bb14011216b8b522a3698207a915093f966c5c25207fa99f5b1b52f9e551e494eba934c38a360a5f245d3ab1bbcbb67820ca063b31d8c4dcfd8ed57b",
+      "usesDefaultPassword": true,
+      "passwordUpdatedAt": "2026-05-27T07:12:22.746Z"
+    },
+    {
+      "userId": "backoffice-super-admin",
+      "username": "super",
+      "role": "super_admin",
+      "passwordSalt": "77b58716b800401d819b3f4cab4f96fb",
+      "passwordHash": "485553b45eb8af8d11d778a340d08969fa4baed269ad8e17596b064fb9197517a426297a54deb68bec1def55bfbb5385d3e8db01dd1bc9d59f8fb2e5b666e2fb",
+      "usesDefaultPassword": true,
+      "passwordUpdatedAt": "2026-05-27T07:12:22.714Z"
+    },
+    {
       "userId": "admin-001",
       "username": "admin",
-      "role": "super_admin",
+      "role": "admin",
       "passwordSalt": "e1bae5b6dfe1dde131e694ee982531be",
       "passwordHash": "233b07f9a05bcebc1d542895f4d93d0bafbb393c6d16bb939fe98dfea50275685aaedc2791e0378e805f0483cb37be95c21aff7c45dd50fbbd49e71196b7130d",
       "usesDefaultPassword": true,
-      "passwordUpdatedAt": "2026-05-21T10:34:41.092Z"
+      "passwordUpdatedAt": "2026-05-21T10:34:41.092Z",
+      "tenantId": "tenant-a"
     }
   ],
   "callbackLog": [],

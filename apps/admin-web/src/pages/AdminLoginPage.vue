@@ -8,7 +8,7 @@ import { useAdminSessionStore } from "../stores/session";
 const router = useRouter();
 const sessionStore = useAdminSessionStore();
 
-const username = ref("admin");
+const username = ref("super");
 const password = ref("");
 const busy = ref(false);
 const errorMessage = ref("");
@@ -21,7 +21,7 @@ const submit = async () => {
   try {
     const response = await adminApi.backofficeLogin(username.value, password.value);
     sessionStore.setSession(response);
-    await router.replace(response.user.backofficeRole === "merchant" ? "/merchant" : "/dashboard");
+    await router.replace(sessionStore.defaultPath);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "登录失败。";
   } finally {
@@ -36,7 +36,7 @@ const submit = async () => {
       <div class="login-panel__head">
         <span class="admin-kicker">后台登录</span>
         <h1 class="login-panel__title">公益智助柜后台</h1>
-        <p class="admin-copy">超级管理员和已开通后台账号的商家可登录 PC 后台。</p>
+        <p class="admin-copy">服务商平台账号、客户实例管理员和已开通后台账号的商家可登录 PC 后台。</p>
       </div>
 
       <label class="admin-field">
@@ -55,7 +55,7 @@ const submit = async () => {
         />
       </label>
 
-      <div class="admin-note">空库或无超级管理员凭证时，系统会自动补建超级管理员：账号 `admin`，密码 `admin`。</div>
+      <div class="admin-note">默认服务商账号：`super`；默认客户实例账号：`admin`、`merchant`。</div>
       <div v-if="errorMessage" class="admin-note login-panel__error">{{ errorMessage }}</div>
 
       <button class="admin-button" :disabled="busy || !username || !password" @click="submit">

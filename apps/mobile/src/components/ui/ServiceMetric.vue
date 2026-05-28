@@ -1,5 +1,7 @@
 <script setup lang="ts">
-withDefaults(
+import { computed } from "vue";
+
+const props = withDefaults(
   defineProps<{
     label: string;
     value: string | number;
@@ -11,10 +13,12 @@ withDefaults(
     tone: "neutral"
   }
 );
+
+const isLongValue = computed(() => String(props.value).length >= 7);
 </script>
 
 <template>
-  <view class="service-metric" :class="`service-metric--${tone}`">
+  <view class="service-metric" :class="[`service-metric--${tone}`, { 'service-metric--long': isLongValue }]">
     <text class="service-metric__label">{{ label }}</text>
     <text class="vm-number service-metric__value">{{ value }}</text>
     <text v-if="hint" class="service-metric__hint">{{ hint }}</text>
@@ -25,9 +29,9 @@ withDefaults(
 .service-metric {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 9rpx;
-  min-height: 132rpx;
+  min-height: 138rpx;
   padding: 20rpx 18rpx;
   border-radius: 20rpx;
   border: 1rpx solid var(--vm-line-strong);
@@ -47,7 +51,9 @@ withDefaults(
 }
 
 .service-metric__label {
-  font-size: 21rpx;
+  min-height: 28rpx;
+  font-size: 22rpx;
+  line-height: 1.28;
   color: var(--vm-muted);
 }
 
@@ -56,12 +62,18 @@ withDefaults(
   line-height: 1;
   color: var(--vm-accent-strong);
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .service-metric__hint {
-  font-size: 19rpx;
+  font-size: 20rpx;
   color: var(--vm-text-soft);
-  line-height: 1.5;
+  line-height: 1.45;
+}
+
+.service-metric--long .service-metric__value {
+  font-size: 28rpx;
+  line-height: 1.08;
 }
 
 :global(.vm-page--accessible) .service-metric {

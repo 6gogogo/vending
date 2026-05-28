@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from "vue-router";
 
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
+import { useAdminSessionStore } from "../stores/session";
 import { formatDate, formatDateTime, formatDateTimeSeconds, formatNowInBeijing } from "../utils/datetime";
 import {
   buildAlertContextSummary,
@@ -17,6 +18,7 @@ import {
 } from "../utils/business-context";
 
 const route = useRoute();
+const sessionStore = useAdminSessionStore();
 
 const detail = ref<Awaited<ReturnType<typeof adminApi.deviceDetail>>>();
 const loading = ref(false);
@@ -405,14 +407,20 @@ const load = async () => {
 };
 
 const loadDebugPanel = async () => {
+  if (!sessionStore.can("system-audit:view")) {
+    return;
+  }
+
   debugLoading.value = true;
   try {
     const [callbackLogs, systemAuditLogs] = await Promise.all([
       adminApi.deviceCallbackLogs(String(route.params.deviceCode), Number(debugCallbackLimit.value)),
-      adminApi.systemAuditLogs({
-        deviceCode: String(route.params.deviceCode),
-        limit: Number(debugAuditLimit.value)
-      })
+      sessionStore.can("system-audit:view")
+        ? adminApi.systemAuditLogs({
+            deviceCode: String(route.params.deviceCode),
+            limit: Number(debugAuditLimit.value)
+          })
+        : Promise.resolve([])
     ]);
     debugCallbackLogs.value = callbackLogs;
     debugSystemAuditLogs.value = systemAuditLogs;
@@ -1076,7 +1084,7 @@ onUnmounted(() => {
         </aside>
       </section>
 
-      <section class="admin-page__section">
+      <section v-if="sessionStore.can('system-audit:view')" class="admin-page__section">
         <div class="admin-page__section-head">
           <div>
             <p class="admin-kicker">底层调试</p>

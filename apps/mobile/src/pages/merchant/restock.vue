@@ -75,20 +75,24 @@ const estimatedExpireDate = computed(() => {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 });
+const estimatedExpireShort = computed(() => estimatedExpireDate.value.slice(5) || "-");
+const estimatedExpireHint = computed(() =>
+  estimatedExpireDate.value ? `${estimatedExpireDate.value.slice(0, 4)} 年 · 自动推导` : "按生产日期自动推导"
+);
 const restockFlowSteps = computed(() => [
   {
     label: "选择物品",
-    description: selectedTemplate.value?.goodsName ?? "先选择要补货的商品模板",
+    description: selectedTemplate.value ? "已选模板" : "先选商品模板",
     state: selectedTemplateId.value ? ("done" as const) : ("current" as const)
   },
   {
     label: "填写批次",
-    description: selectedDevice.value ? `${selectedDevice.value.name} · ${quantity.value || 0} 件` : "填写柜机、数量、日期和批次号",
+    description: selectedDevice.value ? `${quantity.value || 0} 件 / ${selectedDevice.value.deviceCode}` : "柜机、数量、日期",
     state: selectedTemplateId.value && selectedDeviceCode.value && quantity.value > 0 ? ("current" as const) : ("todo" as const)
   },
   {
     label: "提交登记",
-    description: estimatedExpireDate.value ? `预计到期 ${estimatedExpireDate.value}` : "提交后生成可追溯批次",
+    description: estimatedExpireDate.value ? "确认后生成" : "提交后可追溯",
     state: "todo" as const
   }
 ]);
@@ -233,7 +237,7 @@ onLoad((query) => {
         <view class="overview-grid">
           <ServiceMetric label="默认件数" :value="selectedTemplate?.defaultQuantity ?? 0" hint="选中模板后自动带入" tone="accent" />
           <ServiceMetric label="保质期" :value="selectedTemplate?.defaultShelfLifeDays ?? 0" hint="单位为天" />
-          <ServiceMetric label="预计到期" :value="estimatedExpireDate || '-'" hint="按生产日期自动推导" />
+          <ServiceMetric label="预计到期" :value="estimatedExpireShort" :hint="estimatedExpireHint" />
         </view>
 
         <view class="vm-field">

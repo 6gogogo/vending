@@ -1,20 +1,26 @@
-import { Controller, Get, Inject, Query, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, Query, Req, UseGuards } from "@nestjs/common";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedBackofficeRoles,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AnalyticsService } from "./analytics.service";
-import type { DataMonitorRange } from "@vm/shared-types";
+import type { BackofficeRole, DataMonitorRange } from "@vm/shared-types";
 
 @Controller("analytics")
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
+@AllowedBackofficeRoles("super_admin", "admin")
+@AllowedBackofficePermissions("dashboard:view")
 export class AnalyticsController {
   constructor(@Inject(AnalyticsService) private readonly analyticsService: AnalyticsService) {}
 
   @Get("dashboard")
-  dashboard() {
-    return ok(this.analyticsService.getDashboard());
+  dashboard(@Req() request: { authUser?: { backofficeRole?: BackofficeRole } }) {
+    return ok(this.analyticsService.getDashboard(request.authUser?.backofficeRole));
   }
 
   @Get("personas")
@@ -28,6 +34,7 @@ export class AnalyticsController {
   }
 
   @Get("data-monitor")
+  @AllowedBackofficePermissions("analytics:data-monitor:view")
   dataMonitor(
     @Query("month") month?: string,
     @Query("date") date?: string,

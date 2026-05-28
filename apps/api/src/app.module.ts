@@ -15,6 +15,7 @@ import { InventoryOrdersModule } from "./modules/inventory-orders/inventory-orde
 import { MerchantGoodsTemplatesModule } from "./modules/merchant-goods-templates/merchant-goods-templates.module";
 import { OperationLogsModule } from "./modules/operation-logs/operation-logs.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
+import { PlatformModule } from "./modules/platform/platform.module";
 import { RegistrationApplicationsModule } from "./modules/registration-applications/registration-applications.module";
 import { RegionsModule } from "./modules/regions/regions.module";
 import { ReservationsModule } from "./modules/reservations/reservations.module";
@@ -46,6 +47,7 @@ import { WarehousesModule } from "./modules/warehouses/warehouses.module";
     MerchantGoodsTemplatesModule,
     AlertsModule,
     OperationLogsModule,
+    PlatformModule,
     PaymentsModule,
     InventoryOrdersModule,
     CabinetEventsModule,

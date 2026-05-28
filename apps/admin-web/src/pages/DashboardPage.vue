@@ -5,6 +5,7 @@ import type { DashboardSnapshot, OperationLogRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
+import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
 import {
@@ -27,6 +28,7 @@ type TrendMarker = {
 };
 
 const dashboard = ref<DashboardSnapshot>();
+const sessionStore = useAdminSessionStore();
 const loading = ref(false);
 const loadError = ref("");
 const activeBucket = ref<BucketKey>();
@@ -540,7 +542,9 @@ onUnmounted(() => {
               <td class="dashboard-task-cell">
                 <div class="dashboard-task-actions">
                   <button class="admin-button admin-button--ghost" @click="openTaskDetail(task)">详情</button>
-                  <RouterLink class="admin-link" :to="resolveTaskAiLink(task)">AI 分析</RouterLink>
+                  <RouterLink v-if="sessionStore.can('ai-insights:view')" class="admin-link" :to="resolveTaskAiLink(task)">
+                    AI 分析
+                  </RouterLink>
                   <button
                     class="admin-button admin-button--ghost"
                     :disabled="resolvingTaskId === task.id"
@@ -590,7 +594,7 @@ onUnmounted(() => {
               </div>
               <RouterLink class="admin-link" to="/logs">打开</RouterLink>
             </div>
-            <div class="admin-list__row">
+            <div v-if="sessionStore.can('ai-insights:view')" class="admin-list__row">
               <div class="admin-list__main">
                 <span class="admin-list__title">AI 工作台</span>
                 <span class="admin-table__subtext">生成异常诊断、日报、反馈草稿和策略建议。</span>

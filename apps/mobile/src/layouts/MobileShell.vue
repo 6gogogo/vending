@@ -323,8 +323,8 @@ const showUtilityBar = computed(
   align-items: flex-start;
   justify-content: space-between;
   gap: 18rpx;
-  min-height: 188rpx;
-  padding: 30rpx 30rpx 28rpx;
+  min-height: 176rpx;
+  padding: 28rpx 30rpx 26rpx;
   border: 1rpx solid var(--vm-hero-border);
   border-radius: 30rpx;
   background:
@@ -364,8 +364,8 @@ const showUtilityBar = computed(
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
-  padding-right: 148rpx;
+  gap: 9rpx;
+  padding-right: 130rpx;
 }
 
 .shell__compact-access {
@@ -384,39 +384,40 @@ const showUtilityBar = computed(
 
 .shell__compact-eyebrow {
   font-size: 22rpx;
+  line-height: 1.25;
   letter-spacing: 0.08em;
   color: var(--vm-accent-strong);
 }
 
 .shell__compact-title {
-  font-size: 50rpx;
-  line-height: 1.18;
+  font-size: 46rpx;
+  line-height: 1.16;
   font-weight: 800;
   color: var(--vm-text);
 }
 
 .shell__compact-subtitle {
   font-size: 24rpx;
-  line-height: 1.65;
+  line-height: 1.58;
   color: var(--vm-muted);
 }
 
 .shell__compact-mark {
   position: absolute;
-  right: 28rpx;
-  bottom: 20rpx;
+  right: 24rpx;
+  bottom: 18rpx;
   z-index: 1;
-  width: 170rpx;
-  height: 132rpx;
+  width: 154rpx;
+  height: 122rpx;
   pointer-events: none;
 }
 
 .shell__compact-cabinet {
   position: absolute;
-  right: 42rpx;
+  right: 38rpx;
   bottom: 8rpx;
-  width: 74rpx;
-  height: 104rpx;
+  width: 68rpx;
+  height: 96rpx;
   border-radius: 16rpx;
   background: #2e7d46;
   box-shadow: 0 12rpx 28rpx rgba(46, 125, 70, 0.18);

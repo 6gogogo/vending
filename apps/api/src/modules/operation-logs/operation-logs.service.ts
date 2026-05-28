@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { existsSync, openSync, readFileSync, readSync, closeSync, statSync } from "node:fs";
 
 import type {
+  BackofficeRole,
   CallbackLogRecord,
   InventoryMovement,
   OperationLogCategory,
@@ -29,16 +30,23 @@ export class OperationLogsService {
     @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService
   ) {}
 
-  list(filters?: {
-    category?: OperationLogCategory;
-    status?: OperationLogStatus;
-    subjectType?: OperationLogSubject["type"];
-    subjectId?: string;
-    dateFrom?: string;
-    dateTo?: string;
-  }) {
+  list(
+    filters?: {
+      category?: OperationLogCategory;
+      status?: OperationLogStatus;
+      subjectType?: OperationLogSubject["type"];
+      subjectId?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    },
+    viewerBackofficeRole?: BackofficeRole
+  ) {
     return this.store.logs
       .filter((entry) => {
+        if (viewerBackofficeRole !== "super_admin" && this.involvesHiddenBackofficeUser(entry)) {
+          return false;
+        }
+
         if (filters?.category && entry.category !== filters.category) {
           return false;
         }
@@ -81,25 +89,28 @@ export class OperationLogsService {
       .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
   }
 
-  detail(id: string) {
+  detail(id: string, viewerBackofficeRole?: BackofficeRole) {
     const log = this.store.logs.find((entry) => entry.id === id);
 
-    if (!log) {
+    if (!log || (viewerBackofficeRole !== "super_admin" && this.involvesHiddenBackofficeUser(log))) {
       throw new NotFoundException("未找到对应日志。");
     }
 
     return log;
   }
 
-  buildExport(filters?: {
-    category?: OperationLogCategory;
-    status?: OperationLogStatus;
-    subjectType?: OperationLogSubject["type"];
-    subjectId?: string;
-    dateFrom?: string;
-    dateTo?: string;
-  }) {
-    const logs = this.list(filters);
+  buildExport(
+    filters?: {
+      category?: OperationLogCategory;
+      status?: OperationLogStatus;
+      subjectType?: OperationLogSubject["type"];
+      subjectId?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    },
+    viewerBackofficeRole?: BackofficeRole
+  ) {
+    const logs = this.list(filters, viewerBackofficeRole);
     const rows = logs
       .map(
         (log) => `
@@ -278,8 +289,25 @@ export class OperationLogsService {
     }
   }
 
-  undo(id: string, actorUserId?: string) {
-    const log = this.detail(id);
+  private involvesHiddenBackofficeUser(log: OperationLogRecord) {
+    const possibleUserIds = [
+      log.actor.id,
+      log.primarySubject?.type === "user" ? log.primarySubject.id : undefined,
+      log.secondarySubject?.type === "user" ? log.secondarySubject.id : undefined,
+      typeof log.metadata?.userId === "string" ? log.metadata.userId : undefined,
+      typeof log.metadata?.targetUserId === "string" ? log.metadata.targetUserId : undefined,
+      typeof log.metadata?.confirmedByUserId === "string" ? log.metadata.confirmedByUserId : undefined,
+      typeof log.metadata?.undoneByUserId === "string" ? log.metadata.undoneByUserId : undefined
+    ].filter((value): value is string => Boolean(value));
+
+    return possibleUserIds.some((userId) => {
+      const user = this.store.users.find((entry) => entry.id === userId);
+      return this.store.isHiddenBackofficeUser(user);
+    });
+  }
+
+  undo(id: string, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
+    const log = this.detail(id, actorBackofficeRole);
 
     if (log.metadata?.undoState !== "undoable") {
       throw new BadRequestException("该日志记录不支持撤销。");

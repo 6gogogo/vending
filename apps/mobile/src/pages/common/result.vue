@@ -25,9 +25,9 @@ const resultMeta = computed(() => {
 
   if (status.value === "warning") {
     return {
-      label: "暂时无法领取",
+      label: "需要确认收费",
       symbol: "!",
-      suggestion: "请先查看原因，如次数已用完或不在开放时段，可稍后再试。"
+      suggestion: "超出免费额度的部分可继续领取，系统会按商品价格结算。"
     };
   }
 

@@ -1,7 +1,10 @@
 import { Body, Controller, Get, Inject, Patch, Post, Param, Req, UseGuards } from "@nestjs/common";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { RegionsService } from "./regions.service";
 
@@ -17,6 +20,7 @@ export class RegionsController {
   @Post()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   create(
     @Body() body: { name: string; sortOrder?: number; longitude?: number; latitude?: number },
     @Req() request: { authUser?: { id: string } }
@@ -27,6 +31,7 @@ export class RegionsController {
   @Patch(":id")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   update(
     @Param("id") id: string,
     @Body()

@@ -5,8 +5,9 @@ import { onLoad } from "@dcloudio/uni-app";
 import type { RegistrationApplicationProfile, RegistrationPhoneLookup, RegionRecord, UserRole } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
-import { useSmsCooldown } from "../../composables/useSmsCooldown";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
@@ -23,7 +24,6 @@ const regions = ref<RegionRecord[]>([]);
 const selectedRegionId = ref("");
 const lookup = ref<RegistrationPhoneLookup>();
 const lastLookupPhone = ref("");
-const { remainingSeconds, isCoolingDown, startCooldown } = useSmsCooldown(60);
 
 const form = reactive<RegistrationApplicationProfile>({
   name: "",
@@ -39,9 +39,9 @@ const form = reactive<RegistrationApplicationProfile>({
 });
 
 const roleOptions = [
-  { value: "special" as const, label: "受助用户" },
-  { value: "merchant" as const, label: "爱心商户" },
-  { value: "admin" as const, label: "管理员" }
+  { value: "special" as const, label: "受助用户", description: "用于公益领取", icon: "users" as const },
+  { value: "merchant" as const, label: "爱心商户", description: "用于补货捐赠", icon: "restock" as const },
+  { value: "admin" as const, label: "管理员", description: "用于审核巡检", icon: "review" as const }
 ];
 
 const activeRegions = computed(() => regions.value.filter((item) => item.status === "active"));
@@ -59,19 +59,27 @@ const hasPendingDraft = computed(
   () => lookup.value?.state === "pending" || lookup.value?.state === "rejected"
 );
 const helperMessage = computed(() => lookup.value?.message ?? "");
-const selectedRoleIndex = computed(() =>
-  Math.max(
-    0,
-    roleOptions.findIndex((item) => item.value === effectiveRole.value)
-  )
-);
 const selectedRegionLabel = computed(
   () => regionOptions.value.find((item) => item.value === selectedRegionId.value)?.label ?? "请选择区域"
 );
 const phoneValid = computed(() => /^1\d{10}$/.test(phone.value.trim()));
-const sendCodeLabel = computed(() =>
-  isCoolingDown.value ? `${remainingSeconds.value}s 后重发` : "获取验证码"
-);
+const registerSteps = computed(() => [
+  {
+    label: "提交资料",
+    description: phoneValid.value ? "手机号已填写" : "先验证手机号",
+    state: "current" as const
+  },
+  {
+    label: "等待审核",
+    description: hasPendingDraft.value ? "已有待审资料" : "工作人员处理",
+    state: hasPendingDraft.value ? "current" as const : "todo" as const
+  },
+  {
+    label: "审核后登录",
+    description: "通过后进入服务",
+    state: isApprovedPhone.value ? "done" as const : "todo" as const
+  }
+]);
 
 const applyProfile = (profile?: RegistrationApplicationProfile) => {
   form.name = profile?.name ?? "";
@@ -147,16 +155,10 @@ const sendCode = async () => {
     return;
   }
 
-  if (isCoolingDown.value) {
-    showOperationFailure(new Error(`请在 ${remainingSeconds.value}s 后重试`));
-    return;
-  }
-
   sendingCode.value = true;
   try {
     const response = await mobileApi.requestCode(phone.value.trim(), "register");
     previewCode.value = response.previewCode ?? "";
-    startCooldown();
     showOperationSuccess();
   } catch (error) {
     showOperationFailure(error);
@@ -309,48 +311,49 @@ onLoad(async (query) => {
 
 <template>
   <MobileShell eyebrow="注册申请" title="提交注册申请" subtitle="填写必要信息，工作人员审核通过后即可使用。">
-    <GlassCard tone="accent">
+    <GlassCard tone="accent" class="register-card">
       <view class="vm-stack">
-        <view class="application-steps">
-          <text class="vm-status vm-status--pending">提交资料</text>
-          <text class="vm-status vm-status--pending">等待审核</text>
-          <text class="vm-status vm-status--certified">审核通过后登录</text>
-        </view>
+        <FlowSteps :steps="registerSteps" />
 
-        <view class="vm-field">
-          <text class="vm-field__label">手机号</text>
-          <input
-            v-model="phone"
-            class="vm-field__input"
-            type="number"
-            maxlength="11"
-            placeholder="请输入 11 位手机号"
-          />
-        </view>
-
-        <view class="vm-field">
-          <view class="field-header">
-            <text class="vm-field__label">验证码</text>
-            <text class="vm-field__helper">提交时必填</text>
+        <view class="form-grid">
+          <view class="vm-field">
+            <text class="vm-field__label">手机号</text>
+            <view class="vm-field-shell">
+              <MenuIcon name="phone" size="sm" tone="neutral" />
+              <input
+                v-model="phone"
+                class="vm-field-shell__input"
+                type="number"
+                maxlength="11"
+                placeholder="请输入 11 位手机号"
+              />
+            </view>
           </view>
-          <input
-            v-model="code"
-            class="vm-field__input"
-            type="number"
-            maxlength="6"
-            placeholder="请输入验证码"
-          />
-        </view>
 
-        <view class="action-row">
-          <button
-            class="vm-button vm-button--ghost"
-            :disabled="sendingCode || isCoolingDown"
-            :loading="sendingCode"
-            @tap="sendCode"
-          >
-            {{ sendCodeLabel }}
-          </button>
+          <view class="vm-field">
+            <view class="field-header">
+              <text class="vm-field__label">验证码</text>
+              <text class="vm-field__helper">提交时必填</text>
+            </view>
+            <view class="vm-field-shell">
+              <MenuIcon name="code" size="sm" tone="neutral" />
+              <input
+                v-model="code"
+                class="vm-field-shell__input"
+                type="number"
+                maxlength="6"
+                placeholder="请输入验证码"
+              />
+              <button
+                class="vm-field-shell__button"
+                :disabled="sendingCode"
+                :loading="sendingCode"
+                @tap="sendCode"
+              >
+                获取验证码
+              </button>
+            </view>
+          </view>
         </view>
 
         <view v-if="previewCode" class="debug-box">
@@ -361,28 +364,50 @@ onLoad(async (query) => {
         <view v-if="helperMessage" class="status-box">
           <text class="status-box__value">{{ helperMessage }}</text>
         </view>
+      </view>
+    </GlassCard>
+
+    <GlassCard tone="quiet" class="register-card">
+      <view class="vm-stack">
+        <view class="section-heading">
+          <text class="section-heading__title">选择身份与区域</text>
+          <text class="vm-subtitle">选择后只显示该身份必填项，减少重复填写。</text>
+        </view>
 
         <view class="vm-field">
           <text class="vm-field__label">身份</text>
-          <picker :range="roleOptions" range-key="label" :value="selectedRoleIndex" @change="requestedRole = roleOptions[$event.detail.value]?.value ?? 'special'">
-            <view class="vm-field__input picker-value">
-              {{ roleOptions[selectedRoleIndex]?.label ?? "受助用户" }}
-            </view>
-          </picker>
+          <view class="role-segment">
+            <button
+              v-for="item in roleOptions"
+              :key="item.value"
+              class="role-option"
+              :class="{ 'role-option--active': effectiveRole === item.value }"
+              :disabled="Boolean(fixedRole)"
+              @tap="requestedRole = item.value"
+            >
+              <MenuIcon :name="item.icon" size="sm" :tone="effectiveRole === item.value ? 'accent' : 'neutral'" />
+              <view class="role-option__copy">
+                <text class="role-option__label">{{ item.label }}</text>
+                <text class="role-option__desc">{{ item.description }}</text>
+              </view>
+            </button>
+          </view>
         </view>
 
-        <view class="vm-field">
-          <text class="vm-field__label">{{ effectiveRole === "merchant" ? "联系人姓名" : "姓名" }}</text>
-          <input v-model="form.name" class="vm-field__input" placeholder="请输入姓名" />
-        </view>
+        <view class="form-grid">
+          <view class="vm-field">
+            <text class="vm-field__label">{{ effectiveRole === "merchant" ? "联系人姓名" : "姓名" }}</text>
+            <input v-model="form.name" class="vm-field__input" placeholder="请输入姓名" />
+          </view>
 
-        <view class="vm-field">
-          <text class="vm-field__label">区域</text>
-          <picker :range="regionOptions" range-key="label" :value="Math.max(0, regionOptions.findIndex((item) => item.value === selectedRegionId))" @change="selectedRegionId = regionOptions[$event.detail.value]?.value ?? ''">
-            <view class="vm-field__input picker-value">
-              {{ selectedRegionLabel }}
-            </view>
-          </picker>
+          <view class="vm-field">
+            <text class="vm-field__label">区域</text>
+            <picker :range="regionOptions" range-key="label" :value="Math.max(0, regionOptions.findIndex((item) => item.value === selectedRegionId))" @change="selectedRegionId = regionOptions[$event.detail.value]?.value ?? ''">
+              <view class="vm-field__input picker-value">
+                {{ selectedRegionLabel }}
+              </view>
+            </picker>
+          </view>
         </view>
 
         <template v-if="effectiveRole === 'merchant'">
@@ -410,7 +435,11 @@ onLoad(async (query) => {
             <input v-model="form.title" class="vm-field__input" placeholder="请输入职务" />
           </view>
         </template>
+      </view>
+    </GlassCard>
 
+    <GlassCard tone="quiet" class="register-card">
+      <view class="vm-stack">
         <view class="vm-field">
           <text class="vm-field__label">备注（选填）</text>
           <textarea
@@ -421,16 +450,22 @@ onLoad(async (query) => {
           />
         </view>
 
-        <button class="vm-button" :loading="submitting" @tap="submit">
-          {{ hasPendingDraft ? "覆盖更新并重新提交" : "提交注册资料" }}
-        </button>
-        <button class="vm-button vm-button--ghost" @tap="goLogin">已有账号，直接登录</button>
+        <view class="submit-actions">
+          <button class="vm-button" :loading="submitting" @tap="submit">
+            {{ hasPendingDraft ? "覆盖更新并重新提交" : "提交注册资料" }}
+          </button>
+          <button class="vm-button vm-button--ghost" @tap="goLogin">已有账号，直接登录</button>
+        </view>
       </view>
     </GlassCard>
   </MobileShell>
 </template>
 
 <style scoped>
+.register-card {
+  overflow: hidden;
+}
+
 .field-header {
   display: flex;
   align-items: center;
@@ -439,24 +474,108 @@ onLoad(async (query) => {
 }
 
 .vm-field__helper,
+.debug-box__label,
+.section-heading__title {
+  line-height: 1.35;
+}
+
+.vm-field__helper,
 .debug-box__label {
   font-size: 22rpx;
   color: var(--vm-text-soft);
 }
 
-.action-row {
+.section-heading {
   display: grid;
-  gap: 16rpx;
+  gap: 8rpx;
 }
 
-.application-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
+.section-heading__title {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.form-grid,
+.submit-actions {
+  display: grid;
+  gap: 18rpx;
 }
 
 .picker-value {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+}
+
+.role-segment {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.role-option {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 10rpx;
+  min-height: 144rpx;
+  padding: 16rpx 10rpx;
+  border-radius: 22rpx;
+  border: 1rpx solid var(--vm-line-strong);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--vm-text);
+}
+
+.role-option--active {
+  border-color: var(--vm-accent-line);
+  background: var(--vm-accent-bg);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.78);
+}
+
+.role-option[disabled] {
+  opacity: 1;
+}
+
+.role-option__copy {
+  display: grid;
+  gap: 4rpx;
+  justify-items: center;
+  text-align: center;
+}
+
+.role-option__label {
+  font-size: 24rpx;
+  line-height: 1.25;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.role-option__desc {
+  font-size: 20rpx;
+  line-height: 1.35;
+  color: var(--vm-text-soft);
+}
+
+.debug-box,
+.status-box {
+  display: grid;
+  gap: 8rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid var(--vm-line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.status-box__value {
+  font-size: 25rpx;
+  line-height: 1.55;
+  color: var(--vm-text);
+}
+
+@media screen and (min-width: 720px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

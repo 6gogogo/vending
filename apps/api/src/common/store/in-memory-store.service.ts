@@ -2,8 +2,10 @@ import { Injectable } from "@nestjs/common";
 
 import {
   cloneSeedState,
+  resolveBackofficePermissions,
   type BatchConsumptionTrace,
   type AlertTask,
+  type BackofficePermission,
   type BackofficeRole,
   type CabinetAccessRule,
   type CabinetEventRecord,
@@ -25,6 +27,7 @@ import {
   type OperationLogRecord,
   type PaymentOrderRecord,
   type PaymentRefundRecord,
+  type PlatformTenantRecord,
   type RegionRecord,
   type RegistrationApplication,
   type ReservationSettings,
@@ -60,11 +63,25 @@ interface BatchConsumptionEntry {
 
 const MAX_CALLBACK_LOGS = 1000;
 const NEGATIVE_STOCK_BALANCE_NOTE = "库存透支调整";
-const DEFAULT_SUPER_ADMIN_USERNAME = "admin";
-const DEFAULT_SUPER_ADMIN_PASSWORD = "admin";
-const DEFAULT_SUPER_ADMIN_PHONE = "13800000001";
-const DEFAULT_SUPER_ADMIN_NAME = "超级管理员";
+const HIDDEN_BACKOFFICE_USER_TAG = "hidden-backoffice";
+const SUPER_ADMIN_TAG = "super-admin";
+const DEFAULT_SUPER_ADMIN_USER_ID = "backoffice-super-admin";
+const LEGACY_SUPER_ADMIN_USER_ID = "admin-root";
+const DEFAULT_SUPER_ADMIN_USERNAME = "super";
+const DEFAULT_SUPER_ADMIN_PASSWORD = "super123";
+const DEFAULT_SUPER_ADMIN_PHONE = "13900000000";
+const DEFAULT_SUPER_ADMIN_NAME = "服务商平台账号";
+const DEFAULT_ADMIN_USERNAME = "admin";
+const DEFAULT_ADMIN_PASSWORD = "admin";
+const DEFAULT_ADMIN_PHONE = "13800000001";
+const DEFAULT_ADMIN_NAME = "街道管理员";
+const DEFAULT_MERCHANT_USERNAME = "merchant";
+const DEFAULT_MERCHANT_PASSWORD = "merchant123";
+const DEFAULT_MERCHANT_PHONE = "13800000004";
+const DEFAULT_MERCHANT_NAME = "鲜食爱心商户";
 const DEFAULT_SUPER_ADMIN_REGION_NAME = "系统管理";
+const DEFAULT_TENANT_ID = "tenant-a";
+const DEFAULT_TENANT_NAME = "A 公司示范实例";
 
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
@@ -102,6 +119,28 @@ export class InMemoryStoreService {
   };
   readonly alerts: AlertTask[] = this.seed.alerts;
   readonly logs: OperationLogRecord[] = this.seed.logs.map((entry) => this.decorateStoredLog(entry));
+  readonly platformTenants: PlatformTenantRecord[] = [
+    {
+      id: DEFAULT_TENANT_ID,
+      code: "company-a",
+      name: DEFAULT_TENANT_NAME,
+      status: "active",
+      instanceUrl: "https://a.example.com",
+      contactName: "A 公司管理员",
+      planName: "正式版",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    },
+    {
+      id: "tenant-b",
+      code: "company-b",
+      name: "B 公司试运行实例",
+      status: "trial",
+      instanceUrl: "https://b.example.com",
+      contactName: "B 公司管理员",
+      planName: "试用版",
+      createdAt: "2026-03-01T00:00:00.000Z"
+    }
+  ];
 
   readonly verificationCodes = new Map<string, VerificationRecord>();
   readonly sessions = new Map<string, SessionRecord>();
@@ -245,16 +284,29 @@ export class InMemoryStoreService {
     return token;
   }
 
-  createBackofficeSession(user: UserRecord, backofficeRole: BackofficeRole) {
+  createBackofficeSession(user: UserRecord, backofficeRole: BackofficeRole, tenantId?: string) {
     const token = this.createId("session");
     this.sessions.set(token, {
       token,
       userId: user.id,
       role: user.role,
       backofficeRole,
+      tenantId,
       createdAt: new Date().toISOString()
     });
     return token;
+  }
+
+  listPlatformTenants() {
+    return this.platformTenants;
+  }
+
+  findPlatformTenantById(tenantId?: string) {
+    return tenantId ? this.platformTenants.find((entry) => entry.id === tenantId) : undefined;
+  }
+
+  getDefaultTenantId() {
+    return DEFAULT_TENANT_ID;
   }
 
   createDraftSession(payload: {
@@ -366,7 +418,9 @@ export class InMemoryStoreService {
         return false;
       }
 
-      return this.users.some((user) => this.isUserValidForBackofficeRole(user, entry.role));
+      return this.users.some(
+        (user) => user.id === entry.userId && this.isUserValidForBackofficeRole(user, entry.role)
+      );
     });
   }
 
@@ -378,14 +432,37 @@ export class InMemoryStoreService {
 
   upsertBackofficeCredential(record: BackofficeCredentialRecord) {
     const existing = this.findBackofficeCredentialByUserId(record.userId, record.role);
+    const normalizedRecord = {
+      ...record,
+      permissions: record.permissions
+        ? resolveBackofficePermissions(record.role, record.permissions)
+        : undefined
+    };
 
     if (existing) {
-      Object.assign(existing, record);
+      Object.assign(existing, normalizedRecord);
       return existing;
     }
 
-    this.backofficeCredentials.unshift(record);
-    return record;
+    this.backofficeCredentials.unshift(normalizedRecord);
+    return normalizedRecord;
+  }
+
+  getBackofficePermissions(userId: string, role: BackofficeRole): BackofficePermission[] {
+    const credential = this.findBackofficeCredentialByUserId(userId, role);
+    return resolveBackofficePermissions(role, credential?.permissions);
+  }
+
+  getBackofficeSessionPermissions(session?: SessionRecord): BackofficePermission[] {
+    if (!session?.backofficeRole) {
+      return [];
+    }
+
+    return this.getBackofficePermissions(session.userId, session.backofficeRole);
+  }
+
+  getBackofficeScope(role: BackofficeRole) {
+    return role === "super_admin" ? "provider" : "tenant";
   }
 
   isUserValidForBackofficeRole(user: UserRecord, role: BackofficeRole) {
@@ -393,11 +470,24 @@ export class InMemoryStoreService {
       return false;
     }
 
-    if (role === "super_admin") {
+    if (role === "super_admin" || role === "admin") {
       return user.role === "admin";
     }
 
     return user.role === "merchant";
+  }
+
+  isHiddenBackofficeUser(user?: UserRecord) {
+    if (!user) {
+      return false;
+    }
+
+    return (
+      user.tags.includes(HIDDEN_BACKOFFICE_USER_TAG) ||
+      this.backofficeCredentials.some(
+        (entry) => entry.userId === user.id && entry.role === "super_admin"
+      )
+    );
   }
 
   updateDraftSession(
@@ -1425,30 +1515,112 @@ export class InMemoryStoreService {
 
   private ensureBootstrapAdmin() {
     let changed = false;
-    let adminUser = this.users.find((entry) => entry.role === "admin" && entry.status === "active");
+    let superAdminUser =
+      this.users.find((entry) => entry.id === DEFAULT_SUPER_ADMIN_USER_ID) ??
+      this.users.find(
+        (entry) =>
+          entry.id === LEGACY_SUPER_ADMIN_USER_ID &&
+          entry.role === "admin" &&
+          entry.tags.includes(SUPER_ADMIN_TAG)
+      ) ??
+      this.users.find(
+        (entry) =>
+          entry.role === "admin" &&
+          entry.tags.includes(SUPER_ADMIN_TAG) &&
+          entry.tags.includes(HIDDEN_BACKOFFICE_USER_TAG)
+      );
 
-    if (!adminUser) {
-      adminUser = {
-        id: "admin-root",
+    if (!superAdminUser) {
+      superAdminUser = {
+        id: DEFAULT_SUPER_ADMIN_USER_ID,
         role: "admin",
         phone: DEFAULT_SUPER_ADMIN_PHONE,
         name: DEFAULT_SUPER_ADMIN_NAME,
         status: "active",
         regionName: DEFAULT_SUPER_ADMIN_REGION_NAME,
         neighborhood: DEFAULT_SUPER_ADMIN_REGION_NAME,
-        tags: ["super-admin"],
+        tags: [SUPER_ADMIN_TAG, HIDDEN_BACKOFFICE_USER_TAG],
         mobileProfileCompleted: false
+      };
+      this.users.unshift(superAdminUser);
+      changed = true;
+    } else {
+      const nextTags = Array.from(
+        new Set([...superAdminUser.tags, SUPER_ADMIN_TAG, HIDDEN_BACKOFFICE_USER_TAG])
+      );
+
+      if (
+        superAdminUser.phone !== DEFAULT_SUPER_ADMIN_PHONE ||
+        superAdminUser.name !== DEFAULT_SUPER_ADMIN_NAME ||
+        superAdminUser.regionName !== DEFAULT_SUPER_ADMIN_REGION_NAME ||
+        superAdminUser.neighborhood !== DEFAULT_SUPER_ADMIN_REGION_NAME ||
+        nextTags.length !== superAdminUser.tags.length
+      ) {
+        superAdminUser.phone = DEFAULT_SUPER_ADMIN_PHONE;
+        superAdminUser.name = DEFAULT_SUPER_ADMIN_NAME;
+        superAdminUser.regionName = DEFAULT_SUPER_ADMIN_REGION_NAME;
+        superAdminUser.neighborhood = DEFAULT_SUPER_ADMIN_REGION_NAME;
+        superAdminUser.tags = nextTags;
+        changed = true;
+      }
+    }
+
+    changed = this.normalizeBackofficeBootstrapCredentials(superAdminUser.id) || changed;
+
+    let adminUser = this.users.find(
+      (entry) =>
+        entry.role === "admin" &&
+        entry.status === "active" &&
+        !this.isHiddenBackofficeUser(entry)
+    );
+
+    if (!adminUser) {
+      adminUser = {
+        id: "admin-001",
+        role: "admin",
+        phone: DEFAULT_ADMIN_PHONE,
+        name: DEFAULT_ADMIN_NAME,
+        status: "active",
+        regionName: DEFAULT_SUPER_ADMIN_REGION_NAME,
+        neighborhood: DEFAULT_SUPER_ADMIN_REGION_NAME,
+        tags: ["运营"],
+        mobileProfileCompleted: false,
+        profile: {
+          organization: "扬名街道办",
+          title: "值班管理员"
+        }
       };
       this.users.unshift(adminUser);
       changed = true;
     }
 
+    let merchantUser = this.users.find((entry) => entry.role === "merchant" && entry.status === "active");
+
+    if (!merchantUser) {
+      merchantUser = {
+        id: "merchant-001",
+        role: "merchant",
+        phone: DEFAULT_MERCHANT_PHONE,
+        name: DEFAULT_MERCHANT_NAME,
+        status: "active",
+        regionName: DEFAULT_SUPER_ADMIN_REGION_NAME,
+        tags: ["食品捐赠"],
+        mobileProfileCompleted: false,
+        merchantProfile: {
+          donationWindowDays: 2,
+          defaultDeviceCodes: []
+        }
+      };
+      this.users.unshift(merchantUser);
+      changed = true;
+    }
+
     if (!this.findAdminCredentialByUserId(adminUser.id)) {
-      const hashedPassword = hashAdminPassword(DEFAULT_SUPER_ADMIN_PASSWORD);
+      const hashedPassword = hashAdminPassword(DEFAULT_ADMIN_PASSWORD);
 
       this.adminCredentials.unshift({
         userId: adminUser.id,
-        username: DEFAULT_SUPER_ADMIN_USERNAME,
+        username: DEFAULT_ADMIN_USERNAME,
         passwordSalt: hashedPassword.salt,
         passwordHash: hashedPassword.hash,
         usesDefaultPassword: true,
@@ -1457,27 +1629,130 @@ export class InMemoryStoreService {
       changed = true;
     }
 
-    if (!this.findBackofficeCredentialByUserId(adminUser.id, "super_admin")) {
-      const existingAdminCredential = this.findAdminCredentialByUserId(adminUser.id);
-      const hashedPassword = existingAdminCredential
-        ? {
-            salt: existingAdminCredential.passwordSalt,
-            hash: existingAdminCredential.passwordHash
-          }
-        : hashAdminPassword(DEFAULT_SUPER_ADMIN_PASSWORD);
+    changed =
+      this.ensureDefaultBackofficeCredential(
+      superAdminUser,
+      "super_admin",
+      DEFAULT_SUPER_ADMIN_USERNAME,
+      DEFAULT_SUPER_ADMIN_PASSWORD
+      ) || changed;
+    changed =
+      this.ensureDefaultBackofficeCredential(
+      adminUser,
+      "admin",
+      DEFAULT_ADMIN_USERNAME,
+      DEFAULT_ADMIN_PASSWORD,
+      this.findAdminCredentialByUserId(adminUser.id),
+      DEFAULT_TENANT_ID
+    ) || changed;
+    changed =
+      this.ensureDefaultBackofficeCredential(
+        merchantUser,
+        "merchant",
+        DEFAULT_MERCHANT_USERNAME,
+        DEFAULT_MERCHANT_PASSWORD,
+        undefined,
+        DEFAULT_TENANT_ID
+      ) || changed;
 
-      this.backofficeCredentials.unshift({
-        userId: adminUser.id,
-        username: DEFAULT_SUPER_ADMIN_USERNAME,
-        role: "super_admin",
-        passwordSalt: hashedPassword.salt,
-        passwordHash: hashedPassword.hash,
-        usesDefaultPassword: true,
-        passwordUpdatedAt: new Date().toISOString()
-      });
-      changed = true;
+    return changed;
+  }
+
+  private normalizeBackofficeBootstrapCredentials(superAdminUserId: string) {
+    let changed = false;
+
+    for (const credential of this.backofficeCredentials) {
+      if (credential.role === "super_admin" && credential.userId !== superAdminUserId) {
+        credential.role = "admin";
+        changed = true;
+      }
+
+      if (credential.role === "super_admin") {
+        if (credential.tenantId) {
+          delete credential.tenantId;
+          changed = true;
+        }
+        continue;
+      }
+
+      if (!credential.tenantId) {
+        credential.tenantId = DEFAULT_TENANT_ID;
+        changed = true;
+      }
+    }
+
+    const seen = new Set<string>();
+    const uniqueCredentials: BackofficeCredentialRecord[] = [];
+
+    for (const credential of this.backofficeCredentials) {
+      const key = `${credential.userId}:${credential.role}`;
+
+      if (seen.has(key)) {
+        changed = true;
+        continue;
+      }
+
+      seen.add(key);
+      uniqueCredentials.push(credential);
+    }
+
+    if (uniqueCredentials.length !== this.backofficeCredentials.length) {
+      this.backofficeCredentials.splice(0, this.backofficeCredentials.length, ...uniqueCredentials);
     }
 
     return changed;
+  }
+
+  private ensureDefaultBackofficeCredential(
+    user: UserRecord,
+    role: BackofficeRole,
+    username: string,
+    password: string,
+    existingCredential?: Pick<BackofficeCredentialRecord, "passwordSalt" | "passwordHash">,
+    tenantId?: string
+  ) {
+    const existing = this.findBackofficeCredentialByUserId(user.id, role);
+
+    if (existing) {
+      if (tenantId && existing.tenantId !== tenantId) {
+        existing.tenantId = tenantId;
+        return true;
+      }
+
+      if (
+        role === "super_admin" &&
+        existing.usesDefaultPassword &&
+        existing.username === DEFAULT_ADMIN_USERNAME
+      ) {
+        const hashedPassword = hashAdminPassword(password);
+        existing.username = username;
+        existing.passwordSalt = hashedPassword.salt;
+        existing.passwordHash = hashedPassword.hash;
+        existing.passwordUpdatedAt = new Date().toISOString();
+        return true;
+      }
+
+      return false;
+    }
+
+    const hashedPassword = existingCredential
+      ? {
+          salt: existingCredential.passwordSalt,
+          hash: existingCredential.passwordHash
+        }
+      : hashAdminPassword(password);
+
+    this.backofficeCredentials.unshift({
+      userId: user.id,
+      username,
+      role,
+      tenantId,
+      passwordSalt: hashedPassword.salt,
+      passwordHash: hashedPassword.hash,
+      usesDefaultPassword: true,
+      passwordUpdatedAt: new Date().toISOString()
+    });
+
+    return true;
   }
 }

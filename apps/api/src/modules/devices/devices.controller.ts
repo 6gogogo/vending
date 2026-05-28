@@ -3,7 +3,10 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, 
 import type { DeviceStatus, GoodsCategory } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { DevicesService } from "./devices.service";
 
@@ -27,6 +30,7 @@ export class DevicesController {
   @Post()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   upsert(
     @Body()
     body: {
@@ -53,6 +57,7 @@ export class DevicesController {
   @Delete(":deviceCode")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   remove(
     @Param("deviceCode") deviceCode: string,
     @Req() request: { authUser?: { id: string } }
@@ -63,6 +68,7 @@ export class DevicesController {
   @Get(":deviceCode/monitoring")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view", "warehouse:view")
   monitoring(@Param("deviceCode") deviceCode: string) {
     return ok(this.devicesService.monitoringDetail(deviceCode));
   }
@@ -75,6 +81,7 @@ export class DevicesController {
   @Post(":deviceCode/refresh")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   async refresh(
     @Param("deviceCode") deviceCode: string,
     @Req() request: { authUser?: { id: string } }
@@ -85,6 +92,7 @@ export class DevicesController {
   @Post(":deviceCode/remote-open")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   async remoteOpen(
     @Param("deviceCode") deviceCode: string,
     @Req() request: { authUser?: { id: string } },
@@ -99,6 +107,7 @@ export class DevicesController {
   @Post(":deviceCode/goods")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   addGoods(
     @Param("deviceCode") deviceCode: string,
     @Body()
@@ -114,6 +123,7 @@ export class DevicesController {
   @Delete(":deviceCode/goods/:goodsId")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   removeGoods(
     @Param("deviceCode") deviceCode: string,
     @Param("goodsId") goodsId: string,
@@ -129,6 +139,7 @@ export class DevicesController {
   @Patch(":deviceCode/location")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   updateLocation(
     @Param("deviceCode") deviceCode: string,
     @Body()
@@ -146,6 +157,7 @@ export class DevicesController {
   @Post("mock/upsert")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   upsertMockDevice(
     @Body()
     body: {

@@ -3,7 +3,10 @@ import { Body, Controller, Get, Inject, Patch, Post, Query, Req, UseGuards } fro
 import type { AiOperationsReportType, AiProviderConfigPayload, DataMonitorRange, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AiInsightsService } from "./ai-insights.service";
 
@@ -20,16 +23,19 @@ export class AiInsightsController {
   }
 
   @Patch("config")
+  @AllowedBackofficePermissions("ai-insights:manage")
   saveProviderConfig(@Body() body: AiProviderConfigPayload) {
     return ok(this.aiInsightsService.saveProviderConfig(body), "配置已保存");
   }
 
   @Post("test")
+  @AllowedBackofficePermissions("ai-insights:manage")
   async testProvider() {
     return ok(await this.aiInsightsService.testProvider(), "测试完成");
   }
 
   @Post("event-diagnosis")
+  @AllowedBackofficePermissions("ai-insights:view")
   async eventDiagnosis(
     @Body()
     body: {
@@ -42,6 +48,7 @@ export class AiInsightsController {
   }
 
   @Get("operations-report")
+  @AllowedBackofficePermissions("ai-insights:view")
   async operationsReport(
     @Query("dateKey") dateKey?: string,
     @Query("reportType") reportType?: AiOperationsReportType
@@ -50,6 +57,7 @@ export class AiInsightsController {
   }
 
   @Get("restock-layout-suggestions")
+  @AllowedBackofficePermissions("ai-insights:view")
   async restockLayoutSuggestions(
     @Query("dateKey") dateKey?: string,
     @Query("range") range?: DataMonitorRange
@@ -58,6 +66,7 @@ export class AiInsightsController {
   }
 
   @Post("feedback-draft")
+  @AllowedBackofficePermissions("ai-insights:view")
   async feedbackDraft(
     @Body()
     body: {
@@ -98,6 +107,7 @@ export class AiInsightsController {
   }
 
   @Post("admin-custom-query")
+  @AllowedBackofficePermissions("ai-insights:view")
   async adminCustomQuery(
     @Body()
     body: {
@@ -124,6 +134,7 @@ export class AiInsightsController {
   }
 
   @Get("policy-optimization")
+  @AllowedBackofficePermissions("ai-insights:view")
   async policyOptimization(
     @Query("dateKey") dateKey?: string,
     @Query("range") range?: DataMonitorRange

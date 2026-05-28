@@ -1,5 +1,57 @@
 export type UserRole = "admin" | "merchant" | "special";
-export type BackofficeRole = "super_admin" | "merchant";
+export type BackofficeRole = "super_admin" | "admin" | "merchant";
+export type BackofficeScope = "provider" | "tenant";
+export const BACKOFFICE_PERMISSIONS = [
+  "platform-overview:view",
+  "platform-tenants:view",
+  "merchant-workbench:view",
+  "dashboard:view",
+  "goods:view",
+  "warehouse:view",
+  "devices:view",
+  "users:view",
+  "operation-logs:view",
+  "operation-logs:export",
+  "system-audit:view",
+  "system-audit:export",
+  "analytics:data-monitor:view",
+  "ai-insights:view",
+  "ai-insights:manage",
+  "system-settings:view",
+  "system-settings:update",
+  "backoffice-credentials:manage"
+] as const;
+export type BackofficePermission = (typeof BACKOFFICE_PERMISSIONS)[number];
+
+export const BACKOFFICE_ROLE_DEFAULT_PERMISSIONS = {
+  super_admin: BACKOFFICE_PERMISSIONS,
+  admin: [
+    "dashboard:view",
+    "goods:view",
+    "warehouse:view",
+    "devices:view",
+    "users:view",
+    "operation-logs:view",
+    "operation-logs:export"
+  ],
+  merchant: ["merchant-workbench:view"]
+} satisfies Record<BackofficeRole, readonly BackofficePermission[]>;
+
+export const isBackofficePermission = (permission: string): permission is BackofficePermission =>
+  (BACKOFFICE_PERMISSIONS as readonly string[]).includes(permission);
+
+export const normalizeBackofficePermissions = (
+  permissions?: readonly string[]
+): BackofficePermission[] =>
+  Array.from(new Set((permissions ?? []).filter(isBackofficePermission)));
+
+export const resolveBackofficePermissions = (
+  role: BackofficeRole,
+  permissions?: readonly string[]
+): BackofficePermission[] =>
+  permissions
+    ? normalizeBackofficePermissions(permissions)
+    : [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS[role]];
 export type MobileDisplayRole = "admin" | "merchant" | "normal";
 export type RegistrationStatus = "pending" | "approved" | "rejected";
 export type PaymentProvider = "wechat" | "alipay";
@@ -183,6 +235,10 @@ export interface BackofficeSessionSnapshot {
     id: string;
     role: Extract<UserRole, "admin" | "merchant">;
     backofficeRole: BackofficeRole;
+    scope: BackofficeScope;
+    tenantId?: string;
+    tenantName?: string;
+    permissions: BackofficePermission[];
     name: string;
     phone: string;
     tags: string[];
@@ -192,6 +248,54 @@ export interface BackofficeSessionSnapshot {
     usesDefaultPassword: boolean;
     passwordUpdatedAt: string;
   };
+}
+
+export type PlatformTenantStatus = "active" | "trial" | "paused";
+
+export interface PlatformTenantRecord {
+  id: string;
+  code: string;
+  name: string;
+  status: PlatformTenantStatus;
+  instanceUrl?: string;
+  contactName?: string;
+  contactPhone?: string;
+  planName?: string;
+  createdAt: string;
+}
+
+export interface PlatformTenantUsageSummary {
+  tenant: PlatformTenantRecord;
+  metrics: {
+    users: number;
+    merchants: number;
+    devices: number;
+    onlineDevices: number;
+    inventoryUnits: number;
+    pickupCount: number;
+    donationCount: number;
+    pendingTasks: number;
+    operationLogs: number;
+  };
+  lastActivityAt?: string;
+}
+
+export interface PlatformOverviewSnapshot {
+  generatedAt: string;
+  totals: {
+    tenants: number;
+    activeTenants: number;
+    users: number;
+    merchants: number;
+    devices: number;
+    onlineDevices: number;
+    inventoryUnits: number;
+    pickupCount: number;
+    donationCount: number;
+    pendingTasks: number;
+    operationLogs: number;
+  };
+  tenants: PlatformTenantUsageSummary[];
 }
 
 export interface PaymentOrderRecord {

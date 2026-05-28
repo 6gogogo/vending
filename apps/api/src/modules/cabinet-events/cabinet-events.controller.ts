@@ -9,7 +9,10 @@ import type {
 } from "@vm/shared-types";
 
 import { ack, ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { CabinetEventsService } from "./cabinet-events.service";
 
@@ -35,6 +38,7 @@ export class CabinetEventsController {
   @Get("callback-logs")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("system-audit:view")
   callbackLogs(
     @Query("limit") limit?: string,
     @Query("deviceCode") deviceCode?: string
@@ -92,6 +96,7 @@ export class CabinetEventsController {
   @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   async notifyPaymentSuccess(
     @Body()
     body: SmartVmPaymentPayload & {
@@ -109,6 +114,7 @@ export class CabinetEventsController {
   @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:view")
   confirmBilling(
     @Param("eventId") eventId: string,
     @Body() body: { note?: string },

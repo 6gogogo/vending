@@ -128,6 +128,10 @@ const exportSystemLogs = async () => {
     return;
   }
 
+  if (!sessionStore.can("system-audit:export")) {
+    return;
+  }
+
   exportingSystem.value = true;
   try {
     const exported = await adminApi.exportSystemAuditLog(sessionStore.token);
@@ -241,7 +245,12 @@ onMounted(async () => {
           <button class="admin-button admin-button--ghost" :disabled="exporting" @click="exportLogs">
             {{ exporting ? "导出中" : "导出 Excel" }}
           </button>
-          <button class="admin-button admin-button--ghost" :disabled="exportingSystem" @click="exportSystemLogs">
+          <button
+            v-if="sessionStore.can('system-audit:export')"
+            class="admin-button admin-button--ghost"
+            :disabled="exportingSystem"
+            @click="exportSystemLogs"
+          >
             {{ exportingSystem ? "下载中" : "下载完整日志" }}
           </button>
         </div>

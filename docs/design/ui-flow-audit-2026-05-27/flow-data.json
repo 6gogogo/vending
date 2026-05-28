@@ -1,0 +1,369 @@
+{
+  "createdAt": "2026-05-27T07:59:53.413Z",
+  "specialPhone": "13968793213",
+  "merchantPhone": "13868793213",
+  "pendingPhone": "13768819285",
+  "pendingBeforeApprovalCount": 5,
+  "region": {
+    "id": "region-001",
+    "name": "扬名街道",
+    "status": "active",
+    "sortOrder": 1,
+    "createdAt": "2026-04-01T00:00:00.000Z",
+    "updatedAt": "2026-04-01T00:00:00.000Z"
+  },
+  "specialApp": {
+    "id": "application-mpnrxadzbkhqu",
+    "phone": "13968793213",
+    "requestedRole": "special",
+    "profile": {
+      "name": "流程测试受助",
+      "regionId": "region-001",
+      "regionName": "扬名街道",
+      "neighborhood": "扬名街道",
+      "note": "UI 全流程测试账号"
+    },
+    "status": "pending",
+    "createdAt": "2026-05-27T07:59:53.303Z",
+    "updatedAt": "2026-05-27T07:59:53.303Z"
+  },
+  "merchantApp": {
+    "id": "application-mpnrxaef7ehmp",
+    "phone": "13868793213",
+    "requestedRole": "merchant",
+    "profile": {
+      "name": "流程测试店长",
+      "merchantName": "流程测试爱心店",
+      "contactName": "流程测试店长",
+      "address": "公益路 27 号",
+      "regionId": "region-001",
+      "regionName": "扬名街道",
+      "neighborhood": "扬名街道",
+      "note": "UI 全流程测试商户"
+    },
+    "status": "pending",
+    "createdAt": "2026-05-27T07:59:53.319Z",
+    "updatedAt": "2026-05-27T07:59:53.319Z"
+  },
+  "sessions": {
+    "backoffice": {
+      "token": "session-mpnrxactq5ip6",
+      "user": {
+        "id": "admin-001",
+        "role": "admin",
+        "backofficeRole": "admin",
+        "scope": "tenant",
+        "tenantId": "tenant-a",
+        "tenantName": "A 公司示范实例",
+        "permissions": [
+          "dashboard:view",
+          "goods:view",
+          "warehouse:view",
+          "devices:view",
+          "users:view",
+          "operation-logs:view",
+          "operation-logs:export"
+        ],
+        "name": "街道管理员",
+        "phone": "13800000001",
+        "tags": [
+          "运营"
+        ]
+      },
+      "auth": {
+        "username": "admin",
+        "usesDefaultPassword": true,
+        "passwordUpdatedAt": "2026-05-21T10:34:41.092Z"
+      }
+    },
+    "special": {
+      "state": "approved",
+      "token": "session-mpnrxafas2275",
+      "user": {
+        "id": "special-mpnrxaewbufck",
+        "role": "special",
+        "name": "流程测试受助",
+        "phone": "13968793213",
+        "tags": []
+      },
+      "quota": {
+        "role": "special",
+        "limit": {
+          "role": "special",
+          "dailyLimit": 2,
+          "categoryLimit": {
+            "food": 1,
+            "drink": 1,
+            "daily": 1
+          },
+          "requiresPhoneMatch": true,
+          "allowExpirySetup": false
+        },
+        "remainingToday": {
+          "food": 1,
+          "drink": 1,
+          "daily": 1
+        },
+        "remainingByGoods": {},
+        "usedCount": 0,
+        "activeWindows": []
+      }
+    },
+    "merchant": {
+      "state": "approved",
+      "token": "session-mpnrxafha8ubf",
+      "user": {
+        "id": "merchant-mpnrxaf3m3uid",
+        "role": "merchant",
+        "name": "流程测试爱心店",
+        "phone": "13868793213",
+        "tags": []
+      },
+      "quota": {
+        "role": "merchant",
+        "remainingToday": {},
+        "limit": {
+          "role": "merchant",
+          "dailyLimit": 8,
+          "categoryLimit": {},
+          "requiresPhoneMatch": true,
+          "allowExpirySetup": true
+        }
+      }
+    },
+    "seededSpecial": {
+      "state": "approved",
+      "token": "session-mpnrxagjy5z1t",
+      "user": {
+        "id": "special-001",
+        "role": "special",
+        "name": "林阿姨",
+        "phone": "13800000002",
+        "tags": [
+          "老人",
+          "重点关怀"
+        ]
+      },
+      "quota": {
+        "role": "special",
+        "limit": {
+          "dailyLimit": 2,
+          "categoryLimit": {
+            "food": 1,
+            "drink": 1
+          }
+        },
+        "remainingToday": {
+          "food": 1
+        },
+        "remainingByGoods": {
+          "goods-1003": 1
+        },
+        "usedCount": 0,
+        "activeWindows": [
+          {
+            "policyId": "user-policy-1776012950239-866",
+            "policyName": "233",
+            "weekdays": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "dateKey": "2026-05-27",
+            "startHour": 8,
+            "endHour": 19,
+            "goodsLimits": [
+              {
+                "goodsId": "goods-1003",
+                "goodsName": "方便面",
+                "category": "food",
+                "quantity": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "seededMerchant": {
+      "state": "approved",
+      "token": "session-mpnrxagwi5209",
+      "user": {
+        "id": "merchant-001",
+        "role": "merchant",
+        "name": "王店长",
+        "phone": "13800000004",
+        "tags": [
+          "食品捐赠"
+        ]
+      },
+      "quota": {
+        "role": "merchant",
+        "remainingToday": {},
+        "limit": {
+          "role": "merchant",
+          "dailyLimit": 8,
+          "categoryLimit": {},
+          "requiresPhoneMatch": true,
+          "allowExpirySetup": true
+        }
+      }
+    }
+  },
+  "device": {
+    "deviceCode": "91120149",
+    "name": "测试平台柜机 91120149",
+    "location": "比赛测试平台指定柜机",
+    "address": "测试平台设备编号 91120149",
+    "longitude": 120.28921,
+    "latitude": 31.55224,
+    "status": "online",
+    "lastSeenAt": "2026-04-13T07:03:57.881Z",
+    "doors": [
+      {
+        "doorNum": "1",
+        "label": "右门",
+        "goods": [
+          {
+            "goodsCode": "690000000002",
+            "goodsId": "goods-1002",
+            "name": "牛奶",
+            "category": "drink",
+            "price": 0,
+            "imageUrl": "https://dummyimage.com/160x160/c8f7e7/0b1220.png",
+            "stock": 1,
+            "expiresAt": "2026-04-09T08:00:00.000Z",
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9110012",
+            "goodsCode": "6920459908501",
+            "name": "每日C阳光甜橙味_500ml",
+            "price": 300,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902924486_420179.jpeg",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9110011",
+            "goodsCode": "6920584472021",
+            "name": "旺仔牛奶原味245ml",
+            "price": 500,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902670174_801549.png",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9120003",
+            "goodsCode": "4897036691175",
+            "name": "魔爪黑罐原味_330ml",
+            "price": 500,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1692078757802_c3f2bc.jpeg",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9120002",
+            "goodsCode": "6928804010145",
+            "name": "雪碧罐装_330ml",
+            "price": 300,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1740712544515_2b0e9f.jpg",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9110007",
+            "goodsCode": "6922456851927",
+            "name": "康师傅青梅绿茶_500ml",
+            "price": 300,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653902210535_620415.jpeg",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9110005",
+            "goodsCode": "6954767460116",
+            "name": "怡泉+C柠檬瓶装_400ml",
+            "price": 500,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653901881544_ffad8f.jpeg",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9120001",
+            "goodsCode": "6901939621240",
+            "name": "芬达橙味汽水罐装_330ml",
+            "price": 300,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653900598418_c2664b.jpeg",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          },
+          {
+            "goodsId": "9110016",
+            "goodsCode": "6921581596048",
+            "name": "三得利乌龙茶_500ml",
+            "price": 500,
+            "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653903367695_e2b0a1.jpeg",
+            "category": "daily",
+            "stock": 0,
+            "thresholdEnabled": false,
+            "expiringSoon": false
+          }
+        ]
+      }
+    ],
+    "runtime": {
+      "deviceCode": "91120149",
+      "doorState": "closed",
+      "lastRefreshAt": "2026-04-13T07:03:57.881Z",
+      "openedAfterLastCommand": false,
+      "lastCommandAt": "2026-04-13T06:14:55.531Z"
+    }
+  },
+  "template": {
+    "id": "catalog-9110016",
+    "ownerUserId": "system",
+    "goodsId": "9110016",
+    "goodsCode": "6921581596048",
+    "goodsName": "三得利乌龙茶_500ml",
+    "fullName": "三得利乌龙茶_500ml",
+    "category": "daily",
+    "defaultQuantity": 1,
+    "defaultShelfLifeDays": 2,
+    "imageUrl": "https://isf-files.oss-cn-qingdao.aliyuncs.com/open/goods/1653903367695_e2b0a1.jpeg",
+    "status": "active",
+    "createdAt": "2026-04-13T06:11:45.960Z",
+    "updatedAt": "2026-04-13T06:11:45.960Z"
+  },
+  "pendingApp": {
+    "id": "application-mpnrxugro1qdm",
+    "phone": "13768819285",
+    "requestedRole": "special",
+    "profile": {
+      "name": "待审视觉测试",
+      "regionId": "region-001",
+      "regionName": "扬名街道",
+      "neighborhood": "扬名街道",
+      "note": "H5 对齐审查待审核样例"
+    },
+    "status": "pending",
+    "createdAt": "2026-05-27T08:00:19.323Z",
+    "updatedAt": "2026-05-27T08:00:19.323Z"
+  }
+}

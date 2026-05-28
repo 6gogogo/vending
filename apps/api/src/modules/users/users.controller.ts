@@ -1,15 +1,19 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
-import type { UserRole } from "@vm/shared-types";
+import type { BackofficeRole, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { UsersService } from "./users.service";
 
 @Controller("users")
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
+@AllowedBackofficePermissions("users:view")
 export class UsersController {
   constructor(@Inject(UsersService) private readonly usersService: UsersService) {}
 
@@ -36,21 +40,25 @@ export class UsersController {
   }
 
   @Get()
-  list(@Query("role") role?: UserRole) {
-    return ok(this.usersService.list(role));
+  list(
+    @Query("role") role: UserRole | undefined,
+    @Req() request: { authUser?: { backofficeRole?: BackofficeRole } }
+  ) {
+    return ok(this.usersService.list(role, request.authUser?.backofficeRole));
   }
 
   @Get(":userId")
   detail(
     @Param("userId") userId: string,
-    @Query("month") month?: string,
-    @Query("date") date?: string
+    @Query("month") month: string | undefined,
+    @Query("date") date: string | undefined,
+    @Req() request: { authUser?: { backofficeRole?: BackofficeRole } }
   ) {
     return ok(
       this.usersService.detail(userId, {
         monthKey: month,
         dateKey: date
-      })
+      }, request.authUser?.backofficeRole)
     );
   }
 
@@ -72,17 +80,23 @@ export class UsersController {
         categoryLimit: Record<string, number>;
       };
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
   ) {
-    return ok(this.usersService.updateUser(userId, body, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.updateUser(userId, body, request.authUser?.id, request.authUser?.backofficeRole),
+      "操作成功"
+    );
   }
 
   @Delete(":userId")
   removeUser(
     @Param("userId") userId: string,
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
   ) {
-    return ok(this.usersService.removeUser(userId, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.removeUser(userId, request.authUser?.id, request.authUser?.backofficeRole),
+      "操作成功"
+    );
   }
 
   @Post("import")
@@ -113,9 +127,12 @@ export class UsersController {
         };
       };
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
   ) {
-    return ok(this.usersService.batchUpdate(body, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.batchUpdate(body, request.authUser?.id, request.authUser?.backofficeRole),
+      "操作成功"
+    );
   }
 
   @Post(":userId/manual-adjustment")
@@ -139,9 +156,12 @@ export class UsersController {
         quantity: number;
       }>;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
   ) {
-    return ok(this.usersService.manualAdjustment(userId, body, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.manualAdjustment(userId, body, request.authUser?.id, request.authUser?.backofficeRole),
+      "操作成功"
+    );
   }
 
   @Post(":userId/access-policies")
@@ -161,26 +181,45 @@ export class UsersController {
       status: "active" | "inactive";
       sourcePolicyId?: string;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
   ) {
-    return ok(this.usersService.saveAccessPolicy(userId, body, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.saveAccessPolicy(userId, body, request.authUser?.id, request.authUser?.backofficeRole),
+      "操作成功"
+    );
   }
 
   @Delete(":userId/access-policies/:policyId")
   deleteAccessPolicy(
     @Param("userId") userId: string,
     @Param("policyId") policyId: string,
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
   ) {
-    return ok(this.usersService.deleteAccessPolicy(userId, policyId, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.deleteAccessPolicy(
+        userId,
+        policyId,
+        request.authUser?.id,
+        request.authUser?.backofficeRole
+      ),
+      "操作成功"
+    );
   }
 
   @Post(":userId/access-policies/:policyId/apply-now")
   applyAccessPolicyNow(
     @Param("userId") userId: string,
     @Param("policyId") policyId: string,
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
   ) {
-    return ok(this.usersService.applyAccessPolicyNow(userId, policyId, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.applyAccessPolicyNow(
+        userId,
+        policyId,
+        request.authUser?.id,
+        request.authUser?.backofficeRole
+      ),
+      "操作成功"
+    );
   }
 }

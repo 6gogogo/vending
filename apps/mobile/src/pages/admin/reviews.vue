@@ -249,6 +249,7 @@ onShow(() => {
 }
 
 .application-item__title-row {
+  align-items: center;
   justify-content: space-between;
 }
 
@@ -281,6 +282,15 @@ onShow(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16rpx;
+}
+
+.action-row .vm-button {
+  min-height: 78rpx;
+}
+
+.application-item .vm-field__input {
+  min-height: 78rpx;
+  font-size: 26rpx;
 }
 </style>
 

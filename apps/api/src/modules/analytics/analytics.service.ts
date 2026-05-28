@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 
 import type {
+  BackofficeRole,
   DataMonitorDailySummary,
   DataMonitorMetricBar,
   DataMonitorRange,
@@ -30,7 +31,7 @@ export class AnalyticsService {
     @Inject(GoodsService) private readonly goodsService: GoodsService
   ) {}
 
-  getDashboard(): DashboardSnapshot {
+  getDashboard(viewerBackofficeRole?: BackofficeRole): DashboardSnapshot {
     const businessDateKey = getBusinessDayKey(new Date());
     const activeSpecialUsers = this.store.users.filter(
       (user) => user.role === "special" && user.status === "active"
@@ -124,9 +125,27 @@ export class AnalyticsService {
       pendingTasks,
       goodsOverview,
       summaryLogs: [...this.store.logs]
+        .filter((entry) => viewerBackofficeRole === "super_admin" || !this.involvesHiddenBackofficeUser(entry))
         .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
         .slice(0, 14)
     };
+  }
+
+  private involvesHiddenBackofficeUser(entry: { actor: { id?: string }; primarySubject?: { type: string; id: string }; secondarySubject?: { type: string; id: string }; metadata?: Record<string, unknown> }) {
+    const possibleUserIds = [
+      entry.actor.id,
+      entry.primarySubject?.type === "user" ? entry.primarySubject.id : undefined,
+      entry.secondarySubject?.type === "user" ? entry.secondarySubject.id : undefined,
+      typeof entry.metadata?.userId === "string" ? entry.metadata.userId : undefined,
+      typeof entry.metadata?.targetUserId === "string" ? entry.metadata.targetUserId : undefined,
+      typeof entry.metadata?.confirmedByUserId === "string" ? entry.metadata.confirmedByUserId : undefined,
+      typeof entry.metadata?.undoneByUserId === "string" ? entry.metadata.undoneByUserId : undefined
+    ].filter((value): value is string => Boolean(value));
+
+    return possibleUserIds.some((userId) => {
+      const user = this.store.users.find((candidate) => candidate.id === userId);
+      return this.store.isHiddenBackofficeUser(user);
+    });
   }
 
   getPersonaPlaceholders() {

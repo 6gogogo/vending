@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, UnauthorizedException } from "
 
 import type {
   AppLoginResult,
+  BackofficePermission,
   BackofficeRole,
   BackofficeSessionSnapshot,
   MobileLoginResult,
@@ -10,6 +11,7 @@ import type {
   UserRecord,
   UserRole
 } from "@vm/shared-types";
+import { normalizeBackofficePermissions } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AccessRulesService } from "../access-rules/access-rules.service";
@@ -306,7 +308,7 @@ export class AuthService {
       throw new UnauthorizedException("账号或密码不正确。");
     }
 
-    return this.createBackofficeSessionSnapshot(user, credential.role);
+    return this.createBackofficeSessionSnapshot(user, credential.role, undefined, credential);
   }
 
   getMobileSession(token?: string): MobileSessionSnapshot {
@@ -353,7 +355,13 @@ export class AuthService {
     const user = this.store.getSessionUser(token);
 
     if (user?.role === "admin") {
-      return this.createBackofficeSessionSnapshot(user, "super_admin", token);
+      const credential =
+        this.store.findBackofficeCredentialByUserId(user.id, "admin") ??
+        this.store.findBackofficeCredentialByUserId(user.id, "super_admin");
+
+      if (credential) {
+        return this.createBackofficeSessionSnapshot(user, credential.role, token);
+      }
     }
 
     throw new UnauthorizedException("当前登录态已失效，请重新登录。");
@@ -505,19 +513,31 @@ export class AuthService {
       username: string;
       password: string;
       role?: BackofficeRole;
+      tenantId?: string;
+      permissions?: BackofficePermission[];
     }
   ) {
     const actor = this.getBackofficeSession(token);
 
-    if (actor.user.backofficeRole !== "super_admin") {
+    if (!actor.user.permissions.includes("backoffice-credentials:manage")) {
       throw new UnauthorizedException("只有超级管理员可以发放后台账号。");
     }
 
     const targetUser = this.store.users.find((entry) => entry.id === payload.userId);
-    const role = payload.role ?? (targetUser?.role === "merchant" ? "merchant" : "super_admin");
+    const role = payload.role ?? (targetUser?.role === "merchant" ? "merchant" : "admin");
 
     if (!targetUser || !this.store.isUserValidForBackofficeRole(targetUser, role)) {
       throw new BadRequestException("目标用户不能开通该后台角色。");
+    }
+
+    if (role === "super_admin" && !this.store.isHiddenBackofficeUser(targetUser)) {
+      throw new BadRequestException("超级看管账号只能绑定系统隐藏账号。");
+    }
+
+    const tenantId = role === "super_admin" ? undefined : (payload.tenantId ?? this.store.getDefaultTenantId());
+
+    if (tenantId && !this.store.findPlatformTenantById(tenantId)) {
+      throw new BadRequestException("目标客户实例不存在。");
     }
 
     const normalizedUsername = payload.username.trim().toLowerCase();
@@ -542,6 +562,10 @@ export class AuthService {
       userId: targetUser.id,
       username: normalizedUsername,
       role,
+      tenantId,
+      permissions: payload.permissions
+        ? normalizeBackofficePermissions(payload.permissions)
+        : undefined,
       passwordSalt: hashedPassword.salt,
       passwordHash: hashedPassword.hash,
       usesDefaultPassword: false,
@@ -574,6 +598,7 @@ export class AuthService {
       userId: credential.userId,
       username: credential.username,
       role: credential.role,
+      permissions: this.store.getBackofficePermissions(credential.userId, credential.role),
       usesDefaultPassword: credential.usesDefaultPassword,
       passwordUpdatedAt: credential.passwordUpdatedAt
     };
@@ -608,27 +633,34 @@ export class AuthService {
   private createBackofficeSessionSnapshot(
     user: UserRecord,
     backofficeRole: BackofficeRole,
-    token = this.store.createBackofficeSession(user, backofficeRole),
+    token?: string,
     credential = this.store.findBackofficeCredentialByUserId(user.id, backofficeRole)
   ): BackofficeSessionResult {
     if (!credential) {
       throw new UnauthorizedException("当前后台账号未配置登录凭证。");
     }
 
-    if (backofficeRole === "super_admin" && user.role !== "admin") {
-      throw new UnauthorizedException("当前账号不是超级管理员，无法登录后台。");
+    if ((backofficeRole === "super_admin" || backofficeRole === "admin") && user.role !== "admin") {
+      throw new UnauthorizedException("当前账号不是管理员，无法登录后台。");
     }
 
     if (backofficeRole === "merchant" && user.role !== "merchant") {
       throw new UnauthorizedException("当前账号不是商家，无法登录商家后台。");
     }
 
+    const tenant = this.store.findPlatformTenantById(credential.tenantId);
+    const resolvedToken = token ?? this.store.createBackofficeSession(user, backofficeRole, credential.tenantId);
+
     return {
-      token,
+      token: resolvedToken,
       user: {
         id: user.id,
         role: user.role as Extract<UserRole, "admin" | "merchant">,
         backofficeRole,
+        scope: this.store.getBackofficeScope(backofficeRole),
+        tenantId: credential.tenantId,
+        tenantName: tenant?.name,
+        permissions: this.store.getBackofficePermissions(user.id, backofficeRole),
         name: user.name,
         phone: user.phone,
         tags: user.tags

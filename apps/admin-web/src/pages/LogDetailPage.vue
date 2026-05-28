@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from "vue-router";
 import type { CallbackLogRecord, OperationLogRecord, SystemAuditLogEntry } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTimeSeconds } from "../utils/datetime";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../utils/business-context";
 
 const route = useRoute();
+const sessionStore = useAdminSessionStore();
 const log = ref<OperationLogRecord>();
 const loading = ref(false);
 const undoing = ref(false);
@@ -161,7 +163,7 @@ const load = async () => {
   loading.value = true;
   try {
     log.value = await adminApi.logDetail(String(route.params.logId));
-    if (deviceCode.value) {
+    if (deviceCode.value && sessionStore.can("system-audit:view")) {
       const [auditLogs, callbackLogs] = await Promise.all([
         adminApi.systemAuditLogs({ deviceCode: deviceCode.value, limit: 150 }),
         adminApi.deviceCallbackLogs(deviceCode.value, 150)
@@ -289,7 +291,7 @@ onMounted(load);
           </div>
         </article>
 
-        <article class="admin-panel admin-panel-block">
+        <article v-if="sessionStore.can('system-audit:view')" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">底层记录</span>
@@ -344,7 +346,9 @@ onMounted(load);
             >
               {{ undoing ? "撤销中" : "撤销这条操作" }}
             </button>
-            <RouterLink class="admin-link" :to="aiDiagnosisLink">进入 AI 异常诊断</RouterLink>
+            <RouterLink v-if="sessionStore.can('ai-insights:view')" class="admin-link" :to="aiDiagnosisLink">
+              进入 AI 异常诊断
+            </RouterLink>
             <span v-if="log.metadata?.undoState !== 'undoable'" class="admin-table__subtext">
               {{ undoStateLabel(log) }}
             </span>

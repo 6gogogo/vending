@@ -3,7 +3,10 @@ import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req, UseGu
 import type { CabinetReservationCreatePayload, ReservationSettings, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { ReservationsService } from "./reservations.service";
 
@@ -27,6 +30,7 @@ export class ReservationsController {
 
   @Patch("settings")
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   updateSettings(
     @Body() body: Partial<Pick<ReservationSettings, "enabled" | "holdMinutes" | "maxTimeouts">>,
     @Req() request: AuthRequest
@@ -36,6 +40,7 @@ export class ReservationsController {
 
   @Get()
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   list(@Req() request: AuthRequest) {
     return ok(this.reservationsService.list(request.authUser));
   }
@@ -63,6 +68,7 @@ export class ReservationsController {
   @Post("users/:userId/reset-timeouts")
   @HttpCode(200)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   resetTimeouts(@Param("userId") userId: string, @Req() request: AuthRequest) {
     return ok(this.reservationsService.resetUserTimeouts(userId, request.authUser?.id));
   }

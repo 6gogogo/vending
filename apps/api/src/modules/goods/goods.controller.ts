@@ -3,7 +3,10 @@ import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, Res, Use
 import type { GoodsAlertPolicy } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { GoodsService } from "./goods.service";
 
@@ -14,6 +17,7 @@ export class GoodsController {
   @Get("goods-overview")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   overview() {
     return ok(this.goodsService.getOverview());
   }
@@ -21,6 +25,7 @@ export class GoodsController {
   @Get("goods-overview/export/file")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   exportOverview(
     @Res()
     response: {
@@ -37,6 +42,7 @@ export class GoodsController {
   @Get("goods-catalog")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view", "devices:view", "users:view")
   catalog() {
     return ok(this.goodsService.listCatalog());
   }
@@ -51,6 +57,7 @@ export class GoodsController {
   @Post("goods-categories")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   createCategory(
     @Body()
     body: {
@@ -66,6 +73,7 @@ export class GoodsController {
   @Patch("goods-categories/:id")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   updateCategory(
     @Param("id") id: string,
     @Body()
@@ -83,6 +91,7 @@ export class GoodsController {
   @Get("goods/:goodsId")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   detail(@Param("goodsId") goodsId: string) {
     return ok(this.goodsService.getDetail(goodsId));
   }
@@ -90,6 +99,7 @@ export class GoodsController {
   @Post("goods")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   createGoods(
     @Body()
     body: {
@@ -113,6 +123,7 @@ export class GoodsController {
   @Patch("goods/:goodsId")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   updateGoods(
     @Param("goodsId") goodsId: string,
     @Body()
@@ -137,6 +148,7 @@ export class GoodsController {
   @Post("goods/:goodsId/batches")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   addBatch(
     @Param("goodsId") goodsId: string,
     @Body()
@@ -158,6 +170,7 @@ export class GoodsController {
   @Post("goods/batches/:batchId/remove")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   removeBatch(
     @Param("batchId") batchId: string,
     @Body()
@@ -174,6 +187,7 @@ export class GoodsController {
   @Get("goods-alert-policies")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   alertPolicies() {
     return ok(this.goodsService.listAlertPolicies());
   }
@@ -181,6 +195,7 @@ export class GoodsController {
   @Post("goods-alert-policies")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   createAlertPolicy(
     @Body() body: Omit<GoodsAlertPolicy, "id">,
     @Req() request: { authUser?: { id: string } }
@@ -194,6 +209,7 @@ export class GoodsController {
   @Patch("goods-alert-policies/:id")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   updateAlertPolicy(
     @Param("id") id: string,
     @Body() body: Partial<Omit<GoodsAlertPolicy, "id">>,
@@ -208,6 +224,7 @@ export class GoodsController {
   @Post("goods-alert-policies/batch-assign")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   batchAssignAlertPolicies(
     @Body()
     body: {
@@ -226,6 +243,7 @@ export class GoodsController {
   @Post("devices/:deviceCode/sync-goods")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   async sync(
     @Param("deviceCode") deviceCode: string,
     @Query("doorNum") doorNum = "1",
@@ -240,6 +258,7 @@ export class GoodsController {
   @Patch("devices/:deviceCode/goods/:goodsId/threshold")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
   updateThreshold(
     @Param("deviceCode") deviceCode: string,
     @Param("goodsId") goodsId: string,

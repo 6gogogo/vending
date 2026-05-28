@@ -3,7 +3,10 @@ import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuard
 import type { RegistrationStatus } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficePermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { RegistrationApplicationsService } from "./registration-applications.service";
 
@@ -17,6 +20,7 @@ export class RegistrationApplicationsController {
   @Get()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   list(@Query("status") status?: RegistrationStatus) {
     return ok(this.registrationApplicationsService.list(status));
   }
@@ -29,6 +33,7 @@ export class RegistrationApplicationsController {
   @Get(":id")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   detail(@Param("id") id: string) {
     return ok(this.registrationApplicationsService.detail(id));
   }
@@ -91,6 +96,7 @@ export class RegistrationApplicationsController {
   @Patch(":id/review")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
+  @AllowedBackofficePermissions("users:view")
   review(
     @Param("id") id: string,
     @Body()
