@@ -513,16 +513,20 @@ export class InMemoryStoreService {
   }
 
   logCallback(type: string, payload: unknown) {
-    this.callbackLog.unshift({
+    const record = {
       id: this.createId("callback"),
       type,
       receivedAt: new Date().toISOString(),
       payload
-    });
+    };
+
+    this.callbackLog.unshift(record);
 
     if (this.callbackLog.length > MAX_CALLBACK_LOGS) {
       this.callbackLog.splice(MAX_CALLBACK_LOGS);
     }
+
+    return record;
   }
 
   private ensureCompetitionTestDevice() {

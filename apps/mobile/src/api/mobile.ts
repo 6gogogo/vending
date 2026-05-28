@@ -23,6 +23,8 @@ import type {
   PaymentOrderCreatePayload,
   PaymentOrderCreateResult,
   PaymentOrderRecord,
+  PaymentPayerIdentityPayload,
+  PaymentPayerIdentityResult,
   RegionRecord,
   ReservationSettings,
   RegistrationPhoneLookup,
@@ -119,6 +121,9 @@ export const mobileApi = {
   createPaymentOrder(payload: PaymentOrderCreatePayload) {
     return mobileClient.post<PaymentOrderCreateResult>("/payments/orders", payload);
   },
+  resolvePaymentPayer(payload: PaymentPayerIdentityPayload) {
+    return mobileClient.post<PaymentPayerIdentityResult>("/payments/payer-identity", payload);
+  },
   paymentOrder(id: string) {
     return mobileClient.get<PaymentOrderRecord>(`/payments/orders/${id}`);
   },
@@ -139,6 +144,11 @@ export const mobileApi = {
   },
   getCabinetEvent(eventId: string) {
     return mobileClient.get<CabinetEventRecord>(`/cabinet-events/event/${eventId}`);
+  },
+  listCabinetEvents(userId?: string) {
+    return mobileClient.get<CabinetEventRecord[]>("/cabinet-events", {
+      query: { userId }
+    });
   },
   listRecords(userId: string, role?: UserRole) {
     return mobileClient.get<InventoryMovement[]>("/inventory-orders", {

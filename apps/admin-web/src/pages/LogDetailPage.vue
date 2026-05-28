@@ -159,6 +159,51 @@ const formatJsonBlock = (value: unknown) => {
   }
 };
 
+const readObject = (value: unknown) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+
+const readString = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+
+const embeddedLowLevelTraces = computed(() => {
+  const metadata = log.value?.metadata;
+  const rows: Array<{
+    id: string;
+    occurredAt?: string;
+    direction: "发" | "收";
+    label: string;
+    path?: string;
+    request: unknown;
+    response?: unknown;
+  }> = [];
+  const smartVmExchange = readObject(metadata?.smartVmExchange);
+
+  if (smartVmExchange) {
+    rows.push({
+      id: "smartvm-exchange",
+      occurredAt: readString(smartVmExchange.occurredAt),
+      direction: "发",
+      label: smartVmExchange.simulated ? "SmartVM 外呼（模拟）" : "SmartVM 外呼",
+      path: readString(smartVmExchange.path),
+      request: smartVmExchange.requestBody,
+      response: smartVmExchange.responseBody ?? smartVmExchange.errorMessage
+    });
+  }
+
+  if (metadata && "callbackPayload" in metadata) {
+    rows.push({
+      id: `callback-${readString(metadata.callbackLogId) ?? "embedded"}`,
+      direction: "收",
+      label: "平台回调",
+      path: readString(metadata.callbackLogId),
+      request: metadata.callbackPayload
+    });
+  }
+
+  return rows;
+});
+
 const load = async () => {
   loading.value = true;
   try {
@@ -291,7 +336,7 @@ onMounted(load);
           </div>
         </article>
 
-        <article v-if="sessionStore.can('system-audit:view')" class="admin-panel admin-panel-block">
+        <article v-if="embeddedLowLevelTraces.length || sessionStore.can('system-audit:view')" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">底层记录</span>
@@ -299,7 +344,24 @@ onMounted(load);
             </div>
           </div>
           <div class="admin-list">
-            <div v-if="relatedAuditLogs.length" class="log-detail__trace-list">
+            <div v-if="embeddedLowLevelTraces.length" class="log-detail__trace-list">
+              <article v-for="entry in embeddedLowLevelTraces" :key="entry.id" class="log-detail__trace-card">
+                <div class="log-detail__trace-head">
+                  <span v-if="entry.occurredAt" class="admin-code">{{ formatDateTimeSeconds(entry.occurredAt) }}</span>
+                  <span class="admin-pill" :class="entry.direction === '发' ? 'admin-pill--success' : 'admin-pill--neutral'">
+                    {{ entry.direction }}
+                  </span>
+                  <span class="admin-table__subtext">{{ entry.label }}</span>
+                  <span v-if="entry.path" class="admin-table__subtext">{{ entry.path }}</span>
+                </div>
+                <div class="log-detail__trace-grid">
+                  <pre class="log-detail__pre">{{ formatJsonBlock(entry.request) }}</pre>
+                  <pre v-if="entry.response !== undefined" class="log-detail__pre">{{ formatJsonBlock(entry.response) }}</pre>
+                </div>
+              </article>
+            </div>
+
+            <div v-if="sessionStore.can('system-audit:view') && relatedAuditLogs.length" class="log-detail__trace-list">
               <article v-for="entry in relatedAuditLogs" :key="`${entry.occurredAt}-${entry.path}`" class="log-detail__trace-card">
                 <div class="log-detail__trace-head">
                   <span class="admin-code">{{ formatDateTimeSeconds(entry.occurredAt) }}</span>
@@ -314,9 +376,9 @@ onMounted(load);
                 </div>
               </article>
             </div>
-            <span v-else class="admin-table__subtext">暂无关联系统审计。</span>
+            <span v-else-if="sessionStore.can('system-audit:view')" class="admin-table__subtext">暂无关联系统审计。</span>
 
-            <div v-if="relatedCallbackLogs.length" class="log-detail__trace-list">
+            <div v-if="sessionStore.can('system-audit:view') && relatedCallbackLogs.length" class="log-detail__trace-list">
               <article v-for="entry in relatedCallbackLogs" :key="entry.id" class="log-detail__trace-card">
                 <div class="log-detail__trace-head">
                   <span class="admin-code">{{ formatDateTimeSeconds(entry.receivedAt) }}</span>
@@ -326,7 +388,7 @@ onMounted(load);
                 <pre class="log-detail__pre">{{ formatJsonBlock(entry.payload) }}</pre>
               </article>
             </div>
-            <span v-else class="admin-table__subtext">暂无关联平台回调。</span>
+            <span v-else-if="sessionStore.can('system-audit:view')" class="admin-table__subtext">暂无关联平台回调。</span>
           </div>
         </article>
 

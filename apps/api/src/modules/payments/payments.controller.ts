@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
 
-import type { PaymentOrderCreatePayload, UserRole } from "@vm/shared-types";
+import type { PaymentOrderCreatePayload, PaymentPayerIdentityPayload, UserRole } from "@vm/shared-types";
 
-import { ack, ok } from "../../common/dto/api-response";
+import { ok } from "../../common/dto/api-response";
 import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { PaymentsService } from "./payments.service";
@@ -14,11 +14,21 @@ export class PaymentsController {
   @Post("orders")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant", "special")
-  createOrder(
+  async createOrder(
     @Body() body: PaymentOrderCreatePayload,
     @Req() request: { authUser?: { id: string; role: UserRole } }
   ) {
-    return ok(this.paymentsService.createOrder(body, request.authUser), "支付单已创建。");
+    return ok(await this.paymentsService.createOrder(body, request.authUser), "支付单已创建。");
+  }
+
+  @Post("payer-identity")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin", "merchant", "special")
+  async payerIdentity(
+    @Body() body: PaymentPayerIdentityPayload,
+    @Req() request: { authUser?: { id: string; role: UserRole } }
+  ) {
+    return ok(await this.paymentsService.resolvePayerIdentity(body, request.authUser));
   }
 
   @Get("orders/:id")
@@ -50,17 +60,35 @@ export class PaymentsController {
     @Req() request: { rawBody?: string }
   ) {
     await this.paymentsService.handleWechatCallback(body, headers, request.rawBody);
-    return ack();
+    return {
+      code: "SUCCESS",
+      message: "成功"
+    };
   }
 
   @Post("callbacks/alipay")
   @HttpCode(200)
+  @Header("Content-Type", "text/plain;charset=utf-8")
   async alipayCallback(
     @Body() body: Record<string, unknown>,
     @Headers() headers: Record<string, string | undefined>
   ) {
     await this.paymentsService.handleAlipayCallback(body, headers);
-    return ack();
+    return "success";
+  }
+
+  @Post("callbacks/wechat-refund")
+  @HttpCode(200)
+  async wechatRefundCallback(
+    @Body() body: Record<string, unknown>,
+    @Headers() headers: Record<string, string | undefined>,
+    @Req() request: { rawBody?: string }
+  ) {
+    await this.paymentsService.handleWechatRefundCallback(body, headers, request.rawBody);
+    return {
+      code: "SUCCESS",
+      message: "成功"
+    };
   }
 
   @Post("refunds")

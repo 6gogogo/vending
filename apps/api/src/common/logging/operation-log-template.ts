@@ -124,6 +124,16 @@ const pickEventReference = (entry: OperationLogDraft) => {
 
 const baseDetail = (parts: Array<string | undefined>) => parts.filter(Boolean).join("；");
 
+const hasLowLevelTrace = (entry: OperationLogDraft) =>
+  Boolean(
+    entry.metadata?.smartVmExchange ||
+      entry.metadata?.callbackPayload ||
+      entry.metadata?.callbackLogId
+  );
+
+const lowLevelTraceLabel = (entry: OperationLogDraft) =>
+  hasLowLevelTrace(entry) ? "底层收发 已记录" : undefined;
+
 export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogRecord, "description" | "detail"> => {
   const actor = actorLabel(entry.actor);
   const device = pickDeviceLabel(entry);
@@ -180,6 +190,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           relatedUser ? `关联人员 ${relatedUser}` : undefined,
           goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           eventReference ? `关联单据 ${eventReference}` : undefined,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
@@ -197,6 +208,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           eventReference ? `关联单据 ${eventReference}` : undefined,
           `回调状态 ${String(entry.metadata?.status ?? entry.status)}`,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
@@ -209,6 +221,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           relatedUser ? `关联人员 ${relatedUser}` : undefined,
           goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           eventReference ? `关联单据 ${eventReference}` : undefined,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
@@ -222,6 +235,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           eventReference ? `关联单据 ${eventReference}` : undefined,
           `金额 ${String(entry.metadata?.amount ?? 0)}`,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
@@ -235,6 +249,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           eventReference ? `关联单据 ${eventReference}` : undefined,
           `补扣金额 ${String(entry.metadata?.amount ?? 0)}`,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
@@ -248,6 +263,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           eventReference ? `关联单据 ${eventReference}` : undefined,
           typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
@@ -261,6 +277,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           eventReference ? `关联单据 ${eventReference}` : undefined,
           typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
           typeof entry.metadata?.targetUrl === "string" ? `目标 ${entry.metadata.targetUrl}` : undefined,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
@@ -275,6 +292,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
           eventReference ? `关联单据 ${eventReference}` : undefined,
           typeof entry.metadata?.transactionId === "string" ? `交易号 ${entry.metadata.transactionId}` : undefined,
           typeof entry.metadata?.targetUrl === "string" ? `目标 ${entry.metadata.targetUrl}` : undefined,
+          lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };

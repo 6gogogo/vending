@@ -3,6 +3,7 @@ import { computed, reactive, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 
 import type {
+  CabinetEventRecord,
   CabinetOpenRequest,
   CabinetPreSettlement,
   CabinetReservationRecord,
@@ -50,6 +51,7 @@ const selectedMap = reactive<Record<string, number>>({});
 const preSettlement = ref<CabinetPreSettlement>();
 const reservationSettings = ref<ReservationSettings>();
 const reservations = ref<CabinetReservationRecord[]>([]);
+let pendingBillingPromptShown = false;
 
 uiPreferencesStore.hydrate();
 
@@ -197,6 +199,84 @@ const pickupFlowSteps = computed(() => [
   }
 ]);
 
+const findPendingBillingEvent = async () => {
+  if (!sessionStore.user) {
+    return undefined;
+  }
+
+  const events = await mobileApi.listCabinetEvents(sessionStore.user.id);
+  return events.find((entry) => {
+    if (entry.role !== "special" || entry.refundedAt || entry.billingResolvedAt) {
+      return false;
+    }
+
+    const pendingAdjustment = entry.adjustments?.some(
+      (adjustment) =>
+        adjustment.amount > 0 &&
+        adjustment.paymentNotifyStatus !== "success" &&
+        !adjustment.refundedAt
+    );
+
+    if (pendingAdjustment) {
+      return true;
+    }
+
+    return (
+      (entry.status === "settled" || entry.status === "closed") &&
+      entry.amount > 0 &&
+      entry.paymentNotifyStatus !== "success" &&
+      entry.billingStatus !== "mismatch"
+    );
+  });
+};
+
+const promptPendingBillingIfNeeded = async (force = false) => {
+  if (pendingBillingPromptShown && !force) {
+    return false;
+  }
+
+  let pendingEvent: CabinetEventRecord | undefined;
+
+  try {
+    pendingEvent = await findPendingBillingEvent();
+  } catch {
+    return false;
+  }
+
+  if (!pendingEvent) {
+    return false;
+  }
+
+  pendingBillingPromptShown = true;
+  const pendingAdjustment = pendingEvent.adjustments?.find(
+    (adjustment) =>
+      adjustment.amount > 0 &&
+      adjustment.paymentNotifyStatus !== "success" &&
+      !adjustment.refundedAt
+  );
+  const amount = pendingAdjustment?.amount ?? pendingEvent.amount;
+  const orderNo = pendingAdjustment?.orderNo ?? pendingEvent.orderNo;
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: pendingAdjustment ? "补扣待支付" : "结算待支付",
+      content: `订单 ${orderNo} 仍需支付 ${formatCurrency(amount)}，处理完成后才能继续开柜或预约。`,
+      confirmText: "去支付",
+      cancelText: "稍后",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return false;
+  }
+
+  uni.navigateTo({
+    url: `/pages/common/door-closed?eventId=${encodeURIComponent(pendingEvent.eventId)}`
+  });
+  return true;
+};
+
 const load = async () => {
   await sessionStore.bootstrap();
 
@@ -204,6 +284,10 @@ const load = async () => {
     uni.reLaunch({
       url: "/pages/common/login"
     });
+    return;
+  }
+
+  if (await promptPendingBillingIfNeeded()) {
     return;
   }
 
@@ -443,8 +527,14 @@ const submit = async () => {
     });
   } catch (error) {
     submitting.value = false;
+    const message = getErrorMessage(error);
+
+    if ((message.includes("待完成结算") || message.includes("费用")) && await promptPendingBillingIfNeeded(true)) {
+      return;
+    }
+
     uni.showToast({
-      title: getErrorMessage(error),
+      title: message,
       icon: "none"
     });
   }

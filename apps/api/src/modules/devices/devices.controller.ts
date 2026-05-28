@@ -40,7 +40,6 @@ export class DevicesController {
       address?: string;
       longitude?: number;
       latitude?: number;
-      status?: DeviceStatus;
       doorNum?: string;
       doorLabel?: string;
     },

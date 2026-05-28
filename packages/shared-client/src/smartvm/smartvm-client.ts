@@ -3,7 +3,8 @@ import type {
   DeviceGoods,
   SmartVmCredentials,
   SmartVmPaymentPayload,
-  SmartVmRefundPayload
+  SmartVmRefundPayload,
+  SmartVmRouterStatusResult
 } from "@vm/shared-types";
 
 import { withSmartVmSignature, type SmartVmPayload } from "./signature";
@@ -13,6 +14,7 @@ interface SmartVmClientOptions {
   credentials: SmartVmCredentials;
   fetchImpl?: typeof fetch;
   onExchange?: (payload: {
+    method: "GET" | "POST";
     path: string;
     requestUrl: string;
     requestBody: SmartVmPayload;
@@ -81,6 +83,30 @@ export class SmartVmClient {
     return fallback;
   }
 
+  private appendQuery(targetUrl: string, payload: SmartVmPayload) {
+    const url = new URL(targetUrl);
+
+    for (const [key, value] of Object.entries(payload)) {
+      if (value === undefined || value === null || value === "") {
+        continue;
+      }
+
+      url.searchParams.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+    }
+
+    return url.toString();
+  }
+
+  private async parseResponseBody(response: Response) {
+    const raw = await response.text();
+
+    try {
+      return raw ? (JSON.parse(raw) as unknown) : "";
+    } catch {
+      return raw;
+    }
+  }
+
   private async signedPostToUrl<T>(path: string, targetUrl: string, payload: SmartVmPayload): Promise<T> {
     const signedPayload = withSmartVmSignature(payload, this.credentials);
     const response = await this.fetchImpl(targetUrl, {
@@ -90,21 +116,13 @@ export class SmartVmClient {
       },
       body: JSON.stringify(signedPayload)
     });
-    const raw = await response.text();
-    let parsed: unknown = raw;
-
-    if (raw) {
-      try {
-        parsed = JSON.parse(raw) as unknown;
-      } catch {
-        parsed = raw;
-      }
-    }
+    const parsed = await this.parseResponseBody(response);
 
     if (!response.ok) {
       const detail = this.extractDetail(parsed, `SmartVM request failed with status ${response.status}`);
 
       this.onExchange?.({
+        method: "POST",
         path,
         requestUrl: targetUrl,
         requestBody: signedPayload,
@@ -121,6 +139,7 @@ export class SmartVmClient {
     if (json.code !== 200) {
       const detail = this.extractDetail(json, "SmartVM business request failed");
       this.onExchange?.({
+        method: "POST",
         path,
         requestUrl: targetUrl,
         requestBody: signedPayload,
@@ -138,6 +157,7 @@ export class SmartVmClient {
     }
 
     this.onExchange?.({
+      method: "POST",
       path,
       requestUrl: targetUrl,
       requestBody: signedPayload,
@@ -153,6 +173,76 @@ export class SmartVmClient {
     return this.signedPostToUrl(path, `${this.baseUrl}${path}`, payload);
   }
 
+  private async signedGet<T>(path: string, payload: SmartVmPayload): Promise<T> {
+    const signedPayload = withSmartVmSignature(payload, this.credentials);
+    const requestUrl = this.appendQuery(`${this.baseUrl}${path}`, signedPayload);
+    const response = await this.fetchImpl(requestUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
+    const parsed = await this.parseResponseBody(response);
+
+    if (!response.ok) {
+      const detail = this.extractDetail(parsed, `SmartVM request failed with status ${response.status}`);
+
+      this.onExchange?.({
+        method: "GET",
+        path,
+        requestUrl,
+        requestBody: signedPayload,
+        statusCode: response.status,
+        responseBody: parsed,
+        ok: false
+      });
+
+      throw new SmartVmRequestError(detail, response.status, path, signedPayload, parsed);
+    }
+
+    const json = parsed as { code?: number | string; message?: string; data?: T } | undefined;
+
+    if (json && typeof json === "object" && "code" in json) {
+      if (json.code !== 200 && json.code !== "200") {
+        const detail = this.extractDetail(json, "SmartVM business request failed");
+        this.onExchange?.({
+          method: "GET",
+          path,
+          requestUrl,
+          requestBody: signedPayload,
+          statusCode: response.status,
+          responseBody: json,
+          ok: false
+        });
+        throw new SmartVmRequestError(detail, response.status, path, signedPayload, json);
+      }
+
+      this.onExchange?.({
+        method: "GET",
+        path,
+        requestUrl,
+        requestBody: signedPayload,
+        statusCode: response.status,
+        responseBody: json,
+        ok: true
+      });
+
+      return json.data as T;
+    }
+
+    this.onExchange?.({
+      method: "GET",
+      path,
+      requestUrl,
+      requestBody: signedPayload,
+      statusCode: response.status,
+      responseBody: parsed,
+      ok: true
+    });
+
+    return parsed as T;
+  }
+
   postToPath<T>(path: string, payload: SmartVmPayload) {
     return this.signedPost<T>(path, payload);
   }
@@ -163,6 +253,12 @@ export class SmartVmClient {
 
   getCabinetGoodsInfo(payload: { deviceCode: string; doorNum?: string }) {
     return this.signedPost<DeviceGoods[]>("/api/pay/container/getCabinetGoodsInfo", payload);
+  }
+
+  getRouterStatus(payload: { deviceCode: string }) {
+    return this.signedGet<SmartVmRouterStatusResult>("/osapi/router/status", {
+      assetId: payload.deviceCode
+    });
   }
 
   async openDoor(payload: {

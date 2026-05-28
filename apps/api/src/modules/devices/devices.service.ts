@@ -1,6 +1,14 @@
 import { BadGatewayException, BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
-import type { DeviceGoods, DeviceMonitoringDetail, DeviceRecord, DeviceStatus, GoodsCategory } from "@vm/shared-types";
+import type {
+  DeviceGoods,
+  DeviceMonitoringDetail,
+  DeviceRecord,
+  DeviceRuntimeState,
+  DeviceStatus,
+  GoodsCategory,
+  SmartVmRouterStatusResult
+} from "@vm/shared-types";
 
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { getBusinessDayKey } from "../../common/time/business-day";
@@ -74,7 +82,6 @@ export class DevicesService {
       address?: string;
       longitude?: number;
       latitude?: number;
-      status?: DeviceStatus;
       doorNum?: string;
       doorLabel?: string;
     },
@@ -116,8 +123,6 @@ export class DevicesService {
       existing.address = address;
       existing.longitude = payload.longitude;
       existing.latitude = payload.latitude;
-      existing.status = payload.status ?? existing.status;
-      existing.lastSeenAt = now;
 
       if (!existing.doors.some((door) => door.doorNum === doorNum)) {
         existing.doors.push({
@@ -126,11 +131,6 @@ export class DevicesService {
           goods: []
         });
       }
-
-      this.store.updateDeviceRuntime(deviceCode, {
-        deviceCode,
-        lastRefreshAt: now
-      });
 
       this.store.logOperation({
         category: "device",
@@ -162,7 +162,7 @@ export class DevicesService {
       address,
       longitude: payload.longitude,
       latitude: payload.latitude,
-      status: payload.status ?? "online",
+      status: "offline",
       lastSeenAt: now,
       doors: [
         {
@@ -449,10 +449,51 @@ export class DevicesService {
   async refreshDevice(deviceCode: string, actorUserId?: string) {
     const device = this.getByCode(deviceCode);
     const now = new Date().toISOString();
-    device.lastSeenAt = now;
-    this.store.updateDeviceRuntime(deviceCode, {
+    let remoteStatus: SmartVmRouterStatusResult | undefined;
+    const runtimePatch: Partial<DeviceRuntimeState> = {
       lastRefreshAt: now
-    });
+    };
+
+    try {
+      remoteStatus = await this.smartVmGateway.getRouterStatus({ deviceCode });
+    } catch (error) {
+      const detail = this.smartVmGateway.extractErrorMessage(error);
+      this.store.updateDeviceRuntime(deviceCode, runtimePatch);
+      this.store.logOperation({
+        category: "device",
+        type: "manual-refresh-device",
+        status: "failed",
+        actor: this.getAdminActor(actorUserId),
+        primarySubject: {
+          type: "device",
+          id: device.deviceCode,
+          label: device.name
+        },
+        description: `管理员刷新 ${device.name} 的平台状态失败。`,
+        detail: `柜机平台返回：${detail}`,
+        metadata: {
+          deviceCode: device.deviceCode,
+          undoState: "not_undoable"
+        }
+      });
+      throw new BadGatewayException(`柜机平台状态读取失败：${detail}`);
+    }
+
+    const remoteDeviceStatus = this.resolveRemoteDeviceStatus(remoteStatus);
+    const remoteDoorState = this.resolveRemoteDoorState(remoteStatus);
+
+    if (remoteDeviceStatus) {
+      device.status = remoteDeviceStatus;
+      if (remoteDeviceStatus === "online") {
+        device.lastSeenAt = now;
+      }
+    }
+
+    if (remoteDoorState) {
+      runtimePatch.doorState = remoteDoorState;
+    }
+
+    this.store.updateDeviceRuntime(deviceCode, runtimePatch);
     this.store.logOperation({
       category: "device",
       type: "manual-refresh-device",
@@ -464,13 +505,52 @@ export class DevicesService {
         label: device.name
       },
       description: `管理员刷新了 ${device.name} 的设备状态。`,
-      detail: `设备 ${device.deviceCode} 已执行手工刷新，最近心跳时间更新为 ${now}。`,
+      detail: remoteStatus
+        ? `设备 ${device.deviceCode} 已从平台读取状态：${remoteDeviceStatus ? `设备${remoteDeviceStatus}` : "设备状态未返回"}，${remoteDoorState ? `门${remoteDoorState}` : "门状态未返回"}。`
+        : `设备 ${device.deviceCode} 已刷新本地状态；当前未配置 SmartVM 凭据，未读取平台状态。`,
       metadata: {
-        deviceCode: device.deviceCode
+        deviceCode: device.deviceCode,
+        remoteStatus
       }
     });
 
     return this.monitoringDetail(deviceCode);
+  }
+
+  private normalizeSmartVmState(value: unknown) {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    return String(value).trim();
+  }
+
+  private resolveRemoteDeviceStatus(status?: SmartVmRouterStatusResult): Extract<DeviceStatus, "online" | "offline"> | undefined {
+    const normalized = this.normalizeSmartVmState(status?.online ?? status?.routerInfo?.online ?? status?.vendingInfo?.online);
+
+    if (normalized === "0") {
+      return "online";
+    }
+
+    if (normalized === "1") {
+      return "offline";
+    }
+
+    return undefined;
+  }
+
+  private resolveRemoteDoorState(status?: SmartVmRouterStatusResult): DeviceRuntimeState["doorState"] | undefined {
+    const normalized = this.normalizeSmartVmState(status?.doorState ?? status?.vendingInfo?.doorState);
+
+    if (normalized === "0") {
+      return "open";
+    }
+
+    if (normalized === "1") {
+      return "closed";
+    }
+
+    return undefined;
   }
 
   async remoteOpen(deviceCode: string, payload?: { doorNum?: string }, actorUserId?: string) {
@@ -492,6 +572,7 @@ export class DevicesService {
       });
     } catch (error) {
       const detail = this.smartVmGateway.extractErrorMessage(error);
+      const smartVmExchange = this.smartVmGateway.extractExchangeTrace(error);
       this.store.logOperation({
         category: "admin",
         type: "remote-open-device",
@@ -512,6 +593,7 @@ export class DevicesService {
         metadata: {
           deviceCode,
           doorNum: payload?.doorNum ?? "1",
+          smartVmExchange,
           undoState: "not_undoable"
         }
       });
@@ -559,7 +641,8 @@ export class DevicesService {
       relatedOrderNo: openResult.orderNo,
       metadata: {
         deviceCode,
-        doorNum: payload?.doorNum ?? "1"
+        doorNum: payload?.doorNum ?? "1",
+        smartVmExchange: openResult.smartVmExchange
       }
     });
 

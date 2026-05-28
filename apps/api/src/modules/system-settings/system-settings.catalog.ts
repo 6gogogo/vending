@@ -148,6 +148,17 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "智能柜补扣回调在本系统中的接收路径。",
     inputType: "path"
   },
+  SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: {
+    label: "补扣额度归属时间",
+    description: "平台补扣占用免费额度时使用哪个时间点。自动模式下，有预约按预约创建时间，无预约按原开柜交易时间。",
+    inputType: "select",
+    options: [
+      { label: "自动", value: "auto" },
+      { label: "原交易时间", value: "transaction_time" },
+      { label: "预约创建时间", value: "reservation_time" },
+      { label: "补扣回调时间", value: "callback_time" }
+    ]
+  },
   SMARTVM_REFUND_CALLBACK_PATH: {
     label: "退款回调路径",
     description: "智能柜退款回调在本系统中的接收路径。",
@@ -174,10 +185,36 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "password",
     sensitive: true
   },
+  WECHAT_MINI_APP_SECRET: {
+    label: "微信小程序 App Secret",
+    description: "用于把微信登录 code 换取付款用户 openid。",
+    inputType: "password",
+    sensitive: true
+  },
+  WECHAT_MINI_LOGIN_URL: {
+    label: "微信登录凭证校验接口",
+    description: "微信 jscode2session 接口地址，留空使用官方接口。",
+    inputType: "url"
+  },
   WECHAT_PAY_MCH_ID: {
     label: "微信支付商户号",
     description: "微信支付商户号。",
     inputType: "text"
+  },
+  WECHAT_PAY_API_BASE_URL: {
+    label: "微信支付 API 地址",
+    description: "微信支付 API v3 根地址，留空使用官方生产地址。",
+    inputType: "url"
+  },
+  WECHAT_PAY_NOTIFY_URL: {
+    label: "微信支付回调地址",
+    description: "微信支付成功回调完整 URL，留空使用 PUBLIC_BASE_URL 自动拼接。",
+    inputType: "url"
+  },
+  WECHAT_PAY_REFUND_NOTIFY_URL: {
+    label: "微信退款回调地址",
+    description: "微信退款结果回调完整 URL，留空使用 PUBLIC_BASE_URL 自动拼接。",
+    inputType: "url"
   },
   WECHAT_PAY_API_V3_KEY: {
     label: "微信支付 API v3 Key",
@@ -207,6 +244,16 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     label: "支付宝 App ID",
     description: "支付宝应用编号。",
     inputType: "text"
+  },
+  ALIPAY_GATEWAY_URL: {
+    label: "支付宝网关地址",
+    description: "支付宝 OpenAPI 网关地址，留空使用官方生产网关。",
+    inputType: "url"
+  },
+  ALIPAY_NOTIFY_URL: {
+    label: "支付宝支付回调地址",
+    description: "支付宝异步通知完整 URL，留空使用 PUBLIC_BASE_URL 自动拼接。",
+    inputType: "url"
   },
   ALIPAY_SELLER_ID: {
     label: "支付宝收款方 ID",

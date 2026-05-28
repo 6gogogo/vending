@@ -2,7 +2,13 @@
 import { computed, ref } from "vue";
 import { onLoad, onUnload } from "@dcloudio/uni-app";
 
-import type { CabinetEventRecord, MerchantGoodsTemplate, PaymentProvider } from "@vm/shared-types";
+import type {
+  CabinetAdjustmentRecord,
+  CabinetEventRecord,
+  MerchantGoodsTemplate,
+  PaymentOrderCreatePayload,
+  PaymentProvider
+} from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -36,6 +42,9 @@ let pollTimer: ReturnType<typeof setInterval> | undefined;
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
 let pollAttempts = 0;
 let mismatchNotified = false;
+let settlementConfirmationShown = false;
+let adjustmentPaymentNotified = false;
+let refundNotified = false;
 
 const isOperationalEvent = computed(
   () => event.value?.role === "merchant" || event.value?.role === "admin"
@@ -78,6 +87,33 @@ const needsPayment = computed(
     event.value?.billingStatus !== "mismatch" &&
     settlementMatched.value
 );
+const pendingAdjustment = computed<CabinetAdjustmentRecord | undefined>(() =>
+  event.value?.adjustments?.find(
+    (adjustment) =>
+      adjustment.amount > 0 &&
+      adjustment.paymentNotifyStatus !== "success" &&
+      !adjustment.refundedAt
+  )
+);
+const needsAdjustmentPayment = computed(() => Boolean(pendingAdjustment.value));
+const adjustmentPaymentCompleted = computed(() =>
+  Boolean(
+    event.value?.adjustments?.some(
+      (adjustment) => adjustment.amount > 0 && adjustment.paymentNotifyStatus === "success"
+    )
+  )
+);
+const activePaymentAmount = computed(() =>
+  pendingAdjustment.value?.amount ?? event.value?.amount ?? 0
+);
+const activePaymentOrderNo = computed(() =>
+  pendingAdjustment.value?.orderNo ?? event.value?.orderNo ?? ""
+);
+const refundCompleted = computed(
+  () =>
+    Boolean(event.value?.refundedAt) ||
+    Boolean(event.value?.adjustments?.some((adjustment) => Boolean(adjustment.refundedAt)))
+);
 const isFreeSettlement = computed(
   () =>
     Boolean(event.value) &&
@@ -85,7 +121,8 @@ const isFreeSettlement = computed(
     (event.value?.status === "settled" || event.value?.status === "refunded") &&
     (event.value?.amount ?? 0) <= 0 &&
     event.value?.billingStatus !== "mismatch" &&
-    settlementMatched.value
+    settlementMatched.value &&
+    !needsAdjustmentPayment.value
 );
 const selectedTemplate = computed(() =>
   templates.value.find((entry) => entry.id === selectedTemplateId.value)
@@ -133,9 +170,12 @@ const flowSteps = computed(() => {
     restockSubmitted.value ||
     isFreeSettlement.value ||
     event.value?.status === "refunded" ||
-    event.value?.paymentNotifyStatus === "success";
+    event.value?.paymentNotifyStatus === "success" ||
+    (Boolean(event.value?.adjustments?.length) && !needsAdjustmentPayment.value);
   const settlementWarning =
-    needsPayment.value || Boolean(event.value?.settlementComparison && !event.value.settlementComparison.matched);
+    needsPayment.value ||
+    needsAdjustmentPayment.value ||
+    Boolean(event.value?.settlementComparison && !event.value.settlementComparison.matched);
 
   return [
     {
@@ -235,6 +275,67 @@ const notifyMismatchIfNeeded = () => {
     content: `${event.value.settlementComparison.summary}，后台已收到异常记录。`,
     showCancel: false
   });
+};
+
+const notifyPendingAdjustmentIfNeeded = () => {
+  const adjustment = pendingAdjustment.value;
+
+  if (!adjustment || adjustmentPaymentNotified) {
+    return;
+  }
+
+  adjustmentPaymentNotified = true;
+  uni.showModal({
+    title: "补扣待支付",
+    content: `补扣订单 ${adjustment.orderNo} 金额为 ${formatCurrency(adjustment.amount)}，支付完成后系统会回写柜机平台。`,
+    confirmText: "去支付",
+    showCancel: false
+  });
+};
+
+const notifyRefundIfNeeded = () => {
+  if (!event.value || !refundCompleted.value || refundNotified) {
+    return;
+  }
+
+  refundNotified = true;
+  uni.showModal({
+    title: "退款已完成",
+    content: "系统已收到退款结果，本次领取占用的免费额度已退回。可返回首页继续使用。",
+    confirmText: "我知道了",
+    showCancel: false,
+    success: () => startCountdown()
+  });
+};
+
+const confirmSettlementIfNeeded = (nextEvent: CabinetEventRecord) => {
+  if (settlementConfirmationShown || needsPayment.value || needsAdjustmentPayment.value || refundCompleted.value) {
+    return false;
+  }
+
+  if (nextEvent.status !== "settled" && nextEvent.status !== "refunded") {
+    return false;
+  }
+
+  settlementConfirmationShown = true;
+  const settledItems = nextEvent.goods?.length
+    ? nextEvent.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
+    : "无商品扣减";
+  const amountText = nextEvent.amount > 0 ? formatCurrency(nextEvent.amount) : "无需支付";
+  const comparisonText =
+    nextEvent.settlementComparison && !nextEvent.settlementComparison.matched
+      ? `\n差异：${nextEvent.settlementComparison.summary}`
+      : "";
+
+  uni.showModal({
+    title: "确认本次结算",
+    content: `平台结算：${settledItems}\n结算金额：${amountText}${comparisonText}\n确认后将返回首页。`,
+    confirmText: "确认结算",
+    showCancel: false,
+    success: () => startCountdown()
+  });
+
+  return true;
 };
 
 const ensureTemplatesLoaded = async () => {
@@ -353,27 +454,52 @@ const applyEvent = (nextEvent: CabinetEventRecord) => {
   }
 
   if (nextEvent.status === "settled" || nextEvent.status === "refunded") {
-    statusText.value = nextEvent.billingStatus === "mismatch"
-      ? "领取待核对"
-      : needsPayment.value
-        ? "待支付"
-        : isFreeSettlement.value
-          ? "本次免费"
-          : "结算完成";
-    if (needsPayment.value) {
-      hintText.value = "实际拿取与选择一致，请按预结算金额完成本次支付。";
+    statusText.value = needsAdjustmentPayment.value
+      ? "补扣待支付"
+      : refundCompleted.value
+        ? "退款已完成"
+        : adjustmentPaymentCompleted.value
+          ? "补扣已支付"
+          : nextEvent.billingStatus === "mismatch"
+            ? "领取待核对"
+            : needsPayment.value
+              ? "待支付"
+              : isFreeSettlement.value
+                ? "本次免费"
+                : "结算完成";
+    if (needsAdjustmentPayment.value) {
+      hintText.value = "平台已产生补扣订单，请完成支付后再继续使用。";
       stopPolling();
-      notifyMismatchIfNeeded();
+      notifyPendingAdjustmentIfNeeded();
       readyToReturn.value = false;
       return;
     }
 
-    hintText.value = nextEvent.billingStatus === "mismatch"
-      ? "平台已完成结算，但实际领取结果与所选商品存在差异。"
-      : "平台已完成结算，本次在免费额度内，无需支付。";
+    if (needsPayment.value) {
+      hintText.value = "实际拿取与选择一致，请按预结算金额完成本次支付。";
+      stopPolling();
+      readyToReturn.value = false;
+      return;
+    }
+
+    if (refundCompleted.value) {
+      hintText.value = "退款结果已同步，本次领取占用的免费额度已退回。";
+      stopPolling();
+      readyToReturn.value = false;
+      notifyRefundIfNeeded();
+      return;
+    }
+
+    hintText.value = adjustmentPaymentCompleted.value
+      ? "补扣支付已完成，系统已同步柜机平台付款成功状态。"
+      : nextEvent.billingStatus === "mismatch"
+        ? "平台已完成结算，但实际领取结果与所选商品存在差异。"
+        : "平台已完成结算，本次在免费额度内，无需支付。";
     stopPolling();
-    notifyMismatchIfNeeded();
-    startCountdown();
+    if (!confirmSettlementIfNeeded(nextEvent)) {
+      notifyMismatchIfNeeded();
+      startCountdown();
+    }
     return;
   }
 
@@ -398,6 +524,63 @@ const applyEvent = (nextEvent: CabinetEventRecord) => {
     startCountdown();
     return;
   }
+};
+
+const getPaymentAuthCode = async (provider: PaymentProvider) => {
+  if (provider === "alipay") {
+    const maybeMy = (globalThis as unknown as {
+      my?: {
+        getAuthCode: (options: {
+          scopes?: string | string[];
+          success: (result: { authCode?: string; code?: string }) => void;
+          fail: (error: unknown) => void;
+        }) => void;
+      };
+    }).my;
+
+    if (maybeMy?.getAuthCode) {
+      return new Promise<string | undefined>((resolve, reject) => {
+        maybeMy.getAuthCode({
+          scopes: "auth_base",
+          success: (result) => resolve(result.authCode ?? result.code),
+          fail: reject
+        });
+      });
+    }
+  }
+
+  return new Promise<string | undefined>((resolve, reject) => {
+    uni.login({
+      provider: provider === "wechat" ? "weixin" : "alipay",
+      success: (result) => resolve(typeof result.code === "string" ? result.code : undefined),
+      fail: reject
+    } as UniApp.LoginOptions);
+  });
+};
+
+const resolvePaymentPayer = async (
+  provider: PaymentProvider
+): Promise<Partial<Pick<PaymentOrderCreatePayload, "payerOpenId" | "payerAlipayUserId">>> => {
+  let authCode: string | undefined;
+
+  try {
+    authCode = await getPaymentAuthCode(provider);
+  } catch {
+    return {};
+  }
+
+  const identity = await mobileApi.resolvePaymentPayer({
+    provider,
+    authCode
+  });
+
+  if (identity.simulated) {
+    return {};
+  }
+
+  return provider === "wechat"
+    ? { payerOpenId: identity.payerOpenId }
+    : { payerAlipayUserId: identity.payerAlipayUserId };
 };
 
 const invokeClientPayment = async (provider: PaymentProvider, payload: Record<string, unknown>) => {
@@ -454,15 +637,21 @@ const paySettlement = async (provider: PaymentProvider) => {
   paymentMessage.value = "";
 
   try {
+    const adjustment = pendingAdjustment.value;
+    const amount = adjustment?.amount ?? event.value.amount;
+    const orderNo = adjustment?.orderNo ?? event.value.orderNo;
+    const payerIdentity = await resolvePaymentPayer(provider);
     const payment = await mobileApi.createPaymentOrder({
       provider,
       phase: "post_settlement",
       eventId: event.value.eventId,
       orderNo: event.value.orderNo,
+      adjustmentOrderNo: adjustment?.orderNo,
       deviceCode: event.value.deviceCode,
-      amount: event.value.amount,
+      amount,
       payerUserId: event.value.userId,
-      subject: `柜机结算支付 ${event.value.orderNo}`
+      subject: adjustment ? `柜机补扣支付 ${orderNo}` : `柜机结算支付 ${orderNo}`,
+      ...payerIdentity
     });
 
     await invokeClientPayment(provider, payment.invokePayload);
@@ -473,7 +662,6 @@ const paySettlement = async (provider: PaymentProvider) => {
 
     paymentMessage.value = "支付已完成，正在同步订单状态。";
     await loadEvent();
-    startCountdown();
   } catch (error) {
     paymentMessage.value = getErrorMessage(error);
     uni.showToast({
@@ -626,10 +814,12 @@ onUnload(() => {
           <text class="free-box__title">无需支付</text>
           <text class="free-box__body">实际拿取与选择一致，本次商品在可领取额度内。</text>
         </view>
-        <view v-if="needsPayment" class="payment-box">
-          <text class="payment-box__title">预结算待支付金额</text>
-          <text class="payment-box__amount">{{ formatCurrency(event?.amount ?? 0) }}</text>
-          <text class="payment-box__body">支付成功后系统会自动回写柜机平台的付款成功状态。</text>
+        <view v-if="needsPayment || needsAdjustmentPayment" class="payment-box">
+          <text class="payment-box__title">{{ needsAdjustmentPayment ? "补扣待支付金额" : "预结算待支付金额" }}</text>
+          <text class="payment-box__amount">{{ formatCurrency(activePaymentAmount) }}</text>
+          <text class="payment-box__body">
+            订单 {{ activePaymentOrderNo }} 支付成功后，系统会自动回写柜机平台的付款成功状态。
+          </text>
           <button class="vm-button" :loading="payingProvider === 'wechat'" @tap="paySettlement('wechat')">微信支付</button>
           <button class="vm-button vm-button--ghost" :loading="payingProvider === 'alipay'" @tap="paySettlement('alipay')">支付宝支付</button>
           <text v-if="paymentMessage" class="payment-box__body">{{ paymentMessage }}</text>

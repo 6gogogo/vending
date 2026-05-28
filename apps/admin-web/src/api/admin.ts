@@ -319,7 +319,6 @@ export const adminApi = {
     address?: string;
     longitude?: number;
     latitude?: number;
-    status?: DeviceRecord["status"];
     doorNum?: string;
     doorLabel?: string;
   }) {

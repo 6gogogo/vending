@@ -36,6 +36,50 @@ type EffectivePolicy = Omit<SpecialAccessPolicy, "applicableUserIds"> & {
 const buildCatalogMap = (catalog: GoodsCatalogItem[]) =>
   new Map(catalog.map((item) => [item.goodsId, item]));
 
+const quotaMovementKey = (entry: InventoryMovement) =>
+  entry.orderNo && entry.goodsId ? `${entry.orderNo}::${entry.goodsId}` : undefined;
+
+export const sumNetPickupQuantity = (
+  inventory: InventoryMovement[],
+  pickupFilter: (entry: InventoryMovement) => boolean
+) => {
+  const selectedConsumptions = inventory.filter(
+    (entry) => (entry.type === "pickup" || entry.type === "adjustment") && pickupFilter(entry)
+  );
+  const selectedKeys = new Set(
+    selectedConsumptions
+      .map(quotaMovementKey)
+      .filter((key): key is string => Boolean(key))
+  );
+  const refundQuantityByKey = new Map<string, number>();
+
+  for (const refund of inventory) {
+    if (refund.type !== "refund") {
+      continue;
+    }
+
+    const key = quotaMovementKey(refund);
+
+    if (!key || !selectedKeys.has(key)) {
+      continue;
+    }
+
+    refundQuantityByKey.set(key, (refundQuantityByKey.get(key) ?? 0) + refund.quantity);
+  }
+
+  return selectedConsumptions.reduce((sum, pickup) => {
+    const key = quotaMovementKey(pickup);
+    const refundedQuantity = key ? refundQuantityByKey.get(key) ?? 0 : 0;
+    const consumedRefundQuantity = Math.min(pickup.quantity, refundedQuantity);
+
+    if (key && consumedRefundQuantity > 0) {
+      refundQuantityByKey.set(key, Math.max(0, refundedQuantity - consumedRefundQuantity));
+    }
+
+    return sum + Math.max(0, pickup.quantity - consumedRefundQuantity);
+  }, 0);
+};
+
 export const getApplicablePoliciesForUser = (
   policies: SpecialAccessPolicy[],
   userId: string,
@@ -160,9 +204,6 @@ export const summarizeBusinessDayForUser = (
   businessDateKey: string = getBusinessDayKey(new Date())
 ) => {
   const windows = getBusinessDayWindowsForUser(user, policies, businessDateKey);
-  const relevantPickups = inventory.filter(
-    (entry) => entry.userId === user.id && entry.type === "pickup" && getBusinessDayKey(entry.happenedAt) === businessDateKey
-  );
   const catalogMap = buildCatalogMap(goodsCatalog);
 
   const windowSummaries: SpecialAccessWindowUsage[] = windows.map((window) => ({
@@ -173,17 +214,20 @@ export const summarizeBusinessDayForUser = (
     startHour: window.startHour,
     endHour: window.endHour,
     goodsUsage: window.goodsLimits.map((limit) => {
-      const usedQuantity = relevantPickups
-        .filter((entry) => {
+      const usedQuantity = sumNetPickupQuantity(
+        inventory,
+        (entry) => {
           const parts = getLocalDateParts(entry.happenedAt);
           return (
+            entry.userId === user.id &&
+            getBusinessDayKey(entry.happenedAt) === businessDateKey &&
             toDateKey(entry.happenedAt) === window.dateKey &&
             parts.hour >= window.startHour &&
             parts.hour < window.endHour &&
             entry.goodsId === limit.goodsId
           );
-        })
-        .reduce((sum, entry) => sum + entry.quantity, 0);
+        }
+      );
 
       return {
         goodsId: limit.goodsId,
@@ -230,26 +274,26 @@ export const getActiveWindowCategoryQuota = (
 ) => {
   const activeWindows = getActiveWindowsForUser(user, policies, value);
   const businessDateKey = getBusinessDayKey(value);
-  const relevantPickups = inventory.filter(
-    (entry) => entry.userId === user.id && entry.type === "pickup" && getBusinessDayKey(entry.happenedAt) === businessDateKey
-  );
   const catalogMap = buildCatalogMap(goodsCatalog);
   const remainingByCategory: Record<string, number> = {};
   const remainingByGoods: Record<string, number> = {};
 
   for (const window of activeWindows) {
     for (const limit of window.goodsLimits) {
-      const usedQuantity = relevantPickups
-        .filter((entry) => {
+      const usedQuantity = sumNetPickupQuantity(
+        inventory,
+        (entry) => {
           const parts = getLocalDateParts(entry.happenedAt);
           return (
+            entry.userId === user.id &&
+            getBusinessDayKey(entry.happenedAt) === businessDateKey &&
             toDateKey(entry.happenedAt) === window.dateKey &&
             parts.hour >= window.startHour &&
             parts.hour < window.endHour &&
             entry.goodsId === limit.goodsId
           );
-        })
-        .reduce((sum, entry) => sum + entry.quantity, 0);
+        }
+      );
 
       const remaining = Math.max(0, limit.quantity - usedQuantity);
       const category = limit.category ?? catalogMap.get(limit.goodsId)?.category ?? "daily";

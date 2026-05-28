@@ -21,7 +21,6 @@ const deviceForm = ref<{
   name: string;
   location: string;
   address: string;
-  status: DeviceRecord["status"];
   longitude: string;
   latitude: string;
 }>({
@@ -29,7 +28,6 @@ const deviceForm = ref<{
   name: "",
   location: "",
   address: "",
-  status: "online",
   longitude: "",
   latitude: ""
 });
@@ -115,7 +113,6 @@ const resetDeviceForm = () => {
     name: "",
     location: "",
     address: "",
-    status: "online",
     longitude: "",
     latitude: ""
   };
@@ -133,7 +130,6 @@ const openEditDevice = (device: DeviceRecord) => {
     name: device.name,
     location: device.location,
     address: device.address ?? "",
-    status: device.status,
     longitude: device.longitude !== undefined ? String(device.longitude) : "",
     latitude: device.latitude !== undefined ? String(device.latitude) : ""
   };
@@ -168,7 +164,6 @@ const submitDevice = async () => {
     name: deviceForm.value.name.trim(),
     location: deviceForm.value.location.trim(),
     address: deviceForm.value.address.trim() || undefined,
-    status: deviceForm.value.status,
     longitude: parseOptionalNumber(deviceForm.value.longitude),
     latitude: parseOptionalNumber(deviceForm.value.latitude)
   };
@@ -394,14 +389,6 @@ onUnmounted(() => {
             <label class="admin-field">
               <span class="admin-field__label">详细地址</span>
               <input v-model="deviceForm.address" class="admin-input" :disabled="savingDevice" placeholder="可选，默认跟柜机位置一致" />
-            </label>
-            <label class="admin-field">
-              <span class="admin-field__label">状态</span>
-              <select v-model="deviceForm.status" class="admin-select" :disabled="savingDevice">
-                <option value="online">在线</option>
-                <option value="maintenance">维护中</option>
-                <option value="offline">离线</option>
-              </select>
             </label>
             <label class="admin-field">
               <span class="admin-field__label">经度</span>

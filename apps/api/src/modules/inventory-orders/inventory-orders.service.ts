@@ -1,6 +1,8 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 
 import type {
+  CabinetAdjustmentRecord,
   CabinetEventRecord,
   GoodsCategory,
   InventoryMovement,
@@ -20,7 +22,8 @@ export class InventoryOrdersService {
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
     @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
     @Inject(DevicesService) private readonly devicesService: DevicesService,
-    @Inject(AlertsService) private readonly alertsService: AlertsService
+    @Inject(AlertsService) private readonly alertsService: AlertsService,
+    @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
   list(userId?: string, role?: "special" | "merchant" | "admin") {
@@ -188,6 +191,7 @@ export class InventoryOrdersService {
       };
     }
 
+    const happenedAt = this.resolveAdjustmentQuotaHappenedAt(event);
     const movements =
       payload.detail?.map((item) =>
         this.createMovementFromLineItem(
@@ -199,7 +203,8 @@ export class InventoryOrdersService {
           {
             type: "adjustment",
             orderNo: payload.orderNo,
-            sourceOrderNo: payload.orgOrderNo
+            sourceOrderNo: payload.orgOrderNo,
+            happenedAt
           }
         )
       ) ?? [];
@@ -305,45 +310,38 @@ export class InventoryOrdersService {
       throw new NotFoundException("未找到可退款的订单。");
     }
 
-    const existingMovement = this.store.inventory.find(
+    const existingMovements = this.store.inventory.filter(
       (entry) =>
         entry.orderNo === orderNo &&
         entry.type === "refund" &&
         entry.transactionId === transactionId
     );
 
-    if (event.status === "refunded" && existingMovement) {
+    if (existingMovements.length) {
       return {
-        movement: existingMovement,
+        movement: existingMovements[0],
+        movements: existingMovements,
         transactionId,
         duplicated: true
       };
     }
 
-    const movement: InventoryMovement = {
-      id: this.store.createId("movement"),
-      orderNo,
-      eventId: event.eventId,
-      userId: event.userId,
-      deviceCode: event.deviceCode,
-      goodsId: event.goods[0]?.goodsId ?? "unknown",
-      goodsName: event.goods[0]?.goodsName ?? "unknown",
-      category: event.goods[0]?.category ?? "daily",
-      quantity: event.goods.reduce((sum, item) => sum + item.quantity, 0) || 1,
-      unitPrice: amount,
-      type: "refund",
-      happenedAt: new Date().toISOString(),
-      transactionId,
-      refundNo: options?.refundNo
-    };
-
     const adjustment = event.adjustments?.find((entry) => entry.orderNo === orderNo);
     const isAdjustmentOrder = Boolean(adjustment);
+    const happenedAt = new Date().toISOString();
+    const movements = this.buildRefundMovements(event, {
+      orderNo,
+      amount,
+      transactionId,
+      refundNo: options?.refundNo,
+      adjustment,
+      happenedAt
+    });
 
     if (!isAdjustmentOrder) {
       event.status = "refunded";
     }
-    event.updatedAt = new Date().toISOString();
+    event.updatedAt = happenedAt;
     if (adjustment) {
       adjustment.refundNo = options?.refundNo;
       adjustment.refundTransactionId = transactionId;
@@ -355,7 +353,7 @@ export class InventoryOrdersService {
       event.refundTransactionId = transactionId;
       event.refundedAt = event.updatedAt;
     }
-    this.store.inventory.unshift(movement);
+    this.store.inventory.unshift(...movements);
 
     const isCallback = options?.source === "callback";
     this.store.logOperation({
@@ -397,8 +395,25 @@ export class InventoryOrdersService {
       }
     });
 
+    this.alertsService.create({
+      type: "callback",
+      grade: "feedback",
+      title: isAdjustmentOrder ? "补扣订单已退款" : "订单退款已完成",
+      deviceCode: event.deviceCode,
+      targetUserId: event.userId,
+      dueAt: event.updatedAt,
+      detail: [
+        `订单 ${orderNo}`,
+        `退款单号 ${options?.refundNo ?? "-"}`,
+        `退款金额 ${amount}`,
+        isAdjustmentOrder ? "当前退款对象为补扣订单。" : "系统已退回本次领取占用的免费额度。"
+      ].join("；"),
+      relatedEventId: event.eventId
+    });
+
     return {
-      movement,
+      movement: movements[0],
+      movements,
       transactionId
     };
   }
@@ -427,6 +442,96 @@ export class InventoryOrdersService {
     event.adjustmentRefundedAt = latest?.refundedAt;
   }
 
+  private buildRefundMovements(
+    event: CabinetEventRecord,
+    payload: {
+      orderNo: string;
+      amount: number;
+      transactionId: string;
+      refundNo?: string;
+      adjustment?: CabinetAdjustmentRecord;
+      happenedAt: string;
+    }
+  ): InventoryMovement[] {
+    const adjustmentGoods =
+      payload.adjustment?.goods?.map((item) => ({
+        goodsId: item.goodsId,
+        goodsName: item.goodsName,
+        category: this.getGoodsCategory(event.deviceCode, item.goodsId),
+        quantity: item.quantity,
+        unitPrice: item.unitPrice
+      })) ?? [];
+    const sourceGoods = adjustmentGoods.length
+      ? adjustmentGoods
+      : event.goods.map((item) => ({
+          goodsId: item.goodsId,
+          goodsName: item.goodsName,
+          category: item.category,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice
+        }));
+    const fallbackGoods = sourceGoods.length
+      ? sourceGoods
+      : [
+          {
+            goodsId: "unknown",
+            goodsName: "unknown",
+            category: "daily" as GoodsCategory,
+            quantity: 1,
+            unitPrice: payload.amount
+          }
+        ];
+
+    return fallbackGoods.map((item) => ({
+      id: this.store.createId("movement"),
+      orderNo: payload.orderNo,
+      eventId: event.eventId,
+      userId: event.userId,
+      deviceCode: event.deviceCode,
+      goodsId: item.goodsId,
+      goodsName: item.goodsName,
+      category: item.category,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      type: "refund",
+      happenedAt: payload.happenedAt,
+      transactionId: payload.transactionId,
+      refundNo: payload.refundNo
+    }));
+  }
+
+  private getGoodsCategory(deviceCode: string, goodsId: string, fallback: GoodsCategory = "daily") {
+    return (
+      this.devicesService.findGoods(deviceCode, goodsId)?.category ??
+      this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId)?.category ??
+      fallback
+    );
+  }
+
+  private resolveAdjustmentQuotaHappenedAt(event: CabinetEventRecord) {
+    const mode = this.configService
+      .get<string>("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE")
+      ?.trim()
+      .toLowerCase();
+    const reservation = event.reservationId
+      ? this.store.reservations.find((entry) => entry.id === event.reservationId)
+      : undefined;
+
+    if (mode === "callback_time") {
+      return new Date().toISOString();
+    }
+
+    if (mode === "reservation_time") {
+      return reservation?.reservedAt ?? event.createdAt;
+    }
+
+    if (mode === "transaction_time") {
+      return event.createdAt;
+    }
+
+    return reservation?.reservedAt ?? event.createdAt;
+  }
+
   private createMovementFromLineItem(
     event: CabinetEventRecord,
     goodsId: string,
@@ -437,6 +542,7 @@ export class InventoryOrdersService {
       type?: InventoryMovement["type"];
       orderNo?: string;
       sourceOrderNo?: string;
+      happenedAt?: string;
     }
   ): InventoryMovement {
     const localGoods = this.devicesService.findGoods(event.deviceCode, goodsId);
@@ -463,7 +569,7 @@ export class InventoryOrdersService {
       quantity,
       unitPrice,
       type: movementType,
-      happenedAt: new Date().toISOString(),
+      happenedAt: options?.happenedAt ?? new Date().toISOString(),
       expiresAt
     };
   }

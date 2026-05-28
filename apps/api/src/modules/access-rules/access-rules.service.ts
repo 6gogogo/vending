@@ -5,7 +5,8 @@ import type { GoodsCategory, UserRecord } from "@vm/shared-types";
 import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import {
-  getActiveWindowCategoryQuota
+  getActiveWindowCategoryQuota,
+  sumNetPickupQuantity
 } from "../../common/policies/special-access-policy.utils";
 
 @Injectable()
@@ -62,12 +63,7 @@ export class AccessRulesService {
     }
 
     const quota = user.quota ?? this.store.rules.find((rule) => rule.role === "special");
-    const todayPickups = this.store.inventory.filter(
-      (entry) =>
-        entry.userId === user.id &&
-        entry.type === "pickup" &&
-        getBusinessDayKey(entry.happenedAt) === getBusinessDayKey(new Date())
-    );
+    const currentBusinessDayKey = getBusinessDayKey(new Date());
     // 对特殊群体来说，额度不仅是数量控制，也是在有限供给下尽量保证关键时段有人能领到物资。
     const policyQuota = getActiveWindowCategoryQuota(
       user,
@@ -82,9 +78,13 @@ export class AccessRulesService {
         ? policyQuota.remainingByCategory
         : Object.entries(quota?.categoryLimit ?? {}).reduce<Record<string, number>>(
             (accumulator, [category, limit]) => {
-              const usedByCategory = todayPickups
-                .filter((entry) => entry.category === category)
-                .reduce((sum, entry) => sum + entry.quantity, 0);
+              const usedByCategory = sumNetPickupQuantity(
+                this.store.inventory,
+                (entry) =>
+                  entry.userId === user.id &&
+                  entry.category === category &&
+                  getBusinessDayKey(entry.happenedAt) === currentBusinessDayKey
+              );
               accumulator[category] = Math.max(0, (limit ?? 0) - usedByCategory);
               return accumulator;
             },
@@ -96,7 +96,12 @@ export class AccessRulesService {
       limit: quota,
       remainingToday,
       remainingByGoods: policyQuota.remainingByGoods,
-      usedCount: todayPickups.reduce((sum, entry) => sum + entry.quantity, 0),
+      usedCount: sumNetPickupQuantity(
+        this.store.inventory,
+        (entry) =>
+          entry.userId === user.id &&
+          getBusinessDayKey(entry.happenedAt) === currentBusinessDayKey
+      ),
       activeWindows: policyQuota.activeWindows
     };
   }

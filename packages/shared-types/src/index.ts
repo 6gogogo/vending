@@ -354,6 +354,8 @@ export interface PaymentOrderCreatePayload {
   deviceCode?: string;
   payerUserId?: string;
   merchantUserId?: string;
+  payerOpenId?: string;
+  payerAlipayUserId?: string;
   openRequest?: CabinetOpenRequest;
   intentItems?: Array<{
     goodsId: string;
@@ -366,6 +368,19 @@ export interface PaymentOrderCreatePayload {
 export interface PaymentOrderCreateResult {
   order: PaymentOrderRecord;
   invokePayload: Record<string, unknown>;
+}
+
+export interface PaymentPayerIdentityPayload {
+  provider: PaymentProvider;
+  authCode?: string;
+}
+
+export interface PaymentPayerIdentityResult {
+  provider: PaymentProvider;
+  simulated: boolean;
+  simulatedReason?: string;
+  payerOpenId?: string;
+  payerAlipayUserId?: string;
 }
 
 export type MobileLoginResult =
@@ -1554,6 +1569,22 @@ export interface SmartVmDoorStatusPayload {
   deviceCode: string;
   status: "OPENDING" | "SUCCESS" | "CLOSED" | "FAIL";
   doorIsOpen?: "Y" | "N";
+}
+
+export interface SmartVmRouterStatusResult {
+  assetId?: string;
+  online?: number | string;
+  doorState?: number | string;
+  routerInfo?: {
+    online?: number | string;
+    [key: string]: unknown;
+  };
+  vendingInfo?: {
+    online?: number | string;
+    doorState?: number | string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 export interface SmartVmSettlementPayload {

@@ -110,6 +110,7 @@ export class CabinetEventsService {
       });
     } catch (error) {
       const detail = this.smartVmGateway.extractErrorMessage(error);
+      const smartVmExchange = this.smartVmGateway.extractExchangeTrace(error);
       this.store.logOperation({
         category: logCategory,
         type: "open-cabinet",
@@ -140,6 +141,7 @@ export class CabinetEventsService {
           operationType,
           hasInboundGoods,
           openReason,
+          smartVmExchange,
           undoState: "not_undoable"
         }
       });
@@ -210,7 +212,8 @@ export class CabinetEventsService {
         openReason,
         intentItems,
         preSettlement,
-        reservationId: reservation?.id
+        reservationId: reservation?.id,
+        smartVmExchange: openResult.smartVmExchange
       }
     });
 
@@ -292,7 +295,7 @@ export class CabinetEventsService {
   }
 
   handleDoorStatus(payload: SmartVmDoorStatusPayload & Record<string, unknown>) {
-    this.store.logCallback("door-status", payload);
+    const callbackLog = this.store.logCallback("door-status", payload);
     this.assertSignature(payload);
 
     // 把门状态链路完整落下来，管理员才能快速判断是设备异常还是流程卡住。
@@ -373,7 +376,9 @@ export class CabinetEventsService {
       relatedOrderNo: event.orderNo,
       metadata: {
         deviceCode: payload.deviceCode,
-        status: payload.status
+        status: payload.status,
+        callbackLogId: callbackLog.id,
+        callbackPayload: payload
       }
     });
 
@@ -381,7 +386,7 @@ export class CabinetEventsService {
   }
 
   handleSettlement(payload: SmartVmSettlementPayload & Record<string, unknown>) {
-    this.store.logCallback("settlement", payload);
+    const callbackLog = this.store.logCallback("settlement", payload);
     this.assertSignature(payload);
 
     const event = this.getEventByPlatformOrderNo(payload.orderNo);
@@ -502,6 +507,8 @@ export class CabinetEventsService {
           operationType: event.operationType,
           hasInboundGoods: event.hasInboundGoods,
           openReason: event.openReason,
+          callbackLogId: callbackLog.id,
+          callbackPayload: payload,
           undoState: "not_undoable"
         }
       });
@@ -557,7 +564,7 @@ export class CabinetEventsService {
   }
 
   handleAdjustment(payload: SmartVmAdjustmentPayload & Record<string, unknown>) {
-    this.store.logCallback("adjustment", payload);
+    const callbackLog = this.store.logCallback("adjustment", payload);
     this.assertSignature(payload);
 
     const event = this.getEventByPlatformOrderNo(payload.orgOrderNo);
@@ -592,6 +599,8 @@ export class CabinetEventsService {
         metadata: {
           amount: payload.amount,
           orgOrderNo: payload.orgOrderNo,
+          callbackLogId: callbackLog.id,
+          callbackPayload: payload,
           undoState: "not_undoable"
         }
       });
@@ -640,7 +649,7 @@ export class CabinetEventsService {
   }
 
   async handlePaymentSuccess(payload: SmartVmPaymentPayload & Record<string, unknown>) {
-    this.store.logCallback("payment-success", payload);
+    const callbackLog = this.store.logCallback("payment-success", payload);
     return this.forwardPaymentSuccessToPlatform(payload, {
       actor: {
         type: "system",
@@ -650,7 +659,9 @@ export class CabinetEventsService {
       targetUrl:
         payload.targetUrl ||
         payload.noticeUrl ||
-        payload.notifyUrl
+        payload.notifyUrl,
+      callbackLogId: callbackLog.id,
+      callbackPayload: payload
     });
   }
 
@@ -762,6 +773,7 @@ export class CabinetEventsService {
       });
     } catch (error) {
       const message = this.smartVmGateway.extractErrorMessage(error);
+      const smartVmExchange = this.smartVmGateway.extractExchangeTrace(error);
       const adjustment = this.getAdjustment(event, payload.orderNo);
       if (adjustment) {
         adjustment.paymentNotifyStatus = "failed";
@@ -807,6 +819,7 @@ export class CabinetEventsService {
         metadata: {
           amount: payload.amount,
           transactionId: payload.transactionId,
+          smartVmExchange,
           undoState: "not_undoable"
         }
       });
@@ -824,6 +837,8 @@ export class CabinetEventsService {
       };
       logType: string;
       targetUrl?: string;
+      callbackLogId?: string;
+      callbackPayload?: unknown;
     }
   ) {
     const event = this.getEventByPlatformOrderNo(payload.orderNo);
@@ -847,7 +862,7 @@ export class CabinetEventsService {
       );
     }
 
-    await this.smartVmGateway.notifyPaymentSuccess(payload, {
+    const smartVmResult = await this.smartVmGateway.notifyPaymentSuccess(payload, {
       targetUrl: resolvedTargetUrl
     });
 
@@ -859,7 +874,7 @@ export class CabinetEventsService {
       adjustment.paymentNotifiedAt = event.updatedAt;
       adjustment.paymentTransactionId = payload.transactionId;
       adjustment.updatedAt = event.updatedAt;
-      if (event.billingStatus === "supplement_pending") {
+      if (event.billingStatus === "supplement_pending" || event.billingStatus === "mismatch") {
         event.billingStatus = "paid";
         event.billingResolvedAt = event.updatedAt;
       }
@@ -900,6 +915,9 @@ export class CabinetEventsService {
         transactionId: payload.transactionId,
         amount: payload.amount,
         targetUrl: resolvedTargetUrl,
+        callbackLogId: options.callbackLogId,
+        callbackPayload: options.callbackPayload,
+        smartVmExchange: smartVmResult.smartVmExchange,
         undoState: "not_undoable"
       }
     });
