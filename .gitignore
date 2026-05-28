@@ -9,3 +9,4 @@ coverage
 .vscode
 *.log
 apps/mobile/unpackage
+apps/api/runtime-data/
