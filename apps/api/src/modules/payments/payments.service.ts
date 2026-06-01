@@ -781,18 +781,6 @@ export class PaymentsService {
     headers: Record<string, string | undefined>,
     rawBody?: string
   ): ProviderPaidPayload {
-    const mockPaymentNo = this.readString(body.paymentNo) ?? this.readString(body.out_trade_no);
-
-    if (mockPaymentNo && this.isMockPaymentEnabled("wechat")) {
-      return {
-        provider: "wechat",
-        paymentNo: mockPaymentNo,
-        providerTransactionId: this.readString(body.transaction_id) ?? this.readString(body.transactionId),
-        amount: this.readAmount(body.amount),
-        callbackPayload: body
-      };
-    }
-
     this.verifyWechatSignature(headers, rawBody ?? JSON.stringify(body));
     const resource = body.resource as Record<string, unknown> | undefined;
     const decrypted = resource ? this.decryptWechatResource(resource) : body;
@@ -845,9 +833,7 @@ export class PaymentsService {
   }
 
   private parseAlipayPaidPayload(body: Record<string, unknown>): ProviderPaidPayload {
-    if (!this.isMockPaymentEnabled("alipay")) {
-      this.verifyAlipaySignature(body);
-    }
+    this.verifyAlipaySignature(body);
 
     const status = this.readString(body.trade_status);
 
@@ -874,10 +860,6 @@ export class PaymentsService {
     const publicKey = this.normalizePem(this.getConfigValue("WECHAT_PAY_PLATFORM_PUBLIC_KEY"));
 
     if (!publicKey) {
-      if (this.isMockPaymentEnabled("wechat")) {
-        return;
-      }
-
       throw new BadRequestException("微信支付平台公钥未配置，无法验签。");
     }
 
@@ -902,10 +884,6 @@ export class PaymentsService {
     const publicKey = this.normalizePem(this.getConfigValue("ALIPAY_PUBLIC_KEY"));
 
     if (!publicKey) {
-      if (this.isMockPaymentEnabled("alipay")) {
-        return;
-      }
-
       throw new BadRequestException("支付宝公钥未配置，无法验签。");
     }
 

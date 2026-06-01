@@ -112,7 +112,7 @@ const applyEventState = (nextEvent: CabinetEventRecord) => {
   if (nextEvent.status === "opened") {
     statusText.value = "柜门已打开";
     hintText.value = nextEvent.hasInboundGoods === true
-      ? "商品入柜后请及时关闭柜门，闭门后需要提交模板登记。"
+      ? "商品入柜后请及时关闭柜门，闭门后需要提交入柜商品登记。"
       : nextEvent.hasInboundGoods === false
         ? "操作完成后请及时关闭柜门，系统会按平台结果自动扣减库存。"
         : "取货后请及时关闭柜门，系统会在闭门后继续核对结算结果。";

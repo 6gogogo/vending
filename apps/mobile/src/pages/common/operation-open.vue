@@ -123,7 +123,7 @@ const submit = async () => {
     uni.showModal({
       title: hasInboundGoods.value ? "确认入柜开门" : "确认运营开门",
       content: hasInboundGoods.value
-        ? "柜门关闭后必须提交模板补货登记，系统不会按平台结算自动入库。"
+        ? "柜门关闭后必须提交入柜商品登记，系统不会按平台结算自动入库。"
         : `本次开门理由：${resolvedReason.value}。柜门关闭后，系统会按平台结算结果自动扣减库存，不产生支付。`,
       confirmText: "确认开门",
       success: ({ confirm }) => resolve(confirm),
@@ -233,7 +233,7 @@ onLoad((query) => {
             @tap="hasInboundGoods = true"
           >
             <text class="choice-card__title">有商品入柜</text>
-            <text class="choice-card__body">关门后必须按模板提交补货登记，平台结算不会自动入库。</text>
+            <text class="choice-card__body">关门后必须选择常用商品并提交补货登记，平台结算不会自动入库。</text>
           </button>
           <button
             class="choice-card"
@@ -251,12 +251,12 @@ onLoad((query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">入柜登记提醒</text>
-          <text class="vm-subtitle">请先完成实物入柜，关门后页面会要求选择模板、数量和生产日期。</text>
+          <text class="vm-subtitle">请先完成实物入柜，关门后页面会要求选择常用商品、数量和生产日期。</text>
         </view>
         <view class="process-list">
           <text class="process-item">1. 打开柜门并放入商品</text>
           <text class="process-item">2. 关闭柜门</text>
-          <text class="process-item">3. 按模板提交入柜登记</text>
+          <text class="process-item">3. 选择常用商品并提交入柜登记</text>
         </view>
       </view>
     </GlassCard>

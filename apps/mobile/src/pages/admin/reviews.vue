@@ -23,11 +23,11 @@ const rejectedCount = computed(() => applications.value.filter((item) => item.st
 
 const roleLabel = (role: RegistrationApplication["requestedRole"]) => {
   if (role === "special") {
-    return "受助用户";
+    return "用户";
   }
 
   if (role === "merchant") {
-    return "爱心商户";
+    return "商家";
   }
 
   return "管理员";

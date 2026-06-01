@@ -11,6 +11,7 @@ import type {
 import { ack, ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
+  AllowedBackofficeSessionPermissions,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -21,8 +22,13 @@ export class CabinetEventsController {
   constructor(@Inject(CabinetEventsService) private readonly cabinetEventsService: CabinetEventsService) {}
 
   @Get()
-  list(@Query("userId") userId?: string) {
-    return ok(this.cabinetEventsService.list(userId));
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin", "merchant", "special")
+  list(
+    @Query("userId") userId?: string,
+    @Req() request?: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+  ) {
+    return ok(this.cabinetEventsService.list(userId, request?.authUser));
   }
 
   @Get("event/:eventId")
@@ -54,14 +60,26 @@ export class CabinetEventsController {
 
   @Post("open")
   @HttpCode(200)
-  async open(@Body() body: CabinetOpenRequest) {
-    return ok(await this.cabinetEventsService.openCabinet(body));
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin", "merchant", "special")
+  @AllowedBackofficeSessionPermissions("devices:operate")
+  async open(
+    @Body() body: CabinetOpenRequest,
+    @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+  ) {
+    return ok(await this.cabinetEventsService.openCabinet(body, request.authUser));
   }
 
   @Post("open/pre-settlement")
   @HttpCode(200)
-  preSettlement(@Body() body: CabinetOpenRequest) {
-    return ok(this.cabinetEventsService.previewOpenSettlement(body));
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin", "merchant", "special")
+  @AllowedBackofficeSessionPermissions("devices:operate")
+  preSettlement(
+    @Body() body: CabinetOpenRequest,
+    @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+  ) {
+    return ok(this.cabinetEventsService.previewOpenSettlement(body, request.authUser));
   }
 
   @Post("callbacks/door-status")
@@ -96,7 +114,7 @@ export class CabinetEventsController {
   @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("devices:view")
+  @AllowedBackofficePermissions("devices:operate")
   async notifyPaymentSuccess(
     @Body()
     body: SmartVmPaymentPayload & {
@@ -114,7 +132,7 @@ export class CabinetEventsController {
   @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("devices:view")
+  @AllowedBackofficePermissions("devices:operate")
   confirmBilling(
     @Param("eventId") eventId: string,
     @Body() body: { note?: string },

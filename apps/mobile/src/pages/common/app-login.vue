@@ -23,11 +23,39 @@ const loginState = ref<AppLoginResult | null>(null);
 const rejectedReason = ref("");
 const hasAcceptedDisclaimer = ref(false);
 const showDisclaimer = ref(false);
+const showVerificationPreview =
+  import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
 
 const helper = reactive({
   title: "",
   detail: ""
 });
+
+const normalizedPhone = () => phone.value.trim();
+
+const validatePhone = () => {
+  if (/^1\d{10}$/.test(normalizedPhone())) {
+    return true;
+  }
+
+  uni.showToast({
+    title: "请输入 11 位手机号",
+    icon: "none"
+  });
+  return false;
+};
+
+const validateCode = () => {
+  if (/^\d{4,8}$/.test(code.value.trim())) {
+    return true;
+  }
+
+  uni.showToast({
+    title: "请输入验证码",
+    icon: "none"
+  });
+  return false;
+};
 
 const disclaimerLines = computed(() =>
   userDisclaimerText
@@ -50,24 +78,18 @@ const bootstrap = async () => {
 };
 
 const sendCode = async () => {
-  if (!ensureDisclaimerAccepted()) {
+  if (!validatePhone()) {
     return;
   }
 
-  const normalizedPhone = phone.value.trim();
-
-  if (!/^1\d{10}$/.test(normalizedPhone)) {
-    uni.showToast({
-      title: "请输入 11 位手机号",
-      icon: "none"
-    });
+  if (!ensureDisclaimerAccepted()) {
     return;
   }
 
   sendingCode.value = true;
   try {
-    const response = await mobileApi.requestCode(normalizedPhone, "app-login");
-    previewCode.value = response.previewCode ?? "";
+    const response = await mobileApi.requestCode(normalizedPhone(), "app-login");
+    previewCode.value = showVerificationPreview ? response.previewCode ?? "" : "";
     uni.showToast({
       title: "验证码已发送",
       icon: "none"
@@ -80,16 +102,21 @@ const sendCode = async () => {
     uni.showModal({
       title: shouldWaitReview ? "请等待审核" : shouldRegister ? "请注册" : "获取验证码失败",
       content: shouldWaitReview
-        ? "当前手机号资料还在审核中，审核通过前不能获取登录验证码。"
+        ? "当前手机号资料还在审核中，可以先查看审核状态；如需人工协助，请通过反馈入口联系工作人员。"
         : shouldRegister
           ? "当前手机号未登记或未通过审核，请先注册后再登录。"
           : message,
       showCancel: !shouldWaitReview,
       cancelText: "关闭",
-      confirmText: shouldRegister ? "去注册" : "我知道了",
+      confirmText: shouldWaitReview ? "查看状态" : shouldRegister ? "去注册" : "我知道了",
       success: ({ confirm }) => {
         if (confirm && shouldRegister) {
           goRegister();
+        }
+        if (confirm && shouldWaitReview) {
+          uni.navigateTo({
+            url: `/pages/common/review-status?phone=${encodeURIComponent(normalizedPhone())}`
+          });
         }
       }
     });
@@ -99,6 +126,10 @@ const sendCode = async () => {
 };
 
 const submit = async () => {
+  if (!validatePhone() || !validateCode()) {
+    return;
+  }
+
   if (!ensureDisclaimerAccepted()) {
     return;
   }
@@ -108,7 +139,7 @@ const submit = async () => {
   rejectedReason.value = "";
 
   try {
-    const response = await mobileApi.appLogin(phone.value, code.value);
+    const response = await mobileApi.appLogin(normalizedPhone(), code.value.trim());
     loginState.value = response;
 
     if (response.state === "approved") {
@@ -167,9 +198,11 @@ const ensureDisclaimerAccepted = () => {
   }
 
   showDisclaimer.value = true;
-  uni.showToast({
-    title: "请先阅读并同意免责声明",
-    icon: "none"
+  uni.showModal({
+    title: "请先确认使用须知",
+    content: "领取和开柜会涉及身份校验、柜机识别和可能的支付结算。请阅读并同意免责声明后再获取验证码。",
+    confirmText: "去阅读",
+    showCancel: false
   });
   return false;
 };
@@ -209,7 +242,22 @@ onShow(() => {
       <view class="vm-stack">
         <view class="login-heading">
           <text class="login-heading__title">登录</text>
-          <text class="login-heading__body">请输入手机号和验证码</text>
+          <text class="login-heading__body">已注册或已审核通过的手机号可直接登录</text>
+        </view>
+
+        <view class="login-guide">
+          <view class="login-guide__item">
+            <text class="login-guide__index">1</text>
+            <text>输入手机号并同意免责声明</text>
+          </view>
+          <view class="login-guide__item">
+            <text class="login-guide__index">2</text>
+            <text>获取验证码完成身份识别</text>
+          </view>
+          <view class="login-guide__item">
+            <text class="login-guide__index">3</text>
+            <text>系统会按身份进入领取、补货或管理页面</text>
+          </view>
         </view>
 
         <view class="vm-field">
@@ -219,8 +267,11 @@ onShow(() => {
             <input
               v-model="phone"
               class="vm-field-shell__input"
-              type="number"
+              type="tel"
+              inputmode="numeric"
               maxlength="11"
+              name="phone"
+              aria-label="手机号"
               placeholder="请输入手机号"
             />
           </view>
@@ -229,15 +280,18 @@ onShow(() => {
         <view class="vm-field">
           <view class="field-header">
             <text class="vm-field__label">验证码</text>
-            <text class="vm-field__helper">已认证手机号可获取</text>
+            <text class="vm-field__helper">先同意免责声明再发送</text>
           </view>
-          <view class="vm-field-shell">
+          <view class="vm-field-shell vm-field-shell--stacked-action">
             <MenuIcon name="code" size="sm" tone="neutral" />
             <input
               v-model="code"
               class="vm-field-shell__input"
-              type="number"
+              type="tel"
+              inputmode="numeric"
               maxlength="6"
+              name="verification-code"
+              aria-label="验证码"
               placeholder="请输入验证码"
             />
             <button
@@ -245,8 +299,9 @@ onShow(() => {
               :disabled="sendingCode"
               :loading="sendingCode"
               @tap="sendCode"
+              aria-label="获取验证码"
             >
-              获取验证码
+              发送
             </button>
           </view>
         </view>
@@ -262,7 +317,7 @@ onShow(() => {
           <text class="register-link" @tap="goRegister">首次使用？去注册</text>
         </view>
 
-        <view v-if="previewCode" class="debug-box">
+        <view v-if="showVerificationPreview && previewCode" class="debug-box">
           <text class="debug-box__label">当前验证码</text>
           <text class="vm-number">{{ previewCode }}</text>
         </view>
@@ -378,6 +433,37 @@ onShow(() => {
   gap: 16rpx;
 }
 
+.login-guide {
+  display: grid;
+  gap: 12rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 22rpx;
+  border: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
+}
+
+.login-guide__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: var(--vm-text);
+}
+
+.login-guide__index {
+  display: grid;
+  place-items: center;
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  background: var(--vm-accent);
+  color: #ffffff;
+  font-size: 20rpx;
+  font-weight: 900;
+}
+
 .disclaimer-link {
   width: fit-content;
   padding: 6rpx 0;
@@ -401,11 +487,10 @@ onShow(() => {
 }
 
 .login-footnote {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: start;
   gap: 16rpx;
-  flex-wrap: wrap;
 }
 
 .debug-box,

@@ -88,7 +88,7 @@ onShow(() => {
         <view class="info-list">
           <view class="info-item">
             <text class="info-item__label">服务入口</text>
-            <text class="info-item__value">{{ sessionStore.user?.role === "merchant" ? "商户补货" : sessionStore.user?.role === "admin" ? "运营管理" : "公益领取" }}</text>
+            <text class="info-item__value">{{ sessionStore.user?.role === "merchant" ? "商家补货" : sessionStore.user?.role === "admin" ? "运营管理" : "用户服务" }}</text>
           </view>
           <view class="info-item">
             <text class="info-item__label">账号状态</text>

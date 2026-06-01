@@ -26,6 +26,7 @@ export class SpecialAccessPoliciesController {
   }
 
   @Post()
+  @AllowedBackofficePermissions("users:rules:manage")
   create(
     @Body() body: Omit<SpecialAccessPolicy, "id">,
     @Req() request: { authUser?: { id: string } }
@@ -37,6 +38,7 @@ export class SpecialAccessPoliciesController {
   }
 
   @Patch(":id")
+  @AllowedBackofficePermissions("users:rules:manage")
   update(
     @Param("id") id: string,
     @Body() body: Partial<Omit<SpecialAccessPolicy, "id">>,
@@ -53,6 +55,7 @@ export class SpecialAccessPoliciesController {
   }
 
   @Post("batch-assign")
+  @AllowedBackofficePermissions("users:rules:manage")
   batchAssign(
     @Body()
     body: {

@@ -1,0 +1,363 @@
+{
+  "generatedAt": "2026-06-01T18:43:50.389Z",
+  "mobile": [
+    {
+      "name": "登录入口",
+      "path": "/#/pages/common/login",
+      "screenshot": "01-mobile-login.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "注册资料",
+      "path": "/#/pages/common/register",
+      "screenshot": "02-mobile-register.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 2,
+      "headings": []
+    },
+    {
+      "name": "异常反馈",
+      "path": "/#/pages/common/feedback",
+      "screenshot": "03-mobile-feedback.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 2,
+      "headings": []
+    },
+    {
+      "name": "用户首页",
+      "path": "/#/pages/tabs/primary",
+      "screenshot": "04-mobile-user-home.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "附近柜机",
+      "path": "/#/pages/tabs/nearby",
+      "screenshot": "05-mobile-user-nearby.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "用户柜机详情",
+      "path": "/#/pages/special/device-detail?deviceCode=SPEC-MPVJI9E6",
+      "screenshot": "06-mobile-user-device.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "用户记录",
+      "path": "/#/pages/tabs/records",
+      "screenshot": "07-mobile-user-records.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "用户我的",
+      "path": "/#/pages/tabs/settings",
+      "screenshot": "08-mobile-user-settings.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "用户领取历史",
+      "path": "/#/pages/special/history",
+      "screenshot": "09-mobile-user-history.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "商家首页",
+      "path": "/#/pages/tabs/primary",
+      "screenshot": "10-mobile-merchant-home.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "商家补货",
+      "path": "/#/pages/merchant/restock?deviceCode=SPEC-MPVJI9E6",
+      "screenshot": "11-mobile-merchant-restock.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "商家常用商品",
+      "path": "/#/pages/merchant/templates",
+      "screenshot": "12-mobile-merchant-templates.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 7,
+      "headings": []
+    },
+    {
+      "name": "商家补货追踪",
+      "path": "/#/pages/merchant/traces",
+      "screenshot": "13-mobile-merchant-traces.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    },
+    {
+      "name": "商家我的",
+      "path": "/#/pages/tabs/settings",
+      "screenshot": "14-mobile-merchant-settings.png",
+      "viewportHeight": 920,
+      "scrollHeight": 920,
+      "ratio": 1,
+      "visibleButtons": 0,
+      "headings": []
+    }
+  ],
+  "admin": [
+    {
+      "name": "全局工作台",
+      "path": "/platform",
+      "screenshot": "15-admin-platform.png",
+      "viewportHeight": 900,
+      "scrollHeight": 1035,
+      "ratio": 1.15,
+      "visibleButtons": 13,
+      "headings": [
+        "运营后台",
+        "服务商后台",
+        "全局工作台"
+      ]
+    },
+    {
+      "name": "运营主控台",
+      "path": "/dashboard",
+      "screenshot": "16-admin-dashboard.png",
+      "viewportHeight": 900,
+      "scrollHeight": 4619,
+      "ratio": 5.13,
+      "visibleButtons": 19,
+      "headings": [
+        "运营后台",
+        "总览",
+        "运营主控台"
+      ],
+      "fullScreenshot": "16-admin-dashboard-full.png"
+    },
+    {
+      "name": "人员管理",
+      "path": "/users",
+      "screenshot": "17-admin-users.png",
+      "viewportHeight": 900,
+      "scrollHeight": 2717,
+      "ratio": 3.02,
+      "visibleButtons": 24,
+      "headings": [
+        "运营后台",
+        "人员与日志",
+        "人员台账与批量设置"
+      ],
+      "fullScreenshot": "17-admin-users-full.png"
+    },
+    {
+      "name": "人员详情",
+      "path": "/users/special-mpvji9vj56azw",
+      "screenshot": "18-admin-user-detail.png",
+      "viewportHeight": 900,
+      "scrollHeight": 4809,
+      "ratio": 5.34,
+      "visibleButtons": 28,
+      "headings": [
+        "运营后台",
+        "人员与日志",
+        "单人员详情与操作记录"
+      ],
+      "fullScreenshot": "18-admin-user-detail-full.png"
+    },
+    {
+      "name": "货物总览",
+      "path": "/goods",
+      "screenshot": "19-admin-goods.png",
+      "viewportHeight": 900,
+      "scrollHeight": 3544,
+      "ratio": 3.94,
+      "visibleButtons": 29,
+      "headings": [
+        "运营后台",
+        "总览",
+        "货物总览与预警模板"
+      ],
+      "fullScreenshot": "19-admin-goods-full.png"
+    },
+    {
+      "name": "货物详情",
+      "path": "/goods/specialty-goods-mpvji9e6",
+      "screenshot": "20-admin-goods-detail.png",
+      "viewportHeight": 900,
+      "scrollHeight": 2449,
+      "ratio": 2.72,
+      "visibleButtons": 29,
+      "headings": [
+        "运营后台",
+        "总览",
+        "货物批次与阈值设置"
+      ],
+      "fullScreenshot": "20-admin-goods-detail-full.png"
+    },
+    {
+      "name": "仓库盘点",
+      "path": "/warehouse",
+      "screenshot": "21-admin-warehouse.png",
+      "viewportHeight": 900,
+      "scrollHeight": 2079,
+      "ratio": 2.31,
+      "visibleButtons": 28,
+      "headings": [
+        "运营后台",
+        "总览",
+        "本地仓库与盘点"
+      ]
+    },
+    {
+      "name": "柜机监控",
+      "path": "/operations",
+      "screenshot": "22-admin-operations.png",
+      "viewportHeight": 900,
+      "scrollHeight": 2232,
+      "ratio": 2.48,
+      "visibleButtons": 14,
+      "headings": [
+        "运营后台",
+        "总览",
+        "柜机监控矩阵"
+      ]
+    },
+    {
+      "name": "柜机详情",
+      "path": "/operations/SPEC-MPVJI9E6",
+      "screenshot": "23-admin-device-detail.png",
+      "viewportHeight": 900,
+      "scrollHeight": 3197,
+      "ratio": 3.55,
+      "visibleButtons": 18,
+      "headings": [
+        "运营后台",
+        "总览",
+        "单柜机值守页"
+      ],
+      "fullScreenshot": "23-admin-device-detail-full.png"
+    },
+    {
+      "name": "数据监控",
+      "path": "/data-monitor",
+      "screenshot": "24-admin-data-monitor.png",
+      "viewportHeight": 900,
+      "scrollHeight": 1893,
+      "ratio": 2.1,
+      "visibleButtons": 47,
+      "headings": [
+        "运营后台",
+        "总览",
+        "按日数据监控"
+      ]
+    },
+    {
+      "name": "AI 工作台",
+      "path": "/ai",
+      "screenshot": "25-admin-ai.png",
+      "viewportHeight": 900,
+      "scrollHeight": 1678,
+      "ratio": 1.86,
+      "visibleButtons": 21,
+      "headings": [
+        "运营后台",
+        "智能助手",
+        "AI 运营助手"
+      ]
+    },
+    {
+      "name": "系统设置",
+      "path": "/settings",
+      "screenshot": "26-admin-settings.png",
+      "viewportHeight": 900,
+      "scrollHeight": 1655,
+      "ratio": 1.84,
+      "visibleButtons": 26,
+      "headings": [
+        "运营后台",
+        "系统设置",
+        "短信、支付与柜机接口配置"
+      ]
+    },
+    {
+      "name": "操作日志",
+      "path": "/logs",
+      "screenshot": "27-admin-logs.png",
+      "viewportHeight": 900,
+      "scrollHeight": 2143,
+      "ratio": 2.38,
+      "visibleButtons": 30,
+      "headings": [
+        "运营后台",
+        "人员与日志",
+        "系统操作日志"
+      ]
+    },
+    {
+      "name": "日志详情",
+      "path": "/logs/log-mpvjiakwgiunl",
+      "screenshot": "28-admin-log-detail.png",
+      "viewportHeight": 900,
+      "scrollHeight": 1400,
+      "ratio": 1.56,
+      "visibleButtons": 15,
+      "headings": [
+        "运营后台",
+        "人员与日志",
+        "单条日志详情"
+      ]
+    },
+    {
+      "name": "商家后台",
+      "path": "/merchant",
+      "screenshot": "29-admin-merchant.png",
+      "viewportHeight": 900,
+      "scrollHeight": 1035,
+      "ratio": 1.15,
+      "visibleButtons": 13,
+      "headings": [
+        "运营后台",
+        "商家后台",
+        "商家补货与订单"
+      ]
+    }
+  ]
+}

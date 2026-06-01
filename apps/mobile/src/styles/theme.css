@@ -62,6 +62,17 @@ page {
   background: var(--vm-page-gradient);
 }
 
+html,
+body,
+#app,
+uni-app,
+uni-page,
+uni-page-wrapper,
+uni-page-body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 view,
 text,
 button,
@@ -94,10 +105,12 @@ input {
 
 .vm-page {
   min-height: 100vh;
-  width: 100%;
+  width: auto;
+  box-sizing: border-box;
   max-width: 960rpx;
   margin: 0 auto;
   padding: 30rpx 24rpx calc(56rpx + env(safe-area-inset-bottom));
+  overflow-x: hidden;
   background: transparent;
 }
 
@@ -293,6 +306,25 @@ input {
   gap: 28rpx;
 }
 
+.vm-page--accessible .flow-step {
+  padding: 8rpx;
+}
+
+.vm-page--accessible .flow-step__mark {
+  width: 64rpx;
+  height: 64rpx;
+  font-size: 30rpx;
+}
+
+.vm-page--accessible .flow-step__label {
+  font-size: 32rpx;
+}
+
+.vm-page--accessible .flow-step__description {
+  font-size: 26rpx;
+  color: var(--vm-text);
+}
+
 .vm-page--accessible .vm-section__header {
   flex-direction: column;
   align-items: flex-start;
@@ -300,6 +332,10 @@ input {
 
 .vm-card {
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1rpx solid var(--vm-line);
   border-radius: var(--vm-radius-card);
   background:
@@ -351,11 +387,14 @@ input {
   display: flex;
   flex-direction: column;
   gap: 22rpx;
+  width: 100%;
+  min-width: 0;
 }
 
 .vm-grid {
   display: grid;
   gap: 20rpx;
+  min-width: 0;
 }
 
 .vm-pill,
@@ -488,6 +527,7 @@ input {
 .vm-field {
   display: grid;
   gap: 12rpx;
+  min-width: 0;
 }
 
 .vm-field__label {
@@ -512,6 +552,8 @@ input {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 14rpx;
+  width: 100%;
+  box-sizing: border-box;
   min-height: 84rpx;
   padding: 0 18rpx;
   border: 1rpx solid var(--vm-line-strong);
@@ -526,6 +568,7 @@ input {
 
 .vm-field-shell__input {
   width: 100%;
+  min-width: 0;
   min-height: 84rpx;
   color: var(--vm-text);
   font-size: 27rpx;
@@ -533,19 +576,36 @@ input {
 }
 
 .vm-field-shell__button {
-  min-width: 150rpx;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 132rpx;
   min-height: 58rpx;
-  padding: 0 18rpx;
+  margin: 0;
+  padding: 0 14rpx;
   border-radius: 16rpx;
   background: var(--vm-accent-soft);
   color: var(--vm-accent-strong);
   border: 1rpx solid var(--vm-accent-line);
   font-size: 24rpx;
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .vm-field-shell__button[disabled] {
   opacity: 0.54;
+}
+
+.vm-field-shell--stacked-action {
+  grid-template-columns: auto minmax(0, 1fr);
+  row-gap: 10rpx;
+}
+
+.vm-field-shell--stacked-action .vm-field-shell__button {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .vm-field__input:focus {

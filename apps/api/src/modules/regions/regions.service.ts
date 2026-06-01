@@ -19,7 +19,6 @@ export class RegionsService {
     actorUserId?: string
   ) {
     const name = payload.name.trim();
-    const coordinates = this.normalizeCoordinates(payload, true);
 
     if (!name) {
       throw new BadRequestException("区域名称不能为空。");
@@ -28,6 +27,8 @@ export class RegionsService {
     if (this.store.regions.some((entry) => entry.name === name)) {
       throw new BadRequestException("该区域名称已存在。");
     }
+
+    const coordinates = this.normalizeCoordinates(payload, true);
 
     const region: RegionRecord = {
       id: this.store.createId("region"),
@@ -142,7 +143,7 @@ export class RegionsService {
 
     if (!hasLongitude && !hasLatitude) {
       if (requireBoth && (current?.longitude === undefined || current?.latitude === undefined)) {
-        throw new BadRequestException("请填写地区经纬度。");
+        throw new BadRequestException("请填写区域经纬度。");
       }
 
       return {

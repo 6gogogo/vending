@@ -29,6 +29,7 @@ type TrendMarker = {
 
 const dashboard = ref<DashboardSnapshot>();
 const sessionStore = useAdminSessionStore();
+const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
 const loading = ref(false);
 const loadError = ref("");
 const activeBucket = ref<BucketKey>();
@@ -242,6 +243,11 @@ const closeTaskDetail = () => {
 };
 
 const resolveTask = async (id: string) => {
+  if (!canManageAlerts.value) {
+    window.alert("当前账号没有预警处理权限。");
+    return;
+  }
+
   const task = pendingTasks.value.find((entry) => entry.id === id);
 
   if (!task) {
@@ -546,12 +552,14 @@ onUnmounted(() => {
                     AI 分析
                   </RouterLink>
                   <button
+                    v-if="canManageAlerts"
                     class="admin-button admin-button--ghost"
                     :disabled="resolvingTaskId === task.id"
                     @click="resolveTask(task.id)"
                   >
                     {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
                   </button>
+                  <span v-else class="admin-table__subtext">需要预警处理权限</span>
                 </div>
               </td>
             </tr>

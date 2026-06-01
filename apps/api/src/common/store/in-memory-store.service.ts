@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { randomInt } from "node:crypto";
 
 import {
   cloneSeedState,
@@ -78,10 +79,10 @@ const DEFAULT_ADMIN_NAME = "街道管理员";
 const DEFAULT_MERCHANT_USERNAME = "merchant";
 const DEFAULT_MERCHANT_PASSWORD = "merchant123";
 const DEFAULT_MERCHANT_PHONE = "13800000004";
-const DEFAULT_MERCHANT_NAME = "鲜食爱心商户";
+const DEFAULT_MERCHANT_NAME = "鲜食商家";
 const DEFAULT_SUPER_ADMIN_REGION_NAME = "系统管理";
 const DEFAULT_TENANT_ID = "tenant-a";
-const DEFAULT_TENANT_NAME = "A 公司示范实例";
+const DEFAULT_TENANT_NAME = "公益智助柜当前实例";
 
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
@@ -122,23 +123,13 @@ export class InMemoryStoreService {
   readonly platformTenants: PlatformTenantRecord[] = [
     {
       id: DEFAULT_TENANT_ID,
-      code: "company-a",
+      code: "current",
       name: DEFAULT_TENANT_NAME,
       status: "active",
-      instanceUrl: "https://a.example.com",
-      contactName: "A 公司管理员",
+      instanceUrl: "https://5gogogo.top",
+      contactName: "实例管理员",
       planName: "正式版",
       createdAt: "2026-01-01T00:00:00.000Z"
-    },
-    {
-      id: "tenant-b",
-      code: "company-b",
-      name: "B 公司试运行实例",
-      status: "trial",
-      instanceUrl: "https://b.example.com",
-      contactName: "B 公司管理员",
-      planName: "试用版",
-      createdAt: "2026-03-01T00:00:00.000Z"
     }
   ];
 
@@ -184,7 +175,13 @@ export class InMemoryStoreService {
     shouldPersist = this.normalizeRegionsState() || shouldPersist;
     shouldPersist = this.ensureBootstrapAdmin() || shouldPersist;
 
-    if (!persisted?.flags?.skipCompetitionTestDevice) {
+    const allowTestDeviceBootstrap =
+      process.env.NODE_ENV !== "production" &&
+      ["1", "true", "yes", "on"].includes(
+        (process.env.ENABLE_TEST_DEVICE_BOOTSTRAP ?? "true").trim().toLowerCase()
+      );
+
+    if (allowTestDeviceBootstrap && !persisted?.flags?.skipCompetitionTestDevice) {
       this.ensureCompetitionTestDevice();
     }
     this.syncDeviceStocksFromBatches();
@@ -237,7 +234,7 @@ export class InMemoryStoreService {
   }
 
   issueVerificationCode(phone: string) {
-    const code = "123456";
+    const code = randomInt(100_000, 1_000_000).toString();
     const now = Date.now();
     const expiresAt = new Date(now + 5 * 60_000).toISOString();
     const requestedAt = new Date(now).toISOString();
@@ -1569,7 +1566,7 @@ export class InMemoryStoreService {
       }
     }
 
-    changed = this.normalizeBackofficeBootstrapCredentials(superAdminUser.id) || changed;
+    changed = this.normalizeBackofficeBootstrapCredentials() || changed;
 
     let adminUser = this.users.find(
       (entry) =>
@@ -1633,6 +1630,8 @@ export class InMemoryStoreService {
       changed = true;
     }
 
+    changed = this.ensureDefaultTenantAdminPermissions(adminUser.id) || changed;
+
     changed =
       this.ensureDefaultBackofficeCredential(
       superAdminUser,
@@ -1662,15 +1661,21 @@ export class InMemoryStoreService {
     return changed;
   }
 
-  private normalizeBackofficeBootstrapCredentials(superAdminUserId: string) {
+  private ensureDefaultTenantAdminPermissions(userId: string) {
+    const credential = this.findBackofficeCredentialByUserId(userId, "admin");
+
+    if (!credential?.permissions) {
+      return false;
+    }
+
+    delete credential.permissions;
+    return true;
+  }
+
+  private normalizeBackofficeBootstrapCredentials() {
     let changed = false;
 
     for (const credential of this.backofficeCredentials) {
-      if (credential.role === "super_admin" && credential.userId !== superAdminUserId) {
-        credential.role = "admin";
-        changed = true;
-      }
-
       if (credential.role === "super_admin") {
         if (credential.tenantId) {
           delete credential.tenantId;

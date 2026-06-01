@@ -5,6 +5,7 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import type { DeviceRecord, MerchantGoodsTemplate } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import EmptyState from "../../components/ui/EmptyState.vue";
 import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
@@ -82,7 +83,7 @@ const estimatedExpireHint = computed(() =>
 const restockFlowSteps = computed(() => [
   {
     label: "选择物品",
-    description: selectedTemplate.value ? "已选模板" : "先选商品模板",
+    description: selectedTemplate.value ? "已选常用商品" : "先选常用商品",
     state: selectedTemplateId.value ? ("done" as const) : ("current" as const)
   },
   {
@@ -140,7 +141,15 @@ const adjustQuantity = (delta: number) => {
 const submit = async () => {
   if (!selectedTemplateId.value || !selectedDeviceCode.value) {
     uni.showToast({
-      title: "请选择模板和柜机",
+      title: "请选择常用商品和柜机",
+      icon: "none"
+    });
+    return;
+  }
+
+  if (Number(quantity.value) <= 0) {
+    uni.showToast({
+      title: "补货数量必须大于 0",
       icon: "none"
     });
     return;
@@ -200,11 +209,11 @@ onLoad((query) => {
 </script>
 
 <template>
-  <MobileShell eyebrow="补货登记" title="登记补货" subtitle="选择柜机、商品、数量、生产日期和批次号。">
+  <MobileShell eyebrow="补货登记" title="登记补货" subtitle="选择柜机、常用商品、数量、生产日期和批次号。">
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button vm-button--warning" @tap="submit" :loading="submitting">提交补货登记</button>
-        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">商品模板</button>
+        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">常用商品</button>
       </view>
     </template>
 
@@ -215,9 +224,9 @@ onLoad((query) => {
         <view class="selected-product-card">
           <MenuIcon name="box" size="lg" tone="accent" />
           <view class="selected-product-card__main">
-            <text class="selected-product-card__title">{{ selectedTemplate?.goodsName ?? "请选择补货物品" }}</text>
+            <text class="selected-product-card__title">{{ selectedTemplate?.goodsName ?? "请选择补货商品" }}</text>
             <text class="selected-product-card__meta">
-              {{ selectedTemplate ? `${selectedTemplateCategoryLabel} · 默认 ${selectedTemplate.defaultQuantity} 件 · 保质期 ${selectedTemplate.defaultShelfLifeDays} 天` : "选择后会自动带出默认数量和保质期。" }}
+              {{ selectedTemplate ? `${selectedTemplateCategoryLabel} · 默认 ${selectedTemplate.defaultQuantity} 件 · 保质期 ${selectedTemplate.defaultShelfLifeDays} 天` : "先维护常用商品，选择后会自动带出默认数量和保质期。" }}
             </text>
           </view>
           <text class="vm-status" :class="selectedTemplate ? 'vm-status--success' : 'vm-status--pending'">
@@ -235,7 +244,7 @@ onLoad((query) => {
         </view>
 
         <view class="overview-grid">
-          <ServiceMetric label="默认件数" :value="selectedTemplate?.defaultQuantity ?? 0" hint="选中模板后自动带入" tone="accent" />
+          <ServiceMetric label="默认件数" :value="selectedTemplate?.defaultQuantity ?? 0" hint="选中常用商品后自动带入" tone="accent" />
           <ServiceMetric label="保质期" :value="selectedTemplate?.defaultShelfLifeDays ?? 0" hint="单位为天" />
           <ServiceMetric label="预计到期" :value="estimatedExpireShort" :hint="estimatedExpireHint" />
         </view>
@@ -284,7 +293,7 @@ onLoad((query) => {
 
         <view class="summary-panel">
           <text class="summary-panel__title">提交前确认</text>
-          <text class="summary-panel__body">模板：{{ selectedTemplate?.goodsName ?? "未选择" }}</text>
+          <text class="summary-panel__body">常用商品：{{ selectedTemplate?.goodsName ?? "未选择" }}</text>
           <text class="summary-panel__body">柜机：{{ selectedDevice?.name ?? "未选择" }}</text>
           <text class="summary-panel__body">数量：{{ quantity || 0 }} 件</text>
           <text class="summary-panel__body">批次号：{{ batchNo || "系统生成" }}</text>
@@ -293,7 +302,7 @@ onLoad((query) => {
 
         <view class="action-grid">
           <button class="vm-button vm-button--warning" :loading="submitting" @tap="submit">提交补货登记</button>
-          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">查看后端模板</button>
+          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">维护常用商品</button>
         </view>
       </view>
     </GlassCard>
@@ -301,16 +310,22 @@ onLoad((query) => {
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">更换货品模板</text>
-          <text class="vm-subtitle">当前已选商品会自动带入数量和保质期，需要调整时再从这里切换。</text>
+          <text class="section-heading__title">更换常用商品</text>
+          <text class="vm-subtitle">常用商品会自动带入数量和保质期，需要调整时再从这里切换。</text>
         </view>
 
         <view class="vm-field">
-          <text class="vm-field__label">搜索商品名称</text>
+          <text class="vm-field__label">搜索常用商品</text>
           <input v-model="templateKeyword" class="vm-field__input" placeholder="输入名称、编号、分类或规格" />
         </view>
 
-        <view class="template-list template-list--compact">
+        <EmptyState
+          v-if="!filteredTemplates.length"
+          title="暂无可选常用商品"
+          description="请先维护常用商品，再回来登记本次补货。"
+        />
+
+        <view v-else class="template-list template-list--compact">
           <button
             v-for="item in filteredTemplates"
             :key="item.id"

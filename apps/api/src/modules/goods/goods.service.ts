@@ -45,11 +45,17 @@ export class GoodsService {
     payload: Pick<GoodsCategoryRecord, "name" | "category"> & { sortOrder?: number },
     actorUserId?: string
   ) {
+    const name = payload.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException("分类名称不能为空。");
+    }
+
     const duplicated = this.store.goodsCategories.find(
       (entry) =>
         entry.status !== "inactive" &&
         entry.category === payload.category &&
-        entry.name.trim() === payload.name.trim()
+        entry.name.trim() === name
     );
 
     if (duplicated) {
@@ -57,7 +63,7 @@ export class GoodsService {
     }
 
     const created = this.store.upsertGoodsCategory({
-      name: payload.name.trim(),
+      name,
       category: payload.category,
       status: "active",
       sortOrder:
@@ -96,12 +102,18 @@ export class GoodsService {
       throw new NotFoundException("未找到对应分类。");
     }
 
+    const name = payload.name?.trim();
+
+    if (payload.name !== undefined && !name) {
+      throw new BadRequestException("分类名称不能为空。");
+    }
+
     const before = structuredClone(category);
     const updated = this.store.upsertGoodsCategory({
       ...category,
       ...payload,
       id,
-      name: payload.name?.trim() ?? category.name
+      name: name ?? category.name
     });
 
     this.store.logOperation({
@@ -207,6 +219,25 @@ export class GoodsService {
   ) {
     const goodsCode = payload.goodsCode.trim();
     const goodsId = payload.goodsId?.trim() || goodsCode;
+    const name = payload.name?.trim();
+    const price = Number(payload.price);
+
+    if (!goodsCode) {
+      throw new BadRequestException("货品编号不能为空。");
+    }
+
+    if (!goodsId) {
+      throw new BadRequestException("货品编号不能为空。");
+    }
+
+    if (!name) {
+      throw new BadRequestException("货品名称不能为空。");
+    }
+
+    if (!Number.isFinite(price) || price < 0) {
+      throw new BadRequestException("货品价格不能为负数。");
+    }
+
     const existed = this.store.goodsCatalog.find(
       (entry) => entry.goodsId === goodsId || entry.goodsCode === goodsCode
     );
@@ -219,9 +250,10 @@ export class GoodsService {
       ...payload,
       goodsCode,
       goodsId,
-      name: payload.name.trim(),
-      fullName: payload.fullName?.trim() || payload.name.trim(),
+      name,
+      fullName: payload.fullName?.trim() || name,
       categoryName: payload.categoryName?.trim(),
+      price,
       packageForm: payload.packageForm?.trim(),
       specification: payload.specification?.trim(),
       manufacturer: payload.manufacturer?.trim(),
@@ -273,13 +305,29 @@ export class GoodsService {
   ) {
     const goods = this.findCatalogItem(goodsId);
     const before = structuredClone(goods);
+    const nextGoodsCode = payload.goodsCode?.trim();
+    const nextName = payload.name?.trim();
+    const nextPrice = payload.price === undefined ? undefined : Number(payload.price);
+
+    if (payload.goodsCode !== undefined && !nextGoodsCode) {
+      throw new BadRequestException("货品编号不能为空。");
+    }
+
+    if (payload.name !== undefined && !nextName) {
+      throw new BadRequestException("货品名称不能为空。");
+    }
+
+    if (nextPrice !== undefined && (!Number.isFinite(nextPrice) || nextPrice < 0)) {
+      throw new BadRequestException("货品价格不能为负数。");
+    }
 
     Object.assign(goods, {
       ...payload,
-      goodsCode: payload.goodsCode?.trim() ?? goods.goodsCode,
-      name: payload.name?.trim() ?? goods.name,
+      goodsCode: nextGoodsCode ?? goods.goodsCode,
+      name: nextName ?? goods.name,
       fullName: payload.fullName?.trim() ?? goods.fullName,
       categoryName: payload.categoryName?.trim() ?? goods.categoryName,
+      price: nextPrice ?? goods.price,
       packageForm: payload.packageForm?.trim() ?? goods.packageForm,
       specification: payload.specification?.trim() ?? goods.specification,
       manufacturer: payload.manufacturer?.trim() ?? goods.manufacturer,
@@ -328,7 +376,7 @@ export class GoodsService {
       throw new BadRequestException("新增补货批次前需要先确认补货明细。");
     }
 
-    if (payload.quantity <= 0) {
+    if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
       throw new BadRequestException("批次数量必须大于 0。");
     }
 
@@ -414,7 +462,7 @@ export class GoodsService {
       throw new BadRequestException("去除批次数量前需要先确认补扣/去除明细。");
     }
 
-    if (payload.quantity <= 0) {
+    if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
       throw new BadRequestException("去除数量必须大于 0。");
     }
 
@@ -422,6 +470,10 @@ export class GoodsService {
 
     if (!batch) {
       throw new NotFoundException("未找到对应批次。");
+    }
+
+    if (payload.quantity > batch.remainingQuantity) {
+      throw new BadRequestException("去除数量不能超过当前批次剩余库存。");
     }
 
     const goods = this.findCatalogItem(batch.goodsId);
@@ -638,12 +690,19 @@ export class GoodsService {
     actorUserId?: string
   ) {
     this.findCatalogItem(goodsId);
+    const threshold =
+      payload.lowStockThreshold === undefined ? undefined : Math.floor(Number(payload.lowStockThreshold));
+    const resolvedThreshold = threshold ?? 0;
+
+    if (payload.enabled && (!Number.isFinite(resolvedThreshold) || resolvedThreshold < 0)) {
+      throw new BadRequestException("低库存阈值不能为负数。");
+    }
 
     const setting = this.store.upsertDeviceGoodsSetting({
       deviceCode,
       goodsId,
       enabled: payload.enabled,
-      lowStockThreshold: payload.enabled ? payload.lowStockThreshold : undefined,
+      lowStockThreshold: payload.enabled ? resolvedThreshold : undefined,
       sourcePolicyId: this.store.getDeviceGoodsSetting(deviceCode, goodsId)?.sourcePolicyId,
       updatedAt: new Date().toISOString()
     });

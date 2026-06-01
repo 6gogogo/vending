@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type { SpecialAccessPolicy, UserRole } from "@vm/shared-types";
 
@@ -17,9 +17,10 @@ export class SpecialAccessPoliciesService {
     payload: Omit<SpecialAccessPolicy, "id">,
     actorUserId?: string
   ) {
+    const normalized = this.normalizePolicyPayload(payload);
     const policy: SpecialAccessPolicy = {
       id: this.store.createId("policy"),
-      ...payload
+      ...normalized
     };
 
     this.store.specialAccessPolicies.unshift(policy);
@@ -43,8 +44,12 @@ export class SpecialAccessPoliciesService {
     actorUserId?: string
   ) {
     const policy = this.findById(id);
+    const normalized = this.normalizePolicyPayload({
+      ...policy,
+      ...payload
+    });
 
-    Object.assign(policy, payload);
+    Object.assign(policy, normalized);
     this.store.logOperation({
       category: "policy",
       type: "update-special-policy",
@@ -67,12 +72,28 @@ export class SpecialAccessPoliciesService {
     },
     actorUserId?: string
   ) {
+    if (!payload.userIds.length) {
+      throw new BadRequestException("请选择要下发策略的用户。");
+    }
+
+    if (!payload.policyIds.length) {
+      throw new BadRequestException("请选择要下发的领取策略。");
+    }
+
     const targetPolicies = this.store.specialAccessPolicies.filter((policy) =>
       payload.policyIds.includes(policy.id)
     );
     const targetUsers = this.store.users.filter(
       (user) => payload.userIds.includes(user.id) && user.role === "special"
     );
+
+    if (targetPolicies.length !== payload.policyIds.length) {
+      throw new BadRequestException("存在未找到的领取策略。");
+    }
+
+    if (!targetUsers.length) {
+      throw new BadRequestException("请选择普通用户下发领取策略。");
+    }
 
     const businessDateKey = getBusinessDayKey(new Date());
     const nextBusinessDateKey = addDaysToDateKey(businessDateKey, 1);
@@ -168,6 +189,70 @@ export class SpecialAccessPoliciesService {
     }
 
     return policy;
+  }
+
+  private normalizePolicyPayload(payload: Omit<SpecialAccessPolicy, "id">): Omit<SpecialAccessPolicy, "id"> {
+    const name = payload.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException("策略名称不能为空。");
+    }
+
+    const startHour = Number(payload.startHour);
+    const endHour = Number(payload.endHour);
+
+    if (
+      !Number.isFinite(startHour) ||
+      !Number.isFinite(endHour) ||
+      startHour < 0 ||
+      endHour > 24 ||
+      endHour <= startHour
+    ) {
+      throw new BadRequestException("结束时间必须晚于开始时间，且时间范围应在 0 到 24 点之间。");
+    }
+
+    const weekdays = Array.from(new Set((payload.weekdays ?? []).map((weekday) => Number(weekday))))
+      .filter((weekday) => Number.isInteger(weekday))
+      .sort((left, right) => left - right);
+
+    if (!weekdays.length || weekdays.some((weekday) => weekday < 0 || weekday > 6)) {
+      throw new BadRequestException("请选择有效的可领取星期。");
+    }
+
+    if (!payload.goodsLimits?.length) {
+      throw new BadRequestException("请至少设置一种可领取物资。");
+    }
+
+    const goodsLimits = payload.goodsLimits.map((limit) => {
+      const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === limit.goodsId);
+      const quantity = Math.floor(Number(limit.quantity));
+
+      if (!goods) {
+        throw new NotFoundException(`未找到货品 ${limit.goodsId}。`);
+      }
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new BadRequestException("领取物资数量必须大于 0。");
+      }
+
+      return {
+        goodsId: goods.goodsId,
+        goodsName: goods.name,
+        category: goods.category,
+        quantity
+      };
+    });
+
+    return {
+      ...payload,
+      name,
+      weekdays,
+      startHour,
+      endHour,
+      goodsLimits,
+      applicableUserIds: Array.from(new Set(payload.applicableUserIds ?? [])),
+      status: payload.status === "inactive" ? "inactive" : "active"
+    };
   }
 
   private getActor(actorUserId?: string) {

@@ -91,6 +91,23 @@ const reservationSummary = computed(() => {
 
   return reservation.items.map((item) => `${item.goodsName} x${item.quantity}`).join("、");
 });
+const reservationRuleLines = computed(() => {
+  const settings = reservationSettings.value;
+
+  if (!settings) {
+    return ["正在读取预约规则，请稍候。"];
+  }
+
+  if (!settings.enabled) {
+    return ["当前暂未开放提前预约，请到柜机旁直接扫码或手动开柜。"];
+  }
+
+  return [
+    `预约成功后会保留 ${settings.holdMinutes} 分钟。`,
+    `累计超时 ${settings.maxTimeouts} 次后，账号可能会被暂停预约功能。`,
+    "到达柜机后请进入同一台柜机详情，使用当前预约开柜。"
+  ];
+});
 
 const selectedGoodsDetails = computed(() =>
   selectedItems.value.map((item) => {
@@ -409,6 +426,15 @@ const updateSelected = (goodsId: string, delta: number) => {
   const goods = goodsList.value.find((item) => item.goodsId === goodsId);
   const max = Math.max(0, goods?.stock ?? 0);
   const next = Math.min(max, Math.max(0, current + delta));
+
+  if (delta > 0 && current >= max) {
+    uni.showToast({
+      title: max > 0 ? `最多可选 ${max} 件` : "当前暂无库存",
+      icon: "none"
+    });
+    return;
+  }
+
   preSettlement.value = undefined;
   selectedMap[goodsId] = next;
 };
@@ -563,9 +589,11 @@ const createReservation = async () => {
       }))
     });
     reservations.value = [reservation, ...reservations.value.filter((item) => item.id !== reservation.id)];
-    uni.showToast({
+    uni.showModal({
       title: "预约成功",
-      icon: "success"
+      content: `已为你保留 ${reservation.items.map((item) => `${item.goodsName} x${item.quantity}`).join("、")}。\n请在 ${formatShortDateTime(reservation.expiresAt)} 前到达柜机，并在本页点击“用预约开柜”。`,
+      confirmText: "我知道了",
+      showCancel: false
     });
   } catch (error) {
     uni.showToast({
@@ -712,6 +740,16 @@ onLoad((query) => {
           </view>
         </view>
 
+        <view v-if="!accessibilityEnabled" class="reservation-rules" :class="{ 'reservation-rules--disabled': reservationSettings && !reservationSettings.enabled }">
+          <view class="reservation-rules__head">
+            <text class="reservation-rules__title">提前预约规则</text>
+            <text class="vm-status" :class="reservationSettings?.enabled ? 'vm-status--success' : 'vm-status--warning'">
+              {{ reservationSettings?.enabled ? "已开放" : "未开放" }}
+            </text>
+          </view>
+          <text v-for="line in reservationRuleLines" :key="line" class="reservation-rules__body">{{ line }}</text>
+        </view>
+
         <view v-if="selectedGoodsDetails.length && !accessibilityEnabled" class="settlement-preview">
           <view class="settlement-preview__head">
             <text class="settlement-preview__title">预结算明细</text>
@@ -766,7 +804,7 @@ onLoad((query) => {
             {{ scanMode ? "确认货品并扫码开柜" : "确认货品并手动开柜" }}
           </button>
           <button v-if="reservationSettings?.enabled" class="vm-button vm-button--ghost" :loading="submitting" @tap="createReservation">
-            预约所选货品
+            提前预约所选货品
           </button>
           <button v-if="!accessibilityEnabled && hasNavigationTarget" class="vm-button vm-button--ghost" @tap="openNavigation">
             导航到此柜机
@@ -808,7 +846,8 @@ onLoad((query) => {
 .action-stack,
 .distance-banner,
 .settlement-preview,
-.reservation-panel__actions {
+.reservation-panel__actions,
+.reservation-rules {
   display: grid;
   gap: 16rpx;
 }
@@ -820,7 +859,8 @@ onLoad((query) => {
 .selection-banner,
 .goods-item,
 .settlement-preview,
-.reservation-panel {
+.reservation-panel,
+.reservation-rules {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -884,6 +924,37 @@ onLoad((query) => {
 .settlement-preview {
   display: grid;
   align-items: stretch;
+}
+
+.reservation-rules {
+  display: grid;
+  align-items: stretch;
+  background: rgba(255, 255, 255, 0.9);
+  border-color: var(--vm-success-line);
+}
+
+.reservation-rules--disabled {
+  border-color: var(--vm-warning-line);
+  background: var(--vm-warning-bg);
+}
+
+.reservation-rules__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.reservation-rules__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.reservation-rules__body {
+  font-size: 23rpx;
+  line-height: 1.6;
+  color: var(--vm-text-soft);
 }
 
 .settlement-preview__head,

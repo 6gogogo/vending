@@ -26,6 +26,7 @@ import type {
   SmartVmSettlementPayload
 } from "@vm/shared-types";
 
+import { isProductionRuntime } from "../../common/config/production-safety";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AccessRulesService } from "../access-rules/access-rules.service";
 import { AlertsService } from "../alerts/alerts.service";
@@ -41,6 +42,8 @@ type CallbackBilling = Pick<
   items: CabinetPreSettlementItem[];
 };
 
+type AuthActor = { id: string; role: "admin" | "merchant" | "special" } | undefined;
+
 @Injectable()
 export class CabinetEventsService {
   constructor(
@@ -53,7 +56,7 @@ export class CabinetEventsService {
     @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
-  previewOpenSettlement(payload: CabinetOpenRequest): CabinetOpenPreviewResult {
+  previewOpenSettlement(payload: CabinetOpenRequest, actor?: AuthActor): CabinetOpenPreviewResult {
     const {
       user,
       quotaSummary,
@@ -63,7 +66,7 @@ export class CabinetEventsService {
       operationType,
       hasInboundGoods,
       openReason
-    } = this.prepareOpenContext(payload);
+    } = this.prepareOpenContext(payload, actor);
 
     return {
       deviceCode: payload.deviceCode,
@@ -82,7 +85,7 @@ export class CabinetEventsService {
     };
   }
 
-  async openCabinet(payload: CabinetOpenRequest) {
+  async openCabinet(payload: CabinetOpenRequest, actor?: AuthActor) {
     const {
       user,
       quotaSummary,
@@ -93,7 +96,7 @@ export class CabinetEventsService {
       operationType,
       hasInboundGoods,
       openReason
-    } = this.prepareOpenContext(payload);
+    } = this.prepareOpenContext(payload, actor);
     const logCategory = this.getOpenLogCategory(user.role, operationType);
 
     const eventId = this.store.createId("event");
@@ -238,7 +241,15 @@ export class CabinetEventsService {
     };
   }
 
-  list(userId?: string) {
+  list(userId?: string, actor?: AuthActor) {
+    if (!actor) {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
+    if (actor.role !== "admin") {
+      return this.store.events.filter((entry) => entry.userId === actor.id);
+    }
+
     if (!userId) {
       return this.store.events;
     }
@@ -295,8 +306,8 @@ export class CabinetEventsService {
   }
 
   handleDoorStatus(payload: SmartVmDoorStatusPayload & Record<string, unknown>) {
-    const callbackLog = this.store.logCallback("door-status", payload);
     this.assertSignature(payload);
+    const callbackLog = this.store.logCallback("door-status", payload);
 
     // 把门状态链路完整落下来，管理员才能快速判断是设备异常还是流程卡住。
     const event = this.store.events.find((entry) => entry.eventId === payload.eventId);
@@ -386,8 +397,8 @@ export class CabinetEventsService {
   }
 
   handleSettlement(payload: SmartVmSettlementPayload & Record<string, unknown>) {
-    const callbackLog = this.store.logCallback("settlement", payload);
     this.assertSignature(payload);
+    const callbackLog = this.store.logCallback("settlement", payload);
 
     const event = this.getEventByPlatformOrderNo(payload.orderNo);
     const settlementWasAlreadyRecorded = this.hasSettlementRecord(payload.orderNo);
@@ -564,8 +575,8 @@ export class CabinetEventsService {
   }
 
   handleAdjustment(payload: SmartVmAdjustmentPayload & Record<string, unknown>) {
-    const callbackLog = this.store.logCallback("adjustment", payload);
     this.assertSignature(payload);
+    const callbackLog = this.store.logCallback("adjustment", payload);
 
     const event = this.getEventByPlatformOrderNo(payload.orgOrderNo);
     event.updatedAt = new Date().toISOString();
@@ -649,6 +660,7 @@ export class CabinetEventsService {
   }
 
   async handlePaymentSuccess(payload: SmartVmPaymentPayload & Record<string, unknown>) {
+    this.assertSignature(payload);
     const callbackLog = this.store.logCallback("payment-success", payload);
     return this.forwardPaymentSuccessToPlatform(payload, {
       actor: {
@@ -656,10 +668,6 @@ export class CabinetEventsService {
         name: "支付回调"
       },
       logType: "payment-success-callback",
-      targetUrl:
-        payload.targetUrl ||
-        payload.noticeUrl ||
-        payload.notifyUrl,
       callbackLogId: callbackLog.id,
       callbackPayload: payload
     });
@@ -673,11 +681,7 @@ export class CabinetEventsService {
   ) {
     return this.forwardPaymentSuccessToPlatform(payload, {
       actor: this.getAdminActor(actorUserId),
-      logType: "manual-payment-success",
-      targetUrl:
-        payload.targetUrl ||
-        payload.noticeUrl ||
-        payload.notifyUrl
+      logType: "manual-payment-success"
     });
   }
 
@@ -737,9 +741,41 @@ export class CabinetEventsService {
   }
 
   private assertSignature(payload: Record<string, unknown>) {
-    if (!this.smartVmGateway.verifySignedPayload(payload)) {
-      throw new BadRequestException("签名校验失败。");
+    if (this.smartVmGateway.verifySignedPayload(payload)) {
+      return;
     }
+
+    if (this.isAcceptedLocalMockCallback(payload)) {
+      return;
+    }
+
+    throw new BadRequestException("签名校验失败。");
+  }
+
+  private isAcceptedLocalMockCallback(payload: Record<string, unknown>) {
+    if (isProductionRuntime() || !this.smartVmGateway.isUsingMockTransport()) {
+      return false;
+    }
+
+    const eventId = this.readPayloadString(payload.eventId);
+    const orderNo =
+      this.readPayloadString(payload.orderNo) ??
+      this.readPayloadString(payload.orgOrderNo);
+
+    const event = this.store.events.find(
+      (entry) =>
+        (eventId && entry.eventId === eventId) ||
+        (orderNo &&
+          (entry.orderNo === orderNo ||
+            entry.adjustmentOrderNo === orderNo ||
+            entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo)))
+    );
+
+    return Boolean(event?.orderNo.startsWith("mock-"));
+  }
+
+  private readPayloadString(value: unknown) {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
   }
 
   private getEventByPlatformOrderNo(orderNo: string) {
@@ -1002,13 +1038,21 @@ export class CabinetEventsService {
     };
   }
 
-  private prepareOpenContext(payload: CabinetOpenRequest) {
+  private prepareOpenContext(payload: CabinetOpenRequest, actor?: AuthActor) {
+    if (!actor) {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
     const user = this.store.users.find(
-      (entry) => entry.phone === payload.phone && entry.status === "active"
+      (entry) => entry.id === actor.id && entry.status === "active"
     );
 
     if (!user) {
-      throw new UnauthorizedException("该手机号未登记，无法开柜。");
+      throw new UnauthorizedException("当前用户未登记或已停用，无法开柜。");
+    }
+
+    if (payload.phone && payload.phone !== user.phone) {
+      throw new ForbiddenException("不能使用其他手机号发起开柜。");
     }
 
     const doorNum = payload.doorNum ?? "1";

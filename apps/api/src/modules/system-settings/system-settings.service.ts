@@ -36,7 +36,7 @@ const envKeyPattern = /^[A-Z][A-Z0-9_]*$/;
 export class SystemSettingsService {
   constructor(@Inject(ConfigService) private readonly configService: ConfigService) {}
 
-  getSettings(): SystemSettingsSnapshot {
+  getSettings(options?: { includeSensitiveValues?: boolean }): SystemSettingsSnapshot {
     const envFilePath = resolveApiEnvFile();
     const exampleFilePath = this.resolveExampleFilePath(envFilePath);
     const envFile = this.parseEnvFile(envFilePath);
@@ -47,18 +47,29 @@ export class SystemSettingsService {
       envFilePath,
       exampleFilePath: existsSync(exampleFilePath) ? exampleFilePath : undefined,
       loadedAt: new Date().toISOString(),
-      settings: keys.map((key) => this.createSettingEntry(key, envFile, exampleFile))
+      settings: keys.map((key) => this.createSettingEntry(key, envFile, exampleFile, options))
     };
   }
 
-  updateSettings(payload: SystemSettingsUpdatePayload): SystemSettingsUpdateResult {
+  updateSettings(
+    payload: SystemSettingsUpdatePayload,
+    options?: { includeSensitiveValues?: boolean }
+  ): SystemSettingsUpdateResult {
     if (!payload || typeof payload.values !== "object" || Array.isArray(payload.values)) {
       throw new BadRequestException("配置保存参数不正确。");
     }
 
-    const snapshotBefore = this.getSettings();
+    const snapshotBefore = this.getSettings({ includeSensitiveValues: true });
     const entriesByKey = new Map(snapshotBefore.settings.map((entry) => [entry.key, entry]));
     const nextValues = new Map<string, string>();
+
+    if (!options?.includeSensitiveValues) {
+      const sensitiveKey = Object.keys(payload.values).find((key) => entriesByKey.get(key)?.sensitive);
+
+      if (sensitiveKey) {
+        throw new BadRequestException(`当前账号不能修改敏感配置项：${sensitiveKey}`);
+      }
+    }
 
     for (const entry of snapshotBefore.settings) {
       const rawValue = Object.prototype.hasOwnProperty.call(payload.values, entry.key)
@@ -105,7 +116,7 @@ export class SystemSettingsService {
     });
 
     return {
-      ...this.getSettings(),
+      ...this.getSettings(options),
       updatedAt,
       changedKeys,
       runtimeAppliedKeys,
@@ -116,13 +127,20 @@ export class SystemSettingsService {
   private createSettingEntry(
     key: string,
     envFile: ParsedEnvFile,
-    exampleFile: ParsedEnvFile
+    exampleFile: ParsedEnvFile,
+    options?: { includeSensitiveValues?: boolean }
   ): SystemSettingEntry {
     const metadata = systemSettingCatalog[key];
     const envValue = envFile.values.get(key);
     const exampleValue = exampleFile.values.get(key);
     const runtimeValue = this.configService.get<string>(key);
     const value = envValue ?? runtimeValue ?? exampleValue ?? "";
+    const sensitive = metadata?.sensitive ?? this.isSensitiveKey(key);
+    const masked = sensitive && !options?.includeSensitiveValues && Boolean(value);
+    const displayValue = masked ? "********" : value;
+    const runtimeDisplayValue = sensitive && !options?.includeSensitiveValues && Boolean(runtimeValue ?? value)
+      ? "********"
+      : (runtimeValue ?? value);
     const source: SystemSettingEntry["source"] =
       envValue !== undefined
         ? "env"
@@ -136,18 +154,19 @@ export class SystemSettingsService {
 
     return {
       key,
-      value,
+      value: displayValue,
       exampleValue,
       group,
       label: metadata?.label ?? this.toReadableLabel(key),
       description: metadata?.description ?? `${group}配置项。`,
       inputType,
       options: metadata?.options,
-      sensitive: metadata?.sensitive ?? this.isSensitiveKey(key),
+      sensitive,
+      masked,
       required: metadata?.required ?? false,
       restartRequired: metadata?.restartRequired ?? false,
       source,
-      effectiveValue: runtimeValue ?? value
+      effectiveValue: runtimeDisplayValue
     };
   }
 

@@ -4,11 +4,14 @@ import { RouterLink } from "vue-router";
 import type { DeviceRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime, formatNowInBeijing } from "../utils/datetime";
 
 type DrawerMode = "" | "create-device" | "edit-device";
 
 const devices = ref<DeviceRecord[]>([]);
+const sessionStore = useAdminSessionStore();
+const canManageDevices = computed(() => sessionStore.can("devices:manage"));
 const loading = ref(false);
 const lastUpdatedAt = ref("");
 const savingDevice = ref(false);
@@ -119,11 +122,21 @@ const resetDeviceForm = () => {
 };
 
 const openCreateDevice = () => {
+  if (!canManageDevices.value) {
+    window.alert("当前账号没有柜机资料管理权限。");
+    return;
+  }
+
   resetDeviceForm();
   drawerMode.value = "create-device";
 };
 
 const openEditDevice = (device: DeviceRecord) => {
+  if (!canManageDevices.value) {
+    window.alert("当前账号没有柜机资料管理权限。");
+    return;
+  }
+
   editingDeviceCode.value = device.deviceCode;
   deviceForm.value = {
     deviceCode: device.deviceCode,
@@ -159,6 +172,11 @@ const parseOptionalNumber = (value: string) => {
 };
 
 const submitDevice = async () => {
+  if (!canManageDevices.value) {
+    window.alert("当前账号没有柜机资料管理权限。");
+    return;
+  }
+
   const payload = {
     deviceCode: deviceForm.value.deviceCode.trim(),
     name: deviceForm.value.name.trim(),
@@ -191,6 +209,11 @@ const submitDevice = async () => {
 };
 
 const removeDevice = async (device: DeviceRecord) => {
+  if (!canManageDevices.value) {
+    window.alert("当前账号没有柜机资料管理权限。");
+    return;
+  }
+
   if (!window.confirm(`确认从当前运行柜机列表中移除 ${device.name}（${device.deviceCode}）吗？`)) {
     return;
   }
@@ -275,11 +298,14 @@ onUnmounted(() => {
           <span class="admin-copy">当前柜机数：{{ sortedDevices.length }}</span>
           <span class="admin-copy">自动刷新 8 秒一次</span>
           <span class="admin-copy">最近刷新：{{ lastUpdatedAt || "尚未加载" }}</span>
-          <button class="admin-button" @click="openCreateDevice">新增柜机</button>
+          <button v-if="canManageDevices" class="admin-button" @click="openCreateDevice">新增柜机</button>
           <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
             {{ loading ? "刷新中" : "立即刷新" }}
           </button>
         </div>
+      </div>
+      <div v-if="!canManageDevices" class="admin-note">
+        当前账号只能查看柜机状态，新增、编辑或删除柜机需要“柜机资料管理”权限。
       </div>
     </section>
 
@@ -348,7 +374,7 @@ onUnmounted(() => {
         </table>
 
         <div class="operations-card__actions">
-          <button class="admin-button admin-button--ghost" :disabled="removingDeviceCode === device.deviceCode" @click="openEditDevice(device)">
+          <button v-if="canManageDevices" class="admin-button admin-button--ghost" :disabled="removingDeviceCode === device.deviceCode" @click="openEditDevice(device)">
             编辑柜机
           </button>
           <RouterLink class="admin-link" :to="`/operations/${device.deviceCode}`">详情</RouterLink>
@@ -401,13 +427,13 @@ onUnmounted(() => {
           </div>
 
           <div class="operations-manager__actions">
-            <button class="admin-button" :disabled="savingDevice" @click="submitDevice">
+            <button class="admin-button" :disabled="savingDevice || !canManageDevices" @click="submitDevice">
               {{ savingDevice ? "提交中" : isEditing ? "保存修改" : "新增柜机" }}
             </button>
             <RouterLink v-if="isEditing" class="admin-link" :to="`/operations/${editingDeviceCode}`">进入当前柜机详情</RouterLink>
           </div>
 
-          <div v-if="isEditing" class="operations-danger-zone">
+          <div v-if="isEditing && canManageDevices" class="operations-danger-zone">
             <div>
               <strong>删除柜机</strong>
               <p>删除柜机会同时清理当前库存批次、阈值设置和未完成预警；历史日志与历史事件保留，便于后续追溯。</p>

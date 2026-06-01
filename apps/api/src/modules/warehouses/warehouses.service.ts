@@ -157,6 +157,14 @@ export class WarehousesService {
     },
     actorUserId?: string
   ) {
+    for (const item of payload.items) {
+      const actualQuantity = Number(item.actualQuantity);
+
+      if (!Number.isFinite(actualQuantity) || actualQuantity < 0) {
+        throw new BadRequestException("实盘数量不能为负数。");
+      }
+    }
+
     const device = this.store.devices.find((entry) => entry.deviceCode === payload.deviceCode);
 
     if (!device) {

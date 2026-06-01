@@ -24,6 +24,13 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "url",
     required: true
   },
+  CORS_ORIGINS: {
+    label: "允许跨域来源",
+    description: "允许浏览器访问 API 的前端来源，多个来源用英文逗号分隔；生产环境必须使用 HTTPS。",
+    inputType: "text",
+    required: true,
+    restartRequired: true
+  },
   API_DATA_FILE: {
     label: "业务数据文件",
     description: "本地 JSON 数据文件路径。修改后建议重启并确认数据迁移。",
@@ -112,6 +119,11 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "智能柜平台签名密钥。",
     inputType: "password",
     sensitive: true
+  },
+  SMARTVM_ALLOW_UNSIGNED_CALLBACKS: {
+    label: "允许未签名柜机回调",
+    description: "仅用于本地联调；生产环境必须关闭。",
+    inputType: "boolean"
   },
   SMARTVM_DEFAULT_PAY_STYLE: {
     label: "默认支付方式",
@@ -284,7 +296,12 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   VERIFICATION_CODE_PREVIEW_ENABLED: {
     label: "显示模拟验证码",
-    description: "使用本地模拟验证码时，是否在接口响应中返回验证码便于联调。",
+    description: "仅限本机联调。开启后，接口响应可能返回验证码；生产环境必须关闭。",
+    inputType: "boolean"
+  },
+  ALLOW_DEFAULT_BACKOFFICE_LOGIN: {
+    label: "允许默认后台密码登录",
+    description: "仅限本机初始化联调。关闭后，仍使用默认密码的后台账号不能登录。",
     inputType: "boolean"
   },
   ALIYUN_SMS_ACCESS_KEY_ID: {

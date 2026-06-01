@@ -34,8 +34,11 @@ defineProps<{
 .flow-steps {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132rpx, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12rpx;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 18rpx 6rpx 8rpx;
 }
 
@@ -83,17 +86,22 @@ defineProps<{
 }
 
 .flow-step__label {
+  display: block;
+  max-width: 100%;
   font-size: 23rpx;
   line-height: 1.24;
   font-weight: 800;
   color: var(--vm-text);
+  overflow-wrap: anywhere;
 }
 
 .flow-step__description {
+  display: block;
   max-width: 138rpx;
   font-size: 19rpx;
   line-height: 1.42;
   color: var(--vm-text-soft);
+  overflow-wrap: anywhere;
 }
 
 .flow-step--done {
@@ -126,22 +134,4 @@ defineProps<{
   color: #ffffff;
 }
 
-:global(.vm-page--accessible) .flow-step {
-  padding: 8rpx;
-}
-
-:global(.vm-page--accessible) .flow-step__mark {
-  width: 64rpx;
-  height: 64rpx;
-  font-size: 30rpx;
-}
-
-:global(.vm-page--accessible) .flow-step__label {
-  font-size: 32rpx;
-}
-
-:global(.vm-page--accessible) .flow-step__description {
-  font-size: 26rpx;
-  color: var(--vm-text);
-}
 </style>

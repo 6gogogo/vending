@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 
 import type {
   RegistrationApplication,
@@ -16,7 +17,8 @@ export class RegistrationApplicationsService {
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
     @Inject(VerificationCodeService)
-    private readonly verificationCodeService: VerificationCodeService
+    private readonly verificationCodeService: VerificationCodeService,
+    @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
   list(status?: RegistrationApplication["status"]) {
@@ -43,8 +45,13 @@ export class RegistrationApplicationsService {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   }
 
-  lookupByPhone(phone: string): RegistrationPhoneLookup {
+  async lookupByPhone(phone: string, code?: string): Promise<RegistrationPhoneLookup> {
     const normalizedPhone = phone.trim();
+    const includePrivateDetails = Boolean(code?.trim());
+
+    if (includePrivateDetails) {
+      await this.ensureVerifiedCode(normalizedPhone, code!.trim());
+    }
 
     if (!normalizedPhone) {
       return {
@@ -57,7 +64,7 @@ export class RegistrationApplicationsService {
     const linkedUser = this.store.users.find((entry) => entry.phone === normalizedPhone);
 
     if (linkedUser?.mobileProfileCompleted) {
-      return {
+      return this.toPublicLookup({
         phone: normalizedPhone,
         state: "approved",
         fixedRole: linkedUser.role,
@@ -65,11 +72,11 @@ export class RegistrationApplicationsService {
         application,
         linkedUser: this.mapLinkedUser(linkedUser),
         message: "该手机号已通过审核，可直接登录。"
-      };
+      }, includePrivateDetails);
     }
 
     if (application?.status === "pending") {
-      return {
+      return this.toPublicLookup({
         phone: normalizedPhone,
         state: "pending",
         fixedRole: linkedUser?.role,
@@ -77,11 +84,11 @@ export class RegistrationApplicationsService {
         application,
         linkedUser: linkedUser ? this.mapLinkedUser(linkedUser) : undefined,
         message: "该手机号已有待审核资料，重新提交将覆盖之前的信息。"
-      };
+      }, includePrivateDetails);
     }
 
     if (application?.status === "rejected") {
-      return {
+      return this.toPublicLookup({
         phone: normalizedPhone,
         state: "rejected",
         fixedRole: linkedUser?.role,
@@ -89,23 +96,37 @@ export class RegistrationApplicationsService {
         application,
         linkedUser: linkedUser ? this.mapLinkedUser(linkedUser) : undefined,
         message: application.reviewReason || "该手机号此前审核未通过，可修改资料后重新提交。"
-      };
+      }, includePrivateDetails);
     }
 
     if (linkedUser) {
-      return {
+      return this.toPublicLookup({
         phone: normalizedPhone,
         state: "existing_user",
         fixedRole: linkedUser.role,
         profile: this.mapUserProfile(linkedUser),
         linkedUser: this.mapLinkedUser(linkedUser),
         message: "该手机号已在系统预登记，补齐资料后可直接启用。"
-      };
+      }, includePrivateDetails);
     }
 
     return {
       phone: normalizedPhone,
       state: "new"
+    };
+  }
+
+  private toPublicLookup(lookup: RegistrationPhoneLookup, includePrivateDetails: boolean): RegistrationPhoneLookup {
+    if (includePrivateDetails) {
+      return lookup;
+    }
+
+    return {
+      phone: lookup.phone,
+      state: lookup.state,
+      message: lookup.state === "rejected"
+        ? "该手机号此前审核未通过，可重新提交资料。"
+        : lookup.message
     };
   }
 
@@ -132,7 +153,9 @@ export class RegistrationApplicationsService {
 
     return this.upsertPendingApplication(existingApplication, {
       phone,
-      requestedRole: payload.requestedRole ?? existingApplication?.requestedRole ?? "special",
+      requestedRole: this.resolvePublicRequestedRole(
+        payload.requestedRole ?? existingApplication?.requestedRole
+      ),
       profile: normalizedProfile
     });
   }
@@ -168,7 +191,7 @@ export class RegistrationApplicationsService {
 
     return this.upsertPendingApplication(application, {
       phone,
-      requestedRole: payload.requestedRole ?? application.requestedRole,
+      requestedRole: this.resolvePublicRequestedRole(payload.requestedRole ?? application.requestedRole),
       profile: normalizedProfile
     });
   }
@@ -198,7 +221,7 @@ export class RegistrationApplicationsService {
 
     return this.upsertPendingApplication(existing, {
       phone: draft.phone,
-      requestedRole: payload.requestedRole ?? draft.requestedRole ?? "special",
+      requestedRole: this.resolvePublicRequestedRole(payload.requestedRole ?? draft.requestedRole),
       profile: normalizedProfile
     });
   }
@@ -374,6 +397,25 @@ export class RegistrationApplicationsService {
     return created;
   }
 
+  private resolvePublicRequestedRole(role?: UserRole) {
+    const resolvedRole = role ?? "special";
+
+    if (resolvedRole !== "admin" || this.isPublicAdminRegistrationEnabled()) {
+      return resolvedRole;
+    }
+
+    throw new BadRequestException("管理员账号请由后台创建或由程序提供商分配。");
+  }
+
+  private isPublicAdminRegistrationEnabled() {
+    return ["1", "true", "yes", "on"].includes(
+      this.configService
+        .get<string>("PUBLIC_ADMIN_REGISTRATION_ENABLED")
+        ?.trim()
+        .toLowerCase() ?? ""
+    );
+  }
+
   private createUserFromApplication(application: RegistrationApplication) {
     const regionName = application.profile.regionName ?? application.profile.neighborhood;
     const created: UserRecord = {
@@ -447,11 +489,17 @@ export class RegistrationApplicationsService {
   }
 
   private normalizeProfile(profile: RegistrationApplicationProfile): RegistrationApplicationProfile {
+    const normalizedName = profile.name?.trim();
+
+    if (!normalizedName) {
+      throw new BadRequestException("姓名不能为空。");
+    }
+
     const region = this.resolveConfiguredRegion(profile.regionId, profile.regionName ?? profile.neighborhood);
 
     return {
       ...profile,
-      name: profile.name.trim(),
+      name: normalizedName,
       neighborhood: region.name,
       regionId: region.id,
       regionName: region.name,
@@ -496,7 +544,7 @@ export class RegistrationApplicationsService {
 
   private resolveUserName(role: UserRole, profile: RegistrationApplicationProfile) {
     if (role === "merchant") {
-      return profile.merchantName || profile.name || "爱心商户";
+      return profile.merchantName || profile.name || "商家";
     }
 
     return profile.name || "待审核用户";

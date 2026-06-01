@@ -18,6 +18,10 @@ export class AccessRulesService {
   }
 
   update(role: "special" | "merchant", patch: { dailyLimit?: number; categoryLimit?: Record<string, number> }) {
+    if (!role) {
+      throw new BadRequestException("请选择要配置的角色。");
+    }
+
     const rule = this.store.rules.find((entry) => entry.role === role);
 
     if (!rule) {
@@ -25,11 +29,29 @@ export class AccessRulesService {
     }
 
     if (patch.dailyLimit !== undefined) {
-      rule.dailyLimit = patch.dailyLimit;
+      const dailyLimit = Math.floor(Number(patch.dailyLimit));
+
+      if (!Number.isFinite(dailyLimit) || dailyLimit < 0) {
+        throw new BadRequestException("每日额度不能为负数。");
+      }
+
+      rule.dailyLimit = dailyLimit;
     }
 
     if (patch.categoryLimit) {
-      rule.categoryLimit = patch.categoryLimit;
+      const nextCategoryLimit: Record<string, number> = {};
+
+      for (const [category, value] of Object.entries(patch.categoryLimit)) {
+        const limit = Math.floor(Number(value));
+
+        if (!Number.isFinite(limit) || limit < 0) {
+          throw new BadRequestException("品类额度不能为负数。");
+        }
+
+        nextCategoryLimit[category] = limit;
+      }
+
+      rule.categoryLimit = nextCategoryLimit;
     }
 
     this.store.logOperation({
@@ -64,7 +86,7 @@ export class AccessRulesService {
 
     const quota = user.quota ?? this.store.rules.find((rule) => rule.role === "special");
     const currentBusinessDayKey = getBusinessDayKey(new Date());
-    // 对特殊群体来说，额度不仅是数量控制，也是在有限供给下尽量保证关键时段有人能领到物资。
+    // 对用户来说，额度不仅是数量控制，也是在有限供给下尽量保证关键时段有人能领到物资。
     const policyQuota = getActiveWindowCategoryQuota(
       user,
       this.store.specialAccessPolicies,
@@ -111,6 +133,16 @@ export class AccessRulesService {
 
     if (!user) {
       throw new BadRequestException("该手机号未登记。");
+    }
+
+    return this.getQuotaSummaryForUser(user);
+  }
+
+  getQuotaSummaryByUserId(userId?: string) {
+    const user = userId ? this.store.users.find((entry) => entry.id === userId) : undefined;
+
+    if (!user) {
+      throw new BadRequestException("当前登录态已失效，请重新登录。");
     }
 
     return this.getQuotaSummaryForUser(user);

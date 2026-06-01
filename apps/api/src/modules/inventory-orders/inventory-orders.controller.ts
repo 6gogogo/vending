@@ -5,6 +5,7 @@ import type { SmartVmRefundPayload } from "@vm/shared-types";
 import { ack, ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
+  AllowedBackofficeSessionPermissions,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -21,6 +22,7 @@ export class InventoryOrdersController {
   @Get()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant", "special")
+  @AllowedBackofficeSessionPermissions("operation-logs:view")
   list(
     @Query("userId") userId?: string,
     @Query("role") role?: "special" | "merchant" | "admin",
@@ -35,6 +37,7 @@ export class InventoryOrdersController {
   @Get("merchant-summary")
   @UseGuards(RoleGuard)
   @AllowedRoles("merchant", "admin")
+  @AllowedBackofficeSessionPermissions("operation-logs:view")
   merchantSummary(
     @Query("userId") userId: string,
     @Req() request?: { authUser?: { id: string; role: "admin" | "merchant" } }
@@ -46,12 +49,11 @@ export class InventoryOrdersController {
   @Post("callbacks/refund")
   @HttpCode(200)
   refundCallback(@Body() body: SmartVmRefundPayload & Record<string, unknown>) {
-    this.inventoryOrdersService.logRefundCallback(body);
-
     if (!this.smartVmGateway.verifySignedPayload(body)) {
       throw new BadRequestException("签名校验失败。");
     }
 
+    this.inventoryOrdersService.logRefundCallback(body);
     this.inventoryOrdersService.handleRefundCallback(body);
     return ack();
   }
@@ -60,7 +62,7 @@ export class InventoryOrdersController {
   @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("devices:view")
+  @AllowedBackofficePermissions("payments:refund")
   async refund(
     @Body()
     body: {

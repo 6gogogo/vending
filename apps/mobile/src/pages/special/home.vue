@@ -185,7 +185,7 @@ onShow(() => {
 
 <template>
   <MobileShell
-    eyebrow="受助用户"
+    eyebrow="用户"
     :title="`${sessionStore.user?.name ?? '访客'}，您好`"
     :subtitle="accessibilityEnabled ? '显示柜机名称、地点和可选货物。' : appCopy.specialWelcome"
   >

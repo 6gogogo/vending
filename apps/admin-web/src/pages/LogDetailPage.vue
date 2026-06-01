@@ -18,6 +18,7 @@ import {
 
 const route = useRoute();
 const sessionStore = useAdminSessionStore();
+const canUndoLogs = computed(() => sessionStore.can("operation-logs:undo"));
 const log = ref<OperationLogRecord>();
 const loading = ref(false);
 const undoing = ref(false);
@@ -237,6 +238,11 @@ const undoLog = async () => {
     return;
   }
 
+  if (!canUndoLogs.value) {
+    window.alert("当前账号没有撤销操作日志权限。");
+    return;
+  }
+
   undoing.value = true;
   try {
     await adminApi.undoLog(log.value.id);
@@ -401,7 +407,7 @@ onMounted(load);
           </div>
           <div class="admin-list">
             <button
-              v-if="log.metadata?.undoState === 'undoable'"
+              v-if="canUndoLogs && log.metadata?.undoState === 'undoable'"
               class="admin-button admin-button--ghost"
               :disabled="undoing"
               @click="undoLog"

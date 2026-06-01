@@ -5,36 +5,68 @@ export const BACKOFFICE_PERMISSIONS = [
   "platform-overview:view",
   "platform-tenants:view",
   "merchant-workbench:view",
+  "merchant-workbench:manage",
   "dashboard:view",
   "goods:view",
+  "goods:manage",
+  "goods:stock-adjust",
+  "goods:export",
   "warehouse:view",
+  "warehouse:transfer",
+  "warehouse:stocktake",
+  "warehouse:export",
   "devices:view",
+  "devices:manage",
+  "devices:operate",
   "users:view",
+  "users:manage",
+  "users:review",
+  "users:rules:manage",
+  "reservations:manage",
+  "alerts:manage",
+  "payments:refund",
   "operation-logs:view",
   "operation-logs:export",
+  "operation-logs:undo",
   "system-audit:view",
   "system-audit:export",
   "analytics:data-monitor:view",
   "ai-insights:view",
   "ai-insights:manage",
   "system-settings:view",
+  "system-settings:secret:view",
   "system-settings:update",
+  "uploads:images",
   "backoffice-credentials:manage"
 ] as const;
 export type BackofficePermission = (typeof BACKOFFICE_PERMISSIONS)[number];
 
+export const BACKOFFICE_PROVIDER_PERMISSIONS = [
+  "platform-overview:view",
+  "platform-tenants:view"
+] as const satisfies readonly BackofficePermission[];
+
+export const BACKOFFICE_TENANT_PERMISSIONS = BACKOFFICE_PERMISSIONS.filter(
+  (permission) => !(BACKOFFICE_PROVIDER_PERMISSIONS as readonly string[]).includes(permission)
+) as BackofficePermission[];
+
+export const BACKOFFICE_ROLE_ALLOWED_PERMISSIONS = {
+  super_admin: BACKOFFICE_PERMISSIONS,
+  admin: BACKOFFICE_TENANT_PERMISSIONS,
+  merchant: BACKOFFICE_TENANT_PERMISSIONS
+} satisfies Record<BackofficeRole, readonly BackofficePermission[]>;
+
 export const BACKOFFICE_ROLE_DEFAULT_PERMISSIONS = {
   super_admin: BACKOFFICE_PERMISSIONS,
-  admin: [
-    "dashboard:view",
+  admin: BACKOFFICE_TENANT_PERMISSIONS,
+  merchant: [
+    "merchant-workbench:view",
+    "merchant-workbench:manage",
     "goods:view",
     "warehouse:view",
     "devices:view",
-    "users:view",
-    "operation-logs:view",
-    "operation-logs:export"
-  ],
-  merchant: ["merchant-workbench:view"]
+    "operation-logs:view"
+  ]
 } satisfies Record<BackofficeRole, readonly BackofficePermission[]>;
 
 export const isBackofficePermission = (permission: string): permission is BackofficePermission =>
@@ -48,10 +80,18 @@ export const normalizeBackofficePermissions = (
 export const resolveBackofficePermissions = (
   role: BackofficeRole,
   permissions?: readonly string[]
-): BackofficePermission[] =>
-  permissions
+): BackofficePermission[] => {
+  if (role === "super_admin") {
+    return [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS.super_admin];
+  }
+
+  const allowedPermissions = new Set(BACKOFFICE_ROLE_ALLOWED_PERMISSIONS[role]);
+  const resolved = permissions
     ? normalizeBackofficePermissions(permissions)
     : [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS[role]];
+
+  return resolved.filter((permission) => allowedPermissions.has(permission));
+};
 export type MobileDisplayRole = "admin" | "merchant" | "normal";
 export type RegistrationStatus = "pending" | "approved" | "rejected";
 export type PaymentProvider = "wechat" | "alipay";
@@ -248,6 +288,17 @@ export interface BackofficeSessionSnapshot {
     usesDefaultPassword: boolean;
     passwordUpdatedAt: string;
   };
+}
+
+export interface BackofficeCredentialSnapshot {
+  userId: string;
+  username: string;
+  role: BackofficeRole;
+  tenantId?: string;
+  tenantName?: string;
+  permissions: BackofficePermission[];
+  usesDefaultPassword: boolean;
+  passwordUpdatedAt: string;
 }
 
 export type PlatformTenantStatus = "active" | "trial" | "paused";
@@ -1408,6 +1459,7 @@ export interface SystemSettingEntry {
   inputType: SystemSettingInputType;
   options?: SystemSettingOption[];
   sensitive: boolean;
+  masked?: boolean;
   required: boolean;
   restartRequired: boolean;
   source: "env" | "example" | "runtime";

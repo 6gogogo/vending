@@ -30,7 +30,7 @@ export class ReservationsController {
 
   @Patch("settings")
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("users:view")
+  @AllowedBackofficePermissions("reservations:manage")
   updateSettings(
     @Body() body: Partial<Pick<ReservationSettings, "enabled" | "holdMinutes" | "maxTimeouts">>,
     @Req() request: AuthRequest
@@ -68,7 +68,7 @@ export class ReservationsController {
   @Post("users/:userId/reset-timeouts")
   @HttpCode(200)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("users:view")
+  @AllowedBackofficePermissions("reservations:manage")
   resetTimeouts(@Param("userId") userId: string, @Req() request: AuthRequest) {
     return ok(this.reservationsService.resetUserTimeouts(userId, request.authUser?.id));
   }

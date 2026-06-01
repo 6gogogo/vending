@@ -10,8 +10,10 @@ import { Reflector } from "@nestjs/core";
 import type { BackofficePermission, BackofficeRole, UserRole } from "@vm/shared-types";
 
 import {
+  ALLOWED_BACKOFFICE_ALL_PERMISSIONS_KEY,
   ALLOWED_BACKOFFICE_PERMISSIONS_KEY,
   ALLOWED_BACKOFFICE_ROLES_KEY,
+  ALLOWED_BACKOFFICE_SESSION_PERMISSIONS_KEY,
   ALLOWED_ROLES_KEY
 } from "./allowed-roles.decorator";
 import { InMemoryStoreService } from "../store/in-memory-store.service";
@@ -37,11 +39,21 @@ export class RoleGuard implements CanActivate {
       ALLOWED_BACKOFFICE_PERMISSIONS_KEY,
       [context.getHandler(), context.getClass()]
     );
+    const requiredBackofficePermissions = this.reflector.getAllAndOverride<BackofficePermission[]>(
+      ALLOWED_BACKOFFICE_ALL_PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()]
+    );
+    const backofficeSessionPermissions = this.reflector.getAllAndOverride<BackofficePermission[]>(
+      ALLOWED_BACKOFFICE_SESSION_PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()]
+    );
 
     if (
       !allowedRoles?.length &&
       !allowedBackofficeRoles?.length &&
-      !allowedBackofficePermissions?.length
+      !allowedBackofficePermissions?.length &&
+      !requiredBackofficePermissions?.length &&
+      !backofficeSessionPermissions?.length
     ) {
       return true;
     }
@@ -69,13 +81,16 @@ export class RoleGuard implements CanActivate {
     const session = this.store.getSession(bearerToken);
 
     if (sessionUser) {
+      const requiresBackofficeAccount =
+        Boolean(allowedBackofficeRoles?.length) ||
+        Boolean(allowedBackofficePermissions?.length) ||
+        Boolean(requiredBackofficePermissions?.length);
+      const backofficePermissions = this.store.getBackofficeSessionPermissions(session);
+      const isBackofficeSession = Boolean(session?.backofficeRole);
+
       if (allowedRoles?.length && !allowedRoles.includes(sessionUser.role)) {
         throw new ForbiddenException("当前角色无权访问该接口。");
       }
-
-      const requiresBackofficeAccount =
-        Boolean(allowedBackofficeRoles?.length) || Boolean(allowedBackofficePermissions?.length);
-      const backofficePermissions = this.store.getBackofficeSessionPermissions(session);
 
       if (requiresBackofficeAccount && !session?.backofficeRole) {
         throw new ForbiddenException("当前接口需要后台账号登录后访问。");
@@ -92,6 +107,21 @@ export class RoleGuard implements CanActivate {
         throw new ForbiddenException("当前后台账号无权访问该接口。");
       }
 
+      if (
+        requiredBackofficePermissions?.length &&
+        !requiredBackofficePermissions.every((permission) => backofficePermissions.includes(permission))
+      ) {
+        throw new ForbiddenException("当前后台账号无权访问该接口。");
+      }
+
+      if (
+        isBackofficeSession &&
+        backofficeSessionPermissions?.length &&
+        !backofficeSessionPermissions.some((permission) => backofficePermissions.includes(permission))
+      ) {
+        throw new ForbiddenException("当前后台账号无权访问该接口。");
+      }
+
       request.userRole = sessionUser.role;
       request.authUser = {
         id: sessionUser.id,
@@ -104,31 +134,14 @@ export class RoleGuard implements CanActivate {
       return true;
     }
 
-    if (allowedBackofficeRoles?.length || allowedBackofficePermissions?.length) {
+    if (
+      allowedBackofficeRoles?.length ||
+      allowedBackofficePermissions?.length ||
+      requiredBackofficePermissions?.length
+    ) {
       throw new ForbiddenException("当前接口需要后台账号登录后访问。");
     }
 
-    if (!allowedRoles?.length) {
-      return true;
-    }
-
-    const allowsAdmin = allowedRoles.includes("admin");
-
-    if (allowsAdmin) {
-      throw new ForbiddenException("当前接口需要管理员登录后访问。");
-    }
-
-    const headerRole = request.headers["x-role"];
-    const queryRole = request.query.role;
-    const bodyRole =
-      typeof request.body?.role === "string" ? (request.body.role as UserRole) : undefined;
-    const resolvedRole = (headerRole ?? queryRole ?? bodyRole) as UserRole | undefined;
-
-    if (!resolvedRole || !allowedRoles.includes(resolvedRole)) {
-      throw new ForbiddenException("当前角色无权访问该接口。");
-    }
-
-    request.userRole = resolvedRole;
-    return true;
+    throw new ForbiddenException("当前接口需要登录后访问。");
   }
 }

@@ -125,7 +125,7 @@ export class InventoryOrdersService {
         if (movement.expiresAt) {
           this.alertsService.create({
             type: "expiry",
-            title: "商户投放物资待过期处理",
+            title: "商家投放物资待过期处理",
             deviceCode: movement.deviceCode,
             targetUserId: movement.userId,
             dueAt: movement.expiresAt,

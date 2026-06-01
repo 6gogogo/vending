@@ -7,6 +7,7 @@ import {
 } from "@vm/shared-types";
 
 import { useAdminSessionStore } from "../stores/session";
+import { adminApiBaseUrl } from "../api/client";
 import AdminLayout from "../layouts/AdminLayout.vue";
 import AdminLoginPage from "../pages/AdminLoginPage.vue";
 import AiWorkspacePage from "../pages/AiWorkspacePage.vue";
@@ -66,9 +67,9 @@ export const router = createRouter({
           component: PlatformOverviewPage,
           meta: {
             group: "服务商后台",
-            eyebrow: "平台总览",
-            title: "客户实例总览",
-            description: "按客户实例查看运行状态、使用规模和跨实例汇总数据。",
+            eyebrow: "全局工作台",
+            title: "全局工作台",
+            description: "服务商视角查看当前实例运行状态，以及未来扩展多实例时的汇总入口。",
             permission: "platform-overview:view"
           }
         },
@@ -143,9 +144,9 @@ export const router = createRouter({
           component: SystemSettingsPage,
           meta: {
             group: "系统设置",
-            eyebrow: "统一设置",
-            title: "系统调控与接口配置",
-            description: "统一维护后端 .env 中的大模型、短信、账户接入、支付和柜机平台参数。",
+            eyebrow: "技术接入设置",
+            title: "短信、支付与柜机接口配置",
+            description: "维护后端 .env 中的大模型、短信、账户接入、支付和柜机平台参数。",
             permission: "system-settings:view"
           }
         },
@@ -189,7 +190,7 @@ export const router = createRouter({
             group: "人员与日志",
             eyebrow: "人员管理",
             title: "人员台账与批量设置",
-            description: "按分类检索人员，新增编辑基础信息，并批量绑定特殊群体策略模板。",
+            description: "按分类检索人员，新增编辑基础信息，并批量绑定用户领取策略模板。",
             permission: "users:view"
           }
         },
@@ -250,7 +251,7 @@ router.beforeEach(async (to) => {
   if (sessionStore.token && sessionStore.needsValidation) {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/auth/backoffice-session`,
+        `${adminApiBaseUrl}/auth/backoffice-session`,
         {
           headers: {
             Authorization: `Bearer ${sessionStore.token}`

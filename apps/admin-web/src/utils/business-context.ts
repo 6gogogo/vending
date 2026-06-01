@@ -27,7 +27,7 @@ export const formatActorTypeLabel = (type: OperationLogRecord["actor"]["type"]) 
   }
 
   if (type === "merchant") {
-    return "商户";
+    return "商家";
   }
 
   if (type === "special") {

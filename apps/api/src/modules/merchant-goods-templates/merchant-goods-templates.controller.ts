@@ -3,7 +3,10 @@ import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } fro
 import type { GoodsCategory } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficeSessionPermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { MerchantGoodsTemplatesService } from "./merchant-goods-templates.service";
 
@@ -17,12 +20,14 @@ export class MerchantGoodsTemplatesController {
 
   @Get("merchant-goods-templates")
   @AllowedRoles("merchant", "admin")
-  list() {
-    return ok(this.merchantGoodsTemplatesService.list());
+  @AllowedBackofficeSessionPermissions("merchant-workbench:view")
+  list(@Req() request: { authUser?: { id: string; role: "admin" | "merchant" } }) {
+    return ok(this.merchantGoodsTemplatesService.list(request.authUser));
   }
 
   @Post("merchant-goods-templates")
   @AllowedRoles("merchant")
+  @AllowedBackofficeSessionPermissions("merchant-workbench:manage")
   create(
     @Body()
     body: {
@@ -49,6 +54,7 @@ export class MerchantGoodsTemplatesController {
 
   @Patch("merchant-goods-templates/:id")
   @AllowedRoles("merchant")
+  @AllowedBackofficeSessionPermissions("merchant-workbench:manage")
   update(
     @Param("id") id: string,
     @Body()
@@ -77,6 +83,7 @@ export class MerchantGoodsTemplatesController {
 
   @Post("merchant-restocks")
   @AllowedRoles("merchant", "admin")
+  @AllowedBackofficeSessionPermissions("merchant-workbench:manage")
   createRestock(
     @Body()
     body: {
@@ -97,6 +104,7 @@ export class MerchantGoodsTemplatesController {
 
   @Get("merchant-restock-traces")
   @AllowedRoles("merchant")
+  @AllowedBackofficeSessionPermissions("merchant-workbench:view")
   traces(@Req() request: { authUser?: { id: string } }) {
     return ok(this.merchantGoodsTemplatesService.listRestockTraces(request.authUser?.id ?? ""));
   }

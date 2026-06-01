@@ -34,11 +34,11 @@ const accountRoleLabel = computed(() => {
   const role = lookup.value?.fixedRole ?? lookup.value?.application?.requestedRole;
 
   if (role === "special") {
-    return "受助用户";
+    return "用户";
   }
 
   if (role === "merchant") {
-    return "爱心商户";
+    return "商家";
   }
 
   if (role === "admin") {
@@ -109,7 +109,7 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="审核状态" title="申请记录" subtitle="申请提交后会进入人工审核，请留意短信通知。">
+  <MobileShell eyebrow="审核状态" title="申请记录" subtitle="申请提交后会进入人工审核，可随时回到本页查看结果。">
     <GlassCard tone="neutral" class="review-hero-card">
       <view class="review-hero">
         <CabinetHeroArt />
@@ -129,6 +129,13 @@ onShow(() => {
             <text class="vm-alert__title">{{ lookup?.state === "rejected" ? "需要修改资料" : "审核中" }}</text>
             <text class="vm-alert__body">{{ lookup?.state === "rejected" ? "根据驳回原因补充后可重新提交。" : "审核通过后可直接登录使用。" }}</text>
           </view>
+        </view>
+
+        <view class="review-next">
+          <text class="review-next__title">接下来会发生什么</text>
+          <text class="review-next__body">1. 工作人员核对申请资料和身份类型。</text>
+          <text class="review-next__body">2. 通过后返回登录页获取验证码。</text>
+          <text class="review-next__body">3. 如果资料不完整，本页会显示驳回原因，可修改后重新提交。</text>
         </view>
 
         <view v-if="lookup" class="status-box">
@@ -203,7 +210,8 @@ onShow(() => {
   color: var(--vm-text-soft);
 }
 
-.status-box {
+.status-box,
+.review-next {
   display: grid;
   gap: 10rpx;
   padding: 22rpx 24rpx;
@@ -212,9 +220,22 @@ onShow(() => {
   border: 1rpx solid var(--vm-line);
 }
 
-.status-box__item {
+.status-box__item,
+.review-next__body {
   font-size: 24rpx;
   color: var(--vm-text-soft);
+  line-height: 1.6;
+}
+
+.review-next {
+  border-color: var(--vm-success-line);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.review-next__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
 }
 </style>
 

@@ -20,7 +20,7 @@ export class RegionsController {
   @Post()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("users:view")
+  @AllowedBackofficePermissions("users:manage")
   create(
     @Body() body: { name: string; sortOrder?: number; longitude?: number; latitude?: number },
     @Req() request: { authUser?: { id: string } }
@@ -31,7 +31,7 @@ export class RegionsController {
   @Patch(":id")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("users:view")
+  @AllowedBackofficePermissions("users:manage")
   update(
     @Param("id") id: string,
     @Body()

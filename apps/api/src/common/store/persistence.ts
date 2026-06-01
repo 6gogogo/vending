@@ -141,13 +141,13 @@ const loadApiEnvFile = () => {
     loadEnvFile?: (path?: string) => void;
   };
 
+  const runtime = (process.env.NODE_ENV ?? process.env.APP_ENV ?? "").trim().toLowerCase();
   const envPaths = [
     ".env.local",
     ".env",
-    ".env.example",
     "apps/api/.env.local",
     "apps/api/.env",
-    "apps/api/.env.example"
+    ...(runtime === "production" ? [] : [".env.example", "apps/api/.env.example"])
   ];
 
   for (const envPath of envPaths) {

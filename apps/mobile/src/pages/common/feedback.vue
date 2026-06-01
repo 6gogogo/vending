@@ -4,8 +4,11 @@ import { onLoad } from "@dcloudio/uni-app";
 
 import { mobileApi } from "../../api/mobile";
 import GlassCard from "../../components/ui/GlassCard.vue";
+import MenuIcon from "../../components/ui/MenuIcon.vue";
+import { appCopy } from "../../constants/copy";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
+import { callSupportPhone } from "../../utils/contact-support";
 import { showOperationFailure } from "../../utils/operation-feedback";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
@@ -19,19 +22,43 @@ const form = reactive({
   detail: ""
 });
 
-const typeOptions = ["机器故障", "服务问题", "其他"] as const;
+const typeOptions = [
+  {
+    label: "柜机异常",
+    value: "机器故障",
+    hint: "柜门无法打开、设备破损、现场安全等问题"
+  },
+  {
+    label: "服务问题",
+    value: "服务问题",
+    hint: "资格、额度、说明不清楚等问题"
+  },
+  {
+    label: "其他",
+    value: "其他",
+    hint: "不属于柜机异常或服务问题的反馈"
+  }
+] as const;
+const typeLabels = computed(() => typeOptions.map((item) => item.label));
 const loggedIn = computed(() => Boolean(sessionStore.user));
 const selectedTypeIndex = computed(() =>
-  Math.max(typeOptions.findIndex((item) => item === form.feedbackType), 0)
+  Math.max(typeOptions.findIndex((item) => item.value === form.feedbackType), 0)
+);
+const selectedType = computed(() => typeOptions[selectedTypeIndex.value] ?? typeOptions[0]);
+const canCallSupport = computed(() => form.feedbackType === "机器故障");
+const detailPlaceholder = computed(() =>
+  canCallSupport.value
+    ? "请填写具体情况，例如柜门无法打开、柜机破损、设备编号或现场位置"
+    : "请填写具体情况，例如资格、额度、服务说明或页面提示哪里不清楚"
 );
 const pageSubtitle = computed(() =>
   loggedIn.value
-    ? "注册、登录后都可以直接提交反馈，问题会进入后台待处理池。"
+    ? "提交后工作人员会按内容处理；柜机现场异常可选择柜机异常后联系处理。"
     : "登录前也可以提交反馈，但需要填写手机号，方便工作人员回访。"
 );
 
 const handleTypeChange = (index: number) => {
-  form.feedbackType = typeOptions[index] ?? typeOptions[0];
+  form.feedbackType = typeOptions[index]?.value ?? typeOptions[0].value;
 };
 
 const submit = async () => {
@@ -66,7 +93,7 @@ const submit = async () => {
       deviceCode: deviceCode.value || undefined,
       feedbackType: form.feedbackType,
       detail: detailSegments.filter(Boolean).join("；"),
-      title: `${form.feedbackType}反馈`
+      title: `${selectedType.value.label}反馈`
     });
 
     uni.reLaunch({
@@ -110,6 +137,14 @@ onLoad((query) => {
   <MobileShell eyebrow="反馈通道" title="提交反馈" :subtitle="pageSubtitle">
     <GlassCard tone="accent">
       <view class="vm-stack">
+        <view v-if="canCallSupport" class="support-card">
+          <MenuIcon name="phone" size="sm" tone="accent" />
+          <view class="support-card__copy">
+            <text class="support-card__title">{{ appCopy.supportPhoneLabel }}</text>
+            <text class="support-card__body">柜门无法打开、设备破损或现场安全问题可直接联系；使用流程问题请提交反馈，工作人员会按内容处理。</text>
+          </view>
+        </view>
+
         <view v-if="deviceCode" class="tip-line">
           <text class="tip-line__label">关联柜机</text>
           <text class="tip-line__value">{{ deviceCode }}</text>
@@ -129,12 +164,13 @@ onLoad((query) => {
 
         <view class="vm-field">
           <text class="vm-field__label">反馈类型</text>
-          <picker :range="typeOptions" :value="selectedTypeIndex" @change="handleTypeChange(Number($event.detail.value))">
+          <picker :range="typeLabels" :value="selectedTypeIndex" @change="handleTypeChange(Number($event.detail.value))">
             <view class="picker-field">
-              <text class="picker-field__value">{{ form.feedbackType }}</text>
+              <text class="picker-field__value">{{ selectedType.label }}</text>
               <view class="picker-field__chevron" />
             </view>
           </picker>
+          <text class="vm-field__hint">{{ selectedType.hint }}</text>
         </view>
 
         <view class="vm-field">
@@ -143,11 +179,12 @@ onLoad((query) => {
             v-model="form.detail"
             class="vm-textarea"
             maxlength="200"
-            placeholder="请填写具体情况，例如柜门无法打开、服务说明不清楚等"
+            :placeholder="detailPlaceholder"
           />
         </view>
 
         <button class="vm-button" :loading="submitting" @tap="submit">提交反馈</button>
+        <button v-if="canCallSupport" class="vm-button vm-button--soft" @tap="callSupportPhone">联系客服电话</button>
         <button class="vm-button vm-button--ghost" @tap="back">{{ loggedIn ? "返回我的" : "返回入口" }}</button>
       </view>
     </GlassCard>
@@ -163,6 +200,34 @@ onLoad((query) => {
   padding: 20rpx 24rpx;
   border-radius: 24rpx;
   background: var(--vm-surface-soft);
+}
+
+.support-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-success-line);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.support-card__copy {
+  display: grid;
+  gap: 6rpx;
+}
+
+.support-card__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.support-card__body {
+  font-size: 23rpx;
+  line-height: 1.6;
+  color: var(--vm-text-soft);
 }
 
 .tip-line__label {

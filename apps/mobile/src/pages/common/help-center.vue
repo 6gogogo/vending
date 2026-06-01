@@ -45,7 +45,16 @@ const load = async () => {
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
-    uni.reLaunch({ url: "/pages/common/login" });
+    aiStatus.value = {
+      enabled: false,
+      provider: "openai-compatible",
+      baseUrl: "",
+      model: "",
+      missingConfig: [],
+      apiKeyConfigured: false,
+      usingDefaultBaseUrl: true,
+      usingDefaultModel: true
+    };
     return;
   }
 
@@ -75,6 +84,14 @@ const submitQuestion = async () => {
   if (!trimmed) {
     uni.showToast({
       title: "请先输入问题",
+      icon: "none"
+    });
+    return;
+  }
+
+  if (!sessionStore.user) {
+    uni.showToast({
+      title: "登录后可使用 AI 助手",
       icon: "none"
     });
     return;
@@ -345,5 +362,6 @@ onShow(() => {
 .chat-item--assistant {
   background: var(--vm-info-bg);
 }
+
 </style>
 

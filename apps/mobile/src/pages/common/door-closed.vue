@@ -57,7 +57,7 @@ const isNoInboundOperation = computed(
 );
 const intendedSummary = computed(() =>
   isInboundOperation.value
-    ? "有商品入柜，需提交模板登记"
+    ? "有商品入柜，需提交常用商品登记"
     : isNoInboundOperation.value
       ? `无商品入柜 · ${event.value?.openReason ?? "未填写理由"}`
       : event.value?.intentItems?.length
@@ -67,8 +67,8 @@ const intendedSummary = computed(() =>
 const settledSummary = computed(() =>
   isInboundOperation.value
     ? restockSubmitted.value
-      ? "模板登记已提交"
-      : "等待手动模板登记"
+      ? "常用商品登记已提交"
+      : "等待手动登记入柜商品"
     : event.value?.goods?.length
       ? event.value.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
       : "等待平台结算"
@@ -429,7 +429,7 @@ const applyEvent = (nextEvent: CabinetEventRecord) => {
     statusText.value = restockSubmitted.value ? "入柜登记完成" : "待提交入柜登记";
     hintText.value = restockSubmitted.value
       ? "补货批次已写入系统，可继续追踪补货记录。"
-      : "柜门已关闭，请按模板登记本次入柜商品。";
+      : "柜门已关闭，请选择常用商品并登记本次入柜数量。";
     stopPolling();
     readyToReturn.value = restockSubmitted.value;
     void ensureTemplatesLoaded();
@@ -728,23 +728,23 @@ onUnload(() => {
         </view>
         <view v-if="isInboundOperation" class="restock-box">
           <view class="billing-box__head">
-            <text class="billing-box__title">模板入柜登记</text>
+            <text class="billing-box__title">入柜商品登记</text>
             <text class="billing-box__amount">{{ restockSubmitted ? "已提交" : "待提交" }}</text>
           </view>
 
           <EmptyState
             v-if="templatesLoading"
-            title="正在加载模板"
-            description="请稍候，系统正在读取可登记的商品模板。"
+            title="正在加载常用商品"
+            description="请稍候，系统正在读取可登记的常用商品。"
           />
           <EmptyState
             v-else-if="!templates.length"
-            title="暂无可用模板"
-            description="请先在商品模板中维护可入柜商品，再回到本页提交登记。"
+            title="暂无可用常用商品"
+            description="请先维护常用商品，再回到本页提交登记。"
           />
           <template v-else-if="!restockSubmitted">
             <view class="vm-field">
-              <text class="vm-field__label">商品模板</text>
+              <text class="vm-field__label">常用商品</text>
               <picker
                 :range="templates"
                 range-key="goodsName"
@@ -752,7 +752,7 @@ onUnload(() => {
                 @change="selectTemplate(templates[$event.detail.value]?.id ?? '')"
               >
                 <view class="vm-field__input picker-value">
-                  {{ selectedTemplate?.goodsName ?? "请选择商品模板" }}
+                  {{ selectedTemplate?.goodsName ?? "请选择常用商品" }}
                 </view>
               </picker>
             </view>

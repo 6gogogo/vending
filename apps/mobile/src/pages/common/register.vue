@@ -24,6 +24,8 @@ const regions = ref<RegionRecord[]>([]);
 const selectedRegionId = ref("");
 const lookup = ref<RegistrationPhoneLookup>();
 const lastLookupPhone = ref("");
+const showVerificationPreview =
+  import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
 
 const form = reactive<RegistrationApplicationProfile>({
   name: "",
@@ -38,11 +40,22 @@ const form = reactive<RegistrationApplicationProfile>({
   title: ""
 });
 
-const roleOptions = [
-  { value: "special" as const, label: "受助用户", description: "用于公益领取", icon: "users" as const },
-  { value: "merchant" as const, label: "爱心商户", description: "用于补货捐赠", icon: "restock" as const },
+const enablePublicAdminRegistration =
+  String(import.meta.env.VITE_ENABLE_PUBLIC_ADMIN_REGISTRATION ?? "")
+    .trim()
+    .toLowerCase() === "true";
+
+const baseRoleOptions = [
+  { value: "special" as const, label: "我是用户", description: "领取和使用服务", icon: "users" as const },
+  { value: "merchant" as const, label: "我是商家", description: "补货与协作", icon: "restock" as const },
   { value: "admin" as const, label: "管理员", description: "用于审核巡检", icon: "review" as const }
 ];
+
+const roleOptions = computed(() =>
+  enablePublicAdminRegistration
+    ? baseRoleOptions
+    : baseRoleOptions.filter((item) => item.value !== "admin")
+);
 
 const activeRegions = computed(() => regions.value.filter((item) => item.status === "active"));
 const regionOptions = computed(() =>
@@ -158,7 +171,7 @@ const sendCode = async () => {
   sendingCode.value = true;
   try {
     const response = await mobileApi.requestCode(phone.value.trim(), "register");
-    previewCode.value = response.previewCode ?? "";
+    previewCode.value = showVerificationPreview ? response.previewCode ?? "" : "";
     showOperationSuccess();
   } catch (error) {
     showOperationFailure(error);
@@ -192,7 +205,7 @@ const validateForm = () => {
 
   if (effectiveRole.value === "merchant") {
     if (!form.merchantName?.trim()) {
-      throw new Error("请输入商户名称");
+      throw new Error("请输入商家名称");
     }
 
     if (!form.contactName?.trim()) {
@@ -315,6 +328,15 @@ onLoad(async (query) => {
       <view class="vm-stack">
         <FlowSteps :steps="registerSteps" />
 
+        <view class="review-guide">
+          <view class="review-guide__head">
+            <MenuIcon name="review" size="sm" tone="accent" />
+            <text class="review-guide__title">审核说明</text>
+          </view>
+          <text class="review-guide__body">提交后由工作人员在后台核对姓名、手机号、区域和身份资料。审核通过后可直接返回登录页；如被驳回，可按原因修改后重新提交。</text>
+          <text class="review-guide__body">如果需要人工协助，可通过反馈入口联系工作人员。</text>
+        </view>
+
         <view class="form-grid">
           <view class="vm-field">
             <text class="vm-field__label">手机号</text>
@@ -323,8 +345,11 @@ onLoad(async (query) => {
               <input
                 v-model="phone"
                 class="vm-field-shell__input"
-                type="number"
+                type="tel"
+                inputmode="numeric"
                 maxlength="11"
+                name="phone"
+                aria-label="手机号"
                 placeholder="请输入 11 位手机号"
               />
             </view>
@@ -335,13 +360,16 @@ onLoad(async (query) => {
               <text class="vm-field__label">验证码</text>
               <text class="vm-field__helper">提交时必填</text>
             </view>
-            <view class="vm-field-shell">
+            <view class="vm-field-shell vm-field-shell--stacked-action">
               <MenuIcon name="code" size="sm" tone="neutral" />
               <input
                 v-model="code"
                 class="vm-field-shell__input"
-                type="number"
+                type="tel"
+                inputmode="numeric"
                 maxlength="6"
+                name="verification-code"
+                aria-label="验证码"
                 placeholder="请输入验证码"
               />
               <button
@@ -349,14 +377,15 @@ onLoad(async (query) => {
                 :disabled="sendingCode"
                 :loading="sendingCode"
                 @tap="sendCode"
+                aria-label="获取验证码"
               >
-                获取验证码
+                发送
               </button>
             </view>
           </view>
         </view>
 
-        <view v-if="previewCode" class="debug-box">
+        <view v-if="showVerificationPreview && previewCode" class="debug-box">
           <text class="debug-box__label">当前验证码</text>
           <text class="vm-number">{{ previewCode }}</text>
         </view>
@@ -371,7 +400,7 @@ onLoad(async (query) => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">选择身份与区域</text>
-          <text class="vm-subtitle">选择后只显示该身份必填项，减少重复填写。</text>
+          <text class="vm-subtitle">请选择与你实际使用场景一致的身份，系统会只展示必要资料。</text>
         </view>
 
         <view class="vm-field">
@@ -392,6 +421,9 @@ onLoad(async (query) => {
               </view>
             </button>
           </view>
+          <text class="vm-field__hint">
+            用户用于领取和使用服务；商家用于补货与协作。管理员账号由后台分配，默认不开放自助申请。
+          </text>
         </view>
 
         <view class="form-grid">
@@ -412,8 +444,8 @@ onLoad(async (query) => {
 
         <template v-if="effectiveRole === 'merchant'">
           <view class="vm-field">
-            <text class="vm-field__label">商户名称</text>
-            <input v-model="form.merchantName" class="vm-field__input" placeholder="请输入商户名称" />
+            <text class="vm-field__label">商家名称</text>
+            <input v-model="form.merchantName" class="vm-field__input" placeholder="请输入商家名称" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">联系人姓名</text>
@@ -497,9 +529,36 @@ onLoad(async (query) => {
 }
 
 .form-grid,
-.submit-actions {
+.submit-actions,
+.review-guide {
   display: grid;
   gap: 18rpx;
+}
+
+.review-guide {
+  padding: 20rpx 22rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-success-line);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.review-guide__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.review-guide__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.review-guide__body,
+.vm-field__hint {
+  font-size: 23rpx;
+  line-height: 1.65;
+  color: var(--vm-text-soft);
 }
 
 .picker-value {
@@ -510,7 +569,7 @@ onLoad(async (query) => {
 
 .role-segment {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190rpx, 1fr));
   gap: 12rpx;
 }
 

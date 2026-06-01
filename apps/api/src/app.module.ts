@@ -25,18 +25,31 @@ import { UploadsModule } from "./modules/uploads/uploads.module";
 import { UsersModule } from "./modules/users/users.module";
 import { WarehousesModule } from "./modules/warehouses/warehouses.module";
 
+const resolveEnvFilePath = () => {
+  const runtime = (process.env.NODE_ENV ?? process.env.APP_ENV ?? "").trim().toLowerCase();
+  const localEnvFiles = [
+    ".env.local",
+    ".env",
+    "apps/api/.env.local",
+    "apps/api/.env"
+  ];
+
+  if (runtime === "production") {
+    return localEnvFiles;
+  }
+
+  return [
+    ...localEnvFiles,
+    ".env.example",
+    "apps/api/.env.example"
+  ];
+};
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [
-        ".env.local",
-        ".env",
-        ".env.example",
-        "apps/api/.env.local",
-        "apps/api/.env",
-        "apps/api/.env.example"
-      ]
+      envFilePath: resolveEnvFilePath()
     }),
     StoreModule,
     AiInsightsModule,

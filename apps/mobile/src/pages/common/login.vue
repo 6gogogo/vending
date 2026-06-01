@@ -5,6 +5,7 @@ import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue
 import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
+import { appCopy } from "../../constants/copy";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
@@ -65,6 +66,16 @@ onShow(() => {
           <text class="vm-subtitle">已认证可直接登录，首次使用请提交注册申请。</text>
         </view>
 
+        <view class="first-use-card">
+          <text class="first-use-card__title">第一次使用怎么走</text>
+          <view class="first-use-steps">
+            <view v-for="(step, index) in appCopy.firstUseSteps" :key="step" class="first-use-step">
+              <text class="first-use-step__index">{{ index + 1 }}</text>
+              <text class="first-use-step__body">{{ step }}</text>
+            </view>
+          </view>
+        </view>
+
         <view class="entry-actions">
           <button class="vm-button action-button" @tap="navigate('/pages/common/app-login')">
             <view class="action-button__content">
@@ -82,6 +93,12 @@ onShow(() => {
             <view class="action-button__content">
               <MenuIcon name="feedback" size="sm" tone="accent" />
               <text>联系工作人员</text>
+            </view>
+          </button>
+          <button class="vm-button vm-button--soft action-button" @tap="navigate('/pages/common/help-center')">
+            <view class="action-button__content">
+              <MenuIcon name="guide" size="sm" tone="accent" />
+              <text>查看使用指引</text>
             </view>
           </button>
         </view>
@@ -154,9 +171,49 @@ onShow(() => {
 }
 
 .entry-actions,
-.tips-list {
+.tips-list,
+.first-use-card,
+.first-use-steps {
   display: grid;
   gap: 16rpx;
+}
+
+.first-use-card {
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--vm-line);
+  background: var(--vm-surface-soft);
+}
+
+.first-use-card__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-text);
+}
+
+.first-use-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14rpx;
+}
+
+.first-use-step__index {
+  display: grid;
+  place-items: center;
+  width: 42rpx;
+  height: 42rpx;
+  border-radius: 50%;
+  background: var(--vm-accent);
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
+.first-use-step__body {
+  font-size: 24rpx;
+  line-height: 1.55;
+  color: var(--vm-text);
 }
 
 .action-button__content {

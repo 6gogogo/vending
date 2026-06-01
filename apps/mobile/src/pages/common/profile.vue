@@ -28,13 +28,13 @@ const form = reactive<RegistrationApplicationProfile>({
 
 const role = computed<UserRole>(() => sessionStore.draft?.requestedRole ?? "special");
 const titleMap: Record<UserRole, string> = {
-  special: "完善受助用户资料",
-  merchant: "完善爱心商户资料",
+  special: "完善用户资料",
+  merchant: "完善商家资料",
   admin: "完善管理员资料"
 };
 const subtitleMap: Record<UserRole, string> = {
   special: "提交后如手机号已预录入可直接通过，否则进入人工审核。",
-  merchant: "请补充商户联系人和经营地址，便于补货与追踪去向。",
+  merchant: "请补充商家联系人和经营地址，便于补货与追踪去向。",
   admin: "管理员申请需要由现有管理员审核后才能启用高权限。"
 };
 
@@ -135,8 +135,8 @@ onShow(() => {
 
         <template v-if="role === 'merchant'">
           <view class="vm-field">
-            <text class="vm-field__label">商户名称</text>
-            <input v-model="form.merchantName" class="vm-field__input" placeholder="请输入商户名称" />
+            <text class="vm-field__label">商家名称</text>
+            <input v-model="form.merchantName" class="vm-field__input" placeholder="请输入商家名称" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">联系人姓名</text>

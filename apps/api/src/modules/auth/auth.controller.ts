@@ -104,7 +104,7 @@ export class AuthController {
     body: {
       userId: string;
       username: string;
-      password: string;
+      password?: string;
       role?: BackofficeRole;
       tenantId?: string;
       permissions?: BackofficePermission[];
@@ -114,6 +114,11 @@ export class AuthController {
       this.authService.createBackofficeCredential(this.extractBearerToken(authorization), body),
       "后台账号已保存。"
     );
+  }
+
+  @Get("backoffice-credentials")
+  backofficeCredentials(@Headers("authorization") authorization?: string) {
+    return ok(this.authService.listBackofficeCredentials(this.extractBearerToken(authorization)));
   }
 
   @Get("session")

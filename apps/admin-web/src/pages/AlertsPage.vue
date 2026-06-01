@@ -3,12 +3,15 @@ import { computed, onMounted, ref } from "vue";
 import type { AlertTask } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 
+const sessionStore = useAdminSessionStore();
 const alerts = ref<AlertTask[]>([]);
 const loading = ref(false);
 const resolvingId = ref("");
 const activeAlert = ref<AlertTask>();
+const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
 
 const openAlerts = computed(() => alerts.value.filter((alert) => alert.status !== "resolved"));
 const resolvedAlerts = computed(() => alerts.value.filter((alert) => alert.status === "resolved"));
@@ -27,6 +30,11 @@ const load = async () => {
 };
 
 const resolve = async (alert: AlertTask) => {
+  if (!canManageAlerts.value) {
+    window.alert("当前账号没有预警处理权限。");
+    return;
+  }
+
   if (!window.confirm(`确认${resolveLabel(alert)}？`)) return;
   resolvingId.value = alert.id;
   try {
@@ -65,7 +73,7 @@ onMounted(load);
         <article class="admin-panel admin-panel-block admin-panel-block--tight">
           <span class="admin-kicker">反馈</span>
           <h3 class="admin-page__section-title">{{ gradeCount("feedback") }}</h3>
-          <p class="admin-copy">用户或商户反馈的问题。</p>
+          <p class="admin-copy">用户或商家反馈的问题。</p>
         </article>
         <article class="admin-panel admin-panel-block admin-panel-block--tight">
           <span class="admin-kicker">预警</span>
@@ -95,7 +103,8 @@ onMounted(load);
               <span class="admin-pill" :class="alert.grade === 'fault' ? 'admin-pill--danger' : alert.grade === 'feedback' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ gradeLabel(alert) }}</span>
               <span class="admin-pill" :class="alert.status === 'open' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ statusLabel(alert) }}</span>
               <button class="admin-button admin-button--ghost" @click="activeAlert = alert">详情</button>
-              <button class="admin-button admin-button--ghost" :disabled="resolvingId === alert.id" @click="resolve(alert)">{{ resolvingId === alert.id ? "处理中" : resolveLabel(alert) }}</button>
+              <button v-if="canManageAlerts" class="admin-button admin-button--ghost" :disabled="resolvingId === alert.id" @click="resolve(alert)">{{ resolvingId === alert.id ? "处理中" : resolveLabel(alert) }}</button>
+              <span v-else class="admin-table__subtext">需要预警处理权限</span>
             </div>
           </div>
         </div>

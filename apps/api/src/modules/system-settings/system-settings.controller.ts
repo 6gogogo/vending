@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Patch, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Patch, Req, UseGuards } from "@nestjs/common";
 import type { SystemSettingsUpdatePayload } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
@@ -20,13 +20,27 @@ export class SystemSettingsController {
 
   @Get()
   @AllowedBackofficePermissions("system-settings:view")
-  settings() {
-    return ok(this.systemSettingsService.getSettings());
+  settings(@Req() request: { authUser?: { permissions?: string[] } }) {
+    return ok(this.systemSettingsService.getSettings({
+      includeSensitiveValues: this.canViewSensitiveSettings(request)
+    }));
   }
 
   @Patch()
   @AllowedBackofficePermissions("system-settings:update")
-  updateSettings(@Body() body: SystemSettingsUpdatePayload) {
-    return ok(this.systemSettingsService.updateSettings(body), "系统设置已保存。");
+  updateSettings(
+    @Body() body: SystemSettingsUpdatePayload,
+    @Req() request: { authUser?: { permissions?: string[] } }
+  ) {
+    return ok(
+      this.systemSettingsService.updateSettings(body, {
+        includeSensitiveValues: this.canViewSensitiveSettings(request)
+      }),
+      "系统设置已保存。"
+    );
+  }
+
+  private canViewSensitiveSettings(request: { authUser?: { permissions?: string[] } }) {
+    return Boolean(request.authUser?.permissions?.includes("system-settings:secret:view"));
   }
 }

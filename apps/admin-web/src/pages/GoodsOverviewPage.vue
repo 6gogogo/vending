@@ -18,6 +18,11 @@ import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 
 const sessionStore = useAdminSessionStore();
+const canManageGoods = computed(() => sessionStore.can("goods:manage"));
+const canAdjustStock = computed(() => sessionStore.can("goods:stock-adjust"));
+const canExportGoods = computed(() => sessionStore.can("goods:export"));
+const canTransferWarehouse = computed(() => sessionStore.can("warehouse:transfer"));
+const canUploadImages = computed(() => sessionStore.can("uploads:images"));
 
 const categoryLabelMap: Record<GoodsCategory, string> = {
   food: "食品",
@@ -335,6 +340,11 @@ const uploadGoodsImage = async (event: Event) => {
     return;
   }
 
+  if (!canUploadImages.value) {
+    showMessage("error", "操作失败：当前账号没有图片上传权限");
+    return;
+  }
+
   uploadingImage.value = true;
   try {
     const uploaded = await adminApi.uploadImage(file);
@@ -351,6 +361,11 @@ const uploadGoodsImage = async (event: Event) => {
 };
 
 const saveGoods = async () => {
+  if (!canManageGoods.value) {
+    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    return;
+  }
+
   if (!goodsForm.goodsCode.trim() || !goodsForm.name.trim()) {
     showMessage("error", "操作失败：请先填写商品编号和商品名称");
     return;
@@ -382,6 +397,11 @@ const saveGoods = async () => {
 };
 
 const toggleGoodsStatus = async (goods = selectedGoodsForStatus.value) => {
+  if (!canManageGoods.value) {
+    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    return;
+  }
+
   if (!goods) {
     showMessage("error", "操作失败：请先选择货物");
     return;
@@ -420,6 +440,11 @@ const editCategory = (item: GoodsCategoryRecord) => {
 };
 
 const saveCategory = async () => {
+  if (!canManageGoods.value) {
+    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    return;
+  }
+
   if (!categoryForm.name.trim()) {
     showMessage("error", "操作失败：请先填写分类名称");
     return;
@@ -452,6 +477,11 @@ const saveCategory = async () => {
 };
 
 const toggleCategoryStatus = async (item: GoodsCategoryRecord) => {
+  if (!canManageGoods.value) {
+    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    return;
+  }
+
   const nextStatus = item.status === "active" ? "inactive" : "active";
   const actionLabel = nextStatus === "inactive" ? "删除分类" : "重新启用分类";
 
@@ -502,6 +532,11 @@ const editPolicy = (policy: GoodsAlertPolicy) => {
 };
 
 const savePolicy = async () => {
+  if (!canManageGoods.value) {
+    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    return;
+  }
+
   const thresholds = policyForm.thresholds
     .filter((item) => item.goodsId && item.lowStockThreshold > 0)
     .map((item) => {
@@ -553,6 +588,11 @@ const savePolicy = async () => {
 };
 
 const applyPolicies = async () => {
+  if (!canManageGoods.value) {
+    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    return;
+  }
+
   if (!assignForm.deviceCodes.length || !assignForm.policyIds.length) {
     showMessage("error", "操作失败：请先选择柜机和模板");
     return;
@@ -582,6 +622,11 @@ const applyPolicies = async () => {
 };
 
 const submitTransfer = async () => {
+  if (!canTransferWarehouse.value) {
+    showMessage("error", "操作失败：当前账号没有仓库调拨权限");
+    return;
+  }
+
   if (
     !transferForm.fromCode ||
     !transferForm.toCode ||
@@ -617,6 +662,11 @@ const toggleAlertBucket = (bucket: "low" | "empty") => {
 };
 
 const exportOverview = async () => {
+  if (!canExportGoods.value) {
+    showMessage("error", "操作失败：当前账号没有导出货品数据权限");
+    return;
+  }
+
   if (!sessionStore.token) {
     showMessage("error", "操作失败：登录状态已失效");
     return;
@@ -726,7 +776,7 @@ function resolveGoodsName(goodsId: string) {
           <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
             {{ loading ? "刷新中" : "刷新数据" }}
           </button>
-          <button class="admin-button admin-button--ghost" @click="exportOverview">导出 Excel</button>
+          <button v-if="canExportGoods" class="admin-button admin-button--ghost" @click="exportOverview">导出 Excel</button>
         </div>
       </div>
 
@@ -791,13 +841,16 @@ function resolveGoodsName(goodsId: string) {
           <h3 class="admin-page__section-title">按商品台账方式展示编号、全称、分类、包装和状态</h3>
         </div>
         <div class="admin-toolbar">
-          <button class="admin-button" @click="openEditor('goods')">新增货物</button>
-          <button class="admin-button admin-button--ghost" @click="openEditor('goods-delete')">删除货物</button>
-          <button class="admin-button admin-button--ghost" @click="openEditor('category')">编辑分类</button>
+          <button v-if="canManageGoods" class="admin-button" @click="openEditor('goods')">新增货物</button>
+          <button v-if="canManageGoods" class="admin-button admin-button--ghost" @click="openEditor('goods-delete')">删除货物</button>
+          <button v-if="canManageGoods" class="admin-button admin-button--ghost" @click="openEditor('category')">编辑分类</button>
         </div>
       </div>
+      <div v-if="!canManageGoods" class="admin-note">
+        当前账号只能查看货品台账，新增、删除、分类和阈值模板维护需要“货品资料管理”权限。
+      </div>
 
-      <article class="admin-panel admin-panel-block">
+      <article class="admin-panel admin-panel-block goods-contained-table">
         <table v-if="sortedCatalog.length" class="admin-table">
           <thead>
             <tr>
@@ -838,9 +891,9 @@ function resolveGoodsName(goodsId: string) {
               <td>
                 <div class="admin-inline-links goods-table-actions">
                   <RouterLink class="admin-link" :to="`/goods/${item.goodsId}`">详情</RouterLink>
-                  <RouterLink class="admin-link" :to="`/goods/${item.goodsId}?action=inbound`">手动进货</RouterLink>
-                  <RouterLink class="admin-link" :to="`/goods/${item.goodsId}?action=outbound`">手动退货</RouterLink>
-                  <button class="admin-text-button" @click="toggleGoodsStatus(item)">
+                  <RouterLink v-if="canAdjustStock" class="admin-link" :to="`/goods/${item.goodsId}?action=inbound`">手动进货</RouterLink>
+                  <RouterLink v-if="canAdjustStock" class="admin-link" :to="`/goods/${item.goodsId}?action=outbound`">手动退货</RouterLink>
+                  <button v-if="canManageGoods" class="admin-text-button" @click="toggleGoodsStatus(item)">
                     {{ item.status === "inactive" ? "重新启用" : "删除货物" }}
                   </button>
                 </div>
@@ -850,13 +903,13 @@ function resolveGoodsName(goodsId: string) {
         </table>
         <div v-else class="admin-empty">
           <div class="admin-empty__title">{{ loading ? "正在加载货品台账" : "当前没有货品主数据" }}</div>
-          <div class="admin-empty__body">先新增货品或通过商户商品属性补货自动生成主数据。</div>
+          <div class="admin-empty__body">先新增货品或通过商家商品属性补货自动生成主数据。</div>
         </div>
       </article>
     </section>
 
     <section class="admin-grid admin-grid--main-aside">
-      <article class="admin-panel admin-panel-block">
+      <article class="admin-panel admin-panel-block goods-contained-table">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">异常与库存分布</span>
@@ -959,12 +1012,12 @@ function resolveGoodsName(goodsId: string) {
               <span class="admin-kicker">批量下发与阈值模板</span>
               <h3 class="admin-panel__title">在异常与库存分布旁直接维护模板并批量下发</h3>
             </div>
-            <button class="admin-button" @click="openEditor('policy')">{{ editingPolicyId ? "继续编辑模板" : "新增模板" }}</button>
+            <button v-if="canManageGoods" class="admin-button" @click="openEditor('policy')">{{ editingPolicyId ? "继续编辑模板" : "新增模板" }}</button>
           </div>
 
           <label class="admin-field">
             <span class="admin-field__label">下发模式</span>
-            <select v-model="assignForm.mode" class="admin-select">
+            <select v-model="assignForm.mode" class="admin-select" :disabled="!canManageGoods">
               <option value="replace">替换</option>
               <option value="bind">追加</option>
               <option value="unbind">解绑</option>
@@ -974,7 +1027,7 @@ function resolveGoodsName(goodsId: string) {
           <div class="goods-checklist">
             <span class="admin-field__label">选择柜机</span>
             <label v-for="device in devices" :key="`assign-inline-${device.deviceCode}`" class="goods-checklist__item">
-              <input :checked="assignForm.deviceCodes.includes(device.deviceCode)" type="checkbox" @change="toggleSelection(assignForm.deviceCodes, device.deviceCode)" />
+              <input :checked="assignForm.deviceCodes.includes(device.deviceCode)" type="checkbox" :disabled="!canManageGoods" @change="toggleSelection(assignForm.deviceCodes, device.deviceCode)" />
               <span>{{ device.name }} / {{ device.deviceCode }}</span>
             </label>
           </div>
@@ -992,12 +1045,12 @@ function resolveGoodsName(goodsId: string) {
             </thead>
             <tbody>
               <tr v-for="item in policies" :key="`inline-${item.id}`">
-                <td><input :checked="assignForm.policyIds.includes(item.id)" type="checkbox" @change="toggleSelection(assignForm.policyIds, item.id)" /></td>
+                <td><input :checked="assignForm.policyIds.includes(item.id)" type="checkbox" :disabled="!canManageGoods" @change="toggleSelection(assignForm.policyIds, item.id)" /></td>
                 <td><span class="admin-table__strong">{{ item.name }}</span><span class="admin-table__subtext">{{ item.id }}</span></td>
                 <td><div class="goods-distribution-list"><span v-for="threshold in item.thresholds" :key="`${item.id}-${threshold.goodsId}`" class="admin-table__subtext">{{ threshold.goodsName }} ≤ {{ threshold.lowStockThreshold }}</span></div></td>
                 <td class="admin-code">{{ item.applicableDeviceCodes.length }}</td>
                 <td><span class="admin-pill" :class="item.status === 'active' ? 'admin-pill--success' : 'admin-pill--neutral'">{{ item.status === "active" ? "启用" : "停用" }}</span></td>
-                <td><button class="admin-button admin-button--ghost" @click="editPolicy(item)">编辑</button></td>
+                <td><button v-if="canManageGoods" class="admin-button admin-button--ghost" @click="editPolicy(item)">编辑</button></td>
               </tr>
             </tbody>
           </table>
@@ -1007,7 +1060,7 @@ function resolveGoodsName(goodsId: string) {
           </div>
 
           <div class="admin-toolbar">
-            <button class="admin-button" :disabled="saving || !assignForm.deviceCodes.length || !assignForm.policyIds.length" @click="applyPolicies">{{ saving ? "处理中" : "执行批量下发" }}</button>
+            <button class="admin-button" :disabled="saving || !canManageGoods || !assignForm.deviceCodes.length || !assignForm.policyIds.length" @click="applyPolicies">{{ saving ? "处理中" : "执行批量下发" }}</button>
             <span class="admin-copy">模板管理已经集成到异常与库存分布区域。</span>
           </div>
         </article>
@@ -1046,7 +1099,7 @@ function resolveGoodsName(goodsId: string) {
           </div>
         </div>
 
-        <div class="goods-overview-form goods-overview-form--single">
+        <div v-if="canTransferWarehouse" class="goods-overview-form goods-overview-form--single">
           <label class="admin-field">
             <span class="admin-field__label">来源</span>
             <select v-model="transferForm.fromCode" class="admin-select">
@@ -1095,6 +1148,7 @@ function resolveGoodsName(goodsId: string) {
           <div class="admin-note">货物调拨和仓库流转只维护本地库存台账，不会在平台创建调拨、补货或退货订单。</div>
           <button class="admin-button" :disabled="saving" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
         </div>
+        <div v-else class="admin-note">当前账号只能查看库存流向，提交货物调拨需要“仓库调拨”权限。</div>
       </article>
 
       <aside class="admin-grid">
@@ -1166,8 +1220,8 @@ function resolveGoodsName(goodsId: string) {
           <label class="admin-field"><span class="admin-field__label">包装形式</span><select v-model="goodsForm.packageForm" class="admin-select"><option v-for="item in packageFormOptions" :key="item" :value="item">{{ item }}</option></select></label>
           <label class="admin-field"><span class="admin-field__label">商品规格</span><input v-model="goodsForm.specification" class="admin-input" placeholder="例如 500ml / 12枚装" /></label>
           <label class="admin-field"><span class="admin-field__label">厂家</span><input v-model="goodsForm.manufacturer" class="admin-input" placeholder="例如 可口可乐公司" /></label>
-          <label class="admin-field"><span class="admin-field__label">商品图片</span><input class="admin-input" type="file" accept="image/*" @change="uploadGoodsImage" /><span class="admin-table__subtext">{{ uploadingImage ? "上传中" : "选择本地图片后会自动上传" }}</span><img v-if="goodsForm.imageUrl" class="goods-overview-preview" :src="goodsForm.imageUrl" alt="货品图片预览" /></label>
-          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving" @click="saveGoods">{{ saving ? "保存中" : "新增货物" }}</button><button class="admin-button admin-button--ghost" @click="resetGoodsForm">清空表单</button></div>
+          <label class="admin-field"><span class="admin-field__label">商品图片</span><input class="admin-input" type="file" accept="image/*" :disabled="!canUploadImages" @change="uploadGoodsImage" /><span class="admin-table__subtext">{{ canUploadImages ? uploadingImage ? "上传中" : "选择本地图片后会自动上传" : "当前账号没有图片上传权限" }}</span><img v-if="goodsForm.imageUrl" class="goods-overview-preview" :src="goodsForm.imageUrl" alt="货品图片预览" /></label>
+          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving || !canManageGoods" @click="saveGoods">{{ saving ? "保存中" : "新增货物" }}</button><button class="admin-button admin-button--ghost" @click="resetGoodsForm">清空表单</button></div>
         </div>
 
         <div v-else-if="editorMode === 'goods-delete'" class="goods-overview-form goods-overview-form--single">
@@ -1185,7 +1239,7 @@ function resolveGoodsName(goodsId: string) {
             删除会按逻辑停用处理，不会清掉历史记录。
           </div>
           <div class="admin-toolbar goods-editor__actions">
-            <button class="admin-button admin-button--danger" :disabled="saving || !selectedGoodsForStatus" @click="toggleGoodsStatus()">
+            <button class="admin-button admin-button--danger" :disabled="saving || !canManageGoods || !selectedGoodsForStatus" @click="toggleGoodsStatus()">
               {{ saving ? "处理中" : selectedGoodsForStatus?.status === "inactive" ? "重新启用货物" : "删除货物" }}
             </button>
           </div>
@@ -1195,8 +1249,8 @@ function resolveGoodsName(goodsId: string) {
           <label class="admin-field"><span class="admin-field__label">分类名称</span><input v-model="categoryForm.name" class="admin-input" placeholder="例如 碳酸饮料" /></label>
           <label class="admin-field"><span class="admin-field__label">所属大类</span><select v-model="categoryForm.category" class="admin-select"><option v-for="(label, value) in categoryLabelMap" :key="value" :value="value">{{ label }}</option></select></label>
           <label class="admin-field"><span class="admin-field__label">排序</span><input v-model.number="categoryForm.sortOrder" type="number" min="0" class="admin-input" /></label>
-          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving" @click="saveCategory">{{ saving ? "保存中" : editingCategoryId ? "保存分类" : "新增分类" }}</button><button class="admin-button admin-button--ghost" @click="resetCategoryForm">取消</button></div>
-          <div v-if="categories.length" class="admin-list goods-category-list"><div v-for="item in categories" :key="item.id" class="admin-list__row"><div class="admin-list__main"><span class="admin-list__title">{{ item.name }}</span><span class="admin-list__meta">{{ categoryLabelMap[item.category] }} · 排序 {{ item.sortOrder }}</span></div><div class="admin-inline-links"><span class="admin-pill" :class="item.status === 'active' ? 'admin-pill--success' : 'admin-pill--neutral'">{{ item.status === "active" ? "正常" : "已停用" }}</span><button class="admin-button admin-button--ghost" @click="editCategory(item)">编辑</button><button class="admin-button admin-button--ghost" :disabled="saving" @click="toggleCategoryStatus(item)">{{ item.status === "active" ? "删除分类" : "重新启用" }}</button></div></div></div>
+          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving || !canManageGoods" @click="saveCategory">{{ saving ? "保存中" : editingCategoryId ? "保存分类" : "新增分类" }}</button><button class="admin-button admin-button--ghost" @click="resetCategoryForm">取消</button></div>
+          <div v-if="categories.length" class="admin-list goods-category-list"><div v-for="item in categories" :key="item.id" class="admin-list__row"><div class="admin-list__main"><span class="admin-list__title">{{ item.name }}</span><span class="admin-list__meta">{{ categoryLabelMap[item.category] }} · 排序 {{ item.sortOrder }}</span></div><div class="admin-inline-links"><span class="admin-pill" :class="item.status === 'active' ? 'admin-pill--success' : 'admin-pill--neutral'">{{ item.status === "active" ? "正常" : "已停用" }}</span><button class="admin-button admin-button--ghost" @click="editCategory(item)">编辑</button><button class="admin-button admin-button--ghost" :disabled="saving || !canManageGoods" @click="toggleCategoryStatus(item)">{{ item.status === "active" ? "删除分类" : "重新启用" }}</button></div></div></div>
         </div>
 
         <div v-else class="goods-overview-form goods-overview-form--single">
@@ -1205,7 +1259,7 @@ function resolveGoodsName(goodsId: string) {
           <div class="goods-threshold-rows"><div v-for="(threshold, index) in policyForm.thresholds" :key="`threshold-${index}`" class="goods-threshold-row"><select v-model="threshold.goodsId" class="admin-select"><option value="">请选择货品</option><option v-for="item in catalog.filter((entry) => entry.status !== 'inactive')" :key="item.goodsId" :value="item.goodsId">{{ item.name }} / {{ item.goodsCode }}</option></select><input v-model.number="threshold.lowStockThreshold" type="number" min="1" class="admin-input" placeholder="阈值" /><button class="admin-button admin-button--ghost" @click="removeThresholdRow(index)">删除</button></div></div>
           <div class="admin-toolbar"><button class="admin-button admin-button--ghost" @click="addThresholdRow">增加货品阈值</button></div>
           <div class="goods-checklist"><span class="admin-field__label">适用柜机</span><label v-for="device in devices" :key="device.deviceCode" class="goods-checklist__item"><input :checked="policyForm.applicableDeviceCodes.includes(device.deviceCode)" type="checkbox" @change="toggleSelection(policyForm.applicableDeviceCodes, device.deviceCode)" /><span>{{ device.name }} / {{ device.deviceCode }}</span></label></div>
-          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving" @click="savePolicy">{{ saving ? "保存中" : editingPolicyId ? "保存模板" : "新增模板" }}</button><button class="admin-button admin-button--ghost" @click="resetPolicyForm">取消</button></div>
+          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving || !canManageGoods" @click="savePolicy">{{ saving ? "保存中" : editingPolicyId ? "保存模板" : "新增模板" }}</button><button class="admin-button admin-button--ghost" @click="resetPolicyForm">取消</button></div>
         </div>
       </aside>
     </div>
@@ -1251,6 +1305,15 @@ function resolveGoodsName(goodsId: string) {
   display: grid;
   gap: 4px;
   justify-items: start;
+}
+
+.goods-contained-table {
+  max-height: 460px;
+  overflow: auto;
+}
+
+.goods-contained-table .admin-table {
+  min-width: 1080px;
 }
 
 .goods-category-list,

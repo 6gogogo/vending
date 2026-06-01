@@ -3,7 +3,6 @@ import { Controller, Get, Inject, Query, Req, UseGuards } from "@nestjs/common";
 import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
-  AllowedBackofficeRoles,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -13,7 +12,6 @@ import type { BackofficeRole, DataMonitorRange } from "@vm/shared-types";
 @Controller("analytics")
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
-@AllowedBackofficeRoles("super_admin", "admin")
 @AllowedBackofficePermissions("dashboard:view")
 export class AnalyticsController {
   constructor(@Inject(AnalyticsService) private readonly analyticsService: AnalyticsService) {}

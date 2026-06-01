@@ -156,7 +156,7 @@ export class AlertsService {
       ? this.store.users.find((entry) => entry.id === payload.targetUserId)
       : undefined;
     const actorLabel = targetUser
-      ? `${targetUser.role === "special" ? "普通用户" : targetUser.role === "merchant" ? "爱心商户" : "管理员"}${targetUser.name}`
+      ? `${targetUser.role === "special" ? "用户" : targetUser.role === "merchant" ? "商家" : "管理员"}${targetUser.name}`
       : "访客";
     const trimmedDetail = payload.detail.trim();
     const previewDetail =

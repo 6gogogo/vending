@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, InternalServerErrorException }
 import { ConfigService } from "@nestjs/config";
 import * as Dysmsapi20170525 from "@alicloud/dysmsapi20170525";
 
+import { isProductionRuntime } from "../../common/config/production-safety";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 
 type VerificationProvider = "mock" | "aliyun";
@@ -71,6 +72,7 @@ export class VerificationCodeService {
 
   async requestCode(phone: string): Promise<VerificationCodeResult> {
     const normalizedPhone = this.normalizePhone(phone);
+    this.assertCanRequestCode(normalizedPhone);
 
     if (this.getProvider() === "aliyun") {
       await this.requestAliyunCode(normalizedPhone);
@@ -122,11 +124,26 @@ export class VerificationCodeService {
   private isPreviewEnabled() {
     const raw = this.configService.get<string>("VERIFICATION_CODE_PREVIEW_ENABLED");
 
-    if (raw === undefined) {
-      return this.getProvider() === "mock";
+    if (!raw || !["1", "true", "yes", "on"].includes(raw.trim().toLowerCase())) {
+      return false;
     }
 
-    return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+    return !isProductionRuntime() && this.isLocalPublicBaseUrl();
+  }
+
+  private isLocalPublicBaseUrl() {
+    const raw = this.configService.get<string>("PUBLIC_BASE_URL")?.trim();
+
+    if (!raw) {
+      return false;
+    }
+
+    try {
+      const url = new URL(raw);
+      return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    } catch {
+      return false;
+    }
   }
 
   private normalizePhone(phone: string) {
@@ -147,6 +164,17 @@ export class VerificationCodeService {
     }
 
     return normalizedCode;
+  }
+
+  private assertCanRequestCode(phone: string) {
+    const existing = this.store.verificationCodes.get(phone);
+    const nextAvailableAt = existing?.resendAvailableAt
+      ? new Date(existing.resendAvailableAt).getTime()
+      : 0;
+
+    if (nextAvailableAt > Date.now()) {
+      throw new BadRequestException("验证码发送过于频繁，请稍后再试。");
+    }
   }
 
   private createAliyunClient() {

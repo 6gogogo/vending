@@ -109,12 +109,18 @@ const goodsOptions = computed(() => {
 const selectedGoodsName = computed(
   () => goodsOptions.value.find((item) => item.goodsId === selectedGoodsId.value)?.goodsName ?? ""
 );
+const goodsSearchPlaceholder = computed(() =>
+  sessionStore.user?.role === "merchant" ? "请选择要查看的物资" : "请选择想领取的物资"
+);
+const nearestDeviceButtonText = computed(() =>
+  distanceEnabled.value ? "定位最近柜机" : "选中推荐柜机"
+);
 const heroSupport = computed(() => {
   if (sessionStore.user?.role === "special") {
     return {
       title: "找柜机提示",
       lines: [
-        distanceEnabled.value ? "已按距离排序，越靠前的柜机通常离你越近。" : "未开启定位时也能查看柜机，开启定位后会更容易找到最近的一台。",
+        distanceEnabled.value ? "已按距离排序，越靠前的柜机通常离你越近。" : "未开启定位时也能查看柜机，页面会先展示推荐顺序。",
         selectedGoodsName.value ? `正在查找：${selectedGoodsName.value}` : "可先选择想领取的物资，再查找附近柜机。",
         highlightedDevice.value ? `当前查看：${highlightedDevice.value.name}` : "点击地图大头钉或下方列表，可切换要查看的柜机。"
       ]
@@ -194,7 +200,7 @@ const mapMarkers = computed(() =>
     const highlighted = device.deviceCode === highlightedDeviceCode.value;
     const distanceText = distanceEnabled.value
       ? formatDistance(device.distanceMeters)
-      : "按默认顺序展示";
+      : "按推荐顺序展示";
 
     return {
       id: markerId,
@@ -254,10 +260,10 @@ const load = async () => {
       };
       distanceEnabled.value = true;
     } catch {
-      // 没有定位权限也不能阻断服务，至少要保证列表还能按默认顺序继续使用。
+      // 没有定位权限也不能阻断服务，至少要保证列表还能按推荐顺序继续使用。
       currentLocation.value = undefined;
       distanceEnabled.value = false;
-      locationMessage.value = "未获得定位权限，已按默认顺序展示柜机";
+      locationMessage.value = "未获得定位权限，已按推荐顺序展示柜机";
     }
 
     const [deviceResponse, quotaResponse] = await Promise.all([
@@ -334,7 +340,7 @@ const focusNearestDevice = () => {
 
   highlightedDeviceCode.value = nearest.deviceCode;
   uni.showToast({
-    title: `已定位最近柜机：${nearest.name}`,
+    title: distanceEnabled.value ? `已定位最近柜机：${nearest.name}` : `已选中推荐柜机：${nearest.name}`,
     icon: "none"
   });
 };
@@ -360,7 +366,7 @@ const focusNearestGoods = () => {
 
   if (!matched) {
     uni.showToast({
-      title: `附近没有找到${goodsName}`,
+      title: `当前列表没有找到${goodsName}`,
       icon: "none"
     });
     return;
@@ -368,7 +374,7 @@ const focusNearestGoods = () => {
 
   highlightedDeviceCode.value = matched.deviceCode;
   uni.showToast({
-    title: `已定位最近${goodsName}柜机`,
+    title: distanceEnabled.value ? `已定位最近${goodsName}柜机` : `已选中有${goodsName}的柜机`,
     icon: "none"
   });
 };
@@ -452,10 +458,10 @@ onShow(() => {
               @change="selectedGoodsId = goodsOptions[$event.detail.value]?.goodsId ?? ''"
             >
               <view class="nearby-search-bar__input">
-                {{ selectedGoodsName || "搜索地址或柜机名称" }}
+                {{ selectedGoodsName || goodsSearchPlaceholder }}
               </view>
             </picker>
-            <button class="nearby-search-bar__button" @tap="focusNearestGoods">查找</button>
+            <button class="nearby-search-bar__button" @tap="focusNearestGoods">找物资</button>
           </view>
 
           <view class="nearby-mode-tabs">
@@ -513,7 +519,7 @@ onShow(() => {
                   {{
                     distanceEnabled
                       ? "已按距离排序，点地图大头钉可高亮对应柜机。"
-                      : "未开启定位时仍可使用列表；如需按距离排序，请在小程序和系统设置中允许定位权限。"
+                      : "未开启定位时按推荐顺序展示；如需按距离排序，请在小程序和系统设置中允许定位权限。"
                   }}
                 </text>
               </view>
@@ -534,14 +540,14 @@ onShow(() => {
                 <text class="map-focus-card__title">{{ highlightedDevice.name }}</text>
                 <text class="map-focus-card__meta">{{ highlightedDevice.location }}</text>
                 <text class="map-focus-card__meta">
-                  {{ distanceEnabled ? `距离 ${formatDistance(highlightedDevice.distanceMeters)}` : "按默认顺序展示" }}
+                  {{ distanceEnabled ? `距离 ${formatDistance(highlightedDevice.distanceMeters)}` : "按推荐顺序展示" }}
                 </text>
               </view>
               <text class="vm-status vm-status--success">{{ mapFocusStatusLabel }}</text>
             </button>
 
             <view class="nearby-map-card__tools">
-              <button class="vm-button" @tap="focusNearestDevice">定位最近柜机</button>
+              <button class="vm-button" @tap="focusNearestDevice">{{ nearestDeviceButtonText }}</button>
               <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--warning" @tap="scanAndOpen">扫码开柜</button>
               <button v-else class="vm-button vm-button--ghost" @tap="mapExpanded = true">放大地图查看</button>
             </view>
@@ -570,7 +576,7 @@ onShow(() => {
                   柜机编号 {{ entry.device.deviceCode }} · 最近在线 {{ entry.device.lastSeenAt.slice(0, 16).replace("T", " ") }}
                 </text>
                 <text v-if="!isAccessibleSpecial" class="device-card__meta">
-                  {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按默认顺序显示" }}
+                  {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按推荐顺序显示" }}
                 </text>
                 <text v-if="sessionStore.user?.role === 'special' && !isAccessibleSpecial" class="device-card__highlight">
                   展示柜内有货的物资，超出免费额度会按价格计费
@@ -680,7 +686,7 @@ onShow(() => {
 
         <view class="nearby-map-card__tools">
           <button v-if="sessionStore.user?.role === 'special'" class="vm-button vm-button--warning" @tap="scanAndOpen">扫码开柜</button>
-          <button class="vm-button vm-button--ghost" @tap="focusNearestDevice">找寻最近柜机</button>
+          <button class="vm-button vm-button--ghost" @tap="focusNearestDevice">{{ nearestDeviceButtonText }}</button>
           <view class="nearby-map-card__search">
             <picker
               :range="goodsOptions"
@@ -689,10 +695,10 @@ onShow(() => {
               @change="selectedGoodsId = goodsOptions[$event.detail.value]?.goodsId ?? ''"
             >
               <view class="nearby-map-card__picker">
-                {{ selectedGoodsName || "请选择想找的物资" }}
+                {{ selectedGoodsName || goodsSearchPlaceholder }}
               </view>
             </picker>
-            <button class="vm-button" @tap="focusNearestGoods">搜索最近物资</button>
+            <button class="vm-button" @tap="focusNearestGoods">查找有货柜机</button>
           </view>
         </view>
       </view>

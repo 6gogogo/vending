@@ -1,3 +1,5 @@
+import { adminApiBaseUrl } from "../api/client";
+
 declare global {
   interface Window {
     AMap?: any;
@@ -9,9 +11,7 @@ declare global {
 }
 
 const loadPublicConfig = async () => {
-  const response = await fetch(
-    `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/public-config`
-  );
+  const response = await fetch(`${adminApiBaseUrl}/public-config`);
 
   const parsed = (await response.json()) as {
     code: number;

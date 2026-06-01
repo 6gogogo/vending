@@ -94,7 +94,7 @@
     {
       "path": "pages/special/home",
       "style": {
-        "navigationBarTitleText": "公益领取"
+        "navigationBarTitleText": "用户服务"
       }
     },
     {
@@ -112,13 +112,13 @@
     {
       "path": "pages/merchant/home",
       "style": {
-        "navigationBarTitleText": "商户中心"
+        "navigationBarTitleText": "商家中心"
       }
     },
     {
       "path": "pages/merchant/templates",
       "style": {
-        "navigationBarTitleText": "商品属性"
+        "navigationBarTitleText": "常用商品"
       }
     },
     {

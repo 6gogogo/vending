@@ -15,6 +15,9 @@ import { useAdminSessionStore } from "../stores/session";
 import { formatDate, formatDateTime } from "../utils/datetime";
 
 const sessionStore = useAdminSessionStore();
+const canTransferWarehouse = computed(() => sessionStore.can("warehouse:transfer"));
+const canStocktakeWarehouse = computed(() => sessionStore.can("warehouse:stocktake"));
+const canExportWarehouse = computed(() => sessionStore.can("warehouse:export"));
 const loading = ref(false);
 const saving = ref(false);
 const snapshot = ref<WarehouseInventorySnapshot>();
@@ -153,6 +156,14 @@ const load = async () => {
 };
 
 const submitTransfer = async () => {
+  if (!canTransferWarehouse.value) {
+    message.value = {
+      type: "error",
+      text: "操作失败：当前账号没有仓库调拨权限"
+    };
+    return;
+  }
+
   if (
     !transferForm.value.fromCode ||
     !transferForm.value.toCode ||
@@ -193,6 +204,14 @@ const submitTransfer = async () => {
 };
 
 const submitStocktake = async () => {
+  if (!canStocktakeWarehouse.value) {
+    message.value = {
+      type: "error",
+      text: "操作失败：当前账号没有仓库盘点权限"
+    };
+    return;
+  }
+
   if (!stocktakeForm.value.deviceCode || !stocktakeItems.value.length) {
     message.value = {
       type: "error",
@@ -228,6 +247,14 @@ const submitStocktake = async () => {
 };
 
 const exportStocktake = async (id: string) => {
+  if (!canExportWarehouse.value) {
+    message.value = {
+      type: "error",
+      text: "操作失败：当前账号没有导出仓库盘点权限"
+    };
+    return;
+  }
+
   if (!sessionStore.token) {
     message.value = {
       type: "error",
@@ -415,7 +442,7 @@ function formatBatchDate(value?: string) {
             </div>
           </div>
 
-          <div class="warehouse-form">
+          <div v-if="canTransferWarehouse" class="warehouse-form">
             <label class="admin-field">
               <span class="admin-field__label">来源</span>
               <select v-model="transferForm.fromCode" class="admin-select">
@@ -467,6 +494,7 @@ function formatBatchDate(value?: string) {
             </div>
             <button class="admin-button" :disabled="saving" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
           </div>
+          <div v-else class="admin-note">当前账号只能查看仓库库存，提交调拨需要“仓库调拨”权限。</div>
         </article>
 
         <article class="admin-panel admin-panel-block">
@@ -477,7 +505,7 @@ function formatBatchDate(value?: string) {
             </div>
           </div>
 
-          <div class="warehouse-form">
+          <div v-if="canStocktakeWarehouse" class="warehouse-form">
             <label class="admin-field">
               <span class="admin-field__label">盘点柜机</span>
               <select v-model="stocktakeForm.deviceCode" class="admin-select">
@@ -503,6 +531,7 @@ function formatBatchDate(value?: string) {
               {{ saving ? "处理中" : "提交盘点" }}
             </button>
           </div>
+          <div v-else class="admin-note">当前账号只能查看盘点记录，提交盘点需要“仓库盘点”权限。</div>
         </article>
       </aside>
     </section>
@@ -580,7 +609,8 @@ function formatBatchDate(value?: string) {
               </td>
               <td class="admin-code">{{ item.items.length }}</td>
               <td>
-                <button class="admin-button admin-button--ghost" @click="exportStocktake(item.id)">导出 Excel</button>
+                <button v-if="canExportWarehouse" class="admin-button admin-button--ghost" @click="exportStocktake(item.id)">导出 Excel</button>
+                <span v-else class="admin-table__subtext">需要导出仓库盘点权限</span>
               </td>
             </tr>
           </tbody>

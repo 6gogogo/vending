@@ -4,9 +4,11 @@ import { RouterLink, useRoute } from "vue-router";
 import type { GoodsCategory, GoodsCategoryRecord, WarehouseRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { useAdminSessionStore } from "../stores/session";
 import { formatDate, formatDateTime } from "../utils/datetime";
 
 const route = useRoute();
+const sessionStore = useAdminSessionStore();
 const packageFormOptions = ["瓶装", "盒装", "袋装", "杯装", "罐装", "桶装", "份装", "散装", "其他"];
 
 const detail = ref<Awaited<ReturnType<typeof adminApi.goodsDetail>>>();
@@ -46,6 +48,9 @@ const goods = computed(() => detail.value?.goods);
 const batches = computed(() => detail.value?.batches ?? []);
 const deviceSettings = computed(() => detail.value?.deviceSettings ?? []);
 const recentLogs = computed(() => detail.value?.recentLogs ?? []);
+const canManageGoods = computed(() => sessionStore.can("goods:manage"));
+const canAdjustStock = computed(() => sessionStore.can("goods:stock-adjust"));
+const canUploadImages = computed(() => sessionStore.can("uploads:images"));
 const formatDate = (value?: string) => (value ? value.slice(0, 10) : "-");
 const filteredGoodsCategories = computed(() =>
   goodsCategories.value.filter(
@@ -156,6 +161,11 @@ const saveGoods = async () => {
     return;
   }
 
+  if (!canManageGoods.value) {
+    window.alert("当前账号没有货品资料管理权限。");
+    return;
+  }
+
   saving.value = true;
   try {
     await adminApi.updateGoods(goods.value.goodsId, {
@@ -185,6 +195,11 @@ const uploadGoodsImage = async (event: Event) => {
     return;
   }
 
+  if (!canUploadImages.value) {
+    window.alert("当前账号没有图片上传权限。");
+    return;
+  }
+
   uploadingImage.value = true;
   try {
     const uploaded = await adminApi.uploadImage(file);
@@ -201,6 +216,11 @@ const uploadGoodsImage = async (event: Event) => {
 
 const addBatch = async () => {
   if (!goods.value || !batchForm.value.deviceCode || batchForm.value.quantity <= 0) {
+    return;
+  }
+
+  if (!canAdjustStock.value) {
+    window.alert("当前账号没有货品库存调整权限。");
     return;
   }
 
@@ -239,6 +259,11 @@ const removeBatch = async (batchId: string) => {
     return;
   }
 
+  if (!canAdjustStock.value) {
+    window.alert("当前账号没有货品库存调整权限。");
+    return;
+  }
+
   if (!window.confirm(`确认从批次 ${batchId} 去除 ${form.quantity} 件？该操作会记录为指定批次补扣。`)) {
     return;
   }
@@ -258,6 +283,11 @@ const removeBatch = async (batchId: string) => {
 
 const saveThreshold = async (deviceCode: string) => {
   if (!goods.value) {
+    return;
+  }
+
+  if (!canManageGoods.value) {
+    window.alert("当前账号没有货品资料管理权限。");
     return;
   }
 
@@ -407,8 +437,8 @@ onMounted(load);
             </label>
             <label class="admin-field">
               <span class="admin-field__label">图片</span>
-              <input class="admin-input" type="file" accept="image/*" @change="uploadGoodsImage" />
-              <span class="admin-table__subtext">{{ uploadingImage ? "上传中" : "选择本地图片后会自动上传" }}</span>
+              <input class="admin-input" type="file" accept="image/*" :disabled="!canUploadImages" @change="uploadGoodsImage" />
+              <span class="admin-table__subtext">{{ canUploadImages ? uploadingImage ? "上传中" : "选择本地图片后会自动上传" : "当前账号没有图片上传权限" }}</span>
               <img v-if="goodsForm.imageUrl" class="goods-detail-preview" :src="goodsForm.imageUrl" alt="货品图片预览" />
             </label>
             <label class="admin-field">
@@ -420,13 +450,14 @@ onMounted(load);
             </label>
           </div>
 
-          <button class="admin-button" :disabled="saving" @click="saveGoods">
+          <button class="admin-button" :disabled="saving || !canManageGoods" @click="saveGoods">
             {{ saving ? "保存中" : "保存货品信息" }}
           </button>
         </article>
 
         <aside class="admin-grid">
           <article
+            v-if="canAdjustStock"
             id="goods-inbound-section"
             class="admin-panel admin-panel-block"
             :class="{ 'panel-focus': actionMode === 'inbound' }"
@@ -459,13 +490,13 @@ onMounted(load);
                 <span class="admin-field__label">来源类型</span>
                 <select v-model="batchForm.sourceType" class="admin-select">
                   <option value="admin">管理员</option>
-                  <option value="merchant">商户</option>
+                  <option value="merchant">商家</option>
                   <option value="system">系统补录</option>
                 </select>
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">来源名称</span>
-                <input v-model="batchForm.sourceUserName" class="admin-input" placeholder="例如 鲜食爱心商户" />
+                <input v-model="batchForm.sourceUserName" class="admin-input" placeholder="例如 鲜食商家" />
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">备注</span>
@@ -522,12 +553,12 @@ onMounted(load);
                 <th>所在位置</th>
                 <th>数量</th>
                 <th>保质期</th>
-                <th>去除</th>
+                <th v-if="canAdjustStock">去除</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="batch in batches" :key="batch.batchId">
-                <td>
+                <td v-if="canAdjustStock">
                   <span class="admin-table__strong">{{ batch.batchId }}</span>
                   <span class="admin-table__subtext">{{ formatDate(batch.createdAt) }}</span>
                 </td>
@@ -558,7 +589,7 @@ onMounted(load);
                     />
                     <button
                       class="admin-button admin-button--ghost"
-                      :disabled="saving || batch.remainingQuantity <= 0"
+                       :disabled="saving || !canAdjustStock || batch.remainingQuantity <= 0"
                       @click="removeBatch(batch.batchId)"
                     >
                       {{ saving ? "处理中" : "去除" }}
@@ -605,7 +636,7 @@ onMounted(load);
                 <td class="admin-code">{{ formatDate(item.nearestExpiryAt) }}</td>
                 <td>
                   <label class="goods-threshold-toggle">
-                    <input v-model="thresholdForm[item.deviceCode].enabled" type="checkbox" />
+                    <input v-model="thresholdForm[item.deviceCode].enabled" type="checkbox" :disabled="!canManageGoods" />
                     <span>{{ thresholdForm[item.deviceCode].enabled ? "已开启" : "未启用" }}</span>
                   </label>
                 </td>
@@ -615,11 +646,11 @@ onMounted(load);
                     type="number"
                     min="0"
                     class="admin-input"
-                    :disabled="!thresholdForm[item.deviceCode].enabled"
+                    :disabled="!canManageGoods || !thresholdForm[item.deviceCode].enabled"
                   />
                 </td>
                 <td>
-                  <button class="admin-button admin-button--ghost" :disabled="saving" @click="saveThreshold(item.deviceCode)">
+                  <button class="admin-button admin-button--ghost" :disabled="saving || !canManageGoods" @click="saveThreshold(item.deviceCode)">
                     {{ saving ? "保存中" : "保存" }}
                   </button>
                 </td>

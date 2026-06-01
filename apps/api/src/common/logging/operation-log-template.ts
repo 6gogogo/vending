@@ -5,8 +5,8 @@ type OperationLogDraft = Omit<OperationLogRecord, "description" | "detail"> &
 
 const roleLabelMap = {
   admin: "管理员",
-  merchant: "商户",
-  special: "特殊群体",
+  merchant: "商家",
+  special: "用户",
   system: "系统"
 } as const;
 
@@ -507,12 +507,12 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "import-users":
       return {
-        description: `${actor}导入了${String(entry.metadata?.count ?? 0)}条${String(entry.metadata?.role === "special" ? "特殊群体" : "商户")}数据。`,
+        description: `${actor}导入了${String(entry.metadata?.count ?? 0)}条${String(entry.metadata?.role === "special" ? "用户" : "商家")}数据。`,
         detail: baseDetail([`动作人 ${actor}`, `角色 ${String(entry.metadata?.role ?? "未知")}`, `导入数量 ${String(entry.metadata?.count ?? 0)}`, `状态 ${result}`])
       };
     case "update-access-rule":
       return {
-        description: `${actor}修改了${String(entry.metadata?.role === "special" ? "特殊群体" : "商户")}的领取规则。`,
+        description: `${actor}修改了${String(entry.metadata?.role === "special" ? "用户" : "商家")}的领取规则。`,
         detail: baseDetail([`动作人 ${actor}`, `每日上限 ${String(entry.metadata?.dailyLimit ?? "-")}`, `状态 ${result}`])
       };
     case "create-mock-device":

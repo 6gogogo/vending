@@ -18,8 +18,13 @@ export class MerchantGoodsTemplatesService {
     @Inject(AlertsService) private readonly alertsService: AlertsService
   ) {}
 
-  list() {
-    const storedTemplates = this.store.merchantGoodsTemplates;
+  list(actor?: { id: string; role: UserRole }) {
+    const storedTemplates =
+      actor?.role === "merchant"
+        ? this.store.merchantGoodsTemplates.filter(
+            (entry) => entry.ownerUserId === actor.id || entry.ownerUserId === "system"
+          )
+        : this.store.merchantGoodsTemplates;
     const templatedGoodsIds = new Set(storedTemplates.map((entry) => entry.goodsId).filter(Boolean));
     const catalogTemplates: MerchantGoodsTemplate[] = this.store.goodsCatalog
       .filter((entry) => entry.status !== "inactive" && !templatedGoodsIds.has(entry.goodsId))
@@ -66,23 +71,13 @@ export class MerchantGoodsTemplatesService {
     }
   ) {
     const owner = this.getMerchant(ownerUserId);
+    const normalized = this.normalizeTemplatePayload(payload);
     const now = new Date().toISOString();
     const created: MerchantGoodsTemplate = {
       id: this.store.createId("template"),
-      // 记录创建来源用于审计；模板本身是后端公共模板库，所有商户都可调用。
+      // 记录创建来源用于审计；模板本身是后端公共模板库，所有商家都可调用。
       ownerUserId,
-      goodsId: payload.goodsId,
-      goodsCode: payload.goodsCode,
-      goodsName: payload.goodsName,
-      fullName: payload.fullName,
-      category: payload.category,
-      categoryName: payload.categoryName,
-      packageForm: payload.packageForm,
-      specification: payload.specification,
-      manufacturer: payload.manufacturer,
-      defaultQuantity: payload.defaultQuantity,
-      defaultShelfLifeDays: payload.defaultShelfLifeDays,
-      imageUrl: payload.imageUrl,
+      ...normalized,
       status: "active",
       createdAt: now,
       updatedAt: now
@@ -137,7 +132,9 @@ export class MerchantGoodsTemplatesService {
   ) {
     const owner = this.getMerchant(ownerUserId);
     const template = this.findOrCreateTemplateFromCatalog(ownerUserId, templateId);
-    Object.assign(template, payload, {
+    const normalized = this.normalizeTemplatePatch(payload);
+
+    Object.assign(template, normalized, {
       updatedAt: new Date().toISOString()
     });
 
@@ -184,7 +181,7 @@ export class MerchantGoodsTemplatesService {
     }
 
     const owner = this.getRestockActor(ownerUserId);
-    const template = this.findTemplate(payload.templateId);
+    const template = this.findTemplateForActor(owner.id, owner.role, payload.templateId);
 
     if (template.status !== "active") {
       throw new BadRequestException("当前货品模板已停用。");
@@ -192,7 +189,7 @@ export class MerchantGoodsTemplatesService {
 
     const quantity = payload.quantity ?? template.defaultQuantity;
 
-    if (quantity <= 0) {
+    if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new BadRequestException("补货数量必须大于 0。");
     }
 
@@ -279,7 +276,7 @@ export class MerchantGoodsTemplatesService {
 
     this.alertsService.create({
       type: "expiry",
-      title: owner.role === "admin" ? "管理员入柜批次待到期跟进" : "商户补货批次待到期跟进",
+      title: owner.role === "admin" ? "管理员入柜批次待到期跟进" : "商家补货批次待到期跟进",
       deviceCode: device.deviceCode,
       targetUserId: owner.id,
       goodsId: goods.goodsId,
@@ -442,10 +439,34 @@ export class MerchantGoodsTemplatesService {
     return this.mapCatalogItemToTemplate(catalogItem);
   }
 
+  private findTemplateForActor(ownerUserId: string, role: UserRole, templateId: string) {
+    const template = this.store.merchantGoodsTemplates.find((entry) => entry.id === templateId);
+
+    if (template) {
+      if (role !== "admin" && template.ownerUserId !== ownerUserId && template.ownerUserId !== "system") {
+        throw new ForbiddenException("不能使用其他商家的常用商品模板。");
+      }
+
+      return template;
+    }
+
+    const catalogItem = this.findCatalogItemByTemplateId(templateId);
+
+    if (!catalogItem) {
+      throw new NotFoundException("未找到对应货品模板。");
+    }
+
+    return this.mapCatalogItemToTemplate(catalogItem);
+  }
+
   private findOrCreateTemplateFromCatalog(ownerUserId: string, templateId: string) {
     const template = this.store.merchantGoodsTemplates.find((entry) => entry.id === templateId);
 
     if (template) {
+      if (template.ownerUserId !== ownerUserId && template.ownerUserId !== "system") {
+        throw new ForbiddenException("不能修改其他商家的常用商品模板。");
+      }
+
       return template;
     }
 
@@ -517,6 +538,104 @@ export class MerchantGoodsTemplatesService {
     return `catalog-${goodsId}`;
   }
 
+  private normalizeTemplatePayload(payload: {
+    goodsId?: string;
+    goodsCode?: string;
+    goodsName: string;
+    fullName?: string;
+    category: GoodsCategory;
+    categoryName?: string;
+    packageForm?: string;
+    specification?: string;
+    manufacturer?: string;
+    defaultQuantity: number;
+    defaultShelfLifeDays: number;
+    imageUrl?: string;
+  }) {
+    const goodsName = payload.goodsName?.trim();
+    const defaultQuantity = Math.floor(Number(payload.defaultQuantity));
+    const defaultShelfLifeDays = Math.floor(Number(payload.defaultShelfLifeDays));
+
+    if (!goodsName) {
+      throw new BadRequestException("常用商品名称不能为空。");
+    }
+
+    if (!Number.isFinite(defaultQuantity) || defaultQuantity <= 0) {
+      throw new BadRequestException("默认数量必须大于 0。");
+    }
+
+    if (!Number.isFinite(defaultShelfLifeDays) || defaultShelfLifeDays <= 0) {
+      throw new BadRequestException("保质期天数必须大于 0。");
+    }
+
+    return {
+      goodsId: payload.goodsId?.trim() || undefined,
+      goodsCode: payload.goodsCode?.trim() || undefined,
+      goodsName,
+      fullName: payload.fullName?.trim() || undefined,
+      category: payload.category,
+      categoryName: payload.categoryName?.trim() || undefined,
+      packageForm: payload.packageForm?.trim() || undefined,
+      specification: payload.specification?.trim() || undefined,
+      manufacturer: payload.manufacturer?.trim() || undefined,
+      defaultQuantity,
+      defaultShelfLifeDays,
+      imageUrl: payload.imageUrl?.trim() || undefined
+    };
+  }
+
+  private normalizeTemplatePatch(
+    payload: Partial<{
+      goodsId: string;
+      goodsCode: string;
+      goodsName: string;
+      fullName: string;
+      category: GoodsCategory;
+      categoryName: string;
+      packageForm: string;
+      specification: string;
+      manufacturer: string;
+      defaultQuantity: number;
+      defaultShelfLifeDays: number;
+      imageUrl?: string;
+      status: "active" | "inactive";
+    }>
+  ) {
+    const patch = { ...payload };
+
+    if (payload.goodsName !== undefined) {
+      const goodsName = payload.goodsName.trim();
+
+      if (!goodsName) {
+        throw new BadRequestException("常用商品名称不能为空。");
+      }
+
+      patch.goodsName = goodsName;
+    }
+
+    if (payload.defaultQuantity !== undefined) {
+      const defaultQuantity = Math.floor(Number(payload.defaultQuantity));
+
+      if (!Number.isFinite(defaultQuantity) || defaultQuantity <= 0) {
+        throw new BadRequestException("默认数量必须大于 0。");
+      }
+
+      patch.defaultQuantity = defaultQuantity;
+    }
+
+    if (payload.defaultShelfLifeDays !== undefined) {
+      const defaultShelfLifeDays = Math.floor(Number(payload.defaultShelfLifeDays));
+
+      if (!Number.isFinite(defaultShelfLifeDays) || defaultShelfLifeDays <= 0) {
+        throw new BadRequestException("保质期天数必须大于 0。");
+      }
+
+      patch.defaultShelfLifeDays = defaultShelfLifeDays;
+    }
+
+    return patch;
+  }
+
   private getRestockActor(ownerUserId: string) {
     const actor = this.store.users.find(
       (entry) => entry.id === ownerUserId && (entry.role === "merchant" || entry.role === "admin")
@@ -533,7 +652,7 @@ export class MerchantGoodsTemplatesService {
     const merchant = this.store.users.find((entry) => entry.id === ownerUserId && entry.role === "merchant");
 
     if (!merchant) {
-      throw new ForbiddenException("当前账号不是爱心商户。");
+      throw new ForbiddenException("当前账号不是商家。");
     }
 
     return merchant;

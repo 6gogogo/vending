@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import type { OperationLogCategory, OperationLogRecord, OperationLogStatus, OperationLogSubject } from "@vm/shared-types";
 
@@ -18,6 +18,7 @@ import {
 const route = useRoute();
 const router = useRouter();
 const sessionStore = useAdminSessionStore();
+const canUndoLogs = computed(() => sessionStore.can("operation-logs:undo"));
 
 const logs = ref<OperationLogRecord[]>([]);
 const loading = ref(false);
@@ -30,6 +31,8 @@ const subjectType = ref<"" | OperationLogSubject["type"]>("");
 const subjectId = ref("");
 const dateFrom = ref("");
 const dateTo = ref("");
+const visibleLogs = computed(() => logs.value.slice(0, 12));
+const hiddenLogsCount = computed(() => Math.max(0, logs.value.length - visibleLogs.value.length));
 
 const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.actor);
 const logContextSummary = (log: OperationLogRecord) =>
@@ -149,6 +152,11 @@ const exportSystemLogs = async () => {
 };
 
 const undoLog = async (logId: string) => {
+  if (!canUndoLogs.value) {
+    window.alert("当前账号没有撤销操作日志权限。");
+    return;
+  }
+
   if (!window.confirm("确认撤销这条操作记录？")) {
     return;
   }
@@ -259,6 +267,10 @@ onMounted(async () => {
 
     <section class="admin-page__section">
       <article class="admin-panel admin-panel-block">
+        <div v-if="logs.length" class="logs-result-summary admin-note">
+          当前筛选命中 {{ logs.length }} 条，页面先展示最近 {{ visibleLogs.length }} 条；需要更精确结果可继续筛选，完整数据请使用导出。
+          <span v-if="hiddenLogsCount">还有 {{ hiddenLogsCount }} 条未在当前页面展开。</span>
+        </div>
         <table v-if="logs.length" class="admin-table">
           <thead>
             <tr>
@@ -271,7 +283,7 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="log in logs" :key="log.id">
+            <tr v-for="log in visibleLogs" :key="log.id">
               <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
               <td>
                 <div class="admin-context-main">
@@ -314,14 +326,14 @@ onMounted(async () => {
               </td>
               <td>
                 <button
-                  v-if="log.metadata?.undoState === 'undoable'"
+                  v-if="canUndoLogs && log.metadata?.undoState === 'undoable'"
                   class="admin-button admin-button--ghost"
                   :disabled="undoingLogId === log.id"
                   @click="undoLog(log.id)"
                 >
                   {{ undoingLogId === log.id ? "撤销中" : "撤销" }}
                 </button>
-                <span v-else class="admin-table__subtext">{{ undoStateLabel(log) }}</span>
+                <span v-else class="admin-table__subtext">{{ canUndoLogs ? undoStateLabel(log) : "需要撤销操作日志权限" }}</span>
               </td>
               <td>
                 <span class="admin-table__subtext">{{ log.detail }}</span>
@@ -356,6 +368,10 @@ onMounted(async () => {
   display: grid;
   gap: 4px;
   margin-top: 4px;
+}
+
+.logs-result-summary {
+  margin-bottom: 12px;
 }
 
 @media (max-width: 1024px) {

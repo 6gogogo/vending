@@ -1,7 +1,15 @@
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  UnauthorizedException
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 
 import type {
   AppLoginResult,
+  BackofficeCredentialSnapshot,
   BackofficePermission,
   BackofficeRole,
   BackofficeSessionSnapshot,
@@ -11,7 +19,11 @@ import type {
   UserRecord,
   UserRole
 } from "@vm/shared-types";
-import { normalizeBackofficePermissions } from "@vm/shared-types";
+import {
+  BACKOFFICE_ROLE_ALLOWED_PERMISSIONS,
+  BACKOFFICE_ROLE_DEFAULT_PERMISSIONS,
+  resolveBackofficePermissions
+} from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AccessRulesService } from "../access-rules/access-rules.service";
@@ -47,7 +59,8 @@ export class AuthService {
     private readonly registrationApplicationsService: RegistrationApplicationsService,
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
     @Inject(VerificationCodeService)
-    private readonly verificationCodeService: VerificationCodeService
+    private readonly verificationCodeService: VerificationCodeService,
+    @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
   async requestCode(phone: string, scene: "app-login" | "register" | "general" = "general") {
@@ -288,6 +301,8 @@ export class AuthService {
       throw new UnauthorizedException("账号或密码不正确。");
     }
 
+    this.assertDefaultCredentialAllowed(credential.usesDefaultPassword);
+
     return this.createAdminSessionSnapshot(user);
   }
 
@@ -308,7 +323,22 @@ export class AuthService {
       throw new UnauthorizedException("账号或密码不正确。");
     }
 
+    this.assertDefaultCredentialAllowed(credential.usesDefaultPassword);
+
     return this.createBackofficeSessionSnapshot(user, credential.role, undefined, credential);
+  }
+
+  private assertDefaultCredentialAllowed(usesDefaultPassword: boolean) {
+    if (!usesDefaultPassword) {
+      return;
+    }
+
+    const explicit = this.configService.get<string>("ALLOW_DEFAULT_BACKOFFICE_LOGIN")?.trim().toLowerCase();
+    const allowed = ["1", "true", "yes", "on"].includes(explicit ?? "");
+
+    if (!allowed) {
+      throw new UnauthorizedException("默认后台密码不可用于当前环境，请先修改后台密码。");
+    }
   }
 
   getMobileSession(token?: string): MobileSessionSnapshot {
@@ -511,7 +541,7 @@ export class AuthService {
     payload: {
       userId: string;
       username: string;
-      password: string;
+      password?: string;
       role?: BackofficeRole;
       tenantId?: string;
       permissions?: BackofficePermission[];
@@ -520,7 +550,7 @@ export class AuthService {
     const actor = this.getBackofficeSession(token);
 
     if (!actor.user.permissions.includes("backoffice-credentials:manage")) {
-      throw new UnauthorizedException("只有超级管理员可以发放后台账号。");
+      throw new ForbiddenException("当前后台账号不能管理后台登录权限。");
     }
 
     const targetUser = this.store.users.find((entry) => entry.id === payload.userId);
@@ -530,46 +560,101 @@ export class AuthService {
       throw new BadRequestException("目标用户不能开通该后台角色。");
     }
 
-    if (role === "super_admin" && !this.store.isHiddenBackofficeUser(targetUser)) {
-      throw new BadRequestException("超级看管账号只能绑定系统隐藏账号。");
+    const existingCredential = this.store.findBackofficeCredentialByUserId(targetUser.id, role);
+    const existingPermissions = existingCredential
+      ? this.store.getBackofficePermissions(targetUser.id, role)
+      : undefined;
+    const roleAllowedPermissions = new Set(BACKOFFICE_ROLE_ALLOWED_PERMISSIONS[role]);
+    const roleInvalidPermissions = (payload.permissions ?? []).filter(
+      (permission) => !roleAllowedPermissions.has(permission)
+    );
+
+    if (roleInvalidPermissions.length > 0) {
+      throw new ForbiddenException("不能发放目标后台身份不允许的权限。");
     }
 
-    const tenantId = role === "super_admin" ? undefined : (payload.tenantId ?? this.store.getDefaultTenantId());
+    const requestedPermissions = resolveBackofficePermissions(
+      role,
+      payload.permissions ?? existingPermissions ?? BACKOFFICE_ROLE_DEFAULT_PERMISSIONS[role]
+    );
+    let grantedPermissions = requestedPermissions;
+
+    if (actor.user.backofficeRole !== "super_admin") {
+      if (role === "super_admin") {
+        throw new ForbiddenException("当前后台账号不能发放服务商账号。");
+      }
+
+      const actorTenantId = actor.user.tenantId ?? this.store.getDefaultTenantId();
+      const requestedTenantId = payload.tenantId ?? actorTenantId;
+
+      if (requestedTenantId !== actorTenantId) {
+        throw new ForbiddenException("当前后台账号不能管理其他实例的后台账号。");
+      }
+
+      const actorPermissions = new Set(actor.user.permissions);
+      const invalidPermissions = requestedPermissions.filter(
+        (permission) => !actorPermissions.has(permission)
+      );
+
+      if (existingCredential && !payload.permissions && invalidPermissions.length > 0) {
+        throw new ForbiddenException("不能管理权限超过当前账号的后台账号。");
+      }
+
+      if (payload.permissions && invalidPermissions.length > 0) {
+        throw new ForbiddenException("不能发放当前账号自身没有的权限。");
+      }
+
+      grantedPermissions = requestedPermissions.filter((permission) => actorPermissions.has(permission));
+    }
+
+    const tenantId =
+      role === "super_admin"
+        ? undefined
+        : (payload.tenantId ?? actor.user.tenantId ?? this.store.getDefaultTenantId());
 
     if (tenantId && !this.store.findPlatformTenantById(tenantId)) {
       throw new BadRequestException("目标客户实例不存在。");
     }
 
     const normalizedUsername = payload.username.trim().toLowerCase();
-    const normalizedPassword = payload.password.trim();
+    const normalizedPassword = payload.password?.trim() ?? "";
 
     if (!normalizedUsername) {
       throw new BadRequestException("后台账号不能为空。");
     }
 
-    if (normalizedPassword.length < 6) {
+    if (!existingCredential && normalizedPassword.length < 6) {
+      throw new BadRequestException("后台密码至少需要 6 位。");
+    }
+
+    if (existingCredential && normalizedPassword && normalizedPassword.length < 6) {
       throw new BadRequestException("后台密码至少需要 6 位。");
     }
 
     const sameUsername = this.store.findBackofficeCredentialByUsername(normalizedUsername);
 
-    if (sameUsername && sameUsername.userId !== targetUser.id) {
+    if (sameUsername && (sameUsername.userId !== targetUser.id || sameUsername.role !== role)) {
       throw new BadRequestException("后台账号已被占用。");
     }
 
-    const hashedPassword = hashAdminPassword(normalizedPassword);
+    const hashedPassword = normalizedPassword
+      ? hashAdminPassword(normalizedPassword)
+      : {
+          salt: existingCredential!.passwordSalt,
+          hash: existingCredential!.passwordHash
+        };
     const credential = this.store.upsertBackofficeCredential({
       userId: targetUser.id,
       username: normalizedUsername,
       role,
       tenantId,
-      permissions: payload.permissions
-        ? normalizeBackofficePermissions(payload.permissions)
-        : undefined,
+      permissions: grantedPermissions,
       passwordSalt: hashedPassword.salt,
       passwordHash: hashedPassword.hash,
-      usesDefaultPassword: false,
-      passwordUpdatedAt: new Date().toISOString()
+      usesDefaultPassword: normalizedPassword ? false : existingCredential!.usesDefaultPassword,
+      passwordUpdatedAt: normalizedPassword
+        ? new Date().toISOString()
+        : existingCredential!.passwordUpdatedAt
     });
 
     this.store.logOperation({
@@ -594,10 +679,45 @@ export class AuthService {
       }
     });
 
+    return this.createBackofficeCredentialSnapshot(credential);
+  }
+
+  listBackofficeCredentials(token: string | undefined): BackofficeCredentialSnapshot[] {
+    const actor = this.getBackofficeSession(token);
+
+    if (!actor.user.permissions.includes("backoffice-credentials:manage")) {
+      throw new ForbiddenException("当前后台账号不能管理后台登录权限。");
+    }
+
+    const actorTenantId = actor.user.tenantId ?? this.store.getDefaultTenantId();
+
+    return this.store.backofficeCredentials
+      .filter((credential) => {
+        if (actor.user.backofficeRole === "super_admin") {
+          return true;
+        }
+
+        return credential.role !== "super_admin" && credential.tenantId === actorTenantId;
+      })
+      .map((credential) => this.createBackofficeCredentialSnapshot(credential));
+  }
+
+  private createBackofficeCredentialSnapshot(credential: {
+    userId: string;
+    username: string;
+    role: BackofficeRole;
+    tenantId?: string;
+    usesDefaultPassword: boolean;
+    passwordUpdatedAt: string;
+  }): BackofficeCredentialSnapshot {
+    const tenant = this.store.findPlatformTenantById(credential.tenantId);
+
     return {
       userId: credential.userId,
       username: credential.username,
       role: credential.role,
+      tenantId: credential.tenantId,
+      tenantName: tenant?.name,
       permissions: this.store.getBackofficePermissions(credential.userId, credential.role),
       usesDefaultPassword: credential.usesDefaultPassword,
       passwordUpdatedAt: credential.passwordUpdatedAt
@@ -721,7 +841,7 @@ export class AuthService {
 
   private resolveDisplayName(role: UserRole, profile: RegistrationApplicationProfile) {
     if (role === "merchant") {
-      return profile.merchantName || profile.name || "爱心商户";
+      return profile.merchantName || profile.name || "商家";
     }
 
     return profile.name || "待完善资料用户";
@@ -736,8 +856,8 @@ export class AuthService {
 
     const existingApplication = this.registrationApplicationsService.findLatestByPhone(phone);
 
-    if (existingApplication?.status === "pending") {
-      throw new BadRequestException("请等待审核");
+    if (existingApplication && ["pending", "rejected", "approved"].includes(existingApplication.status)) {
+      return;
     }
 
     throw new BadRequestException("请注册");

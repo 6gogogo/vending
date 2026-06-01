@@ -53,7 +53,7 @@ onMounted(() => {
       <article class="admin-panel stat-card">
         <span class="admin-kicker">服务对象</span>
         <strong>{{ totals?.users ?? 0 }}</strong>
-        <span class="admin-copy">商户 {{ totals?.merchants ?? 0 }}</span>
+        <span class="admin-copy">商家 {{ totals?.merchants ?? 0 }}</span>
       </article>
       <article class="admin-panel stat-card">
         <span class="admin-kicker">待处理事项</span>
@@ -99,7 +99,7 @@ onMounted(() => {
                 </span>
               </td>
               <td>{{ entry.metrics.onlineDevices }}/{{ entry.metrics.devices }}</td>
-              <td>{{ entry.metrics.users }} 人 / 商户 {{ entry.metrics.merchants }}</td>
+              <td>{{ entry.metrics.users }} 人 / 商家 {{ entry.metrics.merchants }}</td>
               <td>{{ entry.metrics.inventoryUnits }} 件 / 领取 {{ entry.metrics.pickupCount }}</td>
               <td class="admin-code">{{ entry.lastActivityAt ? formatDateTime(entry.lastActivityAt) : "-" }}</td>
             </tr>

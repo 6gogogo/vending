@@ -441,7 +441,7 @@ export class AiInsightsService {
         "请核对当天命中的临期批次。"
       ]),
       feedbackHighlights: this.readStringArray(generated.data.feedbackHighlights, [
-        "请关注当天新增的用户反馈与商户提醒。"
+        "请关注当天新增的用户反馈与商家提醒。"
       ]),
       recommendedActions: this.readStringArray(generated.data.recommendedActions, [
         "建议按故障、反馈、库存、临期顺序推进处理。"
@@ -1327,7 +1327,7 @@ export class AiInsightsService {
     }
 
     if (role === "merchant") {
-      return "商户";
+      return "商家";
     }
 
     return "普通用户";

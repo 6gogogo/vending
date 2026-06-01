@@ -1,13 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { RouterLink } from "vue-router";
-import type { GoodsCatalogItem, RegionRecord, RegistrationApplication, SpecialAccessPolicy, UserLedgerStatus, UserRecord } from "@vm/shared-types";
+import { RouterLink, useRouter } from "vue-router";
+import {
+  BACKOFFICE_PERMISSIONS,
+  BACKOFFICE_ROLE_ALLOWED_PERMISSIONS,
+  BACKOFFICE_ROLE_DEFAULT_PERMISSIONS,
+  type BackofficeCredentialSnapshot,
+  type BackofficePermission,
+  type BackofficeRole,
+  type GoodsCatalogItem,
+  type RegionRecord,
+  type RegistrationApplication,
+  type ReservationSettings,
+  type SpecialAccessPolicy,
+  type UserLedgerStatus,
+  type UserRecord
+} from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
+import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 
-type DrawerMode = "" | "create-user" | "edit-user" | "create-policy" | "edit-policy";
+type DrawerMode = "" | "create-user" | "edit-user" | "create-policy" | "edit-policy" | "backoffice-account";
 const weekdayOptions = [
   { label: "周一", value: 1 },
   { label: "周二", value: 2 },
@@ -39,13 +54,144 @@ interface PolicyFormState {
   goodsLimits: Array<{ goodsId: string; quantity: number }>;
 }
 
+interface BackofficeFormState {
+  userId: string;
+  userName: string;
+  role: BackofficeRole;
+  username: string;
+  password: string;
+  permissions: BackofficePermission[];
+  hasExistingCredential: boolean;
+}
+
+interface ReservationFormState {
+  enabled: boolean;
+  holdMinutes: number;
+  maxTimeouts: number;
+}
+
+const backofficeRoleLabels: Record<BackofficeRole, string> = {
+  super_admin: "程序提供商",
+  admin: "管理员",
+  merchant: "商家"
+};
+
+const permissionLabels: Record<BackofficePermission, string> = {
+  "platform-overview:view": "全局工作台",
+  "platform-tenants:view": "客户实例列表",
+  "merchant-workbench:view": "商家工作台",
+  "merchant-workbench:manage": "商家补货管理",
+  "dashboard:view": "运营主控台",
+  "goods:view": "货物与批次",
+  "goods:manage": "货品资料管理",
+  "goods:stock-adjust": "货品库存调整",
+  "goods:export": "导出货品数据",
+  "warehouse:view": "本地仓库",
+  "warehouse:transfer": "仓库调拨",
+  "warehouse:stocktake": "仓库盘点",
+  "warehouse:export": "导出仓库盘点",
+  "devices:view": "柜机监控",
+  "devices:manage": "柜机资料管理",
+  "devices:operate": "柜机操作",
+  "users:view": "人员与取货规则",
+  "users:manage": "人员台账管理",
+  "users:review": "注册审核",
+  "users:rules:manage": "取货规则管理",
+  "reservations:manage": "预约规则管理",
+  "alerts:manage": "预警处理",
+  "payments:refund": "退款与支付处理",
+  "operation-logs:view": "操作日志",
+  "operation-logs:export": "导出操作日志",
+  "operation-logs:undo": "撤销操作日志",
+  "system-audit:view": "系统审计",
+  "system-audit:export": "导出系统审计",
+  "analytics:data-monitor:view": "数据监控",
+  "ai-insights:view": "AI 工作台",
+  "ai-insights:manage": "AI 配置",
+  "system-settings:view": "系统设置查看",
+  "system-settings:secret:view": "查看敏感配置",
+  "system-settings:update": "系统设置修改",
+  "uploads:images": "图片上传",
+  "backoffice-credentials:manage": "后台账号权限配置"
+};
+
+const permissionGroups: Array<{ title: string; permissions: BackofficePermission[] }> = [
+  {
+    title: "工作台",
+    permissions: [
+      "platform-overview:view",
+      "platform-tenants:view",
+      "dashboard:view",
+      "merchant-workbench:view",
+      "merchant-workbench:manage"
+    ]
+  },
+  {
+    title: "日常业务",
+    permissions: [
+      "goods:view",
+      "goods:manage",
+      "goods:stock-adjust",
+      "goods:export",
+      "warehouse:view",
+      "warehouse:transfer",
+      "warehouse:stocktake",
+      "warehouse:export",
+      "devices:view",
+      "devices:manage",
+      "devices:operate",
+      "users:view",
+      "users:manage",
+      "users:review",
+      "users:rules:manage",
+      "reservations:manage",
+      "alerts:manage",
+      "payments:refund",
+      "operation-logs:view",
+      "operation-logs:export",
+      "operation-logs:undo"
+    ]
+  },
+  {
+    title: "数据与智能",
+    permissions: ["analytics:data-monitor:view", "ai-insights:view", "ai-insights:manage"]
+  },
+  {
+    title: "配置与审计",
+    permissions: [
+      "system-settings:view",
+      "system-settings:update",
+      "system-settings:secret:view",
+      "uploads:images",
+      "system-audit:view",
+      "system-audit:export",
+      "backoffice-credentials:manage"
+    ]
+  }
+];
+
+const createEmptyBackofficeForm = (): BackofficeFormState => ({
+  userId: "",
+  userName: "",
+  role: "admin",
+  username: "",
+  password: "",
+  permissions: [],
+  hasExistingCredential: false
+});
+
+const sessionStore = useAdminSessionStore();
+const router = useRouter();
 const users = ref<UserRecord[]>([]);
 const registrationApplications = ref<RegistrationApplication[]>([]);
 const policies = ref<SpecialAccessPolicy[]>([]);
 const goodsCatalog = ref<GoodsCatalogItem[]>([]);
 const regions = ref<RegionRecord[]>([]);
+const backofficeCredentials = ref<BackofficeCredentialSnapshot[]>([]);
+const reservationSettings = ref<ReservationSettings | null>(null);
 const loading = ref(false);
 const saving = ref(false);
+const reservationSaving = ref(false);
 const removingUserId = ref("");
 const creatingRegion = ref(false);
 const drawerMode = ref<DrawerMode>("");
@@ -68,9 +214,14 @@ const regionMapPickerVisible = ref(false);
 const rejectReasons = ref<Record<string, string>>({});
 const userForm = ref<UserFormState>({ role: "special", phone: "", name: "", status: "active", regionId: "", regionName: "", tagsText: "" });
 const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: "", quantity: 1 }] });
+const backofficeForm = ref<BackofficeFormState>(createEmptyBackofficeForm());
+const reservationForm = ref<ReservationFormState>({ enabled: false, holdMinutes: 15, maxTimeouts: 3 });
+const reservationMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 
 const regionOptions = computed(() => regions.value.filter((item) => item.status === "active"));
 const goodsCatalogMap = computed(() => new Map(goodsCatalog.value.map((item) => [item.goodsId, item])));
+const pendingRegistrationCount = computed(() => registrationApplications.value.filter((item) => item.status === "pending").length);
+const specialUserCount = computed(() => users.value.filter((user) => user.role === "special").length);
 const filteredUsers = computed(() => {
   const query = keyword.value.trim();
   return users.value.filter((user) => {
@@ -95,13 +246,60 @@ const filteredApplications = computed(() => registrationApplications.value.filte
 const selectedUsers = computed(() => users.value.filter((user) => selectedUserIds.value.includes(user.id)));
 const selectedSpecialUsers = computed(() => selectedUsers.value.filter((user) => user.role === "special"));
 const allFilteredSelected = computed(() => filteredUsers.value.length > 0 && filteredUsers.value.every((user) => selectedUserIds.value.includes(user.id)));
-const currentDrawerTitle = computed(() => drawerMode.value === "create-user" ? "新增人员" : drawerMode.value === "edit-user" ? "编辑人员" : drawerMode.value === "create-policy" ? "新增策略模板" : drawerMode.value === "edit-policy" ? "编辑策略模板" : "");
+const currentDrawerTitle = computed(() =>
+  drawerMode.value === "create-user"
+    ? "新增人员"
+    : drawerMode.value === "edit-user"
+      ? "编辑人员"
+      : drawerMode.value === "create-policy"
+        ? "新增每日物资模板"
+        : drawerMode.value === "edit-policy"
+          ? "编辑每日物资模板"
+          : drawerMode.value === "backoffice-account"
+            ? "后台账号权限"
+            : ""
+);
 const isUserMutating = computed(() => saving.value || Boolean(removingUserId.value));
+const canManageBackofficeCredentials = computed(() => sessionStore.can("backoffice-credentials:manage"));
+const canUpdateReservationSettings = computed(() => sessionStore.user?.role === "admin" && sessionStore.can("reservations:manage"));
+const canManageUsers = computed(() => sessionStore.can("users:manage"));
+const canManageUserRules = computed(() => sessionStore.can("users:rules:manage"));
+const canReviewRegistrations = computed(() => sessionStore.can("users:review"));
+const isProviderBackoffice = computed(() => sessionStore.user?.backofficeRole === "super_admin");
+const allowedBackofficePermissions = computed(
+  () => {
+    if (backofficeForm.value.role === "super_admin") {
+      return new Set(BACKOFFICE_ROLE_ALLOWED_PERMISSIONS.super_admin);
+    }
+
+    const actorPermissions = new Set(sessionStore.permissions);
+    return new Set(
+      BACKOFFICE_ROLE_ALLOWED_PERMISSIONS[backofficeForm.value.role].filter((permission) =>
+        actorPermissions.has(permission)
+      )
+    );
+  }
+);
+const visiblePermissionGroups = computed(() =>
+  permissionGroups
+    .map((group) => ({
+      ...group,
+      permissions: group.permissions.filter((permission) => allowedBackofficePermissions.value.has(permission))
+    }))
+    .filter((group) => group.permissions.length > 0)
+);
 const visibleRegionNames = computed(() => {
   const names = new Set<string>();
   users.value.forEach((user) => names.add(user.regionName || "未分配区域"));
   return Array.from(names).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
 });
+const backofficeTargetUser = computed(() =>
+  users.value.find((user) => user.id === backofficeForm.value.userId)
+);
+const availableBackofficeRoles = computed(() =>
+  backofficeTargetUser.value ? backofficeRolesForUser(backofficeTargetUser.value) : []
+);
+const canChooseBackofficeRole = computed(() => availableBackofficeRoles.value.length > 1);
 const regionDraftPositionSummary = computed(() => {
   if (regionDraftLongitude.value === undefined || regionDraftLatitude.value === undefined) {
     return "尚未在地图上设置位置";
@@ -112,8 +310,20 @@ const regionDraftPositionSummary = computed(() => {
     ? `${regionDraftLocation.value.trim()} · ${coordinates}`
     : coordinates;
 });
+const configuredSpecialUserCount = computed(() =>
+  users.value.filter((user) => user.role === "special" && policySummary(user.id) !== "未设置").length
+);
+const reservationStatusLabel = computed(() =>
+  reservationForm.value.enabled
+    ? `已开启，预约保留 ${reservationForm.value.holdMinutes} 分钟`
+    : "未开启，小程序只能现场开柜"
+);
+const firstConfigTargetUser = computed(() =>
+  users.value.find((user) => user.role === "special" && policySummary(user.id) === "未设置") ??
+  users.value.find((user) => user.role === "special")
+);
 
-const formatRole = (role: UserRecord["role"]) => role === "special" ? "普通用户" : role === "merchant" ? "爱心商户" : "管理员";
+const formatRole = (role: UserRecord["role"]) => role === "special" ? "用户" : role === "merchant" ? "商家" : "管理员";
 const formatLedgerStatus = (status?: UserLedgerStatus) => status === "unregistered" ? "未注册" : status === "quota_unclaimed" ? "物资未领取" : status === "quota_partial" ? "部分领取" : status === "quota_complete" ? "全部领取" : "已注册";
 const ledgerStatusTone = (status?: UserLedgerStatus) => status === "quota_complete" ? "admin-pill--success" : status === "quota_partial" || status === "unregistered" ? "admin-pill--warning" : "admin-pill--neutral";
 const registrationLabel = (user: UserRecord) => (user.ledgerStatus === "unregistered" ? "未注册" : "已注册");
@@ -123,13 +333,102 @@ const policySummary = (userId: string) => {
   const user = users.value.find((item) => item.id === userId);
   const directCount = user?.accessPolicies?.filter((policy) => policy.status === "active").length ?? 0;
   if (directCount > 0) {
-    return `个人设定 ${directCount} 条`;
+    return `每日物资 ${directCount} 条`;
   }
 
   const inheritedNames = policies.value
     .filter((policy) => policy.applicableUserIds.includes(userId) && policy.status === "active")
     .map((policy) => policy.name);
   return inheritedNames.length ? `模板：${inheritedNames.join("、")}` : "未设置";
+};
+
+function backofficeRolesForUser(user: UserRecord): BackofficeRole[] {
+  if (user.role === "merchant") {
+    return ["merchant"];
+  }
+
+  if (user.role !== "admin") {
+    return [];
+  }
+
+  return isProviderBackoffice.value ? ["admin", "super_admin"] : ["admin"];
+}
+
+const isBackofficeEligibleUser = (user: UserRecord) => backofficeRolesForUser(user).length > 0;
+
+const defaultBackofficeRoleForUser = (user: UserRecord): BackofficeRole =>
+  backofficeCredentials.value.find((credential) => credential.userId === user.id)?.role ??
+  backofficeRolesForUser(user)[0] ??
+  (user.role === "merchant" ? "merchant" : "admin");
+
+const backofficeCredentialsForUser = (user: UserRecord) =>
+  backofficeCredentials.value.filter((credential) => credential.userId === user.id);
+
+const backofficeCredentialForUser = (user: UserRecord, role = defaultBackofficeRoleForUser(user)) =>
+  backofficeCredentials.value.find(
+    (credential) => credential.userId === user.id && credential.role === role
+  );
+
+const backofficeStatusLabel = (user: UserRecord) => {
+  if (!isBackofficeEligibleUser(user)) {
+    return "不适用";
+  }
+
+  const credentials = backofficeCredentialsForUser(user);
+  return credentials.length
+    ? credentials
+      .map((credential) => `${backofficeRoleLabels[credential.role]} ${credential.permissions.length} 项`)
+      .join(" / ")
+    : "未开通";
+};
+
+const defaultBackofficeUsername = (user: UserRecord, role: BackofficeRole) =>
+  role === "super_admin" ? `${user.phone}-provider` : user.phone;
+
+const defaultPermissionsForRole = (role: BackofficeRole) =>
+  role === "super_admin"
+    ? [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS.super_admin]
+    : BACKOFFICE_ROLE_DEFAULT_PERMISSIONS[role].filter((permission) =>
+      sessionStore.permissions.includes(permission)
+    );
+
+const fillBackofficeFormForRole = (user: UserRecord, role: BackofficeRole) => {
+  const credential = backofficeCredentialForUser(user, role);
+  backofficeForm.value = {
+    userId: user.id,
+    userName: user.name,
+    role,
+    username: credential?.username ?? defaultBackofficeUsername(user, role),
+    password: "",
+    permissions: credential?.permissions.length
+      ? [...credential.permissions]
+      : defaultPermissionsForRole(role),
+    hasExistingCredential: Boolean(credential)
+  };
+  normalizeBackofficeFormPermissions();
+};
+
+const normalizeBackofficeFormPermissions = () => {
+  if (backofficeForm.value.role === "super_admin") {
+    backofficeForm.value.permissions = [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS.super_admin];
+    return;
+  }
+
+  const allowed = allowedBackofficePermissions.value;
+  backofficeForm.value.permissions = Array.from(
+    new Set(backofficeForm.value.permissions.filter((permission) => allowed.has(permission)))
+  );
+};
+
+const toggleAllBackofficePermissions = (checked: boolean) => {
+  if (backofficeForm.value.role === "super_admin") {
+    backofficeForm.value.permissions = [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS.super_admin];
+    return;
+  }
+
+  backofficeForm.value.permissions = checked
+    ? BACKOFFICE_PERMISSIONS.filter((permission) => allowedBackofficePermissions.value.has(permission))
+    : [];
 };
 
 const resetUserForm = () => {
@@ -166,15 +465,88 @@ const resolveRegionPayload = (state: UserFormState) => {
   return { regionId: region?.id, regionName: region?.name };
 };
 
+const applyReservationSettings = (settings: ReservationSettings) => {
+  reservationSettings.value = settings;
+  reservationForm.value = {
+    enabled: settings.enabled,
+    holdMinutes: settings.holdMinutes,
+    maxTimeouts: settings.maxTimeouts
+  };
+};
+
+const loadReservationSettings = async () => {
+  try {
+    const settings = await adminApi.reservationSettings();
+    applyReservationSettings(settings);
+    if (reservationMessage.value?.type === "error") {
+      reservationMessage.value = null;
+    }
+  } catch (error) {
+    reservationMessage.value = {
+      type: "error",
+      text: error instanceof Error ? `预约设置加载失败：${error.message}` : "预约设置加载失败"
+    };
+  }
+};
+
+const saveReservationSettings = async () => {
+  if (reservationForm.value.holdMinutes < 1 || reservationForm.value.maxTimeouts < 1) {
+    window.alert("预约保留分钟数和超时次数都必须大于 0。");
+    return;
+  }
+
+  reservationSaving.value = true;
+  try {
+    const settings = await adminApi.saveReservationSettings({
+      enabled: reservationForm.value.enabled,
+      holdMinutes: reservationForm.value.holdMinutes,
+      maxTimeouts: reservationForm.value.maxTimeouts
+    });
+    applyReservationSettings(settings);
+    reservationMessage.value = { type: "success", text: "预约规则已保存。" };
+  } catch (error) {
+    reservationMessage.value = {
+      type: "error",
+      text: error instanceof Error ? `预约规则保存失败：${error.message}` : "预约规则保存失败"
+    };
+  } finally {
+    reservationSaving.value = false;
+  }
+};
+
 const load = async () => {
   loading.value = true;
   try {
-    const [usersResponse, applicationResponse, policiesResponse, goodsCatalogResponse, regionsResponse] = await Promise.all([adminApi.users(), adminApi.registrationApplications(), adminApi.policies(), adminApi.goodsCatalog(), adminApi.regions()]);
+    const [
+      usersResponse,
+      applicationResponse,
+      policiesResponse,
+      goodsCatalogResponse,
+      regionsResponse,
+      backofficeCredentialsResponse,
+      reservationSettingsResponse
+    ] = await Promise.all([
+      adminApi.users(),
+      adminApi.registrationApplications(),
+      adminApi.policies(),
+      adminApi.goodsCatalog(),
+      adminApi.regions(),
+      canManageBackofficeCredentials.value ? adminApi.backofficeCredentials() : Promise.resolve([]),
+      adminApi.reservationSettings().catch((error) => {
+        reservationMessage.value = {
+          type: "error",
+          text: error instanceof Error ? `预约设置加载失败：${error.message}` : "预约设置加载失败"
+        };
+        return null;
+      })
+    ]);
     users.value = usersResponse;
     registrationApplications.value = applicationResponse;
     policies.value = policiesResponse;
     goodsCatalog.value = goodsCatalogResponse;
     regions.value = regionsResponse;
+    backofficeCredentials.value = backofficeCredentialsResponse;
+    if (reservationSettingsResponse) applyReservationSettings(reservationSettingsResponse);
     if (!policyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) policyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
   } finally {
     loading.value = false;
@@ -220,13 +592,32 @@ const openEditPolicy = (policy: SpecialAccessPolicy) => {
   policyForm.value = { name: policy.name, weekdays: [...policy.weekdays], startHour: policy.startHour, endHour: policy.endHour, status: policy.status, goodsLimits: policy.goodsLimits.map((limit) => ({ goodsId: limit.goodsId, quantity: limit.quantity })) };
   drawerMode.value = "edit-policy";
 };
+const openBackofficeAccount = (user: UserRecord) => {
+  if (!isBackofficeEligibleUser(user)) {
+    return;
+  }
+
+  const role = defaultBackofficeRoleForUser(user);
+  fillBackofficeFormForRole(user, role);
+  drawerMode.value = "backoffice-account";
+};
+
+const changeBackofficeRole = (role: BackofficeRole) => {
+  const user = backofficeTargetUser.value;
+  if (!user) {
+    return;
+  }
+
+  fillBackofficeFormForRole(user, role);
+};
 const closeDrawer = () => {
   drawerMode.value = "";
   editingUserId.value = "";
   editingPolicyId.value = "";
+  backofficeForm.value = createEmptyBackofficeForm();
 };
 
-const submitUserForm = async () => {
+const submitUserForm = async (configureAccess = false) => {
   const regionPayload = resolveRegionPayload(userForm.value);
   saving.value = true;
   try {
@@ -240,13 +631,51 @@ const submitUserForm = async () => {
       regionName: regionPayload.regionName,
       tags: parseTags(userForm.value.tagsText)
     };
+    let savedUser: UserRecord | undefined;
     if (drawerMode.value === "create-user") {
-      await adminApi.createUser(payload);
+      savedUser = await adminApi.createUser(payload);
     } else if (drawerMode.value === "edit-user" && editingUserId.value) {
-      await adminApi.updateUser(editingUserId.value, payload);
+      savedUser = await adminApi.updateUser(editingUserId.value, payload);
     }
     closeDrawer();
     await load();
+    if (configureAccess && savedUser?.role === "special") {
+      await router.push(`/users/${savedUser.id}`);
+    }
+  } finally {
+    saving.value = false;
+  }
+};
+
+const submitBackofficeAccount = async () => {
+  const username = backofficeForm.value.username.trim();
+  const password = backofficeForm.value.password.trim();
+
+  if (!username) {
+    window.alert("操作失败：请填写后台登录账号");
+    return;
+  }
+
+  if (!backofficeForm.value.hasExistingCredential && password.length < 6) {
+    window.alert("操作失败：首次开通后台账号时密码至少需要 6 位");
+    return;
+  }
+
+  normalizeBackofficeFormPermissions();
+  saving.value = true;
+
+  try {
+    await adminApi.createBackofficeCredential({
+      userId: backofficeForm.value.userId,
+      username,
+      password: password || undefined,
+      role: backofficeForm.value.role,
+      permissions: backofficeForm.value.permissions
+    });
+    closeDrawer();
+    await load();
+  } catch (error) {
+    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
   } finally {
     saving.value = false;
   }
@@ -367,7 +796,7 @@ const applyBatchPolicies = async () => {
   if (!selectedSpecialUsers.value.length || !batchPolicyIds.value.length) return;
   if (
     batchMode.value === "replace" &&
-    !window.confirm("覆盖会在下一个业务日替换所选普通用户的个人取货设定，确认继续吗？")
+    !window.confirm("覆盖会在下一个业务日替换所选普通用户的每日可领取物资设定，确认继续吗？")
   ) {
     return;
   }
@@ -385,6 +814,124 @@ onMounted(load);
 
 <template>
   <section class="admin-page">
+    <section class="admin-page__section users-setup-section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">业务配置</p>
+          <h3 class="admin-page__section-title">先建人员，再配置每日可领取物资和预约规则</h3>
+        </div>
+        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">新增人员</button>
+      </div>
+
+      <div class="users-setup-grid">
+        <article class="admin-panel admin-panel-block users-setup-flow">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">配置顺序</span>
+              <h3 class="admin-panel__title">按姓名、电话和物资清单完成上线配置</h3>
+            </div>
+          </div>
+          <div class="users-setup-steps">
+            <div class="users-setup-step">
+              <span class="users-setup-step__index">1</span>
+              <div>
+                <span class="admin-table__strong">录入人员</span>
+                <span class="admin-table__subtext">普通用户 {{ specialUserCount }} 人，待审核 {{ pendingRegistrationCount }} 条</span>
+              </div>
+              <button v-if="canManageUsers" class="admin-button admin-button--ghost" @click="openCreateUser">新增</button>
+            </div>
+            <div class="users-setup-step">
+              <span class="users-setup-step__index">2</span>
+              <div>
+                <span class="admin-table__strong">维护每日可领取物资</span>
+                <span class="admin-table__subtext">已配置 {{ configuredSpecialUserCount }} / {{ specialUserCount }} 人</span>
+              </div>
+              <RouterLink v-if="canManageUserRules" class="admin-button admin-button--ghost" :to="firstConfigTargetUser ? `/users/${firstConfigTargetUser.id}` : '/users'">
+                配置个人
+              </RouterLink>
+            </div>
+            <div class="users-setup-step">
+              <span class="users-setup-step__index">3</span>
+              <div>
+                <span class="admin-table__strong">创建批量模板</span>
+                <span class="admin-table__subtext">模板 {{ policies.length }} 个，可批量套用到普通用户</span>
+              </div>
+              <button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="openCreatePolicy">新增模板</button>
+            </div>
+            <div class="users-setup-step">
+              <span class="users-setup-step__index">4</span>
+              <div>
+                <span class="admin-table__strong">提前预约</span>
+                <span class="admin-table__subtext">{{ reservationStatusLabel }}</span>
+              </div>
+              <button class="admin-button admin-button--ghost" @click="loadReservationSettings">刷新</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="admin-panel admin-panel-block users-reservation-card">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">小程序提前预约</span>
+              <h3 class="admin-panel__title">预约开关与保留规则</h3>
+            </div>
+            <span class="admin-pill" :class="reservationForm.enabled ? 'admin-pill--success' : 'admin-pill--neutral'">
+              {{ reservationForm.enabled ? "已开启" : "未开启" }}
+            </span>
+          </div>
+
+          <label class="users-reservation-toggle">
+            <input v-model="reservationForm.enabled" type="checkbox" :disabled="!canUpdateReservationSettings || reservationSaving" />
+            <span>允许小程序提前预约柜门物资</span>
+          </label>
+
+          <div class="users-reservation-fields">
+            <label class="admin-field">
+              <span class="admin-field__label">预约保留分钟数</span>
+              <input
+                v-model.number="reservationForm.holdMinutes"
+                class="admin-input"
+                type="number"
+                min="1"
+                :disabled="!canUpdateReservationSettings || reservationSaving"
+              />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">连续超时限制</span>
+              <input
+                v-model.number="reservationForm.maxTimeouts"
+                class="admin-input"
+                type="number"
+                min="1"
+                :disabled="!canUpdateReservationSettings || reservationSaving"
+              />
+            </label>
+          </div>
+
+          <div class="admin-note">
+            {{ canUpdateReservationSettings ? "保存后，小程序预约流程会按这里的规则执行。" : "当前账号只有查看权限，修改预约规则需要“预约规则管理”权限。" }}
+            <span v-if="reservationSettings?.updatedAt">最近更新：{{ formatDateTime(reservationSettings.updatedAt) }}</span>
+          </div>
+
+          <div
+            v-if="reservationMessage"
+            class="admin-note"
+            :class="{ 'users-reservation-message--error': reservationMessage.type === 'error', 'users-reservation-message--success': reservationMessage.type === 'success' }"
+          >
+            {{ reservationMessage.text }}
+          </div>
+
+          <button
+            class="admin-button"
+            :disabled="reservationSaving || !canUpdateReservationSettings"
+            @click="saveReservationSettings"
+          >
+            {{ reservationSaving ? "保存中" : "保存预约规则" }}
+          </button>
+        </article>
+      </div>
+    </section>
+
     <section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
@@ -400,22 +947,23 @@ onMounted(load);
           <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'approved' }" @click="reviewFilter = 'approved'">已登记 {{ registrationApplications.filter((item) => item.status === "approved").length }}</button>
         </div>
 
-        <div v-if="filteredApplications.length" class="admin-list">
+        <div v-if="filteredApplications.length" class="admin-list users-contained-list">
           <div v-for="item in filteredApplications" :key="item.id" class="admin-list__row users-review-row">
             <div class="admin-list__main">
               <span class="admin-list__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</span>
-              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "普通用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
+              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
               <span class="admin-table__subtext">{{ item.requestedRole === "special" ? `${item.profile.regionName || "待补充区域"}${item.profile.note ? ` · ${item.profile.note}` : ""}` : item.requestedRole === "merchant" ? `${item.profile.contactName || "待补充联系人"} · ${item.profile.address || "待补充地址"}` : `${item.profile.organization || "待补充单位"} · ${item.profile.title || "待补充职务"}` }}</span>
               <span v-if="item.reviewReason" class="users-review-row__reason">驳回原因：{{ item.reviewReason }}</span>
             </div>
             <div class="users-review-row__actions">
               <span class="admin-pill" :class="item.status === 'approved' ? 'admin-pill--success' : item.status === 'pending' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ item.status === "pending" ? "待审核" : item.status === "approved" ? "已通过" : "已驳回" }}</span>
               <template v-if="item.status === 'pending'">
-                <input v-model="rejectReasons[item.id]" class="admin-input" placeholder="驳回时填写原因（选填）" />
-                <div class="admin-inline-links">
+                <input v-if="canReviewRegistrations" v-model="rejectReasons[item.id]" class="admin-input" placeholder="驳回时填写原因（选填）" />
+                <div v-if="canReviewRegistrations" class="admin-inline-links">
                   <button class="admin-button" :disabled="saving" @click="reviewApplication(item.id, 'approved')">通过</button>
                   <button class="admin-button admin-button--ghost" :disabled="saving" @click="reviewApplication(item.id, 'rejected')">驳回</button>
                 </div>
+                <span v-else class="admin-table__subtext">审核申请需要“注册审核”权限。</span>
               </template>
               <RouterLink v-if="item.linkedUserId" class="admin-link" :to="`/users/${item.linkedUserId}`">查看已登记详情</RouterLink>
             </div>
@@ -434,7 +982,7 @@ onMounted(load);
           <p class="admin-kicker">人员检索</p>
           <h3 class="admin-page__section-title">按区域分组查看人员台账并批量绑定普通用户策略</h3>
         </div>
-        <button class="admin-button" @click="openCreateUser">新增人员</button>
+        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">新增人员</button>
       </div>
 
       <div class="users-filters admin-panel admin-panel-block">
@@ -443,7 +991,7 @@ onMounted(load);
           <select v-model="roleFilter" class="admin-select">
             <option value="all">全部</option>
             <option value="special">普通用户</option>
-            <option value="merchant">爱心商户</option>
+            <option value="merchant">商家</option>
             <option value="admin">管理员</option>
           </select>
         </label>
@@ -460,7 +1008,7 @@ onMounted(load);
           <span class="admin-field__label">搜索</span>
           <input v-model="keyword" class="admin-input" placeholder="输入姓名、手机号、标签或区域" />
         </label>
-        <div class="admin-field users-region-create-field">
+        <div v-if="canManageUsers" class="admin-field users-region-create-field">
           <span class="admin-field__label">新增地区</span>
           <div class="users-region-create-card">
             <div class="users-region-form-grid">
@@ -512,7 +1060,7 @@ onMounted(load);
           <button class="admin-button admin-button--ghost" @click="toggleSelectAll">{{ allFilteredSelected ? "取消全选" : "全选当前结果" }}</button>
         </div>
 
-        <div v-if="groupedUsers.length" class="users-region-groups">
+        <div v-if="groupedUsers.length" class="users-region-groups users-contained-list users-contained-list--large">
           <section v-for="group in groupedUsers" :key="group.regionName" class="users-region-group">
             <div class="users-region-group__head">
               <span class="admin-kicker">{{ group.regionName }}</span>
@@ -524,10 +1072,11 @@ onMounted(load);
                   <th>选择</th>
                   <th>姓名</th>
                   <th>角色</th>
+                  <th>后台权限</th>
                   <th>手机号</th>
                   <th>台账状态</th>
                   <th>区域 / 标签</th>
-                  <th>取货设定</th>
+                  <th>每日物资</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -541,6 +1090,17 @@ onMounted(load);
                   <td>
                     <span class="admin-table__strong">{{ formatRole(user.role) }}</span>
                     <span class="admin-table__subtext">{{ user.status === "active" ? "账号已启用" : "账号已停用" }}</span>
+                  </td>
+                  <td>
+                    <span class="admin-table__strong">{{ backofficeStatusLabel(user) }}</span>
+                    <button
+                      v-if="canManageBackofficeCredentials && isBackofficeEligibleUser(user)"
+                      class="admin-text-button"
+                      type="button"
+                      @click="openBackofficeAccount(user)"
+                    >
+                      {{ backofficeCredentialForUser(user) ? "配置权限" : "开通后台" }}
+                    </button>
                   </td>
                   <td>
                     <span class="admin-code">{{ user.phone }}</span>
@@ -557,7 +1117,7 @@ onMounted(load);
                   <td>
                     <div class="admin-inline-links">
                       <RouterLink class="admin-link" :to="`/users/${user.id}`">详情</RouterLink>
-                      <button class="admin-text-button" @click="openEditUser(user)">编辑</button>
+                      <button v-if="canManageUsers" class="admin-text-button" @click="openEditUser(user)">编辑</button>
                     </div>
                   </td>
                 </tr>
@@ -576,14 +1136,16 @@ onMounted(load);
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">批量策略绑定</span>
-              <h3 class="admin-panel__title">模板只作为批量生成用户个人取货设定的起点</h3>
+              <h3 class="admin-panel__title">模板用于批量生成每日可领取物资</h3>
             </div>
           </div>
           <div class="users-side-block">
-            <div class="admin-note">已选普通用户 {{ selectedSpecialUsers.length }} 人。绑定后会按策略模板的星期、时段和货品数量生效。</div>
+            <div class="admin-note">
+              {{ canManageUserRules ? `已选普通用户 ${selectedSpecialUsers.length} 人。绑定后会按模板的星期、时段和货品数量生效。` : "当前账号只能查看每日物资模板，批量绑定或覆盖需要“取货规则管理”权限。" }}
+            </div>
             <label class="admin-field">
               <span class="admin-field__label">操作方式</span>
-              <select v-model="batchMode" class="admin-select">
+              <select v-model="batchMode" class="admin-select" :disabled="!canManageUserRules">
                 <option value="bind">新增为个人设定</option>
                 <option value="replace">覆盖个人设定</option>
                 <option value="unbind">解绑以下模板</option>
@@ -593,7 +1155,7 @@ onMounted(load);
               <span class="admin-field__label">模板选择</span>
               <div class="users-policy-checklist">
                 <label v-for="policy in policies" :key="policy.id" class="users-policy-check">
-                  <input v-model="batchPolicyIds" type="checkbox" :value="policy.id" />
+                  <input v-model="batchPolicyIds" type="checkbox" :value="policy.id" :disabled="!canManageUserRules" />
                   <span>{{ policy.name }}</span>
                   <span class="admin-table__subtext">{{ policy.applicableUserIds.length }} 人</span>
                 </label>
@@ -602,23 +1164,23 @@ onMounted(load);
             <div class="admin-note">
               {{
                 batchMode === "replace"
-                  ? "覆盖会把模板拆成按货品的个人设定，并在下一个业务日替换当前个人设置。"
-                  : "新增会把模板中的每个货品最小单元追加到所选普通用户的个人设定中。"
+                  ? "覆盖会把模板拆成按货品的每日设定，并在下一个业务日替换当前个人设置。"
+                  : "新增会把模板中的每个货品最小单元追加到所选普通用户的每日设定中。"
               }}
             </div>
-            <button class="admin-button" :disabled="saving || !selectedSpecialUsers.length || !batchPolicyIds.length" @click="applyBatchPolicies">{{ saving ? "保存中" : batchMode === "replace" ? "覆盖个人设定" : "新增到个人设定" }}</button>
+            <button class="admin-button" :disabled="saving || !canManageUserRules || !selectedSpecialUsers.length || !batchPolicyIds.length" @click="applyBatchPolicies">{{ saving ? "保存中" : batchMode === "replace" ? "覆盖每日物资" : "新增每日物资" }}</button>
           </div>
         </article>
 
         <article class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
-              <span class="admin-kicker">策略模板库</span>
+              <span class="admin-kicker">每日物资模板库</span>
               <h3 class="admin-panel__title">管理时段、星期和货品数量</h3>
             </div>
-            <button class="admin-button admin-button--ghost" @click="openCreatePolicy">新增模板</button>
+            <button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="openCreatePolicy">新增模板</button>
           </div>
-          <div v-if="policies.length" class="admin-list">
+          <div v-if="policies.length" class="admin-list users-contained-list users-contained-list--side">
             <div v-for="policy in policies" :key="policy.id" class="admin-list__row users-policy-row">
               <div class="admin-list__main">
                 <span class="admin-list__title">{{ policy.name }}</span>
@@ -627,12 +1189,12 @@ onMounted(load);
               </div>
               <div class="admin-inline-links">
                 <span class="admin-pill" :class="policy.status === 'active' ? 'admin-pill--success' : 'admin-pill--warning'">{{ policy.status === "active" ? "启用中" : "已停用" }}</span>
-                <button class="admin-text-button" @click="openEditPolicy(policy)">编辑</button>
+                <button v-if="canManageUserRules" class="admin-text-button" @click="openEditPolicy(policy)">编辑</button>
               </div>
             </div>
           </div>
           <div v-else class="admin-empty">
-            <div class="admin-empty__title">当前还没有策略模板</div>
+            <div class="admin-empty__title">当前还没有每日物资模板</div>
             <div class="admin-empty__body">请先新增模板，再批量绑定到普通用户。</div>
           </div>
         </article>
@@ -654,7 +1216,7 @@ onMounted(load);
             <span class="admin-field__label">角色</span>
             <select v-model="userForm.role" class="admin-select">
               <option value="special">普通用户</option>
-              <option value="merchant">爱心商户</option>
+              <option value="merchant">商家</option>
               <option value="admin">管理员</option>
             </select>
           </label>
@@ -688,13 +1250,24 @@ onMounted(load);
           </label>
           <button
             class="admin-button"
-            :disabled="saving || !userForm.name || !userForm.phone"
-            @click="submitUserForm"
+            :disabled="saving || !canManageUsers || !userForm.name || !userForm.phone"
+            @click="submitUserForm()"
           >
             {{ saving ? "保存中" : "保存人员信息" }}
           </button>
+          <button
+            v-if="userForm.role === 'special'"
+            class="admin-button admin-button--ghost"
+            :disabled="saving || !canManageUsers || !userForm.name || !userForm.phone"
+            @click="submitUserForm(true)"
+          >
+            {{ saving ? "保存中" : "保存并配置每日物资" }}
+          </button>
+          <div v-if="userForm.role === 'special'" class="admin-note">
+            每日可领取物资保存到人员详情页，适合按个人的姓名、电话和物资清单逐个维护。
+          </div>
 
-          <div v-if="drawerMode === 'edit-user'" class="users-danger-zone">
+          <div v-if="drawerMode === 'edit-user' && canManageUsers" class="users-danger-zone">
             <div>
               <strong>删除人员</strong>
               <p>删除人员会移出当前人员台账，并清理取货模板绑定、待处理预警和登录会话；历史日志、库存记录和柜机事件保留，便于后续追溯。</p>
@@ -705,7 +1278,7 @@ onMounted(load);
           </div>
         </div>
 
-        <div v-else class="users-drawer__body">
+        <div v-else-if="drawerMode === 'create-policy' || drawerMode === 'edit-policy'" class="users-drawer__body">
           <label class="admin-field">
             <span class="admin-field__label">模板名称</span>
             <input v-model="policyForm.name" class="admin-input" placeholder="例如早餐关怀" />
@@ -754,7 +1327,65 @@ onMounted(load);
             <button class="admin-text-button" @click="addPolicyGoodsLimit">继续添加货品</button>
           </div>
           <div class="admin-note">时间段采用整点小时制，保存格式为 [开始小时, 结束小时)，例如 08:00-12:00。</div>
-          <button class="admin-button" :disabled="saving || !policyForm.name || !policyForm.weekdays.length || policyForm.endHour <= policyForm.startHour" @click="submitPolicyForm">{{ saving ? "保存中" : "保存策略模板" }}</button>
+          <button class="admin-button" :disabled="saving || !canManageUserRules || !policyForm.name || !policyForm.weekdays.length || policyForm.endHour <= policyForm.startHour" @click="submitPolicyForm">{{ saving ? "保存中" : "保存每日物资模板" }}</button>
+        </div>
+
+        <div v-else class="users-drawer__body">
+          <div class="admin-note">
+            正在为 {{ backofficeForm.userName }} 配置 PC 后台登录权限。权限只能从当前账号已拥有的范围内下发，程序提供商账号默认拥有全部权限。
+          </div>
+          <label class="admin-field">
+            <span class="admin-field__label">后台身份</span>
+            <select
+              v-model="backofficeForm.role"
+              class="admin-select"
+              :disabled="!canChooseBackofficeRole"
+              @change="changeBackofficeRole(backofficeForm.role)"
+            >
+              <option v-for="role in availableBackofficeRoles" :key="role" :value="role">
+                {{ backofficeRoleLabels[role] }}
+              </option>
+            </select>
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">登录账号</span>
+            <input v-model="backofficeForm.username" class="admin-input" placeholder="建议使用手机号或工号" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">{{ backofficeForm.hasExistingCredential ? "重置密码（选填）" : "首次密码" }}</span>
+            <input
+              v-model="backofficeForm.password"
+              class="admin-input"
+              type="password"
+              :placeholder="backofficeForm.hasExistingCredential ? '留空则不修改当前密码' : '至少 6 位'"
+            />
+          </label>
+          <div class="admin-field">
+            <span class="admin-field__label">权限配置</span>
+            <div class="admin-toolbar users-permission-toolbar">
+              <button class="admin-button admin-button--ghost" type="button" :disabled="backofficeForm.role === 'super_admin'" @click="toggleAllBackofficePermissions(true)">
+                选择全部业务权限
+              </button>
+              <button class="admin-button admin-button--ghost" type="button" :disabled="backofficeForm.role === 'super_admin'" @click="toggleAllBackofficePermissions(false)">
+                清空
+              </button>
+            </div>
+            <div v-if="backofficeForm.role === 'super_admin'" class="admin-note">
+              程序提供商账号固定拥有全局与实例内全部权限，不需要单独增减。
+            </div>
+            <div class="users-permission-groups">
+              <section v-for="group in visiblePermissionGroups" :key="group.title" class="users-permission-group">
+                <span class="admin-kicker">{{ group.title }}</span>
+                <label v-for="permission in group.permissions" :key="permission" class="users-permission-check">
+                  <input v-model="backofficeForm.permissions" type="checkbox" :value="permission" :disabled="backofficeForm.role === 'super_admin'" />
+                  <span>{{ permissionLabels[permission] }}</span>
+                </label>
+              </section>
+            </div>
+          </div>
+          <button class="admin-button" :disabled="saving || !backofficeForm.username" @click="submitBackofficeAccount">
+            {{ saving ? "保存中" : "保存后台权限" }}
+          </button>
         </div>
       </aside>
     </div>
@@ -794,6 +1425,70 @@ onMounted(load);
   gap: 10px;
 }
 
+.users-setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 12px;
+}
+
+.users-setup-steps,
+.users-reservation-card {
+  display: grid;
+  gap: 12px;
+}
+
+.users-setup-step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.users-setup-step:last-child {
+  border-bottom: 0;
+}
+
+.users-setup-step__index {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #c6d7e6;
+  border-radius: 8px;
+  background: #f1f7fb;
+  color: #0f5f87;
+  font-weight: 700;
+}
+
+.users-reservation-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--admin-text);
+}
+
+.users-reservation-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.users-reservation-message--error {
+  border-color: #efc0ba;
+  background: #fff4f2;
+  color: #8c2f29;
+}
+
+.users-reservation-message--success {
+  border-color: #b6dfc4;
+  background: #f0fbf4;
+  color: #25673b;
+}
+
 .users-filters {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -804,6 +1499,7 @@ onMounted(load);
 }
 
 .users-policy-check,
+.users-permission-check,
 .users-weekdays__item,
 .users-region-group__head {
   display: flex;
@@ -813,6 +1509,23 @@ onMounted(load);
 
 .users-region-group__head {
   justify-content: space-between;
+}
+
+.users-contained-list {
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.users-contained-list--large {
+  max-height: 460px;
+}
+
+.users-contained-list--side,
+.users-policy-checklist {
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .users-policy-row,
@@ -831,7 +1544,9 @@ onMounted(load);
 .users-policy-limit-row,
 .users-hours,
 .users-region-form-grid,
-.users-region-create {
+.users-region-create,
+.users-permission-groups,
+.users-permission-group {
   display: grid;
   gap: 8px;
 }
@@ -867,6 +1582,17 @@ onMounted(load);
   min-height: 42px;
   display: flex;
   align-items: center;
+}
+
+.users-permission-toolbar {
+  justify-content: flex-start;
+}
+
+.users-permission-group {
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-panel-muted);
 }
 
 .users-region-create-actions {
@@ -935,11 +1661,21 @@ onMounted(load);
 }
 
 @media (max-width: 980px) {
+  .users-setup-grid,
   .users-filters,
   .users-policy-limit-row,
   .users-hours,
   .users-region-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .users-setup-step {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .users-setup-step .admin-button {
+    grid-column: 2;
+    width: 100%;
   }
 
   .users-region-create {

@@ -89,7 +89,7 @@ onShow(() => {
 
         <view class="metric-grid">
           <ServiceMetric label="待审申请" :value="metrics.pendingApplications" hint="新注册用户等待处理" tone="warning" />
-          <ServiceMetric label="人员总数" :value="metrics.users" hint="包含普通用户、商户和管理员" />
+          <ServiceMetric label="人员总数" :value="metrics.users" hint="包含用户、商家和管理员" />
           <ServiceMetric label="柜机数" :value="metrics.devices" hint="当前已接入的柜机数量" />
           <ServiceMetric label="日志量" :value="metrics.logs" hint="用于快速回看近期操作" />
         </view>

@@ -152,12 +152,12 @@ export class AnalyticsService {
     return [
       {
         id: "persona-special-user",
-        title: "特殊群体领取人",
+        title: "用户领取人",
         summary: "关注业务日内的时段配额完成情况、待服务名单和领取异常。"
       },
       {
         id: "persona-merchant",
-        title: "爱心商户",
+        title: "商家",
         summary: "关注补货、临期处理、缺货提醒和柜机货品同步。"
       },
       {

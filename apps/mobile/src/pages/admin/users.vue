@@ -134,7 +134,7 @@ onShow(() => {
         <view class="role-filter">
           <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'all' }" @tap="selectedRole = 'all'">全部</button>
           <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'special' }" @tap="selectedRole = 'special'">普通用户</button>
-          <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'merchant' }" @tap="selectedRole = 'merchant'">爱心商户</button>
+          <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'merchant' }" @tap="selectedRole = 'merchant'">商家</button>
           <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'admin' }" @tap="selectedRole = 'admin'">管理员</button>
         </view>
 

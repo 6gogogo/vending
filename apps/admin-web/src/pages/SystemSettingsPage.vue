@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from "vue-router";
 import type { SystemSettingEntry, SystemSettingsSnapshot, SystemSettingsUpdateResult } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 
 type LeaveDecision = "save" | "discard" | "stay";
@@ -20,9 +21,12 @@ const saveMessage = ref<{ type: "success" | "error"; text: string } | null>(null
 const lastSaveResult = ref<SystemSettingsUpdateResult>();
 const revealedKeys = ref<Set<string>>(new Set());
 const leaveDialogOpen = ref(false);
+const sessionStore = useAdminSessionStore();
 let resolveLeaveDecision: ((decision: LeaveDecision) => void) | undefined;
 
 const settings = computed(() => settingsSnapshot.value?.settings ?? []);
+const canUpdateSettings = computed(() => sessionStore.can("system-settings:update"));
+const canViewSensitiveSettings = computed(() => sessionStore.can("system-settings:secret:view"));
 const settingsByKey = computed(() => new Map(settings.value.map((entry) => [entry.key, entry])));
 const groups = computed(() => [...new Set(settings.value.map((entry) => entry.group))]);
 const dirtyKeys = computed(() =>
@@ -105,12 +109,20 @@ const loadSettings = async () => {
 };
 
 const saveSettings = async () => {
+  if (!canUpdateSettings.value) {
+    saveMessage.value = {
+      type: "error",
+      text: "当前账号只有查看权限，不能保存系统设置。"
+    };
+    return false;
+  }
+
   saving.value = true;
   saveMessage.value = null;
 
   try {
     const response = await adminApi.saveSystemSettings({
-      values: { ...formValues }
+      values: Object.fromEntries(dirtyKeys.value.map((key) => [key, formValues[key] ?? ""]))
     });
     lastSaveResult.value = response;
     applySnapshot(response);
@@ -218,6 +230,9 @@ const shouldHideSensitiveTextarea = (entry: SystemSettingEntry) =>
   Boolean(formValues[entry.key]) &&
   !isKeyRevealed(entry.key);
 
+const canEditEntry = (entry: SystemSettingEntry) =>
+  canUpdateSettings.value && (!entry.sensitive || canViewSensitiveSettings.value);
+
 const requestLeaveDecision = () =>
   new Promise<LeaveDecision>((resolve) => {
     resolveLeaveDecision = resolve;
@@ -294,12 +309,18 @@ onBeforeUnmount(() => {
           >
             放弃更改
           </button>
-          <button class="admin-button" type="button" :disabled="saving || !hasDirtyChanges" @click="saveSettings">
+          <button class="admin-button" type="button" :disabled="saving || !hasDirtyChanges || !canUpdateSettings" @click="saveSettings">
             {{ saving ? "保存中" : "保存设置" }}
           </button>
         </div>
       </div>
 
+      <div v-if="!canUpdateSettings" class="admin-note settings-page__note">
+        当前账号只有查看权限，不能修改或保存系统设置。
+      </div>
+      <div class="admin-note settings-page__note">
+        这里只维护短信、支付、柜机平台和服务密钥等技术接入参数；人员每日物资和提前预约规则在“人员管理”中配置。
+      </div>
       <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
       </div>
@@ -388,6 +409,7 @@ onBeforeUnmount(() => {
               <div class="settings-page__field-pills">
                 <span class="admin-pill" :class="fieldPillClass(entry)">{{ fieldPillText(entry) }}</span>
                 <span v-if="entry.sensitive" class="admin-pill admin-pill--neutral">敏感项</span>
+                <span v-if="entry.masked" class="admin-pill admin-pill--neutral">已隐藏</span>
                 <span class="admin-pill admin-pill--neutral">来源 {{ sourceLabel(entry.source) }}</span>
               </div>
             </div>
@@ -397,12 +419,13 @@ onBeforeUnmount(() => {
                 <input
                   type="checkbox"
                   :checked="isBooleanEnabled(entry.key)"
+                  :disabled="!canEditEntry(entry)"
                   @change="setBooleanValue(entry.key, ($event.target as HTMLInputElement).checked)"
                 />
                 <span>{{ isBooleanEnabled(entry.key) ? "启用" : "停用" }}</span>
               </label>
 
-              <select v-else-if="entry.inputType === 'select'" v-model="formValues[entry.key]" class="admin-select">
+              <select v-else-if="entry.inputType === 'select'" v-model="formValues[entry.key]" class="admin-select" :disabled="!canEditEntry(entry)">
                 <option v-for="option in entry.options" :key="option.value" :value="option.value">
                   {{ option.label }}
                 </option>
@@ -411,7 +434,7 @@ onBeforeUnmount(() => {
               <template v-else-if="entry.inputType === 'textarea'">
                 <div v-if="shouldHideSensitiveTextarea(entry)" class="settings-page__secret-box">
                   <span class="admin-copy">内容已隐藏。</span>
-                  <button class="admin-button admin-button--ghost" type="button" @click="toggleReveal(entry.key)">
+                  <button class="admin-button admin-button--ghost" type="button" :disabled="!canEditEntry(entry)" @click="toggleReveal(entry.key)">
                     显示并编辑
                   </button>
                 </div>
@@ -420,6 +443,7 @@ onBeforeUnmount(() => {
                   v-model="formValues[entry.key]"
                   class="admin-input settings-page__textarea admin-code"
                   :placeholder="entry.exampleValue || entry.key"
+                  :disabled="!canEditEntry(entry)"
                 />
               </template>
 
@@ -429,9 +453,10 @@ onBeforeUnmount(() => {
                   class="admin-input admin-code"
                   :type="inputTypeFor(entry)"
                   :placeholder="entry.exampleValue || entry.key"
+                  :disabled="!canEditEntry(entry)"
                 />
                 <button
-                  v-if="entry.inputType === 'password'"
+                  v-if="entry.inputType === 'password' && canViewSensitiveSettings"
                   class="admin-button admin-button--ghost settings-page__reveal-button"
                   type="button"
                   @click="toggleReveal(entry.key)"
@@ -439,6 +464,10 @@ onBeforeUnmount(() => {
                   {{ isKeyRevealed(entry.key) ? "隐藏" : "显示" }}
                 </button>
               </div>
+
+              <p v-if="entry.sensitive && !canViewSensitiveSettings" class="admin-copy settings-page__example">
+                当前账号没有查看或修改敏感配置的权限。
+              </p>
 
               <p v-if="entry.exampleValue && entry.exampleValue !== formValues[entry.key]" class="admin-copy settings-page__example">
                 示例：<span class="admin-code">{{ entry.exampleValue }}</span>

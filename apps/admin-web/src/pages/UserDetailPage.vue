@@ -5,10 +5,12 @@ import type { DeviceRecord, SpecialAccessPolicy, UserAccessPolicy, UserManagemen
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
+import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
 
 const route = useRoute();
+const sessionStore = useAdminSessionStore();
 const weekdayOptions = [
   { label: "周一", value: 1 },
   { label: "周二", value: 2 },
@@ -82,7 +84,7 @@ const selectedDateSummary = computed(() => detail.value?.policyCalendar?.selecte
 const selectedDeviceGoods = computed(() => devices.value.find((entry) => entry.deviceCode === form.value.deviceCode)?.doors.flatMap((door) => door.goods) ?? []);
 const selectedGoods = computed(() => selectedDeviceGoods.value.find((entry) => entry.goodsId === form.value.goodsId));
 const resolveLogActorRoute = (actor: UserManagementDetail["recentLogs"][number]["actor"]) => resolveActorLink(actor);
-const formatRole = (role: UserManagementDetail["user"]["role"]) => role === "special" ? "普通用户" : role === "merchant" ? "爱心商户" : "管理员";
+const formatRole = (role: UserManagementDetail["user"]["role"]) => role === "special" ? "用户" : role === "merchant" ? "商家" : "管理员";
 const formatLogStatus = (status: UserManagementDetail["recentLogs"][number]["status"]) => status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
 const formatRecordType = (type: UserManagementDetail["recentRecords"][number]["type"]) =>
   type === "pickup"
@@ -106,6 +108,8 @@ const isLocalOnlyRecord = (record: UserManagementDetail["recentRecords"][number]
   record.type === "manual-restock" || record.type === "manual-deduction";
 const isPlatformRefundRecord = (record: UserManagementDetail["recentRecords"][number]) =>
   record.type === "refund" || Boolean(record.refundNo);
+const canManageUserRules = computed(() => sessionStore.can("users:rules:manage"));
+const canAdjustStock = computed(() => sessionStore.can("goods:stock-adjust"));
 
 const directPersonalPolicies = computed(() =>
   (detail.value?.user.accessPolicies ?? [])
@@ -190,6 +194,11 @@ const load = async () => {
 
 const submitAdjustment = async () => {
   if (!detail.value || !selectedGoods.value) return;
+  if (!canAdjustStock.value) {
+    window.alert("当前账号没有货品库存调整权限。");
+    return;
+  }
+
   const actionLabel = form.value.direction === "restock" ? "补货" : "补扣";
   const confirmed = window.confirm(
     form.value.direction === "restock"
@@ -227,6 +236,11 @@ const removePolicyGoodsLimit = (index: number) => {
 
 const submitAccessPolicy = async () => {
   if (!detail.value || detail.value.user.role !== "special") return;
+  if (!canManageUserRules.value) {
+    window.alert("当前账号没有取货规则管理权限。");
+    return;
+  }
+
   const weekdays = Array.from(new Set(accessPolicyForm.value.weekdays)).sort((left, right) => left - right);
   const goodsLimits = accessPolicyForm.value.goodsLimits.filter((item) => item.goodsId && item.quantity > 0).map((item) => ({ goodsId: item.goodsId, quantity: item.quantity }));
   if (!weekdays.length || !goodsLimits.length || accessPolicyForm.value.endHour <= accessPolicyForm.value.startHour) return;
@@ -248,7 +262,12 @@ const submitAccessPolicy = async () => {
 };
 
 const deleteAccessPolicy = async (row: PersonalPolicyRow) => {
-  if (!detail.value || !window.confirm(`确认删除 ${row.goodsName} 的这条个人取货设定吗？`)) return;
+  if (!detail.value || !window.confirm(`确认删除 ${row.goodsName} 的这条每日可领取物资设定吗？`)) return;
+  if (!canManageUserRules.value) {
+    window.alert("当前账号没有取货规则管理权限。");
+    return;
+  }
+
   saving.value = true;
   try {
     await adminApi.deleteUserAccessPolicy(detail.value.user.id, row.policyId);
@@ -261,6 +280,11 @@ const deleteAccessPolicy = async (row: PersonalPolicyRow) => {
 
 const applyAccessPolicyNow = async (row: PersonalPolicyRow) => {
   if (!detail.value) return;
+  if (!canManageUserRules.value) {
+    window.alert("当前账号没有取货规则管理权限。");
+    return;
+  }
+
   applyingNowPolicyId.value = row.policyId;
   try {
     await adminApi.applyUserAccessPolicyNow(detail.value.user.id, row.policyId);
@@ -276,7 +300,12 @@ const toggleTemplatePolicy = (policyId: string) => {
 
 const applyTemplatePolicies = async () => {
   if (!detail.value || detail.value.user.role !== "special" || !templateApplyForm.value.policyIds.length) return;
-  if (templateApplyForm.value.mode === "replace" && !window.confirm("覆盖会在下一个业务日替换当前个人取货设定，确认继续吗？")) return;
+  if (!canManageUserRules.value) {
+    window.alert("当前账号没有取货规则管理权限。");
+    return;
+  }
+
+  if (templateApplyForm.value.mode === "replace" && !window.confirm("覆盖会在下一个业务日替换当前每日可领取物资设定，确认继续吗？")) return;
   saving.value = true;
   try {
     await adminApi.batchAssignPolicies({ userIds: [detail.value.user.id], policyIds: [...templateApplyForm.value.policyIds], mode: templateApplyForm.value.mode });
@@ -379,7 +408,7 @@ onMounted(async () => {
         </article>
 
         <article v-if="detail.user.role === 'merchant'" class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">待办任务</span><h3 class="admin-panel__title">该商户关联任务</h3></div></div>
+          <div class="admin-panel__head"><div><span class="admin-kicker">待办任务</span><h3 class="admin-panel__title">该商家关联任务</h3></div></div>
           <table v-if="detail.relatedTasks?.length" class="admin-table">
             <thead><tr><th>到期时间</th><th>任务</th><th>柜机</th></tr></thead>
             <tbody>
@@ -439,7 +468,7 @@ onMounted(async () => {
 
       <aside class="admin-grid">
         <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">个人取货设定</span><h3 class="admin-panel__title">取货量属于个人设定，模板只负责让设定一致或新增</h3></div><button class="admin-button admin-button--ghost" @click="resetAccessPolicyForm">新增设定</button></div>
+          <div class="admin-panel__head"><div><span class="admin-kicker">每日可领取物资</span><h3 class="admin-panel__title">按人维护可领取物资、数量和时间</h3></div><button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="resetAccessPolicyForm">新增可领物资</button></div>
           <div v-if="groupedPersonalPolicies.length" class="user-policy-groups">
             <section v-for="group in groupedPersonalPolicies" :key="group.goodsId" class="user-policy-group">
               <div class="user-policy-group__head"><div><span class="admin-table__strong">{{ group.goodsName }}</span><span class="admin-table__subtext">{{ group.goodsId }}</span></div><span class="admin-table__subtext">{{ group.rows.length }} 条设定</span></div>
@@ -447,24 +476,24 @@ onMounted(async () => {
                 <div v-for="row in group.rows" :key="`${row.policyId}-${row.goodsId}`" class="user-policy-bar">
                   <div class="user-policy-bar__main"><span class="user-policy-bar__quantity"><span class="user-policy-bar__quantity-label">数量</span><span class="user-policy-bar__quantity-value">{{ row.quantity }}</span><span class="user-policy-bar__quantity-unit">件</span></span><span class="user-policy-bar__meta">{{ formatWeekdays(row.weekdays) }} · {{ String(row.startHour).padStart(2, "0") }}:00-{{ String(row.endHour).padStart(2, "0") }}:00</span><span class="admin-table__subtext">来源：{{ row.sourceLabel }} · {{ row.effectiveLabel }}</span></div>
                   <div class="admin-inline-links">
-                    <button class="admin-text-button" @click="fillAccessPolicyForm(row)">修改</button>
+                    <button v-if="canManageUserRules" class="admin-text-button" @click="fillAccessPolicyForm(row)">修改</button>
                     <button
-                      v-if="row.effectiveLabel === '次日生效'"
+                      v-if="canManageUserRules && row.effectiveLabel === '次日生效'"
                       class="admin-text-button"
                       :disabled="applyingNowPolicyId === row.policyId"
                       @click="applyAccessPolicyNow(row)"
                     >
                       {{ applyingNowPolicyId === row.policyId ? "处理中" : "立即生效" }}
                     </button>
-                    <button class="admin-text-button user-policy-delete" @click="deleteAccessPolicy(row)">删除</button>
+                    <button v-if="canManageUserRules" class="admin-text-button user-policy-delete" @click="deleteAccessPolicy(row)">删除</button>
                   </div>
                 </div>
               </div>
             </section>
           </div>
-          <div v-else class="admin-empty"><div class="admin-empty__title">当前还没有个人取货设定</div><div class="admin-empty__body">{{ inheritedTemplatePolicies.length ? "当前仍沿用模板口径，请先在下方执行新增或覆盖，生成个人设定后再单独维护。" : "可直接新增个人设定，或先从模板生成后再逐项修改。" }}</div></div>
-          <div v-if="inheritedTemplatePolicies.length" class="admin-note">当前还存在按模板推导的有效设定：{{ inheritedTemplatePolicies.map((policy) => policy.name).join("、") }}。执行下方模板新增或覆盖后，会转成可单独维护的个人设定。</div>
-          <div class="user-detail-form">
+          <div v-else class="admin-empty"><div class="admin-empty__title">当前还没有每日可领取物资</div><div class="admin-empty__body">{{ inheritedTemplatePolicies.length ? "当前仍沿用模板口径，请先在下方执行新增或覆盖，生成个人设定后再单独维护。" : "可直接新增每日可领取物资，或先从模板生成后再逐项修改。" }}</div></div>
+          <div v-if="inheritedTemplatePolicies.length" class="admin-note">当前还存在按模板推导的有效设定：{{ inheritedTemplatePolicies.map((policy) => policy.name).join("、") }}。执行下方模板新增或覆盖后，会转成可单独维护的每日物资设定。</div>
+          <div v-if="canManageUserRules" class="user-detail-form">
             <div class="admin-field"><span class="admin-field__label">生效星期</span><div class="user-policy-weekdays"><label v-for="weekday in weekdayOptions" :key="weekday.value" class="user-policy-weekdays__item"><input v-model="accessPolicyForm.weekdays" type="checkbox" :value="weekday.value" /><span>{{ weekday.label }}</span></label></div></div>
             <div class="user-policy-hours">
               <label class="admin-field"><span class="admin-field__label">开始时间</span><select v-model="accessPolicyForm.startHour" class="admin-select"><option v-for="hour in hourOptions" :key="hour" :value="hour">{{ String(hour).padStart(2, "0") }}:00</option></select></label>
@@ -472,7 +501,7 @@ onMounted(async () => {
             </div>
             <label class="admin-field"><span class="admin-field__label">状态</span><select v-model="accessPolicyForm.status" class="admin-select"><option value="active">启用</option><option value="inactive">停用</option></select></label>
             <div class="admin-field">
-              <span class="admin-field__label">货品、时间段与数量</span>
+              <span class="admin-field__label">物资、每日数量和可领取时间</span>
               <div class="user-policy-limits">
                 <div v-for="(limit, index) in accessPolicyForm.goodsLimits" :key="`${index}-${limit.goodsId}`" class="user-policy-limits__row">
                   <select v-model="limit.goodsId" class="admin-select"><option v-for="goods in goodsCatalog" :key="goods.goodsId" :value="goods.goodsId">{{ goods.name }} / {{ goods.goodsId }}</option></select>
@@ -482,12 +511,13 @@ onMounted(async () => {
               </div>
               <button v-if="!editingAccessPolicyId" class="admin-text-button" @click="addPolicyGoodsLimit">继续添加商品</button>
             </div>
-            <button class="admin-button" :disabled="saving || accessPolicyForm.endHour <= accessPolicyForm.startHour" @click="submitAccessPolicy">{{ saving ? "保存中" : editingAccessPolicyId ? "保存个人设定" : "新增个人设定" }}</button>
+            <button class="admin-button" :disabled="saving || accessPolicyForm.endHour <= accessPolicyForm.startHour" @click="submitAccessPolicy">{{ saving ? "保存中" : editingAccessPolicyId ? "保存每日可领取物资" : "新增每日可领取物资" }}</button>
           </div>
+          <div v-else class="admin-note">当前账号只能查看每日可领取物资，新增、修改或立即生效需要“取货规则管理”权限。</div>
         </article>
 
-        <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">模板操作</span><h3 class="admin-panel__title">模板只是批量下发这些最小单元，不替代个人设定</h3></div></div>
+        <article v-if="detail.user.role === 'special' && canManageUserRules" class="admin-panel admin-panel-block">
+          <div class="admin-panel__head"><div><span class="admin-kicker">模板操作</span><h3 class="admin-panel__title">用模板批量填入每日可领取物资</h3></div></div>
           <div class="user-detail-form">
             <label class="admin-field"><span class="admin-field__label">应用方式</span><select v-model="templateApplyForm.mode" class="admin-select"><option value="bind">新增到个人设定</option><option value="replace">覆盖个人设定</option></select></label>
             <div class="admin-field"><span class="admin-field__label">模板选择</span><div class="user-template-checklist"><label v-for="policy in policyTemplates" :key="policy.id" class="user-template-check"><input :checked="templateApplyForm.policyIds.includes(policy.id)" type="checkbox" @change="toggleTemplatePolicy(policy.id)" /><span>{{ policy.name }}</span><span class="admin-table__subtext">{{ formatWeekdays(policy.weekdays) }} · {{ String(policy.startHour).padStart(2, "0") }}:00-{{ String(policy.endHour).padStart(2, "0") }}:00 · {{ policy.goodsLimits.map((limit) => `${limit.goodsName} x${limit.quantity}`).join("，") }}</span></label></div></div>
@@ -496,7 +526,7 @@ onMounted(async () => {
           </div>
         </article>
 
-        <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
+        <article v-if="detail.user.role === 'special' && canAdjustStock" class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">手工补扣</span><h3 class="admin-panel__title">从货物库中选择商品</h3></div></div>
           <div class="user-detail-form">
             <label class="admin-field"><span class="admin-field__label">柜机</span><select v-model="form.deviceCode" class="admin-select"><option v-for="device in devices" :key="device.deviceCode" :value="device.deviceCode">{{ device.name }} / {{ device.deviceCode }}</option></select></label>

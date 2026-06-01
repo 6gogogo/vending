@@ -232,6 +232,11 @@ export class SmartVmGateway {
     };
   }
 
+  isUsingMockTransport() {
+    const baseUrl = this.configService.get<string>("SMARTVM_BASE_URL");
+    return !baseUrl || !this.credentials;
+  }
+
   async notifyPaymentSuccess(
     payload: SmartVmPaymentPayload,
     options?: {
@@ -352,11 +357,13 @@ export class SmartVmGateway {
       | (SmartVmSettlementPayload & Record<string, unknown>)
       | Record<string, unknown>
   ) {
-    if (!this.credentials) {
-      return true;
+    const credentials = this.credentials;
+
+    if (!credentials) {
+      return this.allowUnsignedCallbacks();
     }
 
-    return verifySmartVmSignature(payload, this.credentials);
+    return verifySmartVmSignature(payload, credentials);
   }
 
   extractErrorMessage(error: unknown) {
@@ -407,5 +414,13 @@ export class SmartVmGateway {
 
     const configured = this.configService.get<string>("SMARTVM_DEFAULT_PAY_STYLE")?.trim();
     return configured || "2";
+  }
+
+  private allowUnsignedCallbacks() {
+    const raw =
+      this.configService.get<string>("SMARTVM_ALLOW_UNSIGNED_CALLBACKS") ??
+      this.configService.get<string>("ALLOW_UNSIGNED_SMARTVM_CALLBACKS");
+
+    return ["1", "true", "yes", "on"].includes(raw?.trim().toLowerCase() ?? "");
   }
 }

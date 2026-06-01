@@ -114,6 +114,7 @@ export class OperationLogsController {
   }
 
   @Post(":id/undo")
+  @AllowedBackofficePermissions("operation-logs:undo")
   undo(
     @Param("id") id: string,
     @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }

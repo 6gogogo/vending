@@ -52,6 +52,12 @@ const goHome = async () => {
   });
 };
 
+const goFeedback = () => {
+  uni.navigateTo({
+    url: "/pages/common/feedback"
+  });
+};
+
 onLoad((query) => {
   status.value =
     query.status === "warning" || query.status === "danger" ? query.status : "success";
@@ -78,7 +84,10 @@ onLoad((query) => {
           <text class="result-detail__label">原因 / 说明</text>
           <text class="result-detail__body">{{ detail }}</text>
         </view>
-        <button class="vm-button" @tap="goHome">{{ actionText }}</button>
+        <view class="result-actions">
+          <button class="vm-button" @tap="goHome">{{ actionText }}</button>
+          <button class="vm-button vm-button--ghost" @tap="goFeedback">提交反馈</button>
+        </view>
       </view>
     </GlassCard>
   </MobileShell>
@@ -92,9 +101,14 @@ onLoad((query) => {
 }
 
 .result-hero,
-.result-detail {
+.result-detail,
+.result-actions {
   display: grid;
   gap: 12rpx;
+}
+
+.result-hero,
+.result-detail {
   padding: 24rpx;
   border-radius: 24rpx;
   border: 1rpx solid var(--vm-line);
@@ -143,4 +157,5 @@ onLoad((query) => {
 .result-detail__body {
   color: var(--vm-text);
 }
+
 </style>

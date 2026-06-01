@@ -18,6 +18,7 @@ export class UsersController {
   constructor(@Inject(UsersService) private readonly usersService: UsersService) {}
 
   @Post()
+  @AllowedBackofficePermissions("users:manage")
   createUser(
     @Body()
     body: {
@@ -63,6 +64,7 @@ export class UsersController {
   }
 
   @Patch(":userId")
+  @AllowedBackofficePermissions("users:manage")
   updateUser(
     @Param("userId") userId: string,
     @Body()
@@ -89,6 +91,7 @@ export class UsersController {
   }
 
   @Delete(":userId")
+  @AllowedBackofficePermissions("users:manage")
   removeUser(
     @Param("userId") userId: string,
     @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
@@ -100,6 +103,7 @@ export class UsersController {
   }
 
   @Post("import")
+  @AllowedBackofficePermissions("users:manage")
   importUsers(
     @Body()
     body: {
@@ -111,6 +115,7 @@ export class UsersController {
   }
 
   @Patch("batch")
+  @AllowedBackofficePermissions("users:manage")
   batchUpdate(
     @Body()
     body: {
@@ -136,6 +141,7 @@ export class UsersController {
   }
 
   @Post(":userId/manual-adjustment")
+  @AllowedBackofficePermissions("goods:stock-adjust")
   manualAdjustment(
     @Param("userId") userId: string,
     @Body()
@@ -165,6 +171,7 @@ export class UsersController {
   }
 
   @Post(":userId/access-policies")
+  @AllowedBackofficePermissions("users:rules:manage")
   saveAccessPolicy(
     @Param("userId") userId: string,
     @Body()
@@ -190,6 +197,7 @@ export class UsersController {
   }
 
   @Delete(":userId/access-policies/:policyId")
+  @AllowedBackofficePermissions("users:rules:manage")
   deleteAccessPolicy(
     @Param("userId") userId: string,
     @Param("policyId") policyId: string,
@@ -207,6 +215,7 @@ export class UsersController {
   }
 
   @Post(":userId/access-policies/:policyId/apply-now")
+  @AllowedBackofficePermissions("users:rules:manage")
   applyAccessPolicyNow(
     @Param("userId") userId: string,
     @Param("policyId") policyId: string,

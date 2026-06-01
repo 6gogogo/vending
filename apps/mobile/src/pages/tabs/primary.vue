@@ -195,7 +195,9 @@ const heroSupport = computed(() => {
       lines: [
         activeWindows.value.length ? `开放时段：${activeWindows.value.join("、")}` : "当前暂无开放时段，请稍后再查看。",
         todaySuggestion.value,
-        activeAlerts.value.length ? `你有 ${activeAlerts.value.length} 条提醒待确认。` : "如遇识别异常或柜机问题，可直接提交反馈。"
+        activeAlerts.value.length
+          ? `你有 ${activeAlerts.value.length} 条提醒待确认。`
+          : "如遇识别异常或柜机问题，请先提交反馈；柜机现场异常可在反馈页查看联系电话。"
       ]
     };
   }
@@ -204,8 +206,8 @@ const heroSupport = computed(() => {
     return {
       title: "补货提示",
       lines: [
-        `当前已维护模板 ${templates.value.length} 个，累计补货 ${merchantSummary.value.donatedUnits} 件。`,
-        "补货前先确认柜机在线，再登记商品、数量、生产日期和批次。"
+        `当前已维护常用商品 ${templates.value.length} 个，累计补货 ${merchantSummary.value.donatedUnits} 件。`,
+        "补货前先确认柜机在线，再登记商品、数量、生产日期和批次；柜机现场异常请从异常上报进入。"
       ]
     };
   }
@@ -539,7 +541,7 @@ onShow(() => {
           <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/merchant/templates')">
             <view class="action-button__content">
               <MenuIcon name="template" size="sm" tone="neutral" />
-              <text>商品模板</text>
+              <text>常用商品</text>
             </view>
           </button>
         </template>
@@ -619,7 +621,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <view class="section-heading__row">
-            <text class="section-heading__title">商户工作台</text>
+            <text class="section-heading__title">商家工作台</text>
             <text class="vm-status vm-status--certified">已认证</text>
           </view>
           <text class="vm-subtitle">先选择柜机，再完成补货登记。</text>
@@ -628,7 +630,7 @@ onShow(() => {
         <view class="metric-grid">
           <ServiceMetric label="总库存" :value="merchantSummary.donatedUnits" hint="累计补货件数" tone="accent" />
           <ServiceMetric label="需补货" :value="merchantSummary.pendingAlerts" hint="低库存或异常提醒" tone="warning" />
-          <ServiceMetric label="模板" :value="templates.length" hint="可选商品模板" />
+          <ServiceMetric label="常用商品" :value="templates.length" hint="补货登记可直接选用" />
         </view>
 
         <view class="merchant-action-grid">
@@ -755,7 +757,7 @@ onShow(() => {
             <view class="simple-list">
               <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
                 <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
-                <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "受助用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }}</text>
+                <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }}</text>
                 <input v-model="rejectReasons[item.id]" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
                 <view class="action-grid">
                   <button class="vm-button" @tap="reviewApplication(item.id, 'approved')">通过</button>

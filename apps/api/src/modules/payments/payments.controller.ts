@@ -3,7 +3,10 @@ import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, 
 import type { PaymentOrderCreatePayload, PaymentPayerIdentityPayload, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
-import { AllowedRoles } from "../../common/guards/allowed-roles.decorator";
+import {
+  AllowedBackofficeSessionPermissions,
+  AllowedRoles
+} from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { PaymentsService } from "./payments.service";
 
@@ -45,6 +48,7 @@ export class PaymentsController {
   @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant", "special")
+  @AllowedBackofficeSessionPermissions("payments:refund")
   async mockPaid(
     @Param("id") id: string,
     @Req() request: { authUser?: { id: string; role: UserRole } }
@@ -94,6 +98,7 @@ export class PaymentsController {
   @Post("refunds")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant")
+  @AllowedBackofficeSessionPermissions("payments:refund")
   async refund(
     @Body()
     body: {

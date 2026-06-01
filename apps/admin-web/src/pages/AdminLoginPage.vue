@@ -8,7 +8,7 @@ import { useAdminSessionStore } from "../stores/session";
 const router = useRouter();
 const sessionStore = useAdminSessionStore();
 
-const username = ref("super");
+const username = ref("");
 const password = ref("");
 const busy = ref(false);
 const errorMessage = ref("");
@@ -55,7 +55,6 @@ const submit = async () => {
         />
       </label>
 
-      <div class="admin-note">默认服务商账号：`super`；默认客户实例账号：`admin`、`merchant`。</div>
       <div v-if="errorMessage" class="admin-note login-panel__error">{{ errorMessage }}</div>
 
       <button class="admin-button" :disabled="busy || !username || !password" @click="submit">

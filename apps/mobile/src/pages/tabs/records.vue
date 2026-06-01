@@ -220,7 +220,7 @@ onShow(() => {
           <view v-if="pendingApplications.length" class="simple-list">
             <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
               <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
-              <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "受助用户" : item.requestedRole === "merchant" ? "爱心商户" : "管理员" }}</text>
+              <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }}</text>
               <input v-model="rejectReasons[item.id]" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
               <view class="action-row">
                 <button class="vm-button" @tap="reviewApplication(item.id, 'approved')">通过</button>

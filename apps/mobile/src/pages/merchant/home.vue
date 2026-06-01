@@ -74,7 +74,7 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="爱心商户" :title="sessionStore.user?.name ?? '商户工作台'" :subtitle="appCopy.merchantWelcome">
+  <MobileShell eyebrow="商家" :title="sessionStore.user?.name ?? '商家工作台'" :subtitle="appCopy.merchantWelcome">
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button vm-button--warning" @tap="goNearby">
@@ -108,7 +108,7 @@ onShow(() => {
             </view>
             <view class="merchant-overview__metric">
               <text class="merchant-overview__value vm-number">{{ templateCount }}</text>
-              <text class="merchant-overview__label">商品模板</text>
+              <text class="merchant-overview__label">常用商品</text>
             </view>
             <view class="merchant-overview__metric">
               <text class="merchant-overview__value vm-number">{{ summary.pendingAlerts }}</text>
@@ -140,13 +140,13 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">常用操作</text>
-          <text class="vm-subtitle">可从这里维护模板、登记补货和查看货物去向。</text>
+          <text class="vm-subtitle">可从这里维护常用商品、登记补货和查看货物去向。</text>
         </view>
 
         <view class="menu-grid menu-grid--tiles">
           <button class="menu-card" @tap="navigate('/pages/merchant/templates')">
             <MenuIcon name="template" size="lg" />
-            <text class="menu-card__title">货品模板</text>
+            <text class="menu-card__title">常用商品</text>
             <text class="menu-card__desc">维护属性</text>
           </button>
           <button class="menu-card" @tap="goNearby">

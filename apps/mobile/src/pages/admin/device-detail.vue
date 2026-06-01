@@ -167,7 +167,7 @@ onLoad((query) => {
             <text class="list-item__meta">{{ item.goodsSummary }} · {{ item.lastServedAt.slice(0, 16).replace("T", " ") }}</text>
           </view>
         </view>
-        <EmptyState v-else :title="loading ? '正在加载数据' : '今日还没有服务记录'" description="普通用户、商户或管理员对该柜机有操作后，这里会实时更新。" />
+        <EmptyState v-else :title="loading ? '正在加载数据' : '今日还没有服务记录'" description="用户、商家或管理员对该柜机有操作后，这里会实时更新。" />
       </view>
     </GlassCard>
 

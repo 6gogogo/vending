@@ -36,7 +36,7 @@ import type {
   WarehouseRecord
 } from "@vm/shared-types";
 
-import { mobileClient } from "./client";
+import { mobileApiBaseUrl, mobileClient } from "./client";
 
 export const mobileApi = {
   requestCode(phone: string, scene: "app-login" | "register" | "general" = "general") {
@@ -193,7 +193,7 @@ export const mobileApi = {
   async uploadImage(filePath: string, token?: string) {
     const response = await new Promise<{ data: string; statusCode: number }>((resolve, reject) => {
       uni.uploadFile({
-        url: `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/uploads/images`,
+        url: `${mobileApiBaseUrl}/uploads/images`,
         filePath,
         name: "file",
         header: token
@@ -289,9 +289,9 @@ export const mobileApi = {
       cumulativeHelpTimes: number;
     }>("/merchant-restock-traces");
   },
-  registrationLookup(phone: string) {
+  registrationLookup(phone: string, code?: string) {
     return mobileClient.get<RegistrationPhoneLookup>("/registration-applications/by-phone", {
-      query: { phone }
+      query: code ? { phone, code } : { phone }
     });
   },
   submitRegistration(payload: {

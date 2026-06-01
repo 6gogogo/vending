@@ -7,6 +7,9 @@ import { useSessionStore } from "../stores/session";
 import { getErrorMessage } from "../utils/error-message";
 import { resolveHomePath } from "../utils/role-routing";
 
+const showVerificationPreview =
+  import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
+
 export const useAuthFlow = () => {
   const phone = ref("");
   const code = ref("");
@@ -19,7 +22,7 @@ export const useAuthFlow = () => {
     busy.value = true;
     try {
       const response = await mobileApi.requestCode(phone.value);
-      previewCode.value = response.previewCode ?? "";
+      previewCode.value = showVerificationPreview ? response.previewCode ?? "" : "";
       uni.showToast({
         title: "验证码已生成",
         icon: "none"

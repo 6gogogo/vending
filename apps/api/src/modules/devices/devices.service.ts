@@ -443,7 +443,12 @@ export class DevicesService {
 
     return localDevice.doors
       .filter((door) => !doorNum || door.doorNum === doorNum)
-      .flatMap((door) => door.goods);
+      .flatMap((door) =>
+        door.goods.map((goods) => ({
+          ...goods,
+          stock: this.store.getCurrentStock(deviceCode, goods.goodsId)
+        }))
+      );
   }
 
   async refreshDevice(deviceCode: string, actorUserId?: string) {

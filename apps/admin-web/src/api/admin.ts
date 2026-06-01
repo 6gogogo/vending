@@ -10,6 +10,7 @@ import type {
   AiProviderTestResult,
   AiRestockLayoutSuggestion,
   AlertTask,
+  BackofficeCredentialSnapshot,
   BackofficePermission,
   BackofficeRole,
   BackofficeScope,
@@ -33,6 +34,7 @@ import type {
   PlatformTenantRecord,
   RegionRecord,
   RegistrationApplication,
+  ReservationSettings,
   SystemAuditLogEntry,
   SystemSettingsSnapshot,
   SystemSettingsUpdatePayload,
@@ -45,7 +47,7 @@ import type {
   WarehouseRecord
 } from "@vm/shared-types";
 
-import { adminClient } from "./client";
+import { adminApiBaseUrl, adminClient } from "./client";
 import { useAdminSessionStore } from "../stores/session";
 
 interface AdminLoginResponse {
@@ -115,13 +117,17 @@ export const adminApi = {
   createBackofficeCredential(payload: {
     userId: string;
     username: string;
-    password: string;
+    password?: string;
     role?: BackofficeRole;
     tenantId?: string;
     permissions?: BackofficePermission[];
   }) {
     requireBackofficePermission("backoffice-credentials:manage");
-    return adminClient.post("/auth/backoffice-credentials", payload);
+    return adminClient.post<BackofficeCredentialSnapshot>("/auth/backoffice-credentials", payload);
+  },
+  backofficeCredentials() {
+    requireBackofficePermission("backoffice-credentials:manage");
+    return adminClient.get<BackofficeCredentialSnapshot[]>("/auth/backoffice-credentials");
   },
   dashboard() {
     requireBackofficePermission("dashboard:view");
@@ -148,7 +154,7 @@ export const adminApi = {
     });
   },
   reviewRegistration(id: string, payload: { decision: "approved" | "rejected"; reason?: string }) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:review");
     return adminClient.patch<RegistrationApplication>(`/registration-applications/${id}/review`, payload);
   },
   users(role?: UserRecord["role"]) {
@@ -167,7 +173,7 @@ export const adminApi = {
     longitude?: number;
     latitude?: number;
   }) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:manage");
     return adminClient.post<RegionRecord>("/regions", payload);
   },
   updateRegion(
@@ -180,7 +186,7 @@ export const adminApi = {
       latitude: number;
     }>
   ) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:manage");
     return adminClient.patch<RegionRecord>(`/regions/${id}`, payload);
   },
   createUser(payload: {
@@ -193,7 +199,7 @@ export const adminApi = {
     regionName?: string;
     tags?: string[];
   }) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:manage");
     return adminClient.post<UserRecord>("/users", payload);
   },
   updateUser(
@@ -209,11 +215,11 @@ export const adminApi = {
       tags?: string[];
     }
   ) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:manage");
     return adminClient.patch<UserRecord>(`/users/${userId}`, payload);
   },
   removeUser(userId: string) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:manage");
     return adminClient.delete<{ id: string; name: string }>(`/users/${userId}`);
   },
   userDetail(userId: string, query?: { month?: string; date?: string }) {
@@ -232,7 +238,7 @@ export const adminApi = {
       regionName?: string;
     };
   }) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:manage");
     return adminClient.patch<{ count: number; updated: UserRecord[] }>("/users/batch", payload);
   },
   manualAdjustUser(
@@ -255,7 +261,7 @@ export const adminApi = {
       }>;
     }
   ) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("goods:stock-adjust");
     return adminClient.post(`/users/${userId}/manual-adjustment`, payload);
   },
   saveUserAccessPolicy(
@@ -274,15 +280,15 @@ export const adminApi = {
       sourcePolicyId?: string;
     }
   ) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:rules:manage");
     return adminClient.post<UserAccessPolicy>(`/users/${userId}/access-policies`, payload);
   },
   deleteUserAccessPolicy(userId: string, policyId: string) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:rules:manage");
     return adminClient.delete<UserAccessPolicy>(`/users/${userId}/access-policies/${policyId}`);
   },
   applyUserAccessPolicyNow(userId: string, policyId: string) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:rules:manage");
     return adminClient.post<UserAccessPolicy>(`/users/${userId}/access-policies/${policyId}/apply-now`);
   },
   policies() {
@@ -290,11 +296,11 @@ export const adminApi = {
     return adminClient.get<SpecialAccessPolicy[]>("/special-access-policies");
   },
   createPolicy(payload: Omit<SpecialAccessPolicy, "id">) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:rules:manage");
     return adminClient.post<SpecialAccessPolicy>("/special-access-policies", payload);
   },
   updatePolicy(id: string, payload: Partial<Omit<SpecialAccessPolicy, "id">>) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:rules:manage");
     return adminClient.patch<SpecialAccessPolicy>(`/special-access-policies/${id}`, payload);
   },
   batchAssignPolicies(payload: {
@@ -302,10 +308,19 @@ export const adminApi = {
     policyIds: string[];
     mode: "bind" | "unbind" | "replace";
   }) {
-    requireBackofficePermission("users:view");
+    requireBackofficePermission("users:rules:manage");
     return adminClient.post<SpecialAccessPolicy[]>("/special-access-policies/batch-assign", payload);
   },
+  reservationSettings() {
+    requireBackofficePermission("users:view");
+    return adminClient.get<ReservationSettings>("/reservations/settings");
+  },
+  saveReservationSettings(payload: Partial<Pick<ReservationSettings, "enabled" | "holdMinutes" | "maxTimeouts">>) {
+    requireBackofficePermission("reservations:manage");
+    return adminClient.patch<ReservationSettings>("/reservations/settings", payload);
+  },
   resolveAlert(id: string, note?: string) {
+    requireBackofficePermission("alerts:manage");
     return adminClient.patch(`/alerts/${id}/resolve`, { note });
   },
   devices() {
@@ -322,20 +337,21 @@ export const adminApi = {
     doorNum?: string;
     doorLabel?: string;
   }) {
-    requireBackofficePermission("devices:view");
+    requireBackofficePermission("devices:manage");
     return adminClient.post<DeviceRecord>("/devices", payload);
   },
   removeDevice(deviceCode: string) {
-    requireBackofficePermission("devices:view");
+    requireBackofficePermission("devices:manage");
     return adminClient.delete<{ deviceCode: string; name: string }>(`/devices/${deviceCode}`);
   },
   async uploadImage(file: File) {
+    requireBackofficePermission("uploads:images");
     const sessionStore = useAdminSessionStore();
     const formData = new FormData();
     formData.append("file", file);
 
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/uploads/images`,
+      `${adminApiBaseUrl}/uploads/images`,
       {
         method: "POST",
         headers: sessionStore.token
@@ -376,11 +392,11 @@ export const adminApi = {
     });
   },
   addDeviceGoods(deviceCode: string, payload: { goodsId: string; doorNum?: string }) {
-    requireBackofficePermission("devices:view");
+    requireBackofficePermission("devices:manage");
     return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/goods`, payload);
   },
   removeDeviceGoods(deviceCode: string, goodsId: string, doorNum?: string) {
-    requireBackofficePermission("devices:view");
+    requireBackofficePermission("devices:manage");
     return adminClient.delete<DeviceMonitoringDetail>(`/devices/${deviceCode}/goods/${goodsId}`, {
       query: { doorNum }
     });
@@ -394,15 +410,15 @@ export const adminApi = {
       latitude?: number;
     }
   ) {
-    requireBackofficePermission("devices:view");
+    requireBackofficePermission("devices:manage");
     return adminClient.patch<DeviceRecord>(`/devices/${deviceCode}/location`, payload);
   },
   refreshDevice(deviceCode: string) {
-    requireBackofficePermission("devices:view");
+    requireBackofficePermission("devices:operate");
     return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/refresh`);
   },
   remoteOpenDevice(deviceCode: string, doorNum = "1") {
-    requireBackofficePermission("devices:view");
+    requireBackofficePermission("devices:operate");
     return adminClient.post<{ eventId: string; orderNo: string; deviceCode: string; doorNum: string }>(
       `/devices/${deviceCode}/remote-open`,
       { doorNum }
@@ -419,6 +435,7 @@ export const adminApi = {
     notifyUrl?: string;
     noticeUrl?: string;
   }) {
+    requireBackofficePermission("devices:operate");
     return adminClient.post("/cabinet-events/payment-success", payload);
   },
   refundOrder(payload: {
@@ -428,6 +445,7 @@ export const adminApi = {
     refundNo: string;
     amount: number;
   }) {
+    requireBackofficePermission("payments:refund");
     return adminClient.post("/inventory-orders/refund", payload);
   },
   goodsOverview() {
@@ -435,9 +453,9 @@ export const adminApi = {
     return adminClient.get<GoodsOverviewSnapshot>("/goods-overview");
   },
   async exportGoodsOverview(token: string) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:export");
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/goods-overview/export/file`,
+      `${adminApiBaseUrl}/goods-overview/export/file`,
       {
         headers: {
           Authorization: `Bearer ${token}`
@@ -469,7 +487,7 @@ export const adminApi = {
     category: "food" | "drink" | "daily";
     sortOrder?: number;
   }) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.post<GoodsCategoryRecord>("/goods-categories", payload);
   },
   updateGoodsCategory(
@@ -481,7 +499,7 @@ export const adminApi = {
       sortOrder: number;
     }>
   ) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.patch<GoodsCategoryRecord>(`/goods-categories/${id}`, payload);
   },
   goodsDetail(goodsId: string) {
@@ -501,7 +519,7 @@ export const adminApi = {
     specification?: string;
     manufacturer?: string;
   }) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.post<GoodsCatalogItem>("/goods", payload);
   },
   updateGoods(
@@ -520,7 +538,7 @@ export const adminApi = {
       status: "active" | "inactive";
     }>
   ) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.patch<GoodsCatalogItem>(`/goods/${goodsId}`, payload);
   },
   addGoodsBatch(
@@ -536,11 +554,11 @@ export const adminApi = {
       confirmed?: boolean;
     }
   ) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:stock-adjust");
     return adminClient.post(`/goods/${goodsId}/batches`, payload);
   },
   removeGoodsBatch(batchId: string, payload: { quantity: number; note?: string; confirmed?: boolean }) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:stock-adjust");
     return adminClient.post(`/goods/batches/${batchId}/remove`, payload);
   },
   goodsAlertPolicies() {
@@ -548,11 +566,11 @@ export const adminApi = {
     return adminClient.get<GoodsAlertPolicy[]>("/goods-alert-policies");
   },
   createGoodsAlertPolicy(payload: Omit<GoodsAlertPolicy, "id">) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.post<GoodsAlertPolicy>("/goods-alert-policies", payload);
   },
   updateGoodsAlertPolicy(id: string, payload: Partial<Omit<GoodsAlertPolicy, "id">>) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.patch<GoodsAlertPolicy>(`/goods-alert-policies/${id}`, payload);
   },
   batchAssignGoodsAlertPolicies(payload: {
@@ -560,11 +578,11 @@ export const adminApi = {
     policyIds: string[];
     mode: "bind" | "unbind" | "replace";
   }) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.post<GoodsAlertPolicy[]>("/goods-alert-policies/batch-assign", payload);
   },
   syncDeviceGoods(deviceCode: string, doorNum = "1") {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.post(`/devices/${deviceCode}/sync-goods`, undefined, {
       query: { doorNum }
     });
@@ -577,10 +595,11 @@ export const adminApi = {
       lowStockThreshold?: number;
     }
   ) {
-    requireBackofficePermission("goods:view");
+    requireBackofficePermission("goods:manage");
     return adminClient.patch(`/devices/${deviceCode}/goods/${goodsId}/threshold`, payload);
   },
   alerts() {
+    requireBackofficePermission("alerts:manage");
     return adminClient.get<AlertTask[]>("/alerts");
   },
   merchantTemplates() {
@@ -686,7 +705,7 @@ export const adminApi = {
     sourceBatchId?: string;
     note?: string;
   }) {
-    requireAnyBackofficePermission(["warehouse:view", "goods:view"]);
+    requireBackofficePermission("warehouse:transfer");
     return adminClient.post("/inventory-transfers", payload);
   },
   createStocktake(payload: {
@@ -697,13 +716,13 @@ export const adminApi = {
       actualQuantity: number;
     }>;
   }) {
-    requireBackofficePermission("warehouse:view");
+    requireBackofficePermission("warehouse:stocktake");
     return adminClient.post("/stocktakes", payload);
   },
   async exportStocktake(id: string, token: string) {
-    requireBackofficePermission("warehouse:view");
+    requireBackofficePermission("warehouse:export");
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/stocktakes/${id}/export`,
+      `${adminApiBaseUrl}/stocktakes/${id}/export`,
       {
         headers: {
           Authorization: `Bearer ${token}`
@@ -778,7 +797,7 @@ export const adminApi = {
     }
 
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/operation-logs/export/file${query.size ? `?${query.toString()}` : ""}`,
+      `${adminApiBaseUrl}/operation-logs/export/file${query.size ? `?${query.toString()}` : ""}`,
       {
         headers: {
           Authorization: `Bearer ${token}`
@@ -800,7 +819,7 @@ export const adminApi = {
   async exportSystemAuditLog(token: string) {
     requireBackofficePermission("system-audit:export");
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4000/api"}/operation-logs/export/system-file`,
+      `${adminApiBaseUrl}/operation-logs/export/system-file`,
       {
         headers: {
           Authorization: `Bearer ${token}`
@@ -820,7 +839,7 @@ export const adminApi = {
     };
   },
   undoLog(id: string) {
-    requireBackofficePermission("operation-logs:view");
+    requireBackofficePermission("operation-logs:undo");
     return adminClient.post<OperationLogRecord>(`/operation-logs/${id}/undo`);
   }
 };

@@ -231,7 +231,7 @@ watch(
 </script>
 
 <template>
-  <MobileShell eyebrow="后端模板库" title="爱心商户商品属性" subtitle="从后端公共模板库维护货品信息，所有商户补货时可直接选用。">
+  <MobileShell eyebrow="常用商品" title="维护常用商品" subtitle="维护补货时常用的货品信息，后续登记补货可直接选用。">
     <GlassCard tone="accent">
       <view class="vm-stack">
         <view class="form-grid">
@@ -277,7 +277,7 @@ watch(
           </view>
           <view class="vm-field">
             <text class="vm-field__label">厂家</text>
-            <input v-model="form.manufacturer" class="vm-field__input" placeholder="例如：本地爱心商户" />
+            <input v-model="form.manufacturer" class="vm-field__input" placeholder="例如：本地商家" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">默认数量</text>
@@ -298,7 +298,7 @@ watch(
         </view>
 
         <view class="action-row">
-          <button class="vm-button" :loading="saving" @tap="submit">{{ editingId ? "保存修改" : "新增后端模板" }}</button>
+          <button class="vm-button" :loading="saving" @tap="submit">{{ editingId ? "保存修改" : "新增常用商品" }}</button>
           <button v-if="editingId" class="vm-button vm-button--ghost" @tap="resetForm">取消编辑</button>
         </view>
       </view>
@@ -307,8 +307,8 @@ watch(
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">后端商品模板</text>
-          <text class="vm-subtitle">这些模板由后端统一返回，不按商户账号单独隔离。</text>
+          <text class="section-heading__title">常用商品列表</text>
+          <text class="vm-subtitle">补货登记会从这里选择商品，并自动带出默认数量和保质期。</text>
         </view>
 
         <view class="vm-field">
@@ -335,8 +335,8 @@ watch(
         </view>
         <EmptyState
           v-else
-          :title="loading ? '正在加载商品属性' : keyword.trim() ? '没有匹配的商品属性' : '还没有商品属性'"
-          :description="keyword.trim() ? '请换一个名称、编号或规格继续搜索。' : '先新增后端商品模板，后续所有商户补货时可直接选用。'"
+          :title="loading ? '正在加载常用商品' : keyword.trim() ? '没有匹配的常用商品' : '还没有常用商品'"
+          :description="keyword.trim() ? '请换一个名称、编号或规格继续搜索。' : '先新增常用商品，后续补货时可直接选用。'"
         />
       </view>
     </GlassCard>

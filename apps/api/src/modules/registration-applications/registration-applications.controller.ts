@@ -26,8 +26,8 @@ export class RegistrationApplicationsController {
   }
 
   @Get("by-phone")
-  byPhone(@Query("phone") phone: string) {
-    return ok(this.registrationApplicationsService.lookupByPhone(phone));
+  async byPhone(@Query("phone") phone: string, @Query("code") code?: string) {
+    return ok(await this.registrationApplicationsService.lookupByPhone(phone, code));
   }
 
   @Get(":id")
@@ -96,7 +96,7 @@ export class RegistrationApplicationsController {
   @Patch(":id/review")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("users:view")
+  @AllowedBackofficePermissions("users:review")
   review(
     @Param("id") id: string,
     @Body()

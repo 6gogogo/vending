@@ -6,6 +6,7 @@ import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDate, formatDateTime, formatDateTimeSeconds, formatNowInBeijing } from "../utils/datetime";
+import { categoryLabelMap } from "../utils/labels";
 import {
   buildAlertContextSummary,
   buildAlertIdentitySummary,
@@ -19,6 +20,11 @@ import {
 
 const route = useRoute();
 const sessionStore = useAdminSessionStore();
+const canOperateDevice = computed(() => sessionStore.can("devices:operate"));
+const canManageDevice = computed(() => sessionStore.can("devices:manage"));
+const canManageGoods = computed(() => sessionStore.can("goods:manage"));
+const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
+const canRefundPayments = computed(() => sessionStore.can("payments:refund"));
 
 const detail = ref<Awaited<ReturnType<typeof adminApi.deviceDetail>>>();
 const loading = ref(false);
@@ -200,7 +206,7 @@ const formatLogStatus = (status: string) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
 
 const formatUserRole = (role: "admin" | "merchant" | "special") =>
-  role === "admin" ? "管理员" : role === "merchant" ? "商户" : "特殊群体";
+  role === "admin" ? "管理员" : role === "merchant" ? "商家" : "用户";
 
 const formatDebugPayload = (value: unknown) => {
   if (value === undefined || value === null) {
@@ -431,6 +437,11 @@ const loadDebugPanel = async () => {
 };
 
 const refreshDevice = async () => {
+  if (!canOperateDevice.value) {
+    window.alert("当前账号没有柜机操作权限。");
+    return;
+  }
+
   refreshing.value = true;
   try {
     detail.value = await adminApi.refreshDevice(String(route.params.deviceCode));
@@ -445,6 +456,11 @@ const refreshDevice = async () => {
 };
 
 const syncGoods = async () => {
+  if (!canManageGoods.value) {
+    window.alert("当前账号没有货品资料管理权限。");
+    return;
+  }
+
   syncing.value = true;
   try {
     await adminApi.syncDeviceGoods(String(route.params.deviceCode), selectedDoorNum.value);
@@ -459,6 +475,11 @@ const syncGoods = async () => {
 };
 
 const remoteOpen = async () => {
+  if (!canOperateDevice.value) {
+    window.alert("当前账号没有柜机操作权限。");
+    return;
+  }
+
   remoteOpening.value = true;
   try {
     await adminApi.remoteOpenDevice(String(route.params.deviceCode), selectedDoorNum.value);
@@ -473,6 +494,11 @@ const remoteOpen = async () => {
 };
 
 const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) => {
+  if (!canOperateDevice.value) {
+    window.alert("当前账号没有柜机操作权限。");
+    return;
+  }
+
   const platformContext = resolvePlatformOrderContext(event, "payment", adjustmentOrderNo);
   const defaultTransactionId =
     platformContext.transactionId ||
@@ -525,6 +551,11 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
 };
 
 const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) => {
+  if (!canRefundPayments.value) {
+    window.alert("当前账号没有退款与支付处理权限。");
+    return;
+  }
+
   const platformContext = resolvePlatformOrderContext(event, "refund", adjustmentOrderNo);
   const defaultTransactionId = platformContext.transactionId || createCompactReference("txn");
   const transactionId = window.prompt("请输入退款对应的交易号 transactionId", defaultTransactionId)?.trim();
@@ -581,6 +612,11 @@ const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number]
 };
 
 const resolveTask = async (taskId: string) => {
+  if (!canManageAlerts.value) {
+    window.alert("当前账号没有预警处理权限。");
+    return;
+  }
+
   const task = pendingTasks.value.find((entry) => entry.id === taskId);
   if (!task || !window.confirm(`确认${taskActionLabel(task)}？`)) {
     return;
@@ -603,6 +639,11 @@ const saveLocation = async (payload: {
   location: string;
   address: string;
 }) => {
+  if (!canManageDevice.value) {
+    window.alert("当前账号没有柜机资料管理权限。");
+    return;
+  }
+
   updatingLocation.value = true;
   try {
     await adminApi.updateDeviceLocation(String(route.params.deviceCode), {
@@ -627,6 +668,11 @@ const toggleDebugPanel = async () => {
 };
 
 const addGoods = async () => {
+  if (!canManageDevice.value) {
+    window.alert("当前账号没有柜机资料管理权限。");
+    return;
+  }
+
   if (!selectedGoodsToAdd.value) {
     window.alert("操作失败：请先选择要加入的货品");
     return;
@@ -647,6 +693,11 @@ const addGoods = async () => {
 };
 
 const removeGoods = async (goodsId: string) => {
+  if (!canManageDevice.value) {
+    window.alert("当前账号没有柜机资料管理权限。");
+    return;
+  }
+
   if (!window.confirm("确认移除这条零库存货品？")) {
     return;
   }
@@ -766,13 +817,13 @@ onUnmounted(() => {
                   </option>
                 </select>
               </label>
-              <button class="admin-button admin-button--ghost" :disabled="syncing" @click="syncGoods">
+              <button v-if="canManageGoods" class="admin-button admin-button--ghost" :disabled="syncing" @click="syncGoods">
                 {{ syncing ? "同步中" : "同步货品种类" }}
               </button>
             </div>
           </div>
 
-          <div class="device-goods-toolbar">
+          <div v-if="canManageDevice" class="device-goods-toolbar">
             <label class="admin-field admin-field--inline device-goods-toolbar__field">
               <span class="admin-field__label">新增货品</span>
               <select v-model="selectedGoodsToAdd" class="admin-select">
@@ -806,7 +857,7 @@ onUnmounted(() => {
                     <span class="admin-table__strong">{{ goods.name }}</span>
                     <span class="admin-table__subtext">{{ goods.goodsId }}</span>
                   </td>
-                  <td>{{ goods.category }}</td>
+                  <td>{{ categoryLabelMap[goods.category] ?? goods.category }}</td>
                   <td class="admin-code">{{ formatGoodsStock(goods) }}</td>
                   <td>
                     <span
@@ -821,14 +872,14 @@ onUnmounted(() => {
                   </td>
                   <td>
                     <button
-                      v-if="goods.stock <= 0"
+                      v-if="canManageDevice && goods.stock <= 0"
                       class="admin-button admin-button--ghost"
                       :disabled="removingGoodsId === goods.goodsId"
                       @click="removeGoods(goods.goodsId)"
                     >
                       {{ removingGoodsId === goods.goodsId ? "移除中" : "移除" }}
                     </button>
-                    <span v-else class="admin-table__subtext">库存未清零</span>
+                    <span v-else class="admin-table__subtext">{{ canManageDevice ? "库存未清零" : "无柜机资料管理权限" }}</span>
                   </td>
                 </tr>
               </tbody>
@@ -843,7 +894,7 @@ onUnmounted(() => {
                 <span class="admin-kicker">地图位置</span>
                 <h3 class="admin-panel__title">保存柜机坐标后，移动端会按距离排序</h3>
               </div>
-              <button class="admin-button admin-button--ghost" :disabled="updatingLocation" @click="mapPickerVisible = true">
+              <button v-if="canManageDevice" class="admin-button admin-button--ghost" :disabled="updatingLocation" @click="mapPickerVisible = true">
                 {{ updatingLocation ? "保存中" : "设置位置" }}
               </button>
             </div>
@@ -909,12 +960,13 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="device-detail-actions">
-              <button class="admin-button admin-button--ghost" :disabled="refreshing" @click="refreshDevice">
+              <button v-if="canOperateDevice" class="admin-button admin-button--ghost" :disabled="refreshing" @click="refreshDevice">
                 {{ refreshing ? "刷新中" : "立即刷新" }}
               </button>
-              <button class="admin-button" :disabled="remoteOpening" @click="remoteOpen">
+              <button v-if="canOperateDevice" class="admin-button" :disabled="remoteOpening" @click="remoteOpen">
                 {{ remoteOpening ? "下发中" : "远程开门" }}
               </button>
+              <span v-if="!canOperateDevice" class="admin-table__subtext">当前账号没有柜机操作权限。</span>
             </div>
             <div class="admin-note">
               若门状态长时间不变化或最近一次开门后未收到开门确认，请直接关注右侧待处理任务。
@@ -942,14 +994,14 @@ onUnmounted(() => {
                 </div>
                 <div class="device-task-actions">
                   <button
-                    v-if="task.status === 'open'"
+                    v-if="canManageAlerts && task.status === 'open'"
                     class="admin-button admin-button--ghost"
                     :disabled="resolvingTaskId === task.id"
                     @click="resolveTask(task.id)"
                   >
                     {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
                   </button>
-                  <span v-else class="admin-table__subtext">已知晓</span>
+                  <span v-else class="admin-table__subtext">{{ task.status === "open" ? "需要预警处理权限" : "已知晓" }}</span>
                   <RouterLink class="admin-link" :to="`/logs?subjectType=alert&subjectId=${task.id}`">日志</RouterLink>
                 </div>
               </div>
@@ -999,7 +1051,7 @@ onUnmounted(() => {
                   </div>
                   <div class="device-event-order-row__actions">
                     <button
-                      v-if="shouldShowPaymentAction(event)"
+                      v-if="canOperateDevice && shouldShowPaymentAction(event)"
                       class="admin-button admin-button--ghost"
                       :disabled="notifyingPaymentOrderNo === event.orderNo"
                       @click="notifyPaymentSuccess(event)"
@@ -1007,7 +1059,7 @@ onUnmounted(() => {
                       {{ notifyingPaymentOrderNo === event.orderNo ? "回写中" : paymentActionLabel(event) }}
                     </button>
                     <button
-                      v-if="shouldShowRefundAction(event)"
+                      v-if="canRefundPayments && shouldShowRefundAction(event)"
                       class="admin-button admin-button--ghost"
                       :disabled="refundingOrderNo === event.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
                       @click="refundEvent(event)"
@@ -1015,10 +1067,10 @@ onUnmounted(() => {
                       {{ refundingOrderNo === event.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
                     </button>
                     <span
-                      v-if="!shouldShowPaymentAction(event) && !shouldShowRefundAction(event)"
+                      v-if="(!canOperateDevice || !shouldShowPaymentAction(event)) && (!canRefundPayments || !shouldShowRefundAction(event))"
                       class="admin-table__subtext"
                     >
-                      当前没有待平台确认动作
+                      当前没有待平台确认动作或权限不足
                     </span>
                   </div>
                 </div>
@@ -1051,7 +1103,7 @@ onUnmounted(() => {
                   </div>
                   <div class="device-event-order-row__actions">
                     <button
-                      v-if="shouldShowPaymentAction(event, adjustment.orderNo)"
+                      v-if="canOperateDevice && shouldShowPaymentAction(event, adjustment.orderNo)"
                       class="admin-button admin-button--ghost"
                       :disabled="notifyingPaymentOrderNo === adjustment.orderNo"
                       @click="notifyPaymentSuccess(event, adjustment.orderNo)"
@@ -1059,7 +1111,7 @@ onUnmounted(() => {
                       {{ notifyingPaymentOrderNo === adjustment.orderNo ? "回写中" : paymentActionLabel(event, adjustment.orderNo) }}
                     </button>
                     <button
-                      v-if="shouldShowRefundAction(event, adjustment.orderNo)"
+                      v-if="canRefundPayments && shouldShowRefundAction(event, adjustment.orderNo)"
                       class="admin-button admin-button--ghost"
                       :disabled="refundingOrderNo === adjustment.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt)"
                       @click="refundEvent(event, adjustment.orderNo)"
@@ -1067,10 +1119,10 @@ onUnmounted(() => {
                       {{ refundingOrderNo === adjustment.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt ? "已退款" : refundActionLabel(event, adjustment.orderNo) }}
                     </button>
                     <span
-                      v-if="!shouldShowPaymentAction(event, adjustment.orderNo) && !shouldShowRefundAction(event, adjustment.orderNo)"
+                      v-if="(!canOperateDevice || !shouldShowPaymentAction(event, adjustment.orderNo)) && (!canRefundPayments || !shouldShowRefundAction(event, adjustment.orderNo))"
                       class="admin-table__subtext"
                     >
-                      当前没有待平台确认动作
+                      当前没有待平台确认动作或权限不足
                     </span>
                   </div>
                 </div>
@@ -1078,7 +1130,7 @@ onUnmounted(() => {
             </div>
             <div v-else class="admin-empty">
               <div class="admin-empty__title">{{ loading ? "正在加载事件" : "当前没有开柜事件" }}</div>
-              <div class="admin-empty__body">远程开门、用户取货和商户补货都会在这里记录。</div>
+              <div class="admin-empty__body">远程开门、用户取货和商家补货都会在这里记录。</div>
             </div>
           </article>
         </aside>

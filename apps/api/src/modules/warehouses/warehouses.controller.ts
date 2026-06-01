@@ -28,7 +28,7 @@ export class WarehousesController {
   }
 
   @Post("inventory-transfers")
-  @AllowedBackofficePermissions("warehouse:view", "goods:view")
+  @AllowedBackofficePermissions("warehouse:transfer")
   transfer(
     @Body()
     body: {
@@ -45,6 +45,7 @@ export class WarehousesController {
   }
 
   @Post("stocktakes")
+  @AllowedBackofficePermissions("warehouse:stocktake")
   stocktake(
     @Body()
     body: {
@@ -61,6 +62,7 @@ export class WarehousesController {
   }
 
   @Get("stocktakes/:id/export")
+  @AllowedBackofficePermissions("warehouse:export")
   export(@Param("id") id: string, @Res() response: { setHeader: (name: string, value: string) => void; send: (body: string) => void }) {
     const file = this.warehousesService.buildStocktakeExport(id);
     response.setHeader("Content-Type", file.contentType);

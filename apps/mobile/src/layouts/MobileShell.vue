@@ -136,6 +136,9 @@ const showUtilityBar = computed(
 <style scoped>
 .shell {
   position: relative;
+  width: auto;
+  max-width: 960rpx;
+  box-sizing: border-box;
   overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 250, 242, 0.96) 0, rgba(255, 250, 242, 0) 330rpx),
@@ -207,6 +210,8 @@ const showUtilityBar = computed(
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+  width: 100%;
+  min-width: 0;
 }
 
 .shell__garden {
@@ -826,6 +831,10 @@ const showUtilityBar = computed(
 }
 
 @media screen and (min-width: 720px) {
+  .shell {
+    max-width: 960rpx;
+  }
+
   .shell__hero {
     grid-template-columns: minmax(0, 1.4fr) minmax(220rpx, 0.8fr);
     align-items: start;
