@@ -8,5 +8,14 @@ coverage
 .idea
 .vscode
 *.log
+.codex-run/
 apps/mobile/unpackage
 apps/api/runtime-data/
+apps/api/apps/api/runtime-data/
+apps/api/runtime-backups/
+apps/api/runtime-uploads/
+sandbox/reports/
+docs/test-artifacts/**/*.png
+docs/test-artifacts/**/manifest.json
+docs/test-artifacts/**/sessions.json
+docs/test-artifacts/**/flow-data.json

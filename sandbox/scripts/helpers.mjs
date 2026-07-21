@@ -20,8 +20,8 @@ const defaultSandboxConfig = {
   LOCAL_API_BASE_URL: "http://127.0.0.1:4000/api",
   SANDBOX_ADMIN_PHONE: "13800000001",
   SANDBOX_ADMIN_CODE: "123456",
-  TEST_PLATFORM_ACCOUNT: "0320@jinsaitest.com",
-  TEST_PLATFORM_PASSWORD: "jinsaitest"
+  TEST_PLATFORM_ACCOUNT: "",
+  TEST_PLATFORM_PASSWORD: ""
 };
 
 const envFileCandidates = [
@@ -161,17 +161,48 @@ const getSmartVmCredentials = ({ allowDemoCredentials = false } = {}) => {
 export const hasRealSmartVmCredentials = () =>
   !getSmartVmCredentials({ allowDemoCredentials: true }).isDemoCredentials;
 
-export const getSandboxConfig = () => ({
-  smartVmBaseUrl: process.env.SMARTVM_BASE_URL ?? defaultSandboxConfig.SMARTVM_BASE_URL,
-  smartVmDeviceCode: process.env.SMARTVM_DEVICE_CODE ?? defaultSandboxConfig.SMARTVM_DEVICE_CODE,
-  smartVmDoorNum: process.env.SMARTVM_DOOR_NUM ?? defaultSandboxConfig.SMARTVM_DOOR_NUM,
-  localApiBaseUrl: process.env.LOCAL_API_BASE_URL ?? defaultSandboxConfig.LOCAL_API_BASE_URL,
-  sandboxAdminPhone: process.env.SANDBOX_ADMIN_PHONE ?? defaultSandboxConfig.SANDBOX_ADMIN_PHONE,
-  sandboxAdminCode: process.env.SANDBOX_ADMIN_CODE ?? defaultSandboxConfig.SANDBOX_ADMIN_CODE,
-  testPlatformAccount: process.env.TEST_PLATFORM_ACCOUNT ?? defaultSandboxConfig.TEST_PLATFORM_ACCOUNT,
-  testPlatformPassword:
-    process.env.TEST_PLATFORM_PASSWORD ?? defaultSandboxConfig.TEST_PLATFORM_PASSWORD
-});
+const assertLoopbackLocalApi = (rawUrl) => {
+  let parsed;
+
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`LOCAL_API_BASE_URL 不是合法 URL：${rawUrl}`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const isLoopback =
+    hostname === "localhost" ||
+    hostname === "::1" ||
+    hostname === "[::1]" ||
+    hostname.startsWith("127.");
+  const explicitlyAllowed = ["1", "true", "yes", "on"].includes(
+    (process.env.ALLOW_REMOTE_LOCAL_API ?? "").trim().toLowerCase()
+  );
+
+  if (!isLoopback && !explicitlyAllowed) {
+    throw new Error(
+      "已阻止 sandbox 将 LOCAL_API_BASE_URL 指向非本机地址。如确需显式联调，请单独设置 ALLOW_REMOTE_LOCAL_API=true。"
+    );
+  }
+};
+
+export const getSandboxConfig = () => {
+  const localApiBaseUrl = process.env.LOCAL_API_BASE_URL ?? defaultSandboxConfig.LOCAL_API_BASE_URL;
+  assertLoopbackLocalApi(localApiBaseUrl);
+
+  return {
+    smartVmBaseUrl: process.env.SMARTVM_BASE_URL ?? defaultSandboxConfig.SMARTVM_BASE_URL,
+    smartVmDeviceCode: process.env.SMARTVM_DEVICE_CODE ?? defaultSandboxConfig.SMARTVM_DEVICE_CODE,
+    smartVmDoorNum: process.env.SMARTVM_DOOR_NUM ?? defaultSandboxConfig.SMARTVM_DOOR_NUM,
+    localApiBaseUrl,
+    sandboxAdminPhone: process.env.SANDBOX_ADMIN_PHONE ?? defaultSandboxConfig.SANDBOX_ADMIN_PHONE,
+    sandboxAdminCode: process.env.SANDBOX_ADMIN_CODE ?? defaultSandboxConfig.SANDBOX_ADMIN_CODE,
+    testPlatformAccount: process.env.TEST_PLATFORM_ACCOUNT ?? defaultSandboxConfig.TEST_PLATFORM_ACCOUNT,
+    testPlatformPassword:
+      process.env.TEST_PLATFORM_PASSWORD ?? defaultSandboxConfig.TEST_PLATFORM_PASSWORD
+  };
+};
 
 export const withSignature = (payload, options = {}) => {
   const { clientId, key } = getSmartVmCredentials(options);
