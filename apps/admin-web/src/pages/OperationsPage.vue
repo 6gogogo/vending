@@ -6,6 +6,7 @@ import type { DeviceRecord } from "@vm/shared-types";
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime, formatNowInBeijing } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 type DrawerMode = "" | "create-device" | "edit-device";
 
@@ -14,10 +15,12 @@ const sessionStore = useAdminSessionStore();
 const canManageDevices = computed(() => sessionStore.can("devices:manage"));
 const loading = ref(false);
 const lastUpdatedAt = ref("");
+const loadError = ref("");
 const savingDevice = ref(false);
 const removingDeviceCode = ref("");
 const editingDeviceCode = ref("");
 const drawerMode = ref<DrawerMode>("");
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 
 const deviceForm = ref<{
   deviceCode: string;
@@ -43,21 +46,27 @@ const isDeviceMutating = computed(() => savingDevice.value || Boolean(removingDe
 const currentDrawerTitle = computed(() => (drawerMode.value === "create-device" ? "新增柜机" : drawerMode.value === "edit-device" ? "编辑柜机" : ""));
 const sortedDevices = computed(() =>
   [...devices.value].sort((left, right) => {
-    if (left.status === right.status) {
+    const leftOpenable = left.readiness?.canOpen ?? left.status === "online";
+    const rightOpenable = right.readiness?.canOpen ?? right.status === "online";
+
+    if (leftOpenable === rightOpenable) {
       return left.deviceCode.localeCompare(right.deviceCode);
     }
 
-    if (left.status === "online") {
-      return -1;
-    }
-
-    if (right.status === "online") {
-      return 1;
-    }
-
-    return left.deviceCode.localeCompare(right.deviceCode);
+    return leftOpenable ? -1 : 1;
   })
 );
+const deviceCountLabel = computed(() => {
+  if (loadError.value) {
+    return "—（暂不可用）";
+  }
+
+  if (loading.value && !lastUpdatedAt.value) {
+    return "加载中";
+  }
+
+  return String(sortedDevices.value.length);
+});
 
 const totalStock = (device: DeviceRecord) =>
   device.doors.flatMap((door) => door.goods).reduce((sum, goods) => sum + goods.stock, 0);
@@ -66,9 +75,41 @@ const previewGoods = (device: DeviceRecord) => device.doors.flatMap((door) => do
 
 const remainingGoodsCount = (device: DeviceRecord) =>
   Math.max(0, device.doors.flatMap((door) => door.goods).length - 5);
+const showActionMessage = (type: "success" | "error", text: string) => {
+  actionMessage.value = { type, text };
+};
 
-const formatStatus = (status: DeviceRecord["status"]) =>
-  status === "online" ? "在线" : status === "maintenance" ? "维护中" : "离线";
+const getDeviceStatusPresentation = (device: DeviceRecord) => {
+  if (device.readiness?.blocker === "stale") {
+    return {
+      label: "状态已过期",
+      pillClass: "admin-pill--warning",
+      hint: "最近心跳已超过有效时限，请进入详情主动刷新；刷新前不能开门。"
+    };
+  }
+
+  if (device.readiness?.blocker === "maintenance" || device.status === "maintenance") {
+    return {
+      label: "维护中",
+      pillClass: "admin-pill--warning",
+      hint: "设备处于维护状态，解除维护前不能开门。"
+    };
+  }
+
+  if (device.readiness?.blocker === "offline" || device.status === "offline") {
+    return {
+      label: "离线",
+      pillClass: "admin-pill--danger",
+      hint: "设备已明确离线，请先排查连接并刷新状态。"
+    };
+  }
+
+  return {
+    label: "在线",
+    pillClass: "admin-pill--success",
+    hint: "最近心跳在有效时限内。"
+  };
+};
 
 const formatDoorState = (doorState?: "open" | "closed" | "unknown") => {
   if (doorState === "open") {
@@ -89,12 +130,14 @@ const formatGoodsStock = (goods: DeviceRecord["doors"][number]["goods"][number])
       : `${goods.stock}`;
   const tags: string[] = [];
 
-  if (
+  if (goods.thresholdEnabled && goods.lowStockThreshold !== undefined && goods.stock <= 0) {
+    tags.push("缺货");
+  } else if (
     goods.thresholdEnabled &&
     goods.lowStockThreshold !== undefined &&
     goods.stock <= goods.lowStockThreshold
   ) {
-    tags.push("缺货");
+    tags.push("低库存");
   }
 
   if (goods.expiringSoon) {
@@ -123,7 +166,7 @@ const resetDeviceForm = () => {
 
 const openCreateDevice = () => {
   if (!canManageDevices.value) {
-    window.alert("当前账号没有柜机资料管理权限。");
+    showActionMessage("error", "当前账号没有柜机资料管理权限，不能新增柜机。");
     return;
   }
 
@@ -133,7 +176,7 @@ const openCreateDevice = () => {
 
 const openEditDevice = (device: DeviceRecord) => {
   if (!canManageDevices.value) {
-    window.alert("当前账号没有柜机资料管理权限。");
+    showActionMessage("error", "当前账号没有柜机资料管理权限，不能编辑柜机。");
     return;
   }
 
@@ -173,7 +216,7 @@ const parseOptionalNumber = (value: string) => {
 
 const submitDevice = async () => {
   if (!canManageDevices.value) {
-    window.alert("当前账号没有柜机资料管理权限。");
+    showActionMessage("error", "当前账号没有柜机资料管理权限，不能保存柜机。");
     return;
   }
 
@@ -187,22 +230,24 @@ const submitDevice = async () => {
   };
 
   if (!payload.deviceCode || !payload.name || !payload.location) {
-    window.alert("操作失败：请填写柜机编号、柜机名称和柜机位置");
+    showActionMessage("error", "保存柜机前请填写柜机编号、柜机名称和柜机位置。");
     return;
   }
 
   if (Number.isNaN(payload.longitude) || Number.isNaN(payload.latitude)) {
-    window.alert("操作失败：经纬度必须是数字");
+    showActionMessage("error", "经纬度必须是数字；如果暂时没有坐标，可以先留空。");
     return;
   }
 
   savingDevice.value = true;
   try {
+    const wasEditing = isEditing.value;
     await adminApi.upsertDevice(payload);
     closeDeviceDrawer();
     await load();
+    showActionMessage("success", wasEditing ? `柜机“${payload.name}”已保存。` : `柜机“${payload.name}”已新增，已进入柜机监控矩阵。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `保存柜机失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     savingDevice.value = false;
   }
@@ -210,7 +255,7 @@ const submitDevice = async () => {
 
 const removeDevice = async (device: DeviceRecord) => {
   if (!canManageDevices.value) {
-    window.alert("当前账号没有柜机资料管理权限。");
+    showActionMessage("error", "当前账号没有柜机资料管理权限，不能删除柜机。");
     return;
   }
 
@@ -225,8 +270,9 @@ const removeDevice = async (device: DeviceRecord) => {
       closeDeviceDrawer();
     }
     await load();
+    showActionMessage("success", `柜机“${device.name}”已从运行柜机列表移除，历史事件和日志仍保留。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `删除柜机失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     removingDeviceCode.value = "";
   }
@@ -236,7 +282,7 @@ const removeEditingDevice = async () => {
   const device = devices.value.find((item) => item.deviceCode === editingDeviceCode.value);
 
   if (!device) {
-    window.alert("操作失败：未找到当前编辑的柜机");
+    showActionMessage("error", "未找到当前编辑的柜机，请刷新后重新选择。");
     return;
   }
 
@@ -244,10 +290,17 @@ const removeEditingDevice = async () => {
 };
 
 const load = async () => {
+  if (loading.value) {
+    return;
+  }
+
   loading.value = true;
   try {
     devices.value = await adminApi.devices();
     lastUpdatedAt.value = formatNowInBeijing();
+    loadError.value = "";
+  } catch {
+    loadError.value = "暂时无法获取柜机状态，请确认本地服务已启动，然后重试。";
   } finally {
     loading.value = false;
   }
@@ -295,17 +348,36 @@ onUnmounted(() => {
           <h3 class="admin-page__section-title">每列一个柜机，集中查看状态、门状态和货品数量</h3>
         </div>
         <div class="admin-toolbar">
-          <span class="admin-copy">当前柜机数：{{ sortedDevices.length }}</span>
+          <span class="admin-copy">当前柜机数：{{ deviceCountLabel }}</span>
           <span class="admin-copy">自动刷新 8 秒一次</span>
           <span class="admin-copy">最近刷新：{{ lastUpdatedAt || "尚未加载" }}</span>
           <button v-if="canManageDevices" class="admin-button" @click="openCreateDevice">新增柜机</button>
-          <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
+          <button v-if="!loadError" class="admin-button admin-button--ghost" :disabled="loading" @click="load">
             {{ loading ? "刷新中" : "立即刷新" }}
           </button>
         </div>
       </div>
       <div v-if="!canManageDevices" class="admin-note">
         当前账号只能查看柜机状态，新增、编辑或删除柜机需要“柜机资料管理”权限。
+      </div>
+      <div
+        v-if="actionMessage"
+        class="admin-alert"
+        :class="{ 'admin-alert--danger': actionMessage.type === 'error' }"
+        :role="actionMessage.type === 'error' ? 'alert' : 'status'"
+        :aria-live="actionMessage.type === 'error' ? 'assertive' : 'polite'"
+        aria-atomic="true"
+      >
+        {{ actionMessage.text }}
+      </div>
+      <div v-if="loadError" class="admin-alert admin-alert--danger" role="alert" aria-live="assertive" aria-atomic="true">
+        <div>
+          <strong>柜机数据未更新</strong>
+          <p>{{ loadError }}{{ lastUpdatedAt ? `当前仍显示 ${lastUpdatedAt} 的最近成功数据。` : "" }}</p>
+        </div>
+        <button class="admin-button" :disabled="loading" @click="load">
+          {{ loading ? "重试中" : "重新同步" }}
+        </button>
       </div>
     </section>
 
@@ -319,9 +391,9 @@ onUnmounted(() => {
           <div class="admin-inline-links">
             <span
               class="admin-pill"
-              :class="device.status === 'online' ? 'admin-pill--success' : device.status === 'maintenance' ? 'admin-pill--warning' : 'admin-pill--danger'"
+              :class="getDeviceStatusPresentation(device).pillClass"
             >
-              {{ formatStatus(device.status) }}
+              {{ getDeviceStatusPresentation(device).label }}
             </span>
             <span class="admin-pill" :class="device.runtime?.doorState === 'open' ? 'admin-pill--warning' : 'admin-pill--neutral'">
               {{ formatDoorState(device.runtime?.doorState) }}
@@ -335,7 +407,7 @@ onUnmounted(() => {
             <strong class="admin-code">{{ totalStock(device) }}</strong>
           </div>
           <div class="operations-card__row">
-            <span>最近在线</span>
+            <span>最近心跳</span>
             <span class="admin-code">{{ formatDateTime(device.lastSeenAt) }}</span>
           </div>
           <div class="operations-card__row">
@@ -350,6 +422,9 @@ onUnmounted(() => {
 
         <div v-if="hasDoorWarning(device)" class="admin-note operations-card__warning">
           该柜机最近一次开门后未收到“门已打开”确认。
+        </div>
+        <div v-if="!(device.readiness?.canOpen ?? device.status === 'online')" class="admin-note operations-card__warning">
+          {{ getDeviceStatusPresentation(device).hint }}
         </div>
 
         <table class="admin-table operations-card__table">
@@ -383,9 +458,13 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <div v-else class="admin-empty">
-      <div class="admin-empty__title">{{ loading ? "正在加载柜机列表" : "当前没有柜机数据" }}</div>
-      <div class="admin-empty__body">点击右上角“新增柜机”创建柜机，创建后会进入监控矩阵。</div>
+    <div v-else class="admin-empty" :role="loadError ? 'alert' : undefined">
+      <div class="admin-empty__title">
+        {{ loading ? "正在加载柜机列表" : loadError ? "柜机数据暂时不可用" : "当前没有柜机数据" }}
+      </div>
+      <div class="admin-empty__body">
+        {{ loadError ? "这不是“没有柜机”。请使用上方“重新同步”；恢复前不会把失败结果当作空数据。" : "点击右上角“新增柜机”创建柜机，创建后会进入监控矩阵。" }}
+      </div>
     </div>
 
     <div v-if="drawerMode" class="operations-drawer-backdrop" @click.self="requestCloseDeviceDrawer">

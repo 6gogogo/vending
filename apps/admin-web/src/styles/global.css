@@ -88,6 +88,22 @@ textarea:focus-visible {
   padding: 16px;
 }
 
+.admin-skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 8px;
+  left: 8px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--admin-info);
+  transform: translateY(-160%);
+}
+
+.admin-skip-link:focus {
+  transform: translateY(0);
+}
+
 .workbench {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
@@ -329,7 +345,7 @@ textarea:focus-visible {
 }
 
 .admin-button:disabled {
-  opacity: 0.64;
+  opacity: 1;
   cursor: not-allowed;
   box-shadow: none;
 }
@@ -347,6 +363,13 @@ textarea:focus-visible {
 
 .admin-button--danger {
   background: var(--admin-danger);
+}
+
+.admin-button:disabled,
+.admin-button:disabled:hover {
+  border-color: var(--admin-line-strong);
+  background: #e9eef2;
+  color: var(--admin-muted);
 }
 
 .admin-pill {
@@ -536,6 +559,8 @@ textarea:focus-visible {
 .admin-table th:last-child,
 .admin-table td:last-child {
   border-right: 0;
+  min-width: 96px;
+  white-space: nowrap;
 }
 
 .admin-table tbody tr:last-child td {
@@ -618,6 +643,7 @@ input[type="checkbox"] {
 
 .admin-inline-links {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -767,11 +793,31 @@ input[type="checkbox"] {
 
   .workbench__sidebar {
     position: static;
-    grid-template-rows: auto;
+    grid-template:
+      "brand nav" auto
+      "status nav" auto
+      / minmax(190px, 0.7fr) minmax(0, 2fr);
+    align-items: start;
+  }
+
+  .workbench__brand-panel {
+    grid-area: brand;
+  }
+
+  .workbench__nav {
+    grid-area: nav;
+  }
+
+  .workbench__status {
+    grid-area: status;
   }
 
   .workbench__nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workbench__nav-link {
+    min-height: 36px;
   }
 
   .workbench__header,
@@ -806,10 +852,6 @@ input[type="checkbox"] {
     gap: 12px;
   }
 
-  .workbench__nav {
-    grid-template-columns: 1fr;
-  }
-
   .workbench__brand-panel,
   .workbench__status,
   .workbench__header,
@@ -819,6 +861,16 @@ input[type="checkbox"] {
 
   .admin-table {
     min-width: 680px;
+  }
+}
+
+@media (max-width: 560px) {
+  .workbench__sidebar {
+    grid-template:
+      "brand" auto
+      "nav" auto
+      "status" auto
+      / minmax(0, 1fr);
   }
 }
 

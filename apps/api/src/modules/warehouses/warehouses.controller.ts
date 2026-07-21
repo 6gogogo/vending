@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Post, Req, Res, UseGuards } from "@nestjs/common";
+import type { ExpiredBatchDispositionMethod } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import {
@@ -59,6 +60,26 @@ export class WarehousesController {
     @Req() request: { authUser?: { id: string } }
   ) {
     return ok(this.warehousesService.stocktake(body, request.authUser?.id), "操作成功");
+  }
+
+  @Post("expired-batches/:batchId/dispositions")
+  @AllowedBackofficePermissions("warehouse:dispose-expired")
+  disposeExpiredBatch(
+    @Param("batchId") batchId: string,
+    @Body()
+    body: {
+      confirmed: boolean;
+      quantity: number;
+      method: ExpiredBatchDispositionMethod;
+      reason: string;
+      idempotencyKey?: string;
+    },
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(
+      this.warehousesService.disposeExpiredBatch(batchId, body, request.authUser?.id),
+      "过期物资处置完成"
+    );
   }
 
   @Get("stocktakes/:id/export")

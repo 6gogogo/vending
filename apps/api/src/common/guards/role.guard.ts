@@ -77,8 +77,10 @@ export class RoleGuard implements CanActivate {
     const bearerToken = authHeader?.startsWith("Bearer ")
       ? authHeader.slice("Bearer ".length)
       : undefined;
-    const sessionUser = this.store.getSessionUser(bearerToken);
     const session = this.store.getSession(bearerToken);
+    const sessionUser = session?.backofficeRole
+      ? this.store.getBackofficeSessionUser(bearerToken)?.user
+      : this.store.getSessionUser(bearerToken);
 
     if (sessionUser) {
       const requiresBackofficeAccount =

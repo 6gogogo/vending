@@ -14,6 +14,7 @@ export const BACKOFFICE_PERMISSIONS = [
   "warehouse:view",
   "warehouse:transfer",
   "warehouse:stocktake",
+  "warehouse:dispose-expired",
   "warehouse:export",
   "devices:view",
   "devices:manage",
@@ -98,12 +99,38 @@ export type PaymentProvider = "wechat" | "alipay";
 export type PaymentPhase = "pre_open" | "post_settlement";
 export type PaymentStatus = "created" | "pending" | "paid" | "failed" | "closed" | "refunded";
 export type PaymentRefundStatus = "pending" | "success" | "failed";
+export type PaymentRuntimeMode = "auto" | "mock" | "real";
+export type PaymentEffectiveMode = "mock" | "real";
 export type ReservationStatus = "active" | "fulfilled" | "cancelled" | "expired";
 
 export type GoodsCategory = "food" | "drink" | "daily";
 export type InventoryLocationType = "device" | "warehouse";
 
 export type DeviceStatus = "online" | "offline" | "maintenance";
+export type DeviceConnectivity = "online" | "offline" | "stale";
+export type DeviceReadinessBlocker =
+  | "maintenance"
+  | "offline"
+  | "stale"
+  | "door_open"
+  | "door_unconfirmed";
+
+/**
+ * 柜机当前是否适合执行开门操作的服务端派生快照。
+ * `reportedStatus` 保留设备上报值，`connectivity` 单独表达心跳是否陈旧，
+ * 避免把“状态已过期”误显示成设备明确上报的“离线”；物理柜门只有明确
+ * `closed` 时才允许开门，打开、未知或缺失的运行态均保持关闭式阻断。
+ */
+export interface DeviceReadiness {
+  reportedStatus: DeviceStatus;
+  effectiveStatus: DeviceStatus;
+  connectivity: DeviceConnectivity;
+  canOpen: boolean;
+  blocker?: DeviceReadinessBlocker;
+  lastObservedAt: string;
+  staleAfterMs: number;
+  staleAt?: string;
+}
 
 export type CabinetEventStatus =
   | "created"
@@ -257,6 +284,11 @@ export interface MobileSessionSnapshot {
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
     usedCount?: number;
+    remainingDaily?: number;
+    /**
+     * 同时受每日总上限与各商品/品类剩余额度约束后的真实可免费领取总数。
+     */
+    remainingFreeTotal?: number;
     activeWindows?: Array<{
       policyId: string;
       policyName: string;
@@ -377,6 +409,18 @@ export interface PaymentOrderRecord {
   closedAt?: string;
 }
 
+export interface FinancialReconciliationState {
+  state: "scheduled" | "completed" | "manual_review";
+  attemptCount: number;
+  nextAttemptAt?: string;
+  lastAttemptAt?: string;
+  lastCompletedAt?: string;
+  lastResult?: string;
+  lastError?: string;
+  alertedAt?: string;
+  requestedByUserAt?: string;
+}
+
 export interface PaymentRefundRecord {
   id: string;
   paymentOrderId: string;
@@ -386,12 +430,68 @@ export interface PaymentRefundRecord {
   status: PaymentRefundStatus;
   amount: number;
   reason?: string;
+  requestSource?: "backoffice" | "merchant" | "smartvm";
+  businessOrderNo?: string;
+  sourceRequestId?: string;
+  requestedByUserId?: string;
+  requestedByRole?: UserRole;
+  providerOutcome?: "unknown" | "pending" | "success" | "failed";
+  businessApplyState?: "pending" | "completed";
   providerRefundId?: string;
   callbackPayload?: unknown;
   createdAt: string;
   updatedAt: string;
   refundedAt?: string;
   failReason?: string;
+  reconciliation?: FinancialReconciliationState;
+}
+
+export type PaymentRefundRecoverySummary = Pick<
+  PaymentRefundRecord,
+  | "id"
+  | "paymentOrderId"
+  | "refundNo"
+  | "provider"
+  | "status"
+  | "amount"
+  | "sourceRequestId"
+  | "providerOutcome"
+  | "businessApplyState"
+  | "failReason"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+/**
+ * 面向本人移动端的待核对支付单摘要。
+ *
+ * 这里刻意不包含支付参数、渠道交易号、付款身份或原始回调，客户端只需
+ * 用 `id` 发起一次后台安全核对请求，并展示当前金额与状态。
+ */
+export type PaymentOrderRecoverySummary = Pick<
+  PaymentOrderRecord,
+  | "id"
+  | "paymentNo"
+  | "provider"
+  | "phase"
+  | "status"
+  | "amount"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export interface PaymentRecoveryState {
+  pendingPayment?: PaymentOrderRecoverySummary;
+  pendingRefund?: PaymentRefundRecoverySummary;
+}
+
+/** 特殊群体本人请求后台重新核对待确认支付单后的最小回执。 */
+export interface PaymentOrderReconciliationRequestResult {
+  order: PaymentOrderRecoverySummary;
+  reconciliation: Pick<
+    FinancialReconciliationState,
+    "state" | "nextAttemptAt" | "requestedByUserAt"
+  >;
 }
 
 export interface PaymentOrderCreatePayload {
@@ -405,8 +505,7 @@ export interface PaymentOrderCreatePayload {
   deviceCode?: string;
   payerUserId?: string;
   merchantUserId?: string;
-  payerOpenId?: string;
-  payerAlipayUserId?: string;
+  payerIdentityHandle?: string;
   openRequest?: CabinetOpenRequest;
   intentItems?: Array<{
     goodsId: string;
@@ -416,8 +515,13 @@ export interface PaymentOrderCreatePayload {
   }>;
 }
 
+export type PaymentOrderCreateView = Omit<
+  PaymentOrderRecord,
+  "providerTransactionId" | "invokePayload" | "callbackPayload"
+>;
+
 export interface PaymentOrderCreateResult {
-  order: PaymentOrderRecord;
+  order: PaymentOrderCreateView;
   invokePayload: Record<string, unknown>;
 }
 
@@ -430,8 +534,60 @@ export interface PaymentPayerIdentityResult {
   provider: PaymentProvider;
   simulated: boolean;
   simulatedReason?: string;
-  payerOpenId?: string;
-  payerAlipayUserId?: string;
+  payerIdentityHandle?: string;
+  payerIdentityHandleExpiresAt?: string;
+}
+
+export interface PaymentProviderDiagnostics {
+  provider: PaymentProvider;
+  label: string;
+  requestedMode: PaymentRuntimeMode;
+  effectiveMode: PaymentEffectiveMode;
+  readyForRealPayment: boolean;
+  forcedReal: boolean;
+  mockPaymentEnabled: boolean;
+  missingRequiredKeys: string[];
+  blockers: string[];
+  warnings: string[];
+  simulatedReason?: string;
+}
+
+export interface PaymentDiagnosticsResult {
+  generatedAt: string;
+  requestedMode: PaymentRuntimeMode;
+  requestedModeSource: "PAYMENT_MODE" | "PAYMENT_MOCK_ENABLED" | "default";
+  paymentModeRaw?: string;
+  legacyPaymentMockEnabled?: string;
+  summary: {
+    effectiveMode: PaymentEffectiveMode | "mixed";
+    allProvidersReadyForReal: boolean;
+    strictRealEnabled: boolean;
+    mockPaymentEndpointEnabled: boolean;
+  };
+  reconciliation: {
+    automaticEnabled: boolean;
+    singleWriterEnabled: boolean;
+    singleWriterHeld: boolean;
+    pendingPayments: number;
+    pendingSmartVmForwards: number;
+    pendingRefunds: number;
+    dueNow: number;
+    manualReview: number;
+    alerted: number;
+    lastStartedAt?: string;
+    lastSuccessAt?: string;
+    lastErrorAt?: string;
+    lastError?: string;
+    lastSummary?: {
+      scanned: number;
+      attempted: number;
+      completed: number;
+      pending: number;
+      failed: number;
+    };
+  };
+  providers: PaymentProviderDiagnostics[];
+  warnings: string[];
 }
 
 export type MobileLoginResult =
@@ -583,6 +739,8 @@ export interface DeviceRuntimeState {
 
 export interface DeviceRecord {
   deviceCode: string;
+  /** 仅供本地联调夹具使用；真实设备不得通过模拟接口覆盖。 */
+  isMock?: boolean;
   name: string;
   location: string;
   address?: string;
@@ -590,6 +748,7 @@ export interface DeviceRecord {
   latitude?: number;
   distanceMeters?: number;
   status: DeviceStatus;
+  readiness?: DeviceReadiness;
   doors: DeviceDoor[];
   lastSeenAt: string;
   runtime?: DeviceRuntimeState;
@@ -610,7 +769,10 @@ export interface CabinetOpenRequest {
   deviceCode: string;
   doorNum?: string;
   reservationId?: string;
-  payStyle?: string;
+  /**
+   * 服务端预结算报价的一次性核销标识。收费开柜必须携带，避免确认后价格或额度漂移。
+   */
+  quoteId?: string;
   category?: GoodsCategory;
   openMode?: "manual" | "scan";
   operationType?: CabinetOpenPurpose;
@@ -696,6 +858,8 @@ export interface CabinetPreSettlement {
 export interface CabinetOpenPreviewResult {
   deviceCode: string;
   doorNum: string;
+  quoteId?: string;
+  quoteExpiresAt?: string;
   role: UserRole;
   operationType?: CabinetOpenPurpose;
   hasInboundGoods?: boolean;
@@ -725,11 +889,22 @@ export interface CabinetSettlementComparison {
   settledItems: CabinetSettlementComparisonItem[];
   missingItems: CabinetSettlementComparisonItem[];
   extraItems: CabinetSettlementComparisonItem[];
+  priceMismatches?: Array<{
+    goodsId: string;
+    goodsName: string;
+    quantity: number;
+    quotedUnitPrice: number;
+    platformUnitPrice: number;
+  }>;
 }
 
 export interface CabinetEventRecord {
   eventId: string;
   orderNo: string;
+  /**
+   * 开柜报价编号的 SHA-256，仅用于识别同一开柜命令重放；不得保存原始 quoteId。
+   */
+  openQuoteHash?: string;
   userId: string;
   phone: string;
   role: UserRole;
@@ -740,6 +915,10 @@ export interface CabinetEventRecord {
   hasInboundGoods?: boolean;
   openReason?: string;
   status: CabinetEventStatus;
+  /**
+   * 与账务状态分离的可信门状态；只有 CLOSED 才能解除跨柜机的用户物理占用。
+   */
+  physicalDoorState?: "unknown" | "open" | "closed";
   createdAt: string;
   updatedAt: string;
   amount: number;
@@ -761,6 +940,7 @@ export interface CabinetEventRecord {
   paymentNotifyMessage?: string;
   paymentNotifiedAt?: string;
   paymentTransactionId?: string;
+  paymentRecovery?: PaymentRecoveryState;
   adjustments?: CabinetAdjustmentRecord[];
   adjustmentOrderNo?: string;
   adjustmentNoticeUrl?: string;
@@ -800,6 +980,10 @@ export interface CabinetReservationRecord {
   deviceCode: string;
   doorNum: string;
   status: ReservationStatus;
+  /** 预约只锁定货品与数量，不承诺某个实物批次。 */
+  inventoryReservationMode: "goods_quantity";
+  /** 实际可用批次在开柜前按当时有效库存重新分配。 */
+  batchAllocationTiming: "on_open";
   items: CabinetIntentItem[];
   reservedAt: string;
   expiresAt: string;
@@ -841,6 +1025,7 @@ export interface CabinetAdjustmentRecord {
   paymentNotifyMessage?: string;
   paymentNotifiedAt?: string;
   paymentTransactionId?: string;
+  paymentRecovery?: PaymentRecoveryState;
   refundNo?: string;
   refundTransactionId?: string;
   refundedAt?: string;
@@ -859,6 +1044,11 @@ export interface InventoryMovement {
   goodsName: string;
   category: GoodsCategory;
   quantity: number;
+  /**
+   * 本次流水实际占用或恢复的免费额度数量。
+   * 旧流水未保存该字段时，额度统计按 `quantity` 兼容处理。
+   */
+  quotaQuantity?: number;
   unitPrice: number;
   type: InventoryMovementType;
   happenedAt: string;
@@ -1176,12 +1366,45 @@ export interface StocktakeRecord {
   items: StocktakeItem[];
 }
 
+export type ExpiredBatchDispositionMethod = "destroy" | "return_supplier" | "other";
+
+export interface ExpiredBatchDispositionRecord {
+  id: string;
+  movementId: string;
+  idempotencyKey?: string;
+  batchId: string;
+  goodsId: string;
+  goodsName: string;
+  locationType: InventoryLocationType;
+  locationCode: string;
+  locationName: string;
+  expiresAt: string;
+  quantity: number;
+  remainingQuantity: number;
+  method: ExpiredBatchDispositionMethod;
+  reason: string;
+  disposedAt: string;
+  actorUserId?: string;
+  actorUserName?: string;
+}
+
 export interface WarehouseInventorySnapshot {
   warehouse: WarehouseRecord;
+  /** @deprecated 使用 physicalTotalStock。 */
   totalStock: number;
+  /** 下列三项均只统计 warehouse 指向的当前仓库。 */
+  physicalTotalStock: number;
+  transferableTotalStock: number;
+  expiredTotalStock: number;
   goodsKinds: number;
   items: WarehouseInventoryItem[];
+  /** 批次数组覆盖仓库和柜机位置，用于批次级调拨选择。 */
+  physicalBatches: GoodsBatchRecord[];
+  transferableBatches: GoodsBatchRecord[];
+  expiredBatches: GoodsBatchRecord[];
+  /** @deprecated 名称会误导为可调拨库存；兼容旧客户端，内容等同 physicalBatches。 */
   availableBatches: GoodsBatchRecord[];
+  recentExpiredDispositions: ExpiredBatchDispositionRecord[];
   transfers: InventoryTransferRecord[];
   stocktakes: StocktakeRecord[];
   recentLogs: OperationLogRecord[];
@@ -1449,6 +1672,12 @@ export interface SystemSettingOption {
   value: string;
 }
 
+export interface SystemSettingNumberConstraints {
+  min?: number;
+  max?: number;
+  integerOnly?: boolean;
+}
+
 export interface SystemSettingEntry {
   key: string;
   value: string;
@@ -1458,6 +1687,7 @@ export interface SystemSettingEntry {
   description: string;
   inputType: SystemSettingInputType;
   options?: SystemSettingOption[];
+  numberConstraints?: SystemSettingNumberConstraints;
   sensitive: boolean;
   masked?: boolean;
   required: boolean;
@@ -1835,7 +2065,7 @@ export const seedDevices: DeviceRecord[] = [
             name: "三明治",
             category: "food",
             price: 0,
-            imageUrl: "https://dummyimage.com/160x160/dae4ff/0b1220.png",
+            imageUrl: "",
             stock: 3,
             expiresAt: "2026-04-09T08:00:00.000Z"
           },
@@ -1845,7 +2075,7 @@ export const seedDevices: DeviceRecord[] = [
             name: "牛奶",
             category: "drink",
             price: 0,
-            imageUrl: "https://dummyimage.com/160x160/c8f7e7/0b1220.png",
+            imageUrl: "",
             stock: 1
           }
         ]
@@ -1872,7 +2102,7 @@ export const seedDevices: DeviceRecord[] = [
             name: "方便面",
             category: "food",
             price: 0,
-            imageUrl: "https://dummyimage.com/160x160/f8d9c8/0b1220.png",
+            imageUrl: "",
             stock: 0
           },
           {
@@ -1881,7 +2111,7 @@ export const seedDevices: DeviceRecord[] = [
             name: "牙刷",
             category: "daily",
             price: 0,
-            imageUrl: "https://dummyimage.com/160x160/f7f3b8/0b1220.png",
+            imageUrl: "",
             stock: 6
           }
         ]
@@ -1899,7 +2129,7 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     category: "food",
     categoryName: "鲜食面包",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/dae4ff/0b1220.png",
+    imageUrl: "",
     packageForm: "盒装",
     specification: "180g",
     manufacturer: "社区鲜食工坊",
@@ -1915,7 +2145,7 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     category: "drink",
     categoryName: "乳饮",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/c8f7e7/0b1220.png",
+    imageUrl: "",
     packageForm: "盒装",
     specification: "250ml",
     manufacturer: "社区乳品合作社",
@@ -1931,7 +2161,7 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     category: "food",
     categoryName: "方便食品",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/f8d9c8/0b1220.png",
+    imageUrl: "",
     packageForm: "桶装",
     specification: "103g",
     manufacturer: "民生食品厂",
@@ -1947,7 +2177,7 @@ export const seedGoodsCatalog: GoodsCatalogItem[] = [
     category: "daily",
     categoryName: "洗护清洁",
     price: 0,
-    imageUrl: "https://dummyimage.com/160x160/f7f3b8/0b1220.png",
+    imageUrl: "",
     packageForm: "袋装",
     specification: "1 支",
     manufacturer: "公益日用品厂",
@@ -2134,7 +2364,7 @@ export const seedMerchantGoodsTemplates: MerchantGoodsTemplate[] = [
     manufacturer: "社区鲜食工坊",
     defaultQuantity: 6,
     defaultShelfLifeDays: 2,
-    imageUrl: "https://dummyimage.com/160x160/dae4ff/0b1220.png",
+    imageUrl: "",
     status: "active",
     createdAt: "2026-04-08T00:05:00.000Z",
     updatedAt: "2026-04-08T00:05:00.000Z"

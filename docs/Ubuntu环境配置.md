@@ -48,7 +48,7 @@ npm -v
 ```bash
 git clone <你的仓库地址>
 cd vending-machine
-npm install
+npm ci
 ```
 
 如果仓库目录名不是 `vending-machine`，把上面最后一行改成你的实际目录。
@@ -65,8 +65,11 @@ cp apps/api/.env.example apps/api/.env
 
 ```env
 PORT=4000
+API_HOST=127.0.0.1
 API_DATA_FILE=runtime-data/store.json
 UPLOAD_DIR=runtime-uploads
+SYSTEM_LOG_FILE=runtime-data/system-audit.ndjson
+API_BACKUP_DIR=runtime-backups
 BUSINESS_TIMEZONE_OFFSET_HOURS=8
 BUSINESS_DAY_START_HOUR=4
 PUBLIC_BASE_URL=http://127.0.0.1:4000
@@ -115,7 +118,7 @@ mkdir -p apps/api/runtime-uploads
 需要把后端恢复成默认测试数据时，运行：
 
 ```bash
-npm run init:api-data
+npm run init:api-data -- --confirm-reset
 ```
 
 默认持久化文件会写到：
@@ -137,6 +140,15 @@ npm run dev:api
 ```bash
 npm run dev:api:once
 ```
+
+构建产物启动（部署环境使用，并先完成构建）：
+
+```bash
+npm run build --workspace @vm/api
+NODE_ENV=production npm run start:api:built
+```
+
+生产模式会严格校验 HTTPS 公网地址、可信 CORS、真实短信、SmartVM、真实支付和默认后台密码；配置不完整时拒绝启动。
 
 如果 `4000` 端口已被占用，可以临时改端口：
 
@@ -228,7 +240,7 @@ apps/mobile/.env.local
 ## 12. 生产前最低检查
 
 - 后端 `.env` 已填完整
-- `npm run init:api-data` 已按需执行
+- `npm run init:api-data -- --confirm-reset` 已按需执行
 - API 数据目录与上传目录可写
 - `npm run dev:api:once` 或正式进程可正常启动
 - `npm run build --workspace @vm/admin-web` 通过

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 
 import type { AppLoginResult } from "@vm/shared-types";
@@ -11,6 +11,7 @@ import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?r
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
+import { syncNativeInputAccessibility } from "../../utils/native-input-accessibility";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
@@ -23,8 +24,25 @@ const loginState = ref<AppLoginResult | null>(null);
 const rejectedReason = ref("");
 const hasAcceptedDisclaimer = ref(false);
 const showDisclaimer = ref(false);
+const disclaimerReadToEnd = ref(false);
+const disclaimerDialog = ref<HTMLElement | { $el?: HTMLElement }>();
+let disclaimerPreviousFocus: HTMLElement | undefined;
 const showVerificationPreview =
   import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
+
+const syncLoginInputAccessibility = async () => {
+  await nextTick();
+  syncNativeInputAccessibility("app-login-phone", {
+    labelId: "app-login-phone-label",
+    name: "phone",
+    autocomplete: "tel"
+  });
+  syncNativeInputAccessibility("app-login-code", {
+    labelId: "app-login-code-label",
+    name: "verification-code",
+    autocomplete: "one-time-code"
+  });
+};
 
 const helper = reactive({
   title: "",
@@ -197,7 +215,7 @@ const ensureDisclaimerAccepted = () => {
     return true;
   }
 
-  showDisclaimer.value = true;
+  void openDisclaimer();
   uni.showModal({
     title: "请先确认使用须知",
     content: "领取和开柜会涉及身份校验、柜机识别和可能的支付结算。请阅读并同意免责声明后再获取验证码。",
@@ -207,22 +225,68 @@ const ensureDisclaimerAccepted = () => {
   return false;
 };
 
-const openDisclaimer = () => {
-  showDisclaimer.value = true;
+const resolveDisclaimerElement = () => {
+  const target = disclaimerDialog.value;
+
+  if (typeof HTMLElement !== "undefined" && target instanceof HTMLElement) {
+    return target;
+  }
+
+  return target?.$el;
 };
 
-const acceptDisclaimer = () => {
+const restoreDisclaimerFocus = async () => {
+  const target = disclaimerPreviousFocus;
+  disclaimerPreviousFocus = undefined;
+  await nextTick();
+
+  if (target?.isConnected) {
+    target.focus();
+  }
+};
+
+const openDisclaimer = async () => {
+  disclaimerPreviousFocus = typeof document !== "undefined" &&
+    typeof HTMLElement !== "undefined" &&
+    document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : undefined;
+  showDisclaimer.value = true;
+  await nextTick();
+  resolveDisclaimerElement()?.focus();
+};
+
+const markDisclaimerRead = () => {
+  disclaimerReadToEnd.value = true;
+};
+
+const acceptDisclaimer = async () => {
+  if (!disclaimerReadToEnd.value) {
+    uni.showToast({
+      title: "请先阅读到声明末尾",
+      icon: "none"
+    });
+    return;
+  }
+
   hasAcceptedDisclaimer.value = true;
   showDisclaimer.value = false;
+  await restoreDisclaimerFocus();
 };
 
 const rejectDisclaimer = () => {
   showDisclaimer.value = false;
+  disclaimerPreviousFocus = undefined;
   uni.navigateBack({
     fail: () => {
       uni.redirectTo({ url: "/pages/common/login" });
     }
   });
+};
+
+const closeDisclaimer = async () => {
+  showDisclaimer.value = false;
+  await restoreDisclaimerFocus();
 };
 
 onLoad((query) => {
@@ -233,6 +297,10 @@ onLoad((query) => {
 
 onShow(() => {
   bootstrap();
+});
+
+onMounted(() => {
+  void syncLoginInputAccessibility();
 });
 </script>
 
@@ -261,16 +329,18 @@ onShow(() => {
         </view>
 
         <view class="vm-field">
-          <text class="vm-field__label">手机号</text>
+          <text id="app-login-phone-label" class="vm-field__label">手机号</text>
           <view class="vm-field-shell">
             <MenuIcon name="phone" size="sm" tone="neutral" />
             <input
               v-model="phone"
+              id="app-login-phone"
               class="vm-field-shell__input"
               type="tel"
               inputmode="numeric"
               maxlength="11"
               name="phone"
+              autocomplete="tel"
               aria-label="手机号"
               placeholder="请输入手机号"
             />
@@ -279,18 +349,20 @@ onShow(() => {
 
         <view class="vm-field">
           <view class="field-header">
-            <text class="vm-field__label">验证码</text>
+            <text id="app-login-code-label" class="vm-field__label">验证码</text>
             <text class="vm-field__helper">先同意免责声明再发送</text>
           </view>
           <view class="vm-field-shell vm-field-shell--stacked-action">
             <MenuIcon name="code" size="sm" tone="neutral" />
             <input
               v-model="code"
+              id="app-login-code"
               class="vm-field-shell__input"
               type="tel"
               inputmode="numeric"
               maxlength="6"
               name="verification-code"
+              autocomplete="one-time-code"
               aria-label="验证码"
               placeholder="请输入验证码"
             />
@@ -301,7 +373,7 @@ onShow(() => {
               @tap="sendCode"
               aria-label="获取验证码"
             >
-              发送
+              获取验证码
             </button>
           </view>
         </view>
@@ -347,13 +419,28 @@ onShow(() => {
     </GlassCard>
 
     <view v-if="showDisclaimer" class="disclaimer-mask">
-      <view class="disclaimer-dialog">
+      <view
+        ref="disclaimerDialog"
+        class="disclaimer-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="disclaimer-dialog-title"
+        aria-describedby="disclaimer-dialog-hint disclaimer-dialog-progress"
+        tabindex="-1"
+        @keydown.esc.stop.prevent="closeDisclaimer"
+      >
         <view class="disclaimer-dialog__header">
-          <text class="disclaimer-dialog__title">智能货柜用户免责声明</text>
-          <text class="disclaimer-dialog__hint">请阅读完整内容后继续使用</text>
+          <text id="disclaimer-dialog-title" class="disclaimer-dialog__title">智能货柜用户免责声明</text>
+          <text id="disclaimer-dialog-hint" class="disclaimer-dialog__hint">请阅读完整内容后继续使用</text>
         </view>
 
-        <scroll-view class="disclaimer-dialog__body" scroll-y>
+        <scroll-view
+          class="disclaimer-dialog__body"
+          scroll-y
+          :lower-threshold="24"
+          aria-label="免责声明正文"
+          @scrolltolower="markDisclaimerRead"
+        >
           <text
             v-for="(line, index) in disclaimerLines"
             :key="`${index}-${line}`"
@@ -367,9 +454,19 @@ onShow(() => {
           </text>
         </scroll-view>
 
+        <text id="disclaimer-dialog-progress" class="disclaimer-dialog__progress" aria-live="polite">
+          {{ disclaimerReadToEnd ? "已阅读到声明末尾，可以选择同意并继续" : "请继续向下阅读，读到末尾后才能同意" }}
+        </text>
         <view class="disclaimer-dialog__actions">
           <button class="vm-button vm-button--ghost" @tap="rejectDisclaimer">不同意</button>
-          <button class="vm-button" @tap="acceptDisclaimer">同意并继续</button>
+          <button
+            class="vm-button"
+            :disabled="!disclaimerReadToEnd"
+            :aria-disabled="String(!disclaimerReadToEnd)"
+            @tap="acceptDisclaimer"
+          >
+            {{ disclaimerReadToEnd ? "同意并继续" : "请先读完" }}
+          </button>
         </view>
       </view>
     </view>
@@ -552,6 +649,9 @@ onShow(() => {
 }
 
 .disclaimer-dialog__body {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   height: 58vh;
   padding: 24rpx 30rpx;
 }
@@ -583,6 +683,14 @@ onShow(() => {
   padding: 22rpx 30rpx 28rpx;
   border-top: 1rpx solid var(--vm-line);
   background: var(--vm-surface-soft);
+}
+
+.disclaimer-dialog__progress {
+  display: block;
+  padding: 14rpx 30rpx 0;
+  color: var(--vm-muted);
+  font-size: 22rpx;
+  line-height: 1.5;
 }
 </style>
 

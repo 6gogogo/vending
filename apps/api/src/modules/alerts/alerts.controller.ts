@@ -56,7 +56,7 @@ export class AlertsController {
       targetUserId?: string;
       feedbackType?: "机器故障" | "服务问题" | "其他";
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string }; ip?: string }
   ) {
     const token = authorization?.startsWith("Bearer ")
       ? authorization.slice("Bearer ".length)
@@ -66,7 +66,8 @@ export class AlertsController {
     return ok(
       this.alertsService.createFeedbackTask({
         ...body,
-        targetUserId: sessionUser?.id ?? request.authUser?.id
+        targetUserId: sessionUser?.id ?? request.authUser?.id,
+        sourceKey: sessionUser?.id ?? request.authUser?.id ?? request.ip ?? "anonymous"
       }),
       "操作成功"
     );

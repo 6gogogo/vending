@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
-import type { DeviceStatus, DeviceRecord, GoodsCategory, InventoryMovement } from "@vm/shared-types";
+import type { DeviceRecord, GoodsCategory, InventoryMovement } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -12,7 +12,9 @@ import { appCopy } from "../../constants/copy";
 import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
-import { getErrorMessage } from "../../utils/error-message";
+import { formatBeijingDateTime, formatBeijingMonthDay } from "../../utils/datetime";
+import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
+import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 import { getReceivableDeviceGoods } from "../../utils/receivable-goods";
 import { scanDeviceCode } from "../../utils/scan-device";
 
@@ -21,20 +23,18 @@ const uiPreferencesStore = useUiPreferencesStore();
 const devices = ref<DeviceRecord[]>([]);
 const records = ref<InventoryMovement[]>([]);
 const loading = ref(false);
+const loadError = ref("");
+const hasLoadedData = ref(false);
+const loadErrorBody = computed(() =>
+  appendErrorContext(
+    loadError.value,
+    hasLoadedData.value
+      ? "下方保留最近一次成功数据供参考，但开柜入口已暂停。"
+      : "这不是“无额度”或“无柜机”，恢复前不会显示空结果。"
+  )
+);
 
 uiPreferencesStore.hydrate();
-
-const statusLabelMap: Record<DeviceStatus, string> = {
-  online: "在线",
-  offline: "离线",
-  maintenance: "维护中"
-};
-
-const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
-  online: "success",
-  offline: "danger",
-  maintenance: "warning"
-};
 
 const permissionList = computed(() =>
   Object.entries(sessionStore.quota?.remainingByGoods ?? {}).map(([goodsId, quantity]) => {
@@ -57,7 +57,13 @@ const serviceWindows = computed(() =>
     (window) => `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`
   )
 );
-const totalRemaining = computed(() => permissionList.value.reduce((sum, item) => sum + item.quantity, 0));
+const totalRemaining = computed(() => {
+  const visibleGoodsTotal = permissionList.value.reduce((sum, item) => sum + item.quantity, 0);
+  return (
+    sessionStore.quota?.remainingFreeTotal ??
+    Math.min(sessionStore.quota?.remainingDaily ?? visibleGoodsTotal, visibleGoodsTotal)
+  );
+});
 const usedCount = computed(() => sessionStore.quota?.usedCount ?? 0);
 const categoryOrder: Array<{ key: GoodsCategory; label: string; tone: "drink" | "food" | "daily" }> = [
   { key: "drink", label: "饮品", tone: "drink" },
@@ -78,6 +84,10 @@ const categorySummaries = computed(() =>
 );
 
 const guidanceText = computed(() => {
+  if (loadError.value) {
+    return "资格和柜机状态尚未重新确认，请先重试同步；恢复前不要发起开柜。";
+  }
+
   if (permissionList.value.length) {
     return "先确认今天还能领什么，再去最近的柜机操作；如果机器异常，可直接反馈给工作人员。";
   }
@@ -95,7 +105,11 @@ const deviceEntries = computed(() =>
 const visibleDeviceEntries = computed(() =>
   accessibilityEnabled.value ? deviceEntries.value.filter((entry) => entry.visibleGoods.length) : deviceEntries.value
 );
-const firstAvailableEntry = computed(() => visibleDeviceEntries.value.find((entry) => entry.visibleGoods.length));
+const firstAvailableEntry = computed(() =>
+  loadError.value
+    ? undefined
+    : visibleDeviceEntries.value.find((entry) => entry.visibleGoods.length && canOpenDevice(entry.device))
+);
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -118,9 +132,12 @@ const load = async () => {
     devices.value = deviceResponse;
     records.value = recordResponse;
     sessionStore.setQuota(quotaResponse);
+    hasLoadedData.value = true;
+    loadError.value = "";
   } catch (error) {
+    loadError.value = getErrorMessage(error);
     uni.showToast({
-      title: getErrorMessage(error),
+      title: loadError.value,
       icon: "none"
     });
   } finally {
@@ -128,9 +145,34 @@ const load = async () => {
   }
 };
 
-const openDeviceDetail = (deviceCode: string) => {
+const showDeviceUnavailable = (device: DeviceRecord) => {
+  const presentation = getDeviceStatusPresentation(device);
+  uni.showModal({
+    title: presentation.label,
+    content: presentation.actionHint,
+    confirmText: "我知道了",
+    showCancel: false
+  });
+};
+
+const openDeviceDetail = (device: DeviceRecord) => {
+  if (loadError.value) {
+    uni.showModal({
+      title: "资格与柜机状态尚未确认",
+      content: "上次同步失败。请先重新加载，确认资格、库存和设备状态后再开柜。",
+      confirmText: "我知道了",
+      showCancel: false
+    });
+    return;
+  }
+
+  if (!canOpenDevice(device)) {
+    showDeviceUnavailable(device);
+    return;
+  }
+
   uni.navigateTo({
-    url: `/pages/special/device-detail?deviceCode=${deviceCode}`
+    url: `/pages/special/device-detail?deviceCode=${device.deviceCode}`
   });
 };
 
@@ -153,6 +195,16 @@ const goFeedback = (deviceCode?: string) => {
 };
 
 const scanAndOpen = async () => {
+  if (loadError.value) {
+    uni.showModal({
+      title: "暂不能扫码开柜",
+      content: "资格和柜机状态同步失败，请先点击“重新同步”。",
+      confirmText: "我知道了",
+      showCancel: false
+    });
+    return;
+  }
+
   try {
     const scannedDeviceCode = await scanDeviceCode();
 
@@ -164,7 +216,13 @@ const scanAndOpen = async () => {
       return;
     }
 
-    await mobileApi.getDevice(scannedDeviceCode);
+    const device = await mobileApi.getDevice(scannedDeviceCode);
+
+    if (!canOpenDevice(device)) {
+      showDeviceUnavailable(device);
+      return;
+    }
+
     uni.navigateTo({
       url: `/pages/special/device-detail?deviceCode=${encodeURIComponent(scannedDeviceCode)}&scan=1`
     });
@@ -176,8 +234,6 @@ const scanAndOpen = async () => {
   }
 };
 
-const formatDateTime = (value: string) => value.slice(0, 16).replace("T", " ");
-
 onShow(() => {
   load();
 });
@@ -187,16 +243,28 @@ onShow(() => {
   <MobileShell
     eyebrow="用户"
     :title="`${sessionStore.user?.name ?? '访客'}，您好`"
-    :subtitle="accessibilityEnabled ? '显示柜机名称、地点和可选货物。' : appCopy.specialWelcome"
+    :subtitle="accessibilityEnabled ? '显示柜机名称、地点和可选物资。' : appCopy.specialWelcome"
   >
-    <view v-if="!accessibilityEnabled" class="special-dashboard">
+    <GlassCard v-if="loadError" tone="warning">
+      <view class="sync-error" role="alert" aria-live="assertive">
+        <text class="sync-error__title">资格与柜机数据未更新</text>
+        <text class="sync-error__body">
+          {{ loadErrorBody }}
+        </text>
+        <button class="vm-button" :disabled="loading" :loading="loading" @tap="load">
+          {{ loading ? "同步中" : "重新同步" }}
+        </button>
+      </view>
+    </GlassCard>
+
+    <view v-if="!accessibilityEnabled && (!loadError || hasLoadedData)" class="special-dashboard">
       <view class="special-hero">
         <view class="special-hero__copy">
           <view>
             <text class="special-hero__hello">您好，{{ sessionStore.user?.name ?? "访客" }}</text>
             <text class="special-hero__subtitle">小柜大爱 · 与爱同行</text>
           </view>
-          <text class="special-hero__badge">{{ totalRemaining > 0 ? "已认证" : "待刷新" }}</text>
+          <text class="special-hero__badge">{{ loadError ? "待重新确认" : totalRemaining > 0 ? "已认证" : "待刷新" }}</text>
         </view>
 
         <view class="today-card">
@@ -217,7 +285,7 @@ onShow(() => {
             </view>
             <view class="today-card__metric">
               <text class="today-card__number vm-number">{{ usedCount }}</text>
-              <text class="today-card__label">已领取</text>
+              <text class="today-card__label">已用免费额度</text>
             </view>
             <view class="today-card__metric">
               <text class="today-card__number vm-number">{{ permissionList.length }}</text>
@@ -245,7 +313,7 @@ onShow(() => {
       </view>
 
       <view class="special-action-stack">
-        <button class="special-scan-button" @tap="scanAndOpen">
+        <button class="special-scan-button" :disabled="Boolean(loadError)" @tap="scanAndOpen">
           <MenuIcon name="scan" size="sm" tone="contrast" />
           <text>扫码开柜</text>
         </button>
@@ -256,7 +324,7 @@ onShow(() => {
         <text class="special-action-stack__hint">领取时请及时关门，传递爱心</text>
       </view>
 
-      <button v-if="firstAvailableEntry" class="nearest-card" @tap="openDeviceDetail(firstAvailableEntry.device.deviceCode)">
+      <button v-if="firstAvailableEntry" class="nearest-card" @tap="openDeviceDetail(firstAvailableEntry.device)">
         <view class="nearest-card__media" aria-hidden="true">
           <view class="nearest-card__machine" />
         </view>
@@ -291,11 +359,11 @@ onShow(() => {
       </GlassCard>
     </view>
 
-    <view class="vm-section">
+    <view v-if="!loadError || hasLoadedData" class="vm-section">
       <view class="section-heading">
         <text class="section-heading__title">附近柜机</text>
         <text class="vm-subtitle">
-          {{ accessibilityEnabled ? "仅保留柜机名称、地点和可选货物。" : "可先查看位置、库存和免费额度，再决定前往哪一台柜机。" }}
+          {{ accessibilityEnabled ? "保留柜机名称、地点、柜内数量和今日免费数量，便于选择。" : "可先查看位置、库存和免费额度，再决定前往哪一台柜机。" }}
         </text>
       </view>
 
@@ -307,14 +375,17 @@ onShow(() => {
                 <text class="device-header__title">{{ entry.device.name }}</text>
                 <text class="vm-subtitle">{{ entry.device.location }}</text>
               </view>
-              <text v-if="!accessibilityEnabled" class="vm-status" :class="`vm-status--${statusToneMap[entry.device.status]}`">
-                {{ statusLabelMap[entry.device.status] }}
+              <text class="vm-status" :class="`vm-status--${getDeviceStatusPresentation(entry.device).tone}`">
+                {{ getDeviceStatusPresentation(entry.device).label }}
               </text>
             </view>
 
-            <view v-if="!accessibilityEnabled" class="device-meta">
+            <view class="device-meta">
               <text>柜机编号 {{ entry.device.deviceCode }}</text>
-              <text>最近在线 {{ formatDateTime(entry.device.lastSeenAt) }}</text>
+              <text>最近在线 {{ formatBeijingDateTime(entry.device.lastSeenAt) }}</text>
+              <text v-if="!canOpenDevice(entry.device)" class="device-open-hint" role="alert">
+                {{ getDeviceStatusPresentation(entry.device).actionHint }}
+              </text>
             </view>
 
             <view v-if="entry.visibleGoods.length" class="goods-list">
@@ -324,23 +395,25 @@ onShow(() => {
                   <text class="goods-item__meta">
                     {{
                       accessibilityEnabled
-                        ? `今日免费 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
+                        ? `柜内 ${goods.stock ?? 0} 件 · 今日免费 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
                         : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 免费 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
                     }}
                   </text>
                 </view>
-                <text v-if="!accessibilityEnabled && goods.expiresAt" class="goods-item__tag">至 {{ goods.expiresAt.slice(5, 10) }}</text>
+                <text v-if="goods.expiresAt" class="goods-item__tag">至 {{ formatBeijingMonthDay(goods.expiresAt) }}</text>
               </view>
             </view>
             <EmptyState
               v-else
-              title="当前没有可选货物"
-              :description="accessibilityEnabled ? '' : '这台柜机目前没有柜内有库存的可选货品。'"
+              title="当前没有可选物资"
+              :description="accessibilityEnabled ? '' : '这台柜机目前没有柜内有库存的可选物资。'"
             />
 
             <view class="action-grid" :class="{ 'action-grid--single': accessibilityEnabled }">
-              <button class="vm-button" @tap="openDeviceDetail(entry.device.deviceCode)">选择货品并取货</button>
-              <button v-if="!accessibilityEnabled" class="vm-button vm-button--ghost" @tap="goFeedback(entry.device.deviceCode)">
+              <button class="vm-button" :disabled="Boolean(loadError) || !canOpenDevice(entry.device)" @tap="openDeviceDetail(entry.device)">
+                {{ loadError ? "状态待重新确认" : canOpenDevice(entry.device) ? "选择物资并取货" : "暂不可开柜" }}
+              </button>
+              <button class="vm-button vm-button--ghost" @tap="goFeedback(entry.device.deviceCode)">
                 反馈这台柜机
               </button>
             </view>
@@ -349,13 +422,13 @@ onShow(() => {
       </view>
       <GlassCard v-else tone="quiet">
         <EmptyState
-          :title="loading ? '正在加载柜机信息' : accessibilityEnabled ? '附近暂无可选货物' : '附近暂无可用柜机'"
+          :title="loading ? '正在加载柜机信息' : accessibilityEnabled ? '附近暂无可选物资' : '附近暂无可用柜机'"
           :description="loading ? '请稍候，系统正在同步设备状态。' : accessibilityEnabled ? '稍后再来查看，系统会按库存自动刷新。' : '请联系工作人员确认设备接入状态。'"
         />
       </GlassCard>
     </view>
 
-    <GlassCard v-if="!accessibilityEnabled" tone="quiet">
+    <GlassCard v-if="!accessibilityEnabled && (!loadError || hasLoadedData)" tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">最近服务记录</text>
@@ -366,7 +439,7 @@ onShow(() => {
           <view v-for="record in records.slice(0, 3)" :key="record.id" class="permission-item">
             <view class="permission-item__main">
               <text class="permission-item__title">{{ record.goodsName }}</text>
-              <text class="permission-item__meta">{{ record.deviceCode }} · {{ formatDateTime(record.happenedAt) }}</text>
+              <text class="permission-item__meta">{{ record.deviceCode }} · {{ formatBeijingDateTime(record.happenedAt) }}</text>
             </view>
             <text class="vm-status vm-status--success">领取 {{ record.quantity }} 件</text>
           </view>
@@ -404,6 +477,28 @@ onShow(() => {
   font-size: 22rpx;
   color: var(--vm-text-soft);
   line-height: 1.6;
+}
+
+.device-open-hint {
+  color: var(--vm-warning);
+  font-weight: 700;
+}
+
+.sync-error {
+  display: grid;
+  gap: 16rpx;
+}
+
+.sync-error__title {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: var(--vm-danger);
+}
+
+.sync-error__body {
+  font-size: 25rpx;
+  line-height: 1.65;
+  color: var(--vm-text);
 }
 
 .permission-list,
@@ -614,7 +709,7 @@ onShow(() => {
 }
 
 .special-scan-button {
-  background: linear-gradient(135deg, var(--vm-warning), #ff9a33);
+  background: linear-gradient(135deg, var(--vm-warning), #a95500);
   color: #ffffff;
   box-shadow: 0 18rpx 38rpx rgba(255, 138, 43, 0.2);
 }

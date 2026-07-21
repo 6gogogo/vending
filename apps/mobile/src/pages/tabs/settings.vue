@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
+import { mobileApi } from "../../api/mobile";
 import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
@@ -11,9 +12,11 @@ import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { syncRoleTabBar } from "../../utils/role-routing";
 import { getSupportGuideTopics } from "../../utils/support-guides";
+import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
+const logoutBusy = ref(false);
 
 uiPreferencesStore.hydrate();
 
@@ -46,11 +49,35 @@ const navigate = (url: string) => {
   uni.navigateTo({ url });
 };
 
-const logout = () => {
-  sessionStore.clear();
-  uni.reLaunch({
-    url: "/pages/common/login"
-  });
+const logout = async () => {
+  if (logoutBusy.value) {
+    return;
+  }
+
+  logoutBusy.value = true;
+  try {
+    await mobileApi.logout();
+  } catch (error) {
+    await new Promise<void>((resolve) => {
+      uni.showModal({
+        title: "服务器退出确认失败",
+        content: appendErrorContext(
+          getErrorMessage(error),
+          "本机会继续退出登录；请勿在共享设备上保留当前页面。"
+        ),
+        showCancel: false,
+        confirmText: "继续退出",
+        success: () => resolve(),
+        fail: () => resolve()
+      });
+    });
+  } finally {
+    sessionStore.clear();
+    logoutBusy.value = false;
+    uni.reLaunch({
+      url: "/pages/common/login"
+    });
+  }
 };
 
 onShow(() => {
@@ -119,7 +146,7 @@ onShow(() => {
               <text>批量处理请在电脑端继续</text>
             </view>
           </button>
-          <button class="vm-button vm-button--soft action-button" @tap="logout">
+          <button class="vm-button vm-button--soft action-button" :disabled="logoutBusy" :loading="logoutBusy" @tap="logout">
             <view class="action-button__content">
               <MenuIcon name="logout" size="sm" tone="accent" />
               <text>退出登录</text>

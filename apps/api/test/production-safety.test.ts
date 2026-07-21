@@ -1,0 +1,208 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { ConfigService } from "@nestjs/config";
+
+import { assertProductionSafety } from "../src/common/config/production-safety.js";
+
+const validProductionConfig: Record<string, string> = {
+  PUBLIC_BASE_URL: "https://api.example.com",
+  CORS_ORIGINS: "https://admin.example.com,https://mobile.example.com",
+  VERIFICATION_CODE_PROVIDER: "aliyun",
+  VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+  ALIYUN_SMS_ACCESS_KEY_ID: "configured-access-key-id",
+  ALIYUN_SMS_ACCESS_KEY_SECRET: "configured-access-key-secret",
+  SMARTVM_BASE_URL: "https://smartvm.example.com",
+  SMARTVM_CLIENT_ID: "configured-client-id",
+  SMARTVM_KEY: "configured-smartvm-key",
+  SMARTVM_ALLOW_UNSIGNED_CALLBACKS: "false",
+  ALLOW_UNSIGNED_SMARTVM_CALLBACKS: "false",
+  SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS: "false",
+  PAYMENT_MODE: "real",
+  FINANCIAL_SINGLE_WRITER_ENABLED: "true",
+  FINANCIAL_SINGLE_WRITER_LEASE_FILE: "runtime-data/financial-single-writer.lock",
+  FINANCIAL_SINGLE_WRITER_LEASE_MS: "30000",
+  FINANCIAL_SINGLE_WRITER_HEARTBEAT_MS: "10000",
+  PAYMENT_RECONCILIATION_ENABLED: "true",
+  PAYMENT_RECONCILIATION_INTERVAL_MS: "30000",
+  PAYMENT_RECONCILIATION_INITIAL_DELAY_MS: "30000",
+  PAYMENT_RECONCILIATION_MAX_DELAY_MS: "1800000",
+  PAYMENT_RECONCILIATION_BATCH_SIZE: "20",
+  PAYMENT_RECONCILIATION_ALERT_AFTER_ATTEMPTS: "5",
+  WEB_CONCURRENCY: "1",
+  WECHAT_PAY_APP_ID: "wechat-app-id",
+  WECHAT_MINI_APP_SECRET: "wechat-app-secret",
+  WECHAT_PAY_MCH_ID: "wechat-mch-id",
+  WECHAT_PAY_API_V3_KEY: "wechat-api-v3-key",
+  WECHAT_PAY_MERCHANT_PRIVATE_KEY: "wechat-private-key",
+  WECHAT_PAY_MERCHANT_CERT_SERIAL_NO: "wechat-cert-serial",
+  WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: "wechat-platform-cert-serial",
+  WECHAT_PAY_PLATFORM_PUBLIC_KEY: "wechat-platform-public-key",
+  ALIPAY_APP_ID: "alipay-app-id",
+  ALIPAY_SELLER_ID: "alipay-seller-id",
+  ALIPAY_APP_PRIVATE_KEY: "alipay-private-key",
+  ALIPAY_PUBLIC_KEY: "alipay-public-key",
+  ALLOW_DEFAULT_BACKOFFICE_LOGIN: "false"
+};
+
+const createConfigService = (overrides: Record<string, string | undefined> = {}) => {
+  const values = {
+    ...validProductionConfig,
+    ...overrides
+  };
+
+  return {
+    get: (key: string) => values[key]
+  } as unknown as ConfigService;
+};
+
+const emptyCredentialStore = {
+  adminCredentials: [],
+  backofficeCredentials: [],
+  devices: [],
+  paymentOrders: []
+};
+
+test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁", () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousAppEnv = process.env.APP_ENV;
+  process.env.NODE_ENV = "development";
+  process.env.APP_ENV = "production";
+
+  try {
+    assert.doesNotThrow(() =>
+      assertProductionSafety(createConfigService(), emptyCredentialStore as never)
+    );
+
+    assert.throws(
+      () =>
+        assertProductionSafety(createConfigService(), {
+          ...emptyCredentialStore,
+          devices: [
+            {
+              deviceCode: "MOCK-PERSISTED-001",
+              isMock: true
+            }
+          ]
+        } as never),
+      /生产环境不能加载模拟设备.*1 台 isMock=true.*清理持久化运行数据/
+    );
+
+    assert.throws(
+      () =>
+        assertProductionSafety(createConfigService(), {
+          ...emptyCredentialStore,
+          paymentOrders: [
+            {
+              id: "persisted-mock-payment",
+              metadata: { simulated: true },
+              status: "paid"
+            }
+          ]
+        } as never),
+      /生产环境不能加载模拟支付单.*1 笔.*清理持久化运行数据/
+    );
+
+    const invalidCases: Array<{
+      name: string;
+      overrides: Record<string, string | undefined>;
+      message: RegExp;
+    }> = [
+      {
+        name: "公网基础地址不能使用 IP",
+        overrides: { PUBLIC_BASE_URL: "https://127.0.0.2" },
+        message: /必须使用公网域名/
+      },
+      {
+        name: "CORS 来源不能带路径",
+        overrides: { CORS_ORIGINS: "https://admin.example.com/path" },
+        message: /只能填写来源/
+      },
+      {
+        name: "SmartVM 必须使用 HTTPS",
+        overrides: { SMARTVM_BASE_URL: "http://smartvm.example.com" },
+        message: /SMARTVM_BASE_URL 必须使用 HTTPS/
+      },
+      {
+        name: "生产环境不能把正金额结算自动伪装成付款成功",
+        overrides: { SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS: "true" },
+        message: /不能开启结算后自动转发付款成功/
+      },
+      {
+        name: "生产环境不能关闭金融单写者租约",
+        overrides: { FINANCIAL_SINGLE_WRITER_ENABLED: "false" },
+        message: /FINANCIAL_SINGLE_WRITER_ENABLED=true/
+      },
+      {
+        name: "JSON 账本阶段不能启动多个 API 工作者",
+        overrides: { WEB_CONCURRENCY: "2" },
+        message: /WEB_CONCURRENCY=1/
+      },
+      {
+        name: "真实支付必须启用后台自动对账",
+        overrides: { PAYMENT_RECONCILIATION_ENABLED: "false" },
+        message: /PAYMENT_RECONCILIATION_ENABLED=true/
+      },
+      {
+        name: "真实短信密钥不能为空",
+        overrides: { ALIYUN_SMS_ACCESS_KEY_SECRET: undefined },
+        message: /ALIYUN_SMS_ACCESS_KEY_SECRET/
+      },
+      {
+        name: "严格真实支付配置不能为空",
+        overrides: { WECHAT_PAY_API_V3_KEY: undefined },
+        message: /WECHAT_PAY_API_V3_KEY/
+      },
+      {
+        name: "微信平台证书序列号不能为空",
+        overrides: { WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: undefined },
+        message: /WECHAT_PAY_PLATFORM_CERT_SERIAL_NO/
+      },
+      {
+        name: "微信登录地址必须钉住官方域名",
+        overrides: { WECHAT_MINI_LOGIN_URL: "https://credentials.example.com/sns/jscode2session" },
+        message: /WECHAT_MINI_LOGIN_URL.*官方地址/
+      },
+      {
+        name: "微信支付 API 必须钉住官方域名",
+        overrides: { WECHAT_PAY_API_BASE_URL: "https://payments.example.com" },
+        message: /WECHAT_PAY_API_BASE_URL.*官方地址/
+      },
+      {
+        name: "支付宝网关必须钉住官方地址",
+        overrides: { ALIPAY_GATEWAY_URL: "https://payments.example.com/gateway.do" },
+        message: /ALIPAY_GATEWAY_URL.*官方地址/
+      },
+      {
+        name: "支付回调必须回到本方公开来源",
+        overrides: { WECHAT_PAY_NOTIFY_URL: "https://callbacks.example.net/api/payments/callbacks/wechat" },
+        message: /WECHAT_PAY_NOTIFY_URL.*PUBLIC_BASE_URL.*同源/
+      },
+      {
+        name: "支付回调路径不能指向其他本方接口",
+        overrides: { ALIPAY_NOTIFY_URL: "https://api.example.com/api/auth/admin-login" },
+        message: /ALIPAY_NOTIFY_URL.*回调路径/
+      }
+    ];
+
+    for (const invalidCase of invalidCases) {
+      assert.throws(
+        () => assertProductionSafety(createConfigService(invalidCase.overrides), emptyCredentialStore as never),
+        invalidCase.message,
+        invalidCase.name
+      );
+    }
+  } finally {
+    if (previousNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+
+    if (previousAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnv;
+    }
+  }
+});

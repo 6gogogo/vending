@@ -65,9 +65,9 @@ const submit = async () => {
   const detail = form.detail.trim();
   const phone = contactPhone.value.trim();
 
-  if (!detail) {
+  if (detail.length < 5) {
     uni.showToast({
-      title: "请填写反馈内容",
+      title: "反馈内容至少填写 5 个字符",
       icon: "none"
     });
     return;
@@ -96,8 +96,16 @@ const submit = async () => {
       title: `${selectedType.value.label}反馈`
     });
 
+    const resultDetail = loggedIn.value
+      ? deviceCode.value
+        ? `已提交并关联柜机 ${deviceCode.value}。工作人员处理后，结果会在首页提醒中同步；如问题仍存在，可补充反馈。`
+        : "已提交到工作人员待办。处理后，结果会在首页提醒中同步；如问题仍存在，可补充反馈。"
+      : deviceCode.value
+        ? `已提交并关联柜机 ${deviceCode.value}。工作人员会按填写的手机号回访；未登录反馈不会在首页同步。`
+        : "已提交到工作人员待办。工作人员会按填写的手机号回访；未登录反馈不会在首页同步。";
+
     uni.reLaunch({
-      url: `/pages/common/result?status=success&title=${encodeURIComponent("操作成功")}&detail=${encodeURIComponent("反馈已提交，工作人员会尽快处理。")}`
+      url: `/pages/common/result?status=success&resultType=feedback&title=${encodeURIComponent("反馈已提交")}&detail=${encodeURIComponent(resultDetail)}&actionText=${encodeURIComponent("返回首页")}`
     });
   } catch (error) {
     showOperationFailure(error);
@@ -154,6 +162,7 @@ onLoad((query) => {
           <text class="vm-field__label">手机号</text>
           <input
             v-model="contactPhone"
+            aria-label="反馈回访手机号"
             class="vm-field__input"
             type="number"
             maxlength="11"
@@ -164,7 +173,7 @@ onLoad((query) => {
 
         <view class="vm-field">
           <text class="vm-field__label">反馈类型</text>
-          <picker :range="typeLabels" :value="selectedTypeIndex" @change="handleTypeChange(Number($event.detail.value))">
+          <picker aria-label="选择反馈类型" :range="typeLabels" :value="selectedTypeIndex" @change="handleTypeChange(Number($event.detail.value))">
             <view class="picker-field">
               <text class="picker-field__value">{{ selectedType.label }}</text>
               <view class="picker-field__chevron" />
@@ -177,13 +186,14 @@ onLoad((query) => {
           <text class="vm-field__label">反馈内容</text>
           <textarea
             v-model="form.detail"
+            aria-label="反馈内容"
             class="vm-textarea"
             maxlength="200"
             :placeholder="detailPlaceholder"
           />
         </view>
 
-        <button class="vm-button" :loading="submitting" @tap="submit">提交反馈</button>
+        <button class="vm-button" :disabled="submitting" :loading="submitting" @tap="submit">提交反馈</button>
         <button v-if="canCallSupport" class="vm-button vm-button--soft" @tap="callSupportPhone">联系客服电话</button>
         <button class="vm-button vm-button--ghost" @tap="back">{{ loggedIn ? "返回我的" : "返回入口" }}</button>
       </view>

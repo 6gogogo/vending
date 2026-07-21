@@ -21,6 +21,7 @@ import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 type DrawerMode = "" | "create-user" | "edit-user" | "create-policy" | "edit-policy" | "backoffice-account";
 const weekdayOptions = [
@@ -82,13 +83,14 @@ const permissionLabels: Record<BackofficePermission, string> = {
   "merchant-workbench:view": "商家工作台",
   "merchant-workbench:manage": "商家补货管理",
   "dashboard:view": "运营主控台",
-  "goods:view": "货物与批次",
+  "goods:view": "货品与批次",
   "goods:manage": "货品资料管理",
   "goods:stock-adjust": "货品库存调整",
   "goods:export": "导出货品数据",
   "warehouse:view": "本地仓库",
   "warehouse:transfer": "仓库调拨",
   "warehouse:stocktake": "仓库盘点",
+  "warehouse:dispose-expired": "过期库存处置",
   "warehouse:export": "导出仓库盘点",
   "devices:view": "柜机监控",
   "devices:manage": "柜机资料管理",
@@ -136,6 +138,7 @@ const permissionGroups: Array<{ title: string; permissions: BackofficePermission
       "warehouse:view",
       "warehouse:transfer",
       "warehouse:stocktake",
+      "warehouse:dispose-expired",
       "warehouse:export",
       "devices:view",
       "devices:manage",
@@ -190,8 +193,10 @@ const regions = ref<RegionRecord[]>([]);
 const backofficeCredentials = ref<BackofficeCredentialSnapshot[]>([]);
 const reservationSettings = ref<ReservationSettings | null>(null);
 const loading = ref(false);
+const registrationApplicationsError = ref("");
 const saving = ref(false);
 const reservationSaving = ref(false);
+const reviewingApplicationId = ref("");
 const removingUserId = ref("");
 const creatingRegion = ref(false);
 const drawerMode = ref<DrawerMode>("");
@@ -217,6 +222,11 @@ const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], s
 const backofficeForm = ref<BackofficeFormState>(createEmptyBackofficeForm());
 const reservationForm = ref<ReservationFormState>({ enabled: false, holdMinutes: 15, maxTimeouts: 3 });
 const reservationMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
+const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
+
+const showActionMessage = (type: "success" | "error", text: string) => {
+  actionMessage.value = { type, text };
+};
 
 const regionOptions = computed(() => regions.value.filter((item) => item.status === "active"));
 const goodsCatalogMap = computed(() => new Map(goodsCatalog.value.map((item) => [item.goodsId, item])));
@@ -246,6 +256,13 @@ const filteredApplications = computed(() => registrationApplications.value.filte
 const selectedUsers = computed(() => users.value.filter((user) => selectedUserIds.value.includes(user.id)));
 const selectedSpecialUsers = computed(() => selectedUsers.value.filter((user) => user.role === "special"));
 const allFilteredSelected = computed(() => filteredUsers.value.length > 0 && filteredUsers.value.every((user) => selectedUserIds.value.includes(user.id)));
+const editingUser = computed(() => users.value.find((user) => user.id === editingUserId.value));
+const editingCurrentUser = computed(
+  () =>
+    drawerMode.value === "edit-user" &&
+    Boolean(editingUserId.value) &&
+    editingUserId.value === sessionStore.user?.id
+);
 const currentDrawerTitle = computed(() =>
   drawerMode.value === "create-user"
     ? "新增人员"
@@ -323,7 +340,7 @@ const firstConfigTargetUser = computed(() =>
   users.value.find((user) => user.role === "special")
 );
 
-const formatRole = (role: UserRecord["role"]) => role === "special" ? "用户" : role === "merchant" ? "商家" : "管理员";
+const formatRole = (role: UserRecord["role"]) => role === "special" ? "特殊群体" : role === "merchant" ? "商家" : "管理员";
 const formatLedgerStatus = (status?: UserLedgerStatus) => status === "unregistered" ? "未注册" : status === "quota_unclaimed" ? "物资未领取" : status === "quota_partial" ? "部分领取" : status === "quota_complete" ? "全部领取" : "已注册";
 const ledgerStatusTone = (status?: UserLedgerStatus) => status === "quota_complete" ? "admin-pill--success" : status === "quota_partial" || status === "unregistered" ? "admin-pill--warning" : "admin-pill--neutral";
 const registrationLabel = (user: UserRecord) => (user.ledgerStatus === "unregistered" ? "未注册" : "已注册");
@@ -491,7 +508,7 @@ const loadReservationSettings = async () => {
 
 const saveReservationSettings = async () => {
   if (reservationForm.value.holdMinutes < 1 || reservationForm.value.maxTimeouts < 1) {
-    window.alert("预约保留分钟数和超时次数都必须大于 0。");
+    reservationMessage.value = { type: "error", text: "预约保留分钟数和连续超时限制都必须大于 0。" };
     return;
   }
 
@@ -527,7 +544,7 @@ const load = async () => {
       reservationSettingsResponse
     ] = await Promise.all([
       adminApi.users(),
-      adminApi.registrationApplications(),
+      loadRegistrationApplications(),
       adminApi.policies(),
       adminApi.goodsCatalog(),
       adminApi.regions(),
@@ -541,24 +558,73 @@ const load = async () => {
       })
     ]);
     users.value = usersResponse;
-    registrationApplications.value = applicationResponse;
+    if (applicationResponse) {
+      registrationApplications.value = applicationResponse;
+    }
     policies.value = policiesResponse;
     goodsCatalog.value = goodsCatalogResponse;
     regions.value = regionsResponse;
     backofficeCredentials.value = backofficeCredentialsResponse;
     if (reservationSettingsResponse) applyReservationSettings(reservationSettingsResponse);
     if (!policyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) policyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
+  } catch (error) {
+    showActionMessage("error", `人员与规则数据加载失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     loading.value = false;
   }
 };
 
-const reviewApplication = async (applicationId: string, decision: "approved" | "rejected") => {
-  saving.value = true;
+async function loadRegistrationApplications() {
+  registrationApplicationsError.value = "";
   try {
-    await adminApi.reviewRegistration(applicationId, { decision, reason: decision === "rejected" ? rejectReasons.value[applicationId] : undefined });
+    const response = await adminApi.registrationApplications();
+    registrationApplications.value = response;
+    return response;
+  } catch (error) {
+    registrationApplicationsError.value = readErrorMessage(error, "审核数据加载失败，请稍后重试");
+    return null;
+  }
+}
+
+const reviewApplication = async (applicationId: string, decision: "approved" | "rejected") => {
+  if (reviewingApplicationId.value) {
+    return;
+  }
+
+  const application = registrationApplications.value.find((entry) => entry.id === applicationId);
+  const applicantName = application?.profile.merchantName || application?.profile.name || application?.phone || applicationId;
+  const roleName = application?.requestedRole === "special" ? "用户" : application?.requestedRole === "merchant" ? "商家" : "管理员";
+  const confirmed = window.confirm(
+    [
+      decision === "approved" ? "请确认通过注册申请：" : "请确认驳回注册申请：",
+      `申请人：${applicantName}`,
+      `申请角色：${roleName}`,
+      decision === "rejected" ? `驳回原因：${rejectReasons.value[applicationId]?.trim() || "未填写"}` : "通过后将立即生效。"
+    ].join("\n")
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  reviewingApplicationId.value = applicationId;
+  saving.value = true;
+  actionMessage.value = null;
+  try {
+    const reviewed = await adminApi.reviewRegistration(applicationId, { decision, reason: decision === "rejected" ? rejectReasons.value[applicationId] : undefined });
+    registrationApplications.value = registrationApplications.value.map((item) => item.id === reviewed.id ? reviewed : item);
+    delete rejectReasons.value[applicationId];
     await load();
+    showActionMessage(
+      "success",
+      decision === "approved"
+        ? `已通过 ${application?.profile.name || application?.phone || "该申请"}，人员已进入已登记列表。`
+        : `已驳回 ${application?.profile.name || application?.phone || "该申请"}，申请人可按原因修改后重新提交。`
+    );
+  } catch (error) {
+    showActionMessage("error", `审核失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
+    reviewingApplicationId.value = "";
     saving.value = false;
   }
 };
@@ -619,7 +685,20 @@ const closeDrawer = () => {
 
 const submitUserForm = async (configureAccess = false) => {
   const regionPayload = resolveRegionPayload(userForm.value);
+  const isCreate = drawerMode.value === "create-user";
+  if (
+    editingCurrentUser.value &&
+    editingUser.value &&
+    (
+      userForm.value.role !== editingUser.value.role ||
+      userForm.value.status !== "active"
+    )
+  ) {
+    showActionMessage("error", "不能修改当前登录账号的角色或停用当前账号，请由其他管理员处理。");
+    return;
+  }
   saving.value = true;
+  actionMessage.value = null;
   try {
     const payload = {
       role: userForm.value.role,
@@ -639,9 +718,12 @@ const submitUserForm = async (configureAccess = false) => {
     }
     closeDrawer();
     await load();
+    showActionMessage("success", isCreate ? `已新增人员 ${payload.name}。` : `已保存人员 ${payload.name}。`);
     if (configureAccess && savedUser?.role === "special") {
       await router.push(`/users/${savedUser.id}`);
     }
+  } catch (error) {
+    showActionMessage("error", `人员保存失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -650,19 +732,24 @@ const submitUserForm = async (configureAccess = false) => {
 const submitBackofficeAccount = async () => {
   const username = backofficeForm.value.username.trim();
   const password = backofficeForm.value.password.trim();
+  const hadExistingCredential = backofficeForm.value.hasExistingCredential;
 
   if (!username) {
-    window.alert("操作失败：请填写后台登录账号");
+    showActionMessage("error", "后台账号保存失败：请填写后台登录账号。");
     return;
   }
 
-  if (!backofficeForm.value.hasExistingCredential && password.length < 6) {
-    window.alert("操作失败：首次开通后台账号时密码至少需要 6 位");
+  if ((!backofficeForm.value.hasExistingCredential || password) && password.length < 8) {
+    showActionMessage(
+      "error",
+      `后台账号保存失败：${backofficeForm.value.hasExistingCredential ? "重置" : "首次"}密码至少需要 8 位。`
+    );
     return;
   }
 
   normalizeBackofficeFormPermissions();
   saving.value = true;
+  actionMessage.value = null;
 
   try {
     await adminApi.createBackofficeCredential({
@@ -674,8 +761,14 @@ const submitBackofficeAccount = async () => {
     });
     closeDrawer();
     await load();
+    showActionMessage(
+      "success",
+      hadExistingCredential && !password
+        ? `后台账号 ${username} 的角色与权限已保存，密码未变更。`
+        : `后台账号 ${username} 已保存，可使用对应身份登录后台。`
+    );
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `后台账号保存失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -694,8 +787,9 @@ const removeUser = async (user: UserRecord) => {
       closeDrawer();
     }
     await load();
+    showActionMessage("success", `已从人员台账中删除 ${user.name}，历史记录仍保留用于追溯。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `删除人员失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     removingUserId.value = "";
   }
@@ -705,7 +799,7 @@ const removeEditingUser = async () => {
   const user = users.value.find((item) => item.id === editingUserId.value);
 
   if (!user) {
-    window.alert("操作失败：未找到当前编辑的人员");
+    showActionMessage("error", "未找到当前编辑的人员，请刷新后重新选择。");
     return;
   }
 
@@ -716,7 +810,7 @@ const createRegionDirect = async () => {
   const name = regionDraftName.value.trim();
 
   if (!name) {
-    window.alert("操作失败：请先填写地区名称");
+    showActionMessage("error", "新增地区前请先填写地区名称。");
     return;
   }
 
@@ -726,7 +820,7 @@ const createRegionDirect = async () => {
     regionDraftLatitude.value === undefined ||
     Number.isNaN(regionDraftLatitude.value)
   ) {
-    window.alert("操作失败：请填写有效的地区经纬度");
+    showActionMessage("error", "新增地区前请填写有效的经纬度；可先通过地图设置位置。");
     return;
   }
 
@@ -742,8 +836,9 @@ const createRegionDirect = async () => {
     await load();
     userForm.value.regionId = region.id;
     userForm.value.regionName = "";
+    showActionMessage("success", `地区“${region.name}”已新增，可用于人员分组和小程序距离排序。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `新增地区失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     creatingRegion.value = false;
   }
@@ -770,13 +865,28 @@ const removePolicyGoodsLimit = (index: number) => {
   if (!policyForm.value.goodsLimits.length) addPolicyGoodsLimit();
 };
 const submitPolicyForm = async () => {
-  const normalizedWeekdays = Array.from(new Set(policyForm.value.weekdays)).sort((left, right) => left - right);
-  const goodsLimits = policyForm.value.goodsLimits.filter((item) => item.goodsId && item.quantity > 0).map((item) => {
-    const catalogItem = goodsCatalogMap.value.get(item.goodsId);
-    if (!catalogItem) throw new Error(`未找到货品 ${item.goodsId}。`);
-    return { goodsId: catalogItem.goodsId, goodsName: catalogItem.name, category: catalogItem.category, quantity: item.quantity };
-  });
-  if (!normalizedWeekdays.length || !goodsLimits.length || policyForm.value.endHour <= policyForm.value.startHour) return;
+  actionMessage.value = null;
+  let normalizedWeekdays: number[] = [];
+  let goodsLimits: Array<{ goodsId: string; goodsName: string; category: GoodsCatalogItem["category"]; quantity: number }> = [];
+
+  try {
+    normalizedWeekdays = Array.from(new Set(policyForm.value.weekdays)).sort((left, right) => left - right);
+    goodsLimits = policyForm.value.goodsLimits.filter((item) => item.goodsId && item.quantity > 0).map((item) => {
+      const catalogItem = goodsCatalogMap.value.get(item.goodsId);
+      if (!catalogItem) throw new Error(`未找到货品 ${item.goodsId}。`);
+      return { goodsId: catalogItem.goodsId, goodsName: catalogItem.name, category: catalogItem.category, quantity: item.quantity };
+    });
+  } catch (error) {
+    showActionMessage("error", `规则模板保存失败：${readErrorMessage(error, "请检查货品配置")}`);
+    return;
+  }
+
+  if (!normalizedWeekdays.length || !goodsLimits.length || policyForm.value.endHour <= policyForm.value.startHour) {
+    showActionMessage("error", "规则模板保存失败：请选择开放星期、至少一个货品额度，并确保结束时间晚于开始时间。");
+    return;
+  }
+
+  const isCreate = drawerMode.value === "create-policy";
   saving.value = true;
   try {
     const basePayload = { name: policyForm.value.name.trim(), weekdays: normalizedWeekdays, startHour: policyForm.value.startHour, endHour: policyForm.value.endHour, status: policyForm.value.status, goodsLimits };
@@ -788,22 +898,35 @@ const submitPolicyForm = async () => {
     }
     closeDrawer();
     await load();
+    showActionMessage("success", isCreate ? `已新增规则模板 ${basePayload.name}。` : `已保存规则模板 ${basePayload.name}。`);
+  } catch (error) {
+    showActionMessage("error", `规则模板保存失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
 };
 const applyBatchPolicies = async () => {
-  if (!selectedSpecialUsers.value.length || !batchPolicyIds.value.length) return;
+  if (!selectedSpecialUsers.value.length || !batchPolicyIds.value.length) {
+    showActionMessage("error", "批量规则操作失败：请先选择特殊群体人员和至少一个规则模板。");
+    return;
+  }
+
   if (
     batchMode.value === "replace" &&
-    !window.confirm("覆盖会在下一个业务日替换所选普通用户的每日可领取物资设定，确认继续吗？")
+    !window.confirm("覆盖会在下一个业务日替换所选特殊群体人员的每日可领取物资设定，确认继续吗？")
   ) {
     return;
   }
+  const count = selectedSpecialUsers.value.length;
   saving.value = true;
+  actionMessage.value = null;
   try {
     await adminApi.batchAssignPolicies({ userIds: selectedSpecialUsers.value.map((user) => user.id), policyIds: batchPolicyIds.value, mode: batchMode.value });
     await load();
+    selectedUserIds.value = selectedUserIds.value.filter((id) => !selectedSpecialUsers.value.some((user) => user.id === id));
+    showActionMessage("success", `已${batchMode.value === "replace" ? "覆盖" : batchMode.value === "unbind" ? "解绑" : "绑定"} ${count} 名特殊群体人员的每日可领取规则。`);
+  } catch (error) {
+    showActionMessage("error", `批量规则操作失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -836,7 +959,7 @@ onMounted(load);
               <span class="users-setup-step__index">1</span>
               <div>
                 <span class="admin-table__strong">录入人员</span>
-                <span class="admin-table__subtext">普通用户 {{ specialUserCount }} 人，待审核 {{ pendingRegistrationCount }} 条</span>
+                <span class="admin-table__subtext">特殊群体 {{ specialUserCount }} 人，待审核 {{ pendingRegistrationCount }} 条</span>
               </div>
               <button v-if="canManageUsers" class="admin-button admin-button--ghost" @click="openCreateUser">新增</button>
             </div>
@@ -854,7 +977,7 @@ onMounted(load);
               <span class="users-setup-step__index">3</span>
               <div>
                 <span class="admin-table__strong">创建批量模板</span>
-                <span class="admin-table__subtext">模板 {{ policies.length }} 个，可批量套用到普通用户</span>
+                <span class="admin-table__subtext">模板 {{ policies.length }} 个，可批量套用到特殊群体人员</span>
               </div>
               <button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="openCreatePolicy">新增模板</button>
             </div>
@@ -917,6 +1040,9 @@ onMounted(load);
             v-if="reservationMessage"
             class="admin-note"
             :class="{ 'users-reservation-message--error': reservationMessage.type === 'error', 'users-reservation-message--success': reservationMessage.type === 'success' }"
+            :role="reservationMessage.type === 'error' ? 'alert' : 'status'"
+            :aria-live="reservationMessage.type === 'error' ? 'assertive' : 'polite'"
+            aria-atomic="true"
           >
             {{ reservationMessage.text }}
           </div>
@@ -932,6 +1058,17 @@ onMounted(load);
       </div>
     </section>
 
+    <div
+      v-if="actionMessage"
+      class="admin-alert users-action-message"
+      :class="{ 'admin-alert--danger': actionMessage.type === 'error' }"
+      :role="actionMessage.type === 'error' ? 'alert' : 'status'"
+      :aria-live="actionMessage.type === 'error' ? 'assertive' : 'polite'"
+      aria-atomic="true"
+    >
+      {{ actionMessage.text }}
+    </div>
+
     <section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
@@ -941,13 +1078,23 @@ onMounted(load);
       </div>
 
       <div class="admin-panel admin-panel-block users-review-block">
+        <div
+          v-if="registrationApplicationsError"
+          class="admin-alert admin-alert--danger"
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
+        >
+          审核数据加载失败：{{ registrationApplicationsError }}
+          <button class="admin-text-button" type="button" @click="loadRegistrationApplications">重试审核数据</button>
+        </div>
         <div class="users-review-tabs">
           <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'pending' }" @click="reviewFilter = 'pending'">待审核 {{ registrationApplications.filter((item) => item.status === "pending").length }}</button>
           <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'rejected' }" @click="reviewFilter = 'rejected'">已驳回 {{ registrationApplications.filter((item) => item.status === "rejected").length }}</button>
           <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'approved' }" @click="reviewFilter = 'approved'">已登记 {{ registrationApplications.filter((item) => item.status === "approved").length }}</button>
         </div>
 
-        <div v-if="filteredApplications.length" class="admin-list users-contained-list">
+        <div v-if="!registrationApplicationsError && filteredApplications.length" class="admin-list users-contained-list">
           <div v-for="item in filteredApplications" :key="item.id" class="admin-list__row users-review-row">
             <div class="admin-list__main">
               <span class="admin-list__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</span>
@@ -960,8 +1107,8 @@ onMounted(load);
               <template v-if="item.status === 'pending'">
                 <input v-if="canReviewRegistrations" v-model="rejectReasons[item.id]" class="admin-input" placeholder="驳回时填写原因（选填）" />
                 <div v-if="canReviewRegistrations" class="admin-inline-links">
-                  <button class="admin-button" :disabled="saving" @click="reviewApplication(item.id, 'approved')">通过</button>
-                  <button class="admin-button admin-button--ghost" :disabled="saving" @click="reviewApplication(item.id, 'rejected')">驳回</button>
+                  <button class="admin-button" :disabled="saving || Boolean(reviewingApplicationId)" @click="reviewApplication(item.id, 'approved')">{{ reviewingApplicationId === item.id ? "处理中" : "通过" }}</button>
+                  <button class="admin-button admin-button--ghost" :disabled="saving || Boolean(reviewingApplicationId)" @click="reviewApplication(item.id, 'rejected')">{{ reviewingApplicationId === item.id ? "处理中" : "驳回" }}</button>
                 </div>
                 <span v-else class="admin-table__subtext">审核申请需要“注册审核”权限。</span>
               </template>
@@ -969,7 +1116,7 @@ onMounted(load);
             </div>
           </div>
         </div>
-        <div v-else class="admin-empty">
+        <div v-else-if="!registrationApplicationsError" class="admin-empty">
           <div class="admin-empty__title">{{ loading ? "正在加载审核列表" : "当前分类下没有注册申请" }}</div>
           <div class="admin-empty__body">新的注册申请会在这里出现，审核通过后会自动进入已登记人员列表。</div>
         </div>
@@ -980,7 +1127,7 @@ onMounted(load);
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">人员检索</p>
-          <h3 class="admin-page__section-title">按区域分组查看人员台账并批量绑定普通用户策略</h3>
+          <h3 class="admin-page__section-title">按区域分组查看人员台账并批量绑定特殊群体策略</h3>
         </div>
         <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">新增人员</button>
       </div>
@@ -990,7 +1137,7 @@ onMounted(load);
           <span class="admin-field__label">分类</span>
           <select v-model="roleFilter" class="admin-select">
             <option value="all">全部</option>
-            <option value="special">普通用户</option>
+            <option value="special">特殊群体</option>
             <option value="merchant">商家</option>
             <option value="admin">管理员</option>
           </select>
@@ -1045,7 +1192,7 @@ onMounted(load);
           </div>
         </div>
         <div class="users-filters__summary admin-note">
-          当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。人员台账默认按地区分组，普通用户领取状态单独显示。
+          当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。人员台账默认按地区分组，特殊群体领取状态单独显示。
         </div>
       </div>
     </section>
@@ -1082,7 +1229,7 @@ onMounted(load);
               </thead>
               <tbody>
                 <tr v-for="user in group.users" :key="user.id">
-                  <td><input type="checkbox" :checked="selectedUserIds.includes(user.id)" @change="toggleUser(user.id)" /></td>
+                  <td><input type="checkbox" :checked="selectedUserIds.includes(user.id)" :aria-label="`选择人员 ${user.name}`" @change="toggleUser(user.id)" /></td>
                   <td>
                     <RouterLink class="admin-link" :to="`/users/${user.id}`">{{ user.name }}</RouterLink>
                     <span class="admin-table__subtext">{{ user.id }}</span>
@@ -1141,7 +1288,7 @@ onMounted(load);
           </div>
           <div class="users-side-block">
             <div class="admin-note">
-              {{ canManageUserRules ? `已选普通用户 ${selectedSpecialUsers.length} 人。绑定后会按模板的星期、时段和货品数量生效。` : "当前账号只能查看每日物资模板，批量绑定或覆盖需要“取货规则管理”权限。" }}
+              {{ canManageUserRules ? `已选特殊群体 ${selectedSpecialUsers.length} 人。绑定后会按模板的星期、时段和货品数量生效。` : "当前账号只能查看每日物资模板，批量绑定或覆盖需要“取货规则管理”权限。" }}
             </div>
             <label class="admin-field">
               <span class="admin-field__label">操作方式</span>
@@ -1165,7 +1312,7 @@ onMounted(load);
               {{
                 batchMode === "replace"
                   ? "覆盖会把模板拆成按货品的每日设定，并在下一个业务日替换当前个人设置。"
-                  : "新增会把模板中的每个货品最小单元追加到所选普通用户的每日设定中。"
+                  : "新增会把模板中的每个货品最小单元追加到所选特殊群体人员的每日设定中。"
               }}
             </div>
             <button class="admin-button" :disabled="saving || !canManageUserRules || !selectedSpecialUsers.length || !batchPolicyIds.length" @click="applyBatchPolicies">{{ saving ? "保存中" : batchMode === "replace" ? "覆盖每日物资" : "新增每日物资" }}</button>
@@ -1195,7 +1342,7 @@ onMounted(load);
           </div>
           <div v-else class="admin-empty">
             <div class="admin-empty__title">当前还没有每日物资模板</div>
-            <div class="admin-empty__body">请先新增模板，再批量绑定到普通用户。</div>
+            <div class="admin-empty__body">请先新增模板，再批量绑定到特殊群体人员。</div>
           </div>
         </article>
       </aside>
@@ -1214,8 +1361,8 @@ onMounted(load);
         <div v-if="drawerMode === 'create-user' || drawerMode === 'edit-user'" class="users-drawer__body">
           <label class="admin-field">
             <span class="admin-field__label">角色</span>
-            <select v-model="userForm.role" class="admin-select">
-              <option value="special">普通用户</option>
+            <select v-model="userForm.role" class="admin-select" :disabled="editingCurrentUser">
+              <option value="special">特殊群体</option>
               <option value="merchant">商家</option>
               <option value="admin">管理员</option>
             </select>
@@ -1230,10 +1377,13 @@ onMounted(load);
           </label>
           <label class="admin-field">
             <span class="admin-field__label">状态</span>
-            <select v-model="userForm.status" class="admin-select">
+            <select v-model="userForm.status" class="admin-select" :disabled="editingCurrentUser">
               <option value="active">启用</option>
               <option value="inactive">暂停</option>
             </select>
+            <span v-if="editingCurrentUser" class="admin-table__subtext">
+              当前登录账号的角色和启用状态需由其他管理员修改。
+            </span>
           </label>
           <label class="admin-field">
             <span class="admin-field__label">区域</span>
@@ -1267,7 +1417,7 @@ onMounted(load);
             每日可领取物资保存到人员详情页，适合按个人的姓名、电话和物资清单逐个维护。
           </div>
 
-          <div v-if="drawerMode === 'edit-user' && canManageUsers" class="users-danger-zone">
+          <div v-if="drawerMode === 'edit-user' && canManageUsers && !editingCurrentUser" class="users-danger-zone">
             <div>
               <strong>删除人员</strong>
               <p>删除人员会移出当前人员台账，并清理取货模板绑定、待处理预警和登录会话；历史日志、库存记录和柜机事件保留，便于后续追溯。</p>
@@ -1275,6 +1425,9 @@ onMounted(load);
             <button class="admin-button admin-button--danger" :disabled="saving || removingUserId === editingUserId" @click="removeEditingUser">
               {{ removingUserId === editingUserId ? "删除中" : "删除当前人员" }}
             </button>
+          </div>
+          <div v-else-if="editingCurrentUser" class="admin-note">
+            当前登录账号不能删除；如需调整，请由其他管理员处理。
           </div>
         </div>
 
@@ -1357,7 +1510,7 @@ onMounted(load);
               v-model="backofficeForm.password"
               class="admin-input"
               type="password"
-              :placeholder="backofficeForm.hasExistingCredential ? '留空则不修改当前密码' : '至少 6 位'"
+              :placeholder="backofficeForm.hasExistingCredential ? '留空则不修改当前密码' : '至少 8 位'"
             />
           </label>
           <div class="admin-field">

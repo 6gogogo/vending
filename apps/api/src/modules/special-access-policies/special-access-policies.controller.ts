@@ -5,6 +5,7 @@ import type { SpecialAccessPolicy } from "@vm/shared-types";
 import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
+  AllowedBackofficeSessionPermissions,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -13,7 +14,6 @@ import { SpecialAccessPoliciesService } from "./special-access-policies.service"
 @Controller("special-access-policies")
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
-@AllowedBackofficePermissions("users:view")
 export class SpecialAccessPoliciesController {
   constructor(
     @Inject(SpecialAccessPoliciesService)
@@ -21,6 +21,7 @@ export class SpecialAccessPoliciesController {
   ) {}
 
   @Get()
+  @AllowedBackofficeSessionPermissions("users:view")
   list() {
     return ok(this.specialAccessPoliciesService.list());
   }
@@ -55,7 +56,7 @@ export class SpecialAccessPoliciesController {
   }
 
   @Post("batch-assign")
-  @AllowedBackofficePermissions("users:rules:manage")
+  @AllowedBackofficeSessionPermissions("users:rules:manage")
   batchAssign(
     @Body()
     body: {

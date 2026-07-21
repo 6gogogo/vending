@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   SmartVmClient,
@@ -14,6 +14,8 @@ import type {
   SmartVmSettlementPayload
 } from "@vm/shared-types";
 
+import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
+import { isProductionRuntime } from "../../common/config/runtime-environment";
 import { appendSystemAuditLog } from "../../common/store/persistence";
 
 export interface SmartVmExchangeTrace {
@@ -91,7 +93,7 @@ export class SmartVmGateway {
     statusCode: number;
     ok: boolean;
   }): SmartVmExchangeTrace {
-    return {
+    return sanitizeAuditLogEntry({
       direction: "outbound",
       occurredAt: new Date().toISOString(),
       method: payload.method,
@@ -102,7 +104,7 @@ export class SmartVmGateway {
       responseBody: payload.responseBody,
       ok: payload.ok,
       errorMessage: payload.ok ? undefined : this.formatResponseError(payload.responseBody)
-    };
+    });
   }
 
   private buildSimulatedExchangeTrace(payload: {
@@ -111,7 +113,7 @@ export class SmartVmGateway {
     requestBody: SmartVmPayload;
     responseBody: unknown;
   }): SmartVmExchangeTrace {
-    return {
+    return sanitizeAuditLogEntry({
       direction: "outbound",
       occurredAt: new Date().toISOString(),
       method: payload.method,
@@ -122,7 +124,7 @@ export class SmartVmGateway {
       responseBody: payload.responseBody,
       ok: true,
       simulated: true
-    };
+    });
   }
 
   private attachExchangeTrace(error: unknown, exchange?: SmartVmExchangeTrace) {
@@ -142,6 +144,7 @@ export class SmartVmGateway {
     return new SmartVmClient({
       baseUrl,
       credentials,
+      timeoutMs: this.getRequestTimeoutMs(),
       onExchange: ({ method, path, requestUrl, requestBody, responseBody, statusCode, ok }) => {
         const exchange = this.buildExchangeTrace({
           method,
@@ -177,6 +180,11 @@ export class SmartVmGateway {
     });
   }
 
+  private getRequestTimeoutMs() {
+    const configured = Number(this.configService.get<string>("SMARTVM_TIMEOUT_MS") ?? 15_000);
+    return Number.isSafeInteger(configured) && configured > 0 ? configured : 15_000;
+  }
+
   async getGoodsInfo(payload: { deviceCode: string; doorNum?: string }) {
     return this.createClient()?.getCabinetGoodsInfo(payload);
   }
@@ -189,11 +197,10 @@ export class SmartVmGateway {
     userId: string;
     eventId: string;
     deviceCode: string;
-    payStyle?: string;
     doorNum?: string;
     phone: string;
   }) {
-    const payStyle = this.getDefaultOpenDoorPayStyle(payload.payStyle);
+    const payStyle = this.getDefaultOpenDoorPayStyle();
     const requestBody = {
       ...payload,
       payStyle
@@ -265,6 +272,7 @@ export class SmartVmGateway {
     const overridePath = this.configService.get<string>("SMARTVM_PAYMENT_SUCCESS_PATH");
 
     if (preferredTarget?.startsWith("http://") || preferredTarget?.startsWith("https://")) {
+      this.assertAllowedNotifyTarget(preferredTarget);
       let result: undefined;
       try {
         result = await client.postToUrl<undefined>(preferredTarget, { ...payload }, "/api/pay/container/paymentSuccess");
@@ -391,7 +399,7 @@ export class SmartVmGateway {
       return undefined;
     }
 
-    return {
+    return sanitizeAuditLogEntry({
       direction: "outbound",
       occurredAt: new Date().toISOString(),
       method: "POST",
@@ -402,21 +410,82 @@ export class SmartVmGateway {
       responseBody: error.responseBody,
       ok: false,
       errorMessage: error.message
-    };
+    });
   }
 
-  private getDefaultOpenDoorPayStyle(preferred?: string) {
-    const normalizedPreferred = preferred?.trim();
-
-    if (normalizedPreferred) {
-      return normalizedPreferred;
+  isDefiniteOpenDoorRejection(error: unknown) {
+    if (!(error instanceof SmartVmRequestError)) {
+      return false;
     }
 
+    const responseReason =
+      error.responseBody && typeof error.responseBody === "object"
+        ? (error.responseBody as { reason?: unknown }).reason
+        : undefined;
+
+    // 本地超时和断网都无法判断平台是否已经执行；必须保留命令租约，避免重复开门。
+    if (responseReason === "timeout" || responseReason === "network_error") {
+      return false;
+    }
+
+    // 2xx 下的业务错误和普通 4xx 请求拒绝都有平台明确响应，可以安全释放租约供修正后重试。
+    // 408 仍表示结果不确定：超时响应可能来自中间代理，远端业务端可能已经收到请求。
+    return (
+      (error.statusCode >= 200 && error.statusCode < 300) ||
+      (error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 408)
+    );
+  }
+
+  private getDefaultOpenDoorPayStyle() {
     const configured = this.configService.get<string>("SMARTVM_DEFAULT_PAY_STYLE")?.trim();
     return configured || "2";
   }
 
+  private assertAllowedNotifyTarget(target: string) {
+    let targetUrl: URL;
+
+    try {
+      targetUrl = new URL(target);
+    } catch {
+      throw new BadRequestException("柜机付款回写地址格式无效。");
+    }
+
+    const configuredOrigins = (
+      this.configService.get<string>("SMARTVM_ALLOWED_NOTIFY_ORIGINS") ?? ""
+    )
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const baseUrl = this.configService.get<string>("SMARTVM_BASE_URL")?.trim();
+
+    if (baseUrl) {
+      try {
+        configuredOrigins.push(new URL(baseUrl).origin);
+      } catch {
+        throw new BadRequestException("SMARTVM_BASE_URL 格式无效。");
+      }
+    }
+
+    const allowedOrigins = new Set(
+      configuredOrigins.map((entry) => {
+        try {
+          return new URL(entry).origin;
+        } catch {
+          throw new BadRequestException("SMARTVM_ALLOWED_NOTIFY_ORIGINS 包含无效地址。");
+        }
+      })
+    );
+
+    if (!allowedOrigins.has(targetUrl.origin)) {
+      throw new BadRequestException("柜机付款回写地址不在允许的来源列表中。");
+    }
+  }
+
   private allowUnsignedCallbacks() {
+    if (isProductionRuntime()) {
+      return false;
+    }
+
     const raw =
       this.configService.get<string>("SMARTVM_ALLOW_UNSIGNED_CALLBACKS") ??
       this.configService.get<string>("ALLOW_UNSIGNED_SMARTVM_CALLBACKS");

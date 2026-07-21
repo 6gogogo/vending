@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
+import { ApiError } from "@vm/shared-client";
+import type { DeviceRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDate, formatDateTime, formatDateTimeSeconds, formatNowInBeijing } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
+import {
+  canManuallyConfirmPayment,
+  classifyRefundOutcome,
+  isFinancialActionOutcomeUncertain,
+  validateLegacyFullRefundAmount
+} from "../utils/financial-action-safety";
 import { categoryLabelMap } from "../utils/labels";
 import {
   buildAlertContextSummary,
@@ -25,12 +34,52 @@ const canManageDevice = computed(() => sessionStore.can("devices:manage"));
 const canManageGoods = computed(() => sessionStore.can("goods:manage"));
 const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
 const canRefundPayments = computed(() => sessionStore.can("payments:refund"));
+const canManualPaymentSuccess = computed(() =>
+  canManuallyConfirmPayment(canOperateDevice.value, canRefundPayments.value)
+);
+
+type DeviceDetailResponse = Awaited<ReturnType<typeof adminApi.deviceDetail>>;
+type DeviceRecentEvent = DeviceDetailResponse["recentEvents"][number];
+type FinancialActionKind = "payment" | "refund";
+type FinancialActionStep = "input" | "confirm";
+
+interface FinancialActionDraft {
+  kind: FinancialActionKind;
+  step: FinancialActionStep;
+  event: DeviceRecentEvent;
+  adjustmentOrderNo?: string;
+  orderNo: string;
+  label: string;
+  targetUrl?: string;
+  expectedAmount?: number;
+  transactionId: string;
+  refundNo: string;
+  refundRecordId?: string;
+  amountInput: string;
+}
 
 const detail = ref<Awaited<ReturnType<typeof adminApi.deviceDetail>>>();
 const loading = ref(false);
 const refreshing = ref(false);
 const syncing = ref(false);
 const remoteOpening = ref(false);
+const remoteOpenDialogStep = ref<"reason" | "confirm">();
+const remoteOpenReason = ref("");
+const remoteOpenDialog = ref<HTMLDialogElement>();
+const remoteOpenReasonInput = ref<HTMLTextAreaElement>();
+const remoteOpenSafeButton = ref<HTMLButtonElement>();
+const remoteOpenSubmitError = ref("");
+const remoteOpenOutcomePending = ref(false);
+const financialAction = ref<FinancialActionDraft>();
+const financialDialog = ref<HTMLDialogElement>();
+const financialPrimaryInput = ref<HTMLInputElement>();
+const financialAmountInput = ref<HTMLInputElement>();
+const financialSafeButton = ref<HTMLButtonElement>();
+const financialSubmitError = ref("");
+const financialOutcomePending = ref<Array<{
+  kind: FinancialActionKind;
+  orderNo: string;
+}>>([]);
 const resolvingTaskId = ref("");
 const selectedDoorNum = ref("1");
 const lastUpdatedAt = ref("");
@@ -49,12 +98,112 @@ const debugCallbackLogs = ref<Awaited<ReturnType<typeof adminApi.deviceCallbackL
 const debugSystemAuditLogs = ref<Awaited<ReturnType<typeof adminApi.systemAuditLogs>>>([]);
 const notifyingPaymentOrderNo = ref("");
 const refundingOrderNo = ref("");
+const reconcilingRefundId = ref("");
+const loadError = ref("");
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 
 let timer: ReturnType<typeof setInterval> | undefined;
 let visibilityHandler: (() => void) | undefined;
+let remoteOpenPreviousFocus: HTMLElement | undefined;
+let financialPreviousFocus: HTMLElement | undefined;
 
 const createCompactReference = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const isRemoteOpenOutcomePendingError = (error: unknown, message: string) => {
+  if (/柜机平台开柜失败/.test(message)) {
+    return false;
+  }
+
+  return (
+    /结果待确认|请勿重复|请求超时|设备回调已确认|指令在途|重复下发|failed to fetch|fetch failed|network error|网络/i.test(message)
+    || (error instanceof ApiError && (error.status === 408 || error.status === 409 || error.status >= 500))
+    || !(error instanceof ApiError)
+  );
+};
+const showActionMessage = (type: "success" | "error", text: string) => {
+  actionMessage.value = { type, text };
+};
+
+const financialReferencePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const findPersistedPendingRefund = (orderNo: string) => {
+  for (const event of detail.value?.recentEvents ?? []) {
+    if (event.orderNo === orderNo) {
+      return event.paymentRecovery?.pendingRefund;
+    }
+    const adjustment = event.adjustments?.find(
+      (entry) => entry.orderNo === orderNo
+    );
+    if (adjustment) {
+      return adjustment.paymentRecovery?.pendingRefund;
+    }
+  }
+  return undefined;
+};
+const financialAmount = computed(() => {
+  const value = financialAction.value?.amountInput.trim() ?? "";
+  return /^\d+$/.test(value) ? Number(value) : Number.NaN;
+});
+const isFinancialOutcomePending = (
+  kind: FinancialActionKind,
+  orderNo: string
+) =>
+  financialOutcomePending.value.some(
+    (entry) => entry.kind === kind && entry.orderNo === orderNo
+  ) ||
+  (
+    kind === "refund" &&
+    Boolean(findPersistedPendingRefund(orderNo))
+  );
+const isCurrentFinancialOutcomePending = computed(() =>
+  financialAction.value
+    ? isFinancialOutcomePending(
+        financialAction.value.kind,
+        financialAction.value.orderNo
+      )
+    : false
+);
+const financialInputError = computed(() => {
+  const draft = financialAction.value;
+  if (!draft) {
+    return "";
+  }
+
+  const transactionId = draft.transactionId.trim();
+  if (!financialReferencePattern.test(transactionId)) {
+    return "交易号需为 1–128 位，仅可包含字母、数字、点、下划线、冒号或短横线。";
+  }
+
+  if (draft.kind === "refund" && !financialReferencePattern.test(draft.refundNo.trim())) {
+    return "操作请求编号需为 1–128 位，仅可包含字母、数字、点、下划线、冒号或短横线。";
+  }
+
+  const amount = financialAmount.value;
+  if (!Number.isSafeInteger(amount)) {
+    return "金额必须是安全范围内的整数，单位为分。";
+  }
+
+  if (draft.kind === "payment") {
+    if (amount < 0) {
+      return "支付金额不能为负数。";
+    }
+    if (draft.expectedAmount !== undefined && amount !== draft.expectedAmount) {
+      return `支付金额必须与订单金额一致：${draft.expectedAmount} 分。`;
+    }
+  } else {
+    if (amount <= 0) {
+      return "退款金额必须大于 0 分。";
+    }
+    const fullRefundError = validateLegacyFullRefundAmount(
+      amount,
+      draft.expectedAmount
+    );
+    if (fullRefundError) {
+      return fullRefundError;
+    }
+  }
+
+  return "";
+});
 
 const selectedDoorGoods = computed(() => {
   const device = detail.value?.device;
@@ -97,8 +246,73 @@ const debugSystemAuditRows = computed(() =>
   )
 );
 
-const formatDeviceStatus = (status?: "online" | "offline" | "maintenance") =>
-  status === "online" ? "在线" : status === "maintenance" ? "维护中" : "离线";
+const getDeviceStatusPresentation = (device?: DeviceRecord) => {
+  if (!device) {
+    return { label: "状态加载中", tone: "warning", hint: "请等待柜机状态加载完成。" } as const;
+  }
+
+  if (device.readiness?.blocker === "stale") {
+    return {
+      label: "状态已过期",
+      tone: "warning",
+      hint: "最近心跳已超过有效时限，请先主动刷新状态；刷新成功前不能远程开门。"
+    } as const;
+  }
+
+  if (device.readiness?.blocker === "maintenance" || device.status === "maintenance") {
+    return {
+      label: "维护中",
+      tone: "warning",
+      hint: "柜机处于维护状态，解除维护前不能远程开门。"
+    } as const;
+  }
+
+  if (device.readiness?.blocker === "offline" || device.status === "offline") {
+    return {
+      label: "离线",
+      tone: "danger",
+      hint: "柜机已明确离线，请先排查连接并主动刷新状态。"
+    } as const;
+  }
+
+  return { label: "在线", tone: "success", hint: "最近心跳在有效时限内。" } as const;
+};
+
+const deviceCanOpen = computed(() => {
+  const device = detail.value?.device;
+  return device ? (device.readiness?.canOpen ?? device.status === "online") : false;
+});
+const remoteOpenBlockedHint = computed(() => {
+  if (!detail.value?.device) {
+    return "柜机详情尚未加载，请先刷新页面。";
+  }
+
+  if (!deviceCanOpen.value) {
+    return getDeviceStatusPresentation(detail.value.device).hint;
+  }
+
+  if (detail.value.runtime.doorState === "open") {
+    return "柜门当前已开启，请确认现场并等待关门后再操作。";
+  }
+
+  if (detail.value.runtime.doorState !== "closed") {
+    return "柜门物理状态尚未确认，请先点击“立即刷新”，确认平台返回门已关后再操作。";
+  }
+
+  return "";
+});
+const remoteOpenDisabled = computed(() =>
+  remoteOpening.value || Boolean(remoteOpenBlockedHint.value)
+);
+const remoteOpenDeviceSummary = computed(() => {
+  const device = detail.value?.device;
+  const deviceCode = device?.deviceCode ?? String(route.params.deviceCode);
+  const deviceName = device?.name.trim() || "未知柜机";
+
+  return deviceCode && !deviceName.includes(deviceCode)
+    ? `${deviceName}（编号 ${deviceCode}）`
+    : deviceName;
+});
 
 const formatDoorState = (state?: "open" | "closed" | "unknown") =>
   state === "open" ? "门已开" : state === "closed" ? "门已关" : "门状态未知";
@@ -192,7 +406,10 @@ const resolvePlatformOrderContext = (
     transactionId: adjustment?.paymentTransactionId ?? event.paymentTransactionId,
     refundedAt: adjustment?.refundedAt ?? event.refundedAt,
     refundNo: adjustment?.refundNo ?? event.refundNo,
-    refundTransactionId: adjustment?.refundTransactionId ?? event.refundTransactionId
+    refundTransactionId: adjustment?.refundTransactionId ?? event.refundTransactionId,
+    pendingRefund:
+      adjustment?.paymentRecovery?.pendingRefund ??
+      event.paymentRecovery?.pendingRefund
   };
 };
 
@@ -315,9 +532,9 @@ const formatGoodsStock = (goods: NonNullable<typeof selectedDoorGoods.value>[num
   } else if (
     goods.thresholdEnabled &&
     goods.lowStockThreshold !== undefined &&
-    goods.stock < goods.lowStockThreshold
+    goods.stock <= goods.lowStockThreshold
   ) {
-    tags.push("缺货");
+    tags.push("低库存");
   }
 
   if (goods.expiringSoon) {
@@ -393,6 +610,7 @@ const shouldShowRefundAction = (
 
 const load = async () => {
   loading.value = true;
+  loadError.value = "";
   try {
     const [deviceDetail, catalogResponse] = await Promise.all([
       adminApi.deviceDetail(String(route.params.deviceCode)),
@@ -400,6 +618,28 @@ const load = async () => {
     ]);
     detail.value = deviceDetail;
     goodsCatalog.value = catalogResponse;
+    financialOutcomePending.value = financialOutcomePending.value.filter(
+      (pending) =>
+        recentEvents.value.some((event) => {
+          const adjustmentOrderNo =
+            event.orderNo === pending.orderNo
+              ? undefined
+              : getEventAdjustments(event).find(
+                  (entry) => entry.orderNo === pending.orderNo
+                )?.orderNo;
+
+          if (
+            event.orderNo !== pending.orderNo &&
+            adjustmentOrderNo === undefined
+          ) {
+            return false;
+          }
+
+          return pending.kind === "payment"
+            ? shouldShowPaymentAction(event, adjustmentOrderNo)
+            : shouldShowRefundAction(event, adjustmentOrderNo);
+        })
+    );
     if (!detail.value.device.doors.some((door) => door.doorNum === selectedDoorNum.value)) {
       selectedDoorNum.value = detail.value.device.doors[0]?.doorNum ?? "1";
     }
@@ -407,6 +647,8 @@ const load = async () => {
       selectedGoodsToAdd.value = addableGoodsOptions.value[0]?.goodsId ?? "";
     }
     lastUpdatedAt.value = formatNowInBeijing();
+  } catch (error) {
+    loadError.value = readErrorMessage(error, "柜机详情加载失败");
   } finally {
     loading.value = false;
   }
@@ -438,7 +680,7 @@ const loadDebugPanel = async () => {
 
 const refreshDevice = async () => {
   if (!canOperateDevice.value) {
-    window.alert("当前账号没有柜机操作权限。");
+    showActionMessage("error", "当前账号没有柜机操作权限，不能刷新远端状态。");
     return;
   }
 
@@ -446,6 +688,9 @@ const refreshDevice = async () => {
   try {
     detail.value = await adminApi.refreshDevice(String(route.params.deviceCode));
     lastUpdatedAt.value = formatNowInBeijing();
+    showActionMessage("success", `已刷新柜机状态，最近刷新时间 ${lastUpdatedAt.value}。`);
+  } catch (error) {
+    showActionMessage("error", `刷新失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     refreshing.value = false;
   }
@@ -457,7 +702,7 @@ const refreshDevice = async () => {
 
 const syncGoods = async () => {
   if (!canManageGoods.value) {
-    window.alert("当前账号没有货品资料管理权限。");
+    showActionMessage("error", "当前账号没有货品资料管理权限，不能同步货品种类。");
     return;
   }
 
@@ -465,6 +710,9 @@ const syncGoods = async () => {
   try {
     await adminApi.syncDeviceGoods(String(route.params.deviceCode), selectedDoorNum.value);
     await load();
+    showActionMessage("success", `已同步 ${String(route.params.deviceCode)} / ${selectedDoorNum.value} 号货门的货品种类。`);
+  } catch (error) {
+    showActionMessage("error", `同步货品失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     syncing.value = false;
   }
@@ -474,18 +722,177 @@ const syncGoods = async () => {
   }
 };
 
+const canRestoreFocus = (target?: HTMLElement) =>
+  Boolean(target?.isConnected && !target.matches(":disabled") && target.getAttribute("aria-disabled") !== "true");
+
+const restoreRemoteOpenFocus = async () => {
+  const target = remoteOpenPreviousFocus;
+  remoteOpenPreviousFocus = undefined;
+  await nextTick();
+
+  if (canRestoreFocus(target)) {
+    target?.focus();
+  }
+};
+
+const resetRemoteOpenDialog = async (restoreFocus = true) => {
+  if (remoteOpenDialog.value?.open) {
+    remoteOpenDialog.value.close();
+  }
+  remoteOpenDialogStep.value = undefined;
+  remoteOpenReason.value = "";
+  remoteOpenSubmitError.value = "";
+  remoteOpenOutcomePending.value = false;
+
+  if (restoreFocus) {
+    await restoreRemoteOpenFocus();
+  } else {
+    remoteOpenPreviousFocus = undefined;
+  }
+};
+
+const closeRemoteOpenDialog = async () => {
+  if (!remoteOpening.value) {
+    await resetRemoteOpenDialog();
+  }
+};
+
 const remoteOpen = async () => {
-  if (!canOperateDevice.value) {
-    window.alert("当前账号没有柜机操作权限。");
+  if (remoteOpening.value) {
     return;
   }
 
+  if (!canOperateDevice.value) {
+    showActionMessage("error", "当前账号没有柜机操作权限，不能远程开门。");
+    return;
+  }
+
+  const device = detail.value?.device;
+  if (!device) {
+    showActionMessage("error", "柜机详情尚未加载，不能下发远程开门指令。请先刷新页面。");
+    return;
+  }
+
+  if (device.status === "offline") {
+    showActionMessage("error", "当前柜机处于离线状态，不能下发远程开门指令。请先排查连接状态。");
+    return;
+  }
+
+  if (device.readiness?.blocker === "stale") {
+    showActionMessage("error", "柜机状态已过期，不能下发远程开门指令。请先点击“立即刷新”，确认状态恢复后再操作。");
+    return;
+  }
+
+  if (device.readiness?.blocker === "maintenance" || device.status === "maintenance") {
+    showActionMessage("error", "当前柜机处于维护状态，不能下发远程开门指令。请先解除维护状态。");
+    return;
+  }
+
+  if (detail.value?.runtime.doorState !== "closed") {
+    showActionMessage(
+      "error",
+      detail.value?.runtime.doorState === "open"
+        ? "当前门状态已是开启，已阻止重复下发开门指令。请先确认现场并等待关门。"
+        : "当前门状态尚未确认，已阻止远程开门。请先点击“立即刷新”，确认平台返回门已关。"
+    );
+    return;
+  }
+
+  remoteOpenPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+  remoteOpenReason.value = "";
+  remoteOpenSubmitError.value = "";
+  remoteOpenOutcomePending.value = false;
+  remoteOpenDialogStep.value = "reason";
+  await nextTick();
+  if (remoteOpenDialog.value && !remoteOpenDialog.value.open) {
+    remoteOpenDialog.value.showModal();
+  }
+  remoteOpenReasonInput.value?.focus();
+};
+
+const continueRemoteOpen = async () => {
+  const reason = remoteOpenReason.value.trim();
+  if (!reason || reason.length < 4 || reason.length > 200) {
+    showActionMessage("error", "请填写 4 至 200 个字符的明确操作原因。");
+    return;
+  }
+
+  remoteOpenReason.value = reason;
+  remoteOpenSubmitError.value = "";
+  remoteOpenOutcomePending.value = false;
+  remoteOpenDialogStep.value = "confirm";
+  await nextTick();
+  remoteOpenSafeButton.value?.focus();
+};
+
+const returnToRemoteOpenReason = async () => {
+  if (remoteOpening.value) {
+    return;
+  }
+
+  remoteOpenSubmitError.value = "";
+  remoteOpenOutcomePending.value = false;
+  remoteOpenDialogStep.value = "reason";
+  await nextTick();
+  remoteOpenReasonInput.value?.focus();
+};
+
+const confirmRemoteOpen = async () => {
+  if (remoteOpening.value || remoteOpenDialogStep.value !== "confirm") {
+    return;
+  }
+
+  const device = detail.value?.device;
+  const reason = remoteOpenReason.value.trim();
+
+  if (
+    !device ||
+    device.status === "offline" ||
+    !(device.readiness?.canOpen ?? device.status === "online") ||
+    detail.value?.runtime.doorState !== "closed"
+  ) {
+    await closeRemoteOpenDialog();
+    showActionMessage("error", "柜机状态已变化，已阻止远程开门。请刷新后重新核对。");
+    return;
+  }
+
+  if (reason.length < 4 || reason.length > 200) {
+    remoteOpenDialogStep.value = "reason";
+    showActionMessage("error", "请填写 4 至 200 个字符的明确操作原因。");
+    await nextTick();
+    remoteOpenReasonInput.value?.focus();
+    return;
+  }
+
+  let completed = false;
+  remoteOpenSubmitError.value = "";
+  remoteOpenOutcomePending.value = false;
   remoteOpening.value = true;
   try {
-    await adminApi.remoteOpenDevice(String(route.params.deviceCode), selectedDoorNum.value);
+    const result = await adminApi.remoteOpenDevice(String(route.params.deviceCode), selectedDoorNum.value, reason);
     await load();
+    showActionMessage("success", `远程开门指令已下发：订单 ${result.orderNo}，事件 ${result.eventId}。请继续关注门状态和关联日志。`);
+    completed = true;
+  } catch (error) {
+    const message = readErrorMessage(error, "请求结果无法确认");
+    remoteOpenOutcomePending.value = isRemoteOpenOutcomePendingError(error, message);
+    remoteOpenSubmitError.value = remoteOpenOutcomePending.value
+      ? `开门结果待确认：${message} 请勿再次下发；请关闭对话框并查看最新门状态和关联日志。`
+      : `远程开门失败：${message}`;
+    showActionMessage("error", remoteOpenSubmitError.value);
+
+    if (remoteOpenOutcomePending.value) {
+      await load();
+    }
   } finally {
     remoteOpening.value = false;
+    await nextTick();
+
+    if (completed) {
+      await resetRemoteOpenDialog();
+    } else {
+      remoteOpenSafeButton.value?.focus();
+    }
   }
 
   if (debugPanelVisible.value) {
@@ -493,56 +900,297 @@ const remoteOpen = async () => {
   }
 };
 
-const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) => {
-  if (!canOperateDevice.value) {
-    window.alert("当前账号没有柜机操作权限。");
+const restoreFinancialFocus = async () => {
+  const target = financialPreviousFocus;
+  financialPreviousFocus = undefined;
+  await nextTick();
+
+  if (canRestoreFocus(target)) {
+    target?.focus();
+  }
+};
+
+const resetFinancialDialog = async (restoreFocus = true) => {
+  if (financialDialog.value?.open) {
+    financialDialog.value.close();
+  }
+  financialAction.value = undefined;
+  financialSubmitError.value = "";
+
+  if (restoreFocus) {
+    await restoreFinancialFocus();
+  } else {
+    financialPreviousFocus = undefined;
+  }
+};
+
+const closeFinancialDialog = async () => {
+  if (
+    !notifyingPaymentOrderNo.value &&
+    !refundingOrderNo.value &&
+    !reconcilingRefundId.value
+  ) {
+    const shouldRefresh = isCurrentFinancialOutcomePending.value;
+    await resetFinancialDialog();
+    if (shouldRefresh) {
+      await load();
+    }
+  }
+};
+
+const openFinancialDialog = async (
+  kind: FinancialActionKind,
+  event: DeviceRecentEvent,
+  adjustmentOrderNo?: string
+) => {
+  if (kind === "payment" && !canManualPaymentSuccess.value) {
+    showActionMessage("error", "手工回写付款成功需要同时具备柜机操作和退款支付处理权限。");
+    return;
+  }
+  if (kind === "refund" && !canRefundPayments.value) {
+    showActionMessage("error", "当前账号没有退款处理权限，不能发起退款。");
     return;
   }
 
-  const platformContext = resolvePlatformOrderContext(event, "payment", adjustmentOrderNo);
-  const defaultTransactionId =
-    platformContext.transactionId ||
-    createCompactReference("txn");
-  const transactionId = window.prompt("请输入支付交易号 transactionId", defaultTransactionId)?.trim();
+  const platformContext = resolvePlatformOrderContext(event, kind, adjustmentOrderNo);
+  const pendingRefund =
+    kind === "refund" ? platformContext.pendingRefund : undefined;
+  if (isFinancialOutcomePending(kind, platformContext.orderNo) && !pendingRefund) {
+    showActionMessage(
+      "error",
+      `${kind === "refund" ? "退款" : "付款回写"}结果仍待确认，请先刷新订单状态，不要重复提交。`
+    );
+    return;
+  }
+  financialPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+  financialSubmitError.value = "";
+  financialAction.value = {
+    kind,
+    step: pendingRefund ? "confirm" : "input",
+    event,
+    adjustmentOrderNo,
+    orderNo: platformContext.orderNo,
+    label: platformContext.label,
+    targetUrl: platformContext.targetUrl,
+    expectedAmount: pendingRefund?.amount ?? platformContext.amount,
+    transactionId: platformContext.transactionId ?? "",
+    refundNo:
+      kind === "refund"
+        ? pendingRefund?.sourceRequestId ??
+          platformContext.refundNo ??
+          createCompactReference("rfd")
+        : "",
+    refundRecordId: pendingRefund?.id,
+    amountInput:
+      (pendingRefund?.amount ?? platformContext.amount) === undefined
+        ? ""
+        : String(pendingRefund?.amount ?? platformContext.amount)
+  };
+  if (pendingRefund) {
+    financialOutcomePending.value = [
+      ...financialOutcomePending.value.filter(
+        (entry) =>
+          entry.kind !== "refund" ||
+          entry.orderNo !== platformContext.orderNo
+      ),
+      { kind: "refund", orderNo: platformContext.orderNo }
+    ];
+    financialSubmitError.value =
+      `本地退款单 ${pendingRefund.refundNo} 仍待支付渠道确认。主动核对会复用原退款号，不会新建退款单。`;
+  }
 
-  if (!transactionId) {
+  await nextTick();
+  if (financialDialog.value && !financialDialog.value.open) {
+    financialDialog.value.showModal();
+  }
+  if (pendingRefund) {
+    financialSafeButton.value?.focus();
+  } else {
+    focusFinancialInput();
+  }
+};
+
+const notifyPaymentSuccess = (event: DeviceRecentEvent, adjustmentOrderNo?: string) =>
+  openFinancialDialog("payment", event, adjustmentOrderNo);
+
+const refundEvent = (event: DeviceRecentEvent, adjustmentOrderNo?: string) =>
+  openFinancialDialog("refund", event, adjustmentOrderNo);
+
+const focusFinancialInput = () => {
+  if (financialAction.value?.kind === "refund") {
+    financialAmountInput.value?.focus();
     return;
   }
 
-  const defaultAmount = String(platformContext.amount ?? 0);
-  const amountInput = window.prompt("请输入支付金额（单位：分）", defaultAmount)?.trim();
+  financialPrimaryInput.value?.focus();
+};
 
-  if (!amountInput) {
+const continueFinancialAction = async () => {
+  if (!financialAction.value || financialInputError.value) {
+    financialSubmitError.value = financialInputError.value || "请先完整填写并核对操作信息。";
     return;
   }
 
-  const amount = Number(amountInput);
+  financialSubmitError.value = "";
+  financialAction.value.step = "confirm";
+  await nextTick();
+  financialSafeButton.value?.focus();
+};
 
-  if (Number.isNaN(amount)) {
-    window.alert("操作失败：支付金额必须是数字");
+const returnToFinancialInput = async () => {
+  if (
+    !financialAction.value ||
+    notifyingPaymentOrderNo.value ||
+    refundingOrderNo.value ||
+    isCurrentFinancialOutcomePending.value
+  ) {
     return;
   }
 
-  if (!window.confirm(`确认向平台回写${platformContext.label} ${platformContext.orderNo} 的付款成功结果吗？`)) {
+  financialAction.value.step = "input";
+  financialSubmitError.value = "";
+  await nextTick();
+  focusFinancialInput();
+};
+
+const confirmFinancialAction = async () => {
+  const draft = financialAction.value;
+  if (!draft || draft.step !== "confirm" || financialInputError.value) {
+    financialSubmitError.value = financialInputError.value || "操作信息已失效，请返回重新核对。";
     return;
   }
 
-  notifyingPaymentOrderNo.value = platformContext.orderNo;
+  if ((draft.kind === "payment" && !canManualPaymentSuccess.value) || (draft.kind === "refund" && !canRefundPayments.value)) {
+    await resetFinancialDialog();
+    showActionMessage(
+      "error",
+      draft.kind === "refund"
+        ? "当前账号退款权限已变化，已阻止本次退款。请重新登录后再试。"
+        : "当前账号的柜机操作或退款支付处理权限已变化，已阻止本次付款回写。请重新登录后再试。"
+    );
+    return;
+  }
+
+  const currentEvent = recentEvents.value.find((entry) => entry.eventId === draft.event.eventId);
+  const actionStillAvailable = currentEvent && (
+    draft.kind === "payment"
+      ? shouldShowPaymentAction(currentEvent, draft.adjustmentOrderNo)
+      : shouldShowRefundAction(currentEvent, draft.adjustmentOrderNo)
+  );
+  const currentContext = currentEvent
+    ? resolvePlatformOrderContext(currentEvent, draft.kind, draft.adjustmentOrderNo)
+    : undefined;
+  const sourceStillMatches = currentContext &&
+    currentContext.orderNo === draft.orderNo &&
+    currentContext.amount === draft.expectedAmount &&
+    (draft.kind === "payment" || currentContext.transactionId === draft.transactionId.trim());
+  if (!currentEvent || !actionStillAvailable || !sourceStillMatches) {
+    await resetFinancialDialog();
+    showActionMessage("error", "订单状态或金额已变化，已阻止重复处理。请刷新后重新核对。");
+    return;
+  }
+
+  const amount = financialAmount.value;
+  const transactionId = draft.transactionId.trim();
+  const refundNo = draft.refundNo.trim();
+  financialSubmitError.value = "";
+
+  if (draft.kind === "payment") {
+    notifyingPaymentOrderNo.value = draft.orderNo;
+  } else {
+    refundingOrderNo.value = draft.orderNo;
+  }
+
+  let completed = false;
   try {
-    await adminApi.notifyPaymentSuccess({
-      orderNo: platformContext.orderNo,
-      eventId: event.eventId,
-      transactionId,
-      deviceCode: event.deviceCode,
-      amount,
-      targetUrl: platformContext.targetUrl
-    });
-    window.alert("操作成功");
-    await load();
+    if (draft.kind === "payment") {
+      await adminApi.notifyPaymentSuccess({
+        orderNo: draft.orderNo,
+        eventId: currentEvent.eventId,
+        transactionId,
+        deviceCode: currentEvent.deviceCode,
+        amount,
+        targetUrl: draft.targetUrl
+      });
+      await load();
+      completed = true;
+      showActionMessage(
+        "success",
+        `已向平台回写${draft.label}付款成功：订单 ${draft.orderNo}，交易号 ${transactionId}，金额 ${(amount / 100).toFixed(2)} 元。`
+      );
+    } else {
+      const refund = await adminApi.refundOrder({
+        orderNo: draft.orderNo,
+        transactionId,
+        deviceCode: currentEvent.deviceCode,
+        refundNo,
+        amount
+      });
+      await load();
+      const outcome = classifyRefundOutcome(refund);
+
+      if (outcome === "completed") {
+        completed = true;
+        showActionMessage(
+          "success",
+          `${draft.label}退款已完成：订单 ${draft.orderNo}，操作请求编号 ${refundNo}，金额 ${(amount / 100).toFixed(2)} 元。`
+        );
+      } else if (outcome === "failed") {
+        financialSubmitError.value = `退款失败：${refund.failReason || "支付渠道已明确拒绝退款，请核对后再试。"}`;
+        showActionMessage("error", financialSubmitError.value);
+      } else {
+        draft.refundRecordId = refund.id;
+        financialOutcomePending.value = [
+          ...financialOutcomePending.value.filter(
+            (entry) => entry.kind !== "refund" || entry.orderNo !== draft.orderNo
+          ),
+          { kind: "refund", orderNo: draft.orderNo }
+        ];
+        financialSubmitError.value =
+          `退款请求已记录（操作请求编号 ${refundNo}，本地退款单 ${refund.refundNo}），但渠道或业务结果尚未全部确认。可复用原退款单主动核对，不会新建退款单；确认前不要重复提交。`;
+        showActionMessage("error", financialSubmitError.value);
+      }
+    }
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    const prefix = draft.kind === "payment" ? "付款回写失败" : "退款失败";
+    if (isFinancialActionOutcomeUncertain(error)) {
+      if (draft.kind === "refund") {
+        await load();
+        const recoveredRefund = findPersistedPendingRefund(draft.orderNo);
+        if (recoveredRefund) {
+          draft.refundRecordId = recoveredRefund.id;
+          draft.refundNo =
+            recoveredRefund.sourceRequestId ??
+            recoveredRefund.refundNo;
+          draft.amountInput = String(recoveredRefund.amount);
+          draft.expectedAmount = recoveredRefund.amount;
+          financialSubmitError.value =
+            `退款请求已经由服务端记录为待确认（本地退款单 ${recoveredRefund.refundNo}）。可复用原退款单主动核对，不会新建退款单；确认前不要重复提交。`;
+        }
+      }
+      financialOutcomePending.value = [
+        ...financialOutcomePending.value.filter(
+          (entry) =>
+            entry.kind !== draft.kind || entry.orderNo !== draft.orderNo
+        ),
+        { kind: draft.kind, orderNo: draft.orderNo }
+      ];
+      financialSubmitError.value ||=
+        `${draft.kind === "payment" ? "付款回写" : "退款"}请求已经发出，但结果尚未确认。请刷新订单状态，确认前不要重复提交。`;
+      showActionMessage("error", financialSubmitError.value);
+    } else {
+      financialSubmitError.value = `${prefix}：${readErrorMessage(error, "请稍后重试")}`;
+    }
   } finally {
     notifyingPaymentOrderNo.value = "";
+    refundingOrderNo.value = "";
+    await nextTick();
+  }
+
+  if (completed) {
+    await resetFinancialDialog();
+  } else {
+    financialSafeButton.value?.focus();
   }
 
   if (debugPanelVisible.value) {
@@ -550,75 +1198,79 @@ const notifyPaymentSuccess = async (event: NonNullable<typeof recentEvents.value
   }
 };
 
-const refundEvent = async (event: NonNullable<typeof recentEvents.value>[number], adjustmentOrderNo?: string) => {
+const reconcilePendingRefund = async () => {
+  const draft = financialAction.value;
+  const refundRecordId = draft?.refundRecordId;
+  if (
+    !draft ||
+    draft.kind !== "refund" ||
+    !refundRecordId ||
+    !isCurrentFinancialOutcomePending.value
+  ) {
+    financialSubmitError.value = "当前没有可主动核对的本地退款单，请关闭后刷新订单状态。";
+    return;
+  }
   if (!canRefundPayments.value) {
-    window.alert("当前账号没有退款与支付处理权限。");
+    await resetFinancialDialog();
+    showActionMessage("error", "当前账号退款权限已变化，已阻止主动核对。请重新登录后再试。");
     return;
   }
 
-  const platformContext = resolvePlatformOrderContext(event, "refund", adjustmentOrderNo);
-  const defaultTransactionId = platformContext.transactionId || createCompactReference("txn");
-  const transactionId = window.prompt("请输入退款对应的交易号 transactionId", defaultTransactionId)?.trim();
-
-  if (!transactionId) {
-    return;
-  }
-
-  const defaultRefundNo = event.refundNo || createCompactReference("rfd");
-  const refundNo = window.prompt("请输入退款单号 refundNo", defaultRefundNo)?.trim();
-
-  if (!refundNo) {
-    return;
-  }
-
-  const defaultAmount = String(platformContext.amount ?? 0);
-  const amountInput = window.prompt("请输入退款金额（单位：分）", defaultAmount)?.trim();
-
-  if (!amountInput) {
-    return;
-  }
-
-  const amount = Number(amountInput);
-
-  if (Number.isNaN(amount)) {
-    window.alert("操作失败：退款金额必须是数字");
-    return;
-  }
-
-  if (!window.confirm(`确认向平台发起${platformContext.label} ${platformContext.orderNo} 的退款吗？`)) {
-    return;
-  }
-
-  refundingOrderNo.value = platformContext.orderNo;
+  reconcilingRefundId.value = refundRecordId;
+  financialSubmitError.value = "";
   try {
-    await adminApi.refundOrder({
-      orderNo: platformContext.orderNo,
-      transactionId,
-      deviceCode: event.deviceCode,
-      refundNo,
-      amount
-    });
-    window.alert("操作成功");
+    const refund = await adminApi.reconcileRefund(refundRecordId);
     await load();
-  } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
-  } finally {
-    refundingOrderNo.value = "";
-  }
+    const outcome = classifyRefundOutcome(refund);
 
-  if (debugPanelVisible.value) {
-    await loadDebugPanel();
+    if (outcome === "completed") {
+      financialOutcomePending.value = financialOutcomePending.value.filter(
+        (entry) => entry.kind !== "refund" || entry.orderNo !== draft.orderNo
+      );
+      showActionMessage(
+        "success",
+        `${draft.label}退款已由支付渠道确认完成：本地退款单 ${refund.refundNo}，金额 ${(refund.amount / 100).toFixed(2)} 元。`
+      );
+      await resetFinancialDialog();
+      return;
+    }
+
+    if (outcome === "failed") {
+      financialOutcomePending.value = financialOutcomePending.value.filter(
+        (entry) => entry.kind !== "refund" || entry.orderNo !== draft.orderNo
+      );
+      showActionMessage(
+        "error",
+        `支付渠道已明确退款失败：${refund.failReason || "请核对渠道账单后重新发起新的退款。"}`
+      );
+      await resetFinancialDialog();
+      return;
+    }
+
+    financialSubmitError.value =
+      `支付渠道尚未返回退款终态。本地退款单 ${refund.refundNo} 继续保留；再次核对会复用原退款号，不会新建退款单。`;
+    showActionMessage("error", financialSubmitError.value);
+  } catch (error) {
+    const message = readErrorMessage(error, "支付渠道暂时无法完成核对");
+    financialSubmitError.value = isFinancialActionOutcomeUncertain(error)
+      ? `主动核对结果仍待确认：${message}。系统继续保留原退款单，不会新建退款单。`
+      : `主动核对失败：${message}。请先核对渠道账单，不要重新发起退款。`;
+    showActionMessage("error", financialSubmitError.value);
+  } finally {
+    reconcilingRefundId.value = "";
+    await nextTick();
+    financialSafeButton.value?.focus();
   }
 };
 
 const resolveTask = async (taskId: string) => {
   if (!canManageAlerts.value) {
-    window.alert("当前账号没有预警处理权限。");
+    showActionMessage("error", "当前账号没有预警处理权限，不能处理待办。");
     return;
   }
 
   const task = pendingTasks.value.find((entry) => entry.id === taskId);
-  if (!task || !window.confirm(`确认${taskActionLabel(task)}？`)) {
+  if (!task || !window.confirm(task.grade === "fault" ? "确认标记为已知晓？故障任务仍会保留为需继续跟进的状态。" : `确认${taskActionLabel(task)}？完成后会移入处理记录。`)) {
     return;
   }
   resolvingTaskId.value = taskId;
@@ -628,6 +1280,9 @@ const resolveTask = async (taskId: string) => {
       task?.grade === "fault" ? "管理员已知晓并接手处理" : "管理员手动完成"
     );
     await load();
+    showActionMessage("success", task.grade === "fault" ? "已标记为知晓，请继续跟进柜机状态或关联日志。" : "待办已完成。");
+  } catch (error) {
+    showActionMessage("error", `处理待办失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     resolvingTaskId.value = "";
   }
@@ -640,7 +1295,7 @@ const saveLocation = async (payload: {
   address: string;
 }) => {
   if (!canManageDevice.value) {
-    window.alert("当前账号没有柜机资料管理权限。");
+    showActionMessage("error", "当前账号没有柜机资料管理权限，不能保存位置。");
     return;
   }
 
@@ -654,6 +1309,9 @@ const saveLocation = async (payload: {
     });
     mapPickerVisible.value = false;
     await load();
+    showActionMessage("success", `柜机位置已保存：${payload.location || payload.address || "已更新坐标"}。移动端会按新坐标参与距离排序。`);
+  } catch (error) {
+    showActionMessage("error", `保存位置失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     updatingLocation.value = false;
   }
@@ -669,24 +1327,26 @@ const toggleDebugPanel = async () => {
 
 const addGoods = async () => {
   if (!canManageDevice.value) {
-    window.alert("当前账号没有柜机资料管理权限。");
+    showActionMessage("error", "当前账号没有柜机资料管理权限，不能加入货品。");
     return;
   }
 
   if (!selectedGoodsToAdd.value) {
-    window.alert("操作失败：请先选择要加入的货品");
+    showActionMessage("error", "加入货品失败：请先选择要加入当前货门的货品。");
     return;
   }
 
   addingGoods.value = true;
   try {
+    const goodsName = goodsCatalog.value.find((item) => item.goodsId === selectedGoodsToAdd.value)?.name ?? selectedGoodsToAdd.value;
     detail.value = await adminApi.addDeviceGoods(String(route.params.deviceCode), {
       goodsId: selectedGoodsToAdd.value,
       doorNum: selectedDoorNum.value
     });
     selectedGoodsToAdd.value = addableGoodsOptions.value[0]?.goodsId ?? "";
+    showActionMessage("success", `已将“${goodsName}”加入 ${String(route.params.deviceCode)} / ${selectedDoorNum.value} 号货门，可继续维护库存或阈值。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `加入货品失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     addingGoods.value = false;
   }
@@ -694,7 +1354,7 @@ const addGoods = async () => {
 
 const removeGoods = async (goodsId: string) => {
   if (!canManageDevice.value) {
-    window.alert("当前账号没有柜机资料管理权限。");
+    showActionMessage("error", "当前账号没有柜机资料管理权限，不能移除货品。");
     return;
   }
 
@@ -704,12 +1364,14 @@ const removeGoods = async (goodsId: string) => {
 
   removingGoodsId.value = goodsId;
   try {
+    const goodsName = selectedDoorGoods.value.find((item) => item.goodsId === goodsId)?.name ?? goodsId;
     detail.value = await adminApi.removeDeviceGoods(String(route.params.deviceCode), goodsId, selectedDoorNum.value);
     if (selectedGoodsToAdd.value === goodsId) {
       selectedGoodsToAdd.value = "";
     }
+    showActionMessage("success", `已从 ${String(route.params.deviceCode)} / ${selectedDoorNum.value} 号货门移除“${goodsName}”。历史库存和领取记录仍保留。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `移除货品失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     removingGoodsId.value = "";
   }
@@ -718,6 +1380,8 @@ const removeGoods = async (goodsId: string) => {
 watch(
   () => route.params.deviceCode,
   async () => {
+    await resetRemoteOpenDialog(false);
+    await resetFinancialDialog(false);
     await load();
   }
 );
@@ -746,6 +1410,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  remoteOpenDialog.value?.close();
+  financialDialog.value?.close();
   if (timer) {
     clearInterval(timer);
   }
@@ -770,13 +1436,28 @@ onUnmounted(() => {
       </div>
     </section>
 
+    <div v-if="loadError" class="admin-alert admin-alert--danger" role="alert" aria-live="assertive">
+      {{ loadError }}
+      <button class="admin-text-button" type="button" @click="load">重试</button>
+    </div>
+    <div
+      v-if="actionMessage"
+      class="admin-alert"
+      :class="{ 'admin-alert--danger': actionMessage.type === 'error' }"
+      :role="actionMessage.type === 'error' ? 'alert' : 'status'"
+      :aria-live="actionMessage.type === 'error' ? 'assertive' : 'polite'"
+      aria-atomic="true"
+    >
+      {{ actionMessage.text }}
+    </div>
+
     <section v-if="detail" class="admin-grid">
       <article class="admin-panel admin-panel-block">
         <div class="device-detail-status">
           <div class="device-detail-status__item">
             <span class="admin-kicker">柜机状态</span>
-            <strong>{{ formatDeviceStatus(detail.device.status) }}</strong>
-            <span class="admin-table__subtext">{{ detail.device.deviceCode }}</span>
+            <strong>{{ getDeviceStatusPresentation(detail.device).label }}</strong>
+            <span class="admin-table__subtext">{{ detail.device.deviceCode }} · {{ getDeviceStatusPresentation(detail.device).hint }}</span>
           </div>
           <div class="device-detail-status__item">
             <span class="admin-kicker">门状态</span>
@@ -923,28 +1604,27 @@ onUnmounted(() => {
                 <h3 class="admin-panel__title">业务日 {{ detail.businessDateKey }} 内的领取 / 补货情况</h3>
               </div>
             </div>
-            <div v-if="businessDayServedUsers.length" class="device-table-scroll">
-              <table class="admin-table">
-                <thead>
-                  <tr>
-                    <th>人员</th>
-                    <th>商品</th>
-                    <th>数量</th>
-                    <th>最近时间</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="entry in businessDayServedUsers" :key="entry.userId">
-                    <td>
-                      <RouterLink class="admin-link" :to="`/users/${entry.userId}`">{{ entry.userName }}</RouterLink>
-                      <span class="admin-table__subtext">{{ formatUserRole(entry.role) }}</span>
-                    </td>
-                    <td>{{ entry.goodsSummary }}</td>
-                    <td class="admin-code">{{ entry.totalQuantity }}</td>
-                    <td class="admin-code">{{ formatDateTime(entry.lastServedAt) }}</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-if="businessDayServedUsers.length" class="device-served-list">
+              <article v-for="entry in businessDayServedUsers" :key="entry.userId" class="device-served-card">
+                <div class="device-served-card__head">
+                  <RouterLink class="admin-link" :to="`/users/${entry.userId}`">{{ entry.userName }}</RouterLink>
+                  <span class="admin-badge">{{ formatUserRole(entry.role) }}</span>
+                </div>
+                <dl class="device-served-card__details">
+                  <div>
+                    <dt>商品</dt>
+                    <dd>{{ entry.goodsSummary }}</dd>
+                  </div>
+                  <div>
+                    <dt>总数量</dt>
+                    <dd class="admin-code">{{ entry.totalQuantity }}</dd>
+                  </div>
+                  <div>
+                    <dt>最近时间</dt>
+                    <dd class="admin-code">{{ formatDateTime(entry.lastServedAt) }}</dd>
+                  </div>
+                </dl>
+              </article>
             </div>
             <div v-else class="admin-empty">
               <div class="admin-empty__title">今日还没有人员操作这台柜机</div>
@@ -963,13 +1643,19 @@ onUnmounted(() => {
               <button v-if="canOperateDevice" class="admin-button admin-button--ghost" :disabled="refreshing" @click="refreshDevice">
                 {{ refreshing ? "刷新中" : "立即刷新" }}
               </button>
-              <button v-if="canOperateDevice" class="admin-button" :disabled="remoteOpening" @click="remoteOpen">
-                {{ remoteOpening ? "下发中" : "远程开门" }}
+              <button v-if="canOperateDevice" class="admin-button" :disabled="remoteOpenDisabled" @click="remoteOpen">
+                {{ remoteOpening ? "下发中" : remoteOpenBlockedHint ? "暂不可开门" : "远程开门" }}
               </button>
               <span v-if="!canOperateDevice" class="admin-table__subtext">当前账号没有柜机操作权限。</span>
             </div>
             <div class="admin-note">
               若门状态长时间不变化或最近一次开门后未收到开门确认，请直接关注右侧待处理任务。
+            </div>
+            <div v-if="canOperateDevice && remoteOpenBlockedHint" class="admin-alert admin-alert--danger" role="alert">
+              {{ remoteOpenBlockedHint }}
+              <button v-if="!deviceCanOpen" class="admin-text-button" type="button" :disabled="refreshing" @click="refreshDevice">
+                {{ refreshing ? "刷新中" : "立即刷新状态" }}
+              </button>
             </div>
           </article>
 
@@ -1051,23 +1737,23 @@ onUnmounted(() => {
                   </div>
                   <div class="device-event-order-row__actions">
                     <button
-                      v-if="canOperateDevice && shouldShowPaymentAction(event)"
+                      v-if="canManualPaymentSuccess && shouldShowPaymentAction(event)"
                       class="admin-button admin-button--ghost"
-                      :disabled="notifyingPaymentOrderNo === event.orderNo"
+                      :disabled="notifyingPaymentOrderNo === event.orderNo || isFinancialOutcomePending('payment', event.orderNo)"
                       @click="notifyPaymentSuccess(event)"
                     >
-                      {{ notifyingPaymentOrderNo === event.orderNo ? "回写中" : paymentActionLabel(event) }}
+                      {{ notifyingPaymentOrderNo === event.orderNo ? "回写中" : isFinancialOutcomePending('payment', event.orderNo) ? "结果待确认" : paymentActionLabel(event) }}
                     </button>
                     <button
                       v-if="canRefundPayments && shouldShowRefundAction(event)"
                       class="admin-button admin-button--ghost"
-                      :disabled="refundingOrderNo === event.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
+                      :disabled="refundingOrderNo === event.orderNo || (isFinancialOutcomePending('refund', event.orderNo) && !findPersistedPendingRefund(event.orderNo)) || Boolean(resolvePlatformOrderContext(event, 'refund').refundedAt)"
                       @click="refundEvent(event)"
                     >
-                      {{ refundingOrderNo === event.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
+                      {{ refundingOrderNo === event.orderNo ? "退款中" : findPersistedPendingRefund(event.orderNo) ? "核对退款状态" : isFinancialOutcomePending('refund', event.orderNo) ? "结果待确认" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
                     </button>
                     <span
-                      v-if="(!canOperateDevice || !shouldShowPaymentAction(event)) && (!canRefundPayments || !shouldShowRefundAction(event))"
+                      v-if="(!canManualPaymentSuccess || !shouldShowPaymentAction(event)) && (!canRefundPayments || !shouldShowRefundAction(event))"
                       class="admin-table__subtext"
                     >
                       当前没有待平台确认动作或权限不足
@@ -1103,23 +1789,23 @@ onUnmounted(() => {
                   </div>
                   <div class="device-event-order-row__actions">
                     <button
-                      v-if="canOperateDevice && shouldShowPaymentAction(event, adjustment.orderNo)"
+                      v-if="canManualPaymentSuccess && shouldShowPaymentAction(event, adjustment.orderNo)"
                       class="admin-button admin-button--ghost"
-                      :disabled="notifyingPaymentOrderNo === adjustment.orderNo"
+                      :disabled="notifyingPaymentOrderNo === adjustment.orderNo || isFinancialOutcomePending('payment', adjustment.orderNo)"
                       @click="notifyPaymentSuccess(event, adjustment.orderNo)"
                     >
-                      {{ notifyingPaymentOrderNo === adjustment.orderNo ? "回写中" : paymentActionLabel(event, adjustment.orderNo) }}
+                      {{ notifyingPaymentOrderNo === adjustment.orderNo ? "回写中" : isFinancialOutcomePending('payment', adjustment.orderNo) ? "结果待确认" : paymentActionLabel(event, adjustment.orderNo) }}
                     </button>
                     <button
                       v-if="canRefundPayments && shouldShowRefundAction(event, adjustment.orderNo)"
                       class="admin-button admin-button--ghost"
-                      :disabled="refundingOrderNo === adjustment.orderNo || Boolean(resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt)"
+                      :disabled="refundingOrderNo === adjustment.orderNo || (isFinancialOutcomePending('refund', adjustment.orderNo) && !findPersistedPendingRefund(adjustment.orderNo)) || Boolean(resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt)"
                       @click="refundEvent(event, adjustment.orderNo)"
                     >
-                      {{ refundingOrderNo === adjustment.orderNo ? "退款中" : resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt ? "已退款" : refundActionLabel(event, adjustment.orderNo) }}
+                      {{ refundingOrderNo === adjustment.orderNo ? "退款中" : findPersistedPendingRefund(adjustment.orderNo) ? "核对退款状态" : isFinancialOutcomePending('refund', adjustment.orderNo) ? "结果待确认" : resolvePlatformOrderContext(event, 'refund', adjustment.orderNo).refundedAt ? "已退款" : refundActionLabel(event, adjustment.orderNo) }}
                     </button>
                     <span
-                      v-if="(!canOperateDevice || !shouldShowPaymentAction(event, adjustment.orderNo)) && (!canRefundPayments || !shouldShowRefundAction(event, adjustment.orderNo))"
+                      v-if="(!canManualPaymentSuccess || !shouldShowPaymentAction(event, adjustment.orderNo)) && (!canRefundPayments || !shouldShowRefundAction(event, adjustment.orderNo))"
                       class="admin-table__subtext"
                     >
                       当前没有待平台确认动作或权限不足
@@ -1290,11 +1976,346 @@ onUnmounted(() => {
           </div>
           <div v-else class="admin-empty">
             <div class="admin-empty__title">当前没有柜机日志</div>
-            <div class="admin-empty__body">刷新、远程开门、故障回调和货物流动会自动记录在这里。</div>
+            <div class="admin-empty__body">刷新、远程开门、故障回调和货品流转会自动记录在这里。</div>
           </div>
         </article>
       </section>
     </section>
+
+    <dialog
+      v-if="remoteOpenDialogStep"
+      ref="remoteOpenDialog"
+      class="remote-open-dialog admin-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="remote-open-dialog-title"
+      aria-describedby="remote-open-dialog-description"
+      @cancel.prevent="closeRemoteOpenDialog"
+    >
+      <header class="remote-open-dialog__head">
+        <div>
+          <p class="admin-kicker">高风险操作 · 第 {{ remoteOpenDialogStep === "reason" ? 1 : 2 }} 步，共 2 步</p>
+          <h2 id="remote-open-dialog-title" class="remote-open-dialog__title">
+            {{ remoteOpenDialogStep === "reason" ? "填写远程开门原因" : "最后核对开门信息" }}
+          </h2>
+        </div>
+        <button
+          type="button"
+          class="admin-button admin-button--ghost"
+          :disabled="remoteOpening"
+          aria-label="关闭远程开门对话框"
+          @click="closeRemoteOpenDialog"
+        >
+          取消
+        </button>
+      </header>
+
+      <div v-if="remoteOpenDialogStep === 'reason'" class="remote-open-dialog__body">
+          <p id="remote-open-dialog-description" class="admin-copy">
+            原因会随操作写入审计日志。请说明现场诉求、授权来源或故障背景，不能只填“测试”。
+          </p>
+          <label class="admin-field">
+            <span class="admin-field__label">操作原因（必填，4–200 字符）</span>
+            <textarea
+              ref="remoteOpenReasonInput"
+              v-model="remoteOpenReason"
+              class="admin-input remote-open-dialog__reason"
+              maxlength="200"
+              placeholder="例如：现场工作人员来电确认柜门卡滞，需远程开门排查"
+              @keydown.ctrl.enter.prevent="continueRemoteOpen"
+            />
+          </label>
+          <div class="remote-open-dialog__reason-meta">
+            <span class="admin-table__subtext">Ctrl + Enter 可继续</span>
+            <span class="admin-code" :class="{ 'remote-open-dialog__counter--invalid': remoteOpenReason.trim().length > 0 && remoteOpenReason.trim().length < 4 }">
+              {{ remoteOpenReason.trim().length }}/200
+            </span>
+          </div>
+          <div class="admin-note">此步骤不会向柜机发送任何请求。</div>
+          <div class="remote-open-dialog__actions">
+            <button type="button" class="admin-button admin-button--ghost" @click="closeRemoteOpenDialog">取消</button>
+            <button
+              type="button"
+              class="admin-button"
+              :disabled="remoteOpenReason.trim().length < 4 || remoteOpenReason.trim().length > 200"
+              @click="continueRemoteOpen"
+            >
+              下一步：核对信息
+            </button>
+          </div>
+      </div>
+
+      <div v-else class="remote-open-dialog__body">
+          <p id="remote-open-dialog-description" class="admin-copy">
+            请逐项核对。点击“确认并立即下发”后，系统会立刻向柜机发送开门指令。
+          </p>
+          <dl class="remote-open-dialog__summary">
+            <div>
+              <dt>柜机</dt>
+              <dd>{{ remoteOpenDeviceSummary }}</dd>
+            </div>
+            <div>
+              <dt>货门</dt>
+              <dd>{{ selectedDoorNum }}号门</dd>
+            </div>
+            <div>
+              <dt>当前门状态</dt>
+              <dd>{{ formatDoorState(detail?.runtime.doorState) }}</dd>
+            </div>
+            <div>
+              <dt>操作原因</dt>
+              <dd>{{ remoteOpenReason }}</dd>
+            </div>
+          </dl>
+          <div class="admin-alert admin-alert--danger">
+            这是实际开门动作。若设备、货门或现场授权有任何疑问，请返回修改或取消。
+          </div>
+          <div
+            v-if="remoteOpenSubmitError"
+            class="admin-alert admin-alert--danger"
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+          >
+            {{ remoteOpenSubmitError }}
+          </div>
+          <div class="remote-open-dialog__actions">
+            <button
+              v-if="remoteOpenOutcomePending"
+              ref="remoteOpenSafeButton"
+              type="button"
+              class="admin-button"
+              @click="closeRemoteOpenDialog"
+            >
+              关闭并查看最新状态
+            </button>
+            <template v-else>
+              <button ref="remoteOpenSafeButton" type="button" class="admin-button admin-button--ghost" :disabled="remoteOpening" @click="returnToRemoteOpenReason">
+                返回修改
+              </button>
+              <button type="button" class="admin-button admin-button--danger" :disabled="remoteOpening" @click="confirmRemoteOpen">
+                {{ remoteOpening ? "正在下发" : "确认并立即下发" }}
+              </button>
+            </template>
+          </div>
+      </div>
+    </dialog>
+
+    <dialog
+      v-if="financialAction"
+      ref="financialDialog"
+      class="remote-open-dialog financial-action-dialog admin-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="financial-action-dialog-title"
+      aria-describedby="financial-action-dialog-description"
+      @cancel.prevent="closeFinancialDialog"
+    >
+      <header class="remote-open-dialog__head">
+        <div>
+          <p class="admin-kicker">
+            {{ financialAction.kind === "refund" ? "退款申请" : "付款状态回写" }} ·
+            第 {{ financialAction.step === "input" ? 1 : 2 }} 步，共 2 步
+          </p>
+          <h2 id="financial-action-dialog-title" class="remote-open-dialog__title">
+            {{
+              financialAction.step === "input"
+                ? `填写${financialAction.kind === "payment" ? "付款回写" : "退款"}信息`
+                : financialAction.kind === "payment"
+                  ? "最后核对付款回写信息"
+                  : "最后核对退款信息"
+            }}
+          </h2>
+        </div>
+        <button
+          type="button"
+          class="admin-button admin-button--ghost"
+          :disabled="Boolean(notifyingPaymentOrderNo || refundingOrderNo || reconcilingRefundId)"
+          :aria-label="financialAction.kind === 'refund' ? '关闭退款对话框' : '关闭付款回写对话框'"
+          @click="closeFinancialDialog"
+        >
+          {{ isCurrentFinancialOutcomePending ? "关闭并刷新" : "取消" }}
+        </button>
+      </header>
+
+      <div
+        v-if="financialAction.step === 'input'"
+        class="remote-open-dialog__body"
+        @keydown.ctrl.enter.prevent="continueFinancialAction"
+      >
+        <p id="financial-action-dialog-description" class="admin-copy">
+          {{
+            financialAction.kind === "refund"
+              ? "将基于原付款交易发起退款。系统生成的操作请求编号和退款金额会写入审计记录，请核对原交易与退款金额。"
+              : "订单和金额来自当前业务记录。交易号会进入审计记录，请只填写支付渠道中的真实编号。"
+          }}
+        </p>
+        <label class="admin-field">
+          <span class="admin-field__label">
+            {{ financialAction.kind === "refund" ? "支付渠道原交易号（只读）" : "支付渠道交易号（必填）" }}
+          </span>
+          <input
+            ref="financialPrimaryInput"
+            v-model="financialAction.transactionId"
+            class="admin-input"
+            type="text"
+            maxlength="128"
+            autocomplete="off"
+            :readonly="financialAction.kind === 'refund'"
+            :placeholder="financialAction.kind === 'refund' ? '原付款交易号由订单记录带入' : '请输入支付渠道返回的真实交易号'"
+          />
+          <span v-if="financialAction.kind === 'refund'" class="admin-table__subtext">退款必须绑定原付款交易号，不能在此修改。</span>
+        </label>
+        <label v-if="financialAction.kind === 'refund'" class="admin-field">
+          <span class="admin-field__label">操作请求编号（幂等标识，只读）</span>
+          <input
+            v-model="financialAction.refundNo"
+            class="admin-input"
+            type="text"
+            maxlength="128"
+            autocomplete="off"
+            readonly
+          />
+          <span class="admin-table__subtext">
+            此编号是本次请求的幂等标识；支付渠道受理后的渠道退款号应由回调或查询记录。
+          </span>
+        </label>
+        <label class="admin-field">
+          <span class="admin-field__label">{{ financialAction.kind === "payment" ? "支付" : "退款" }}金额（分）</span>
+          <input
+            ref="financialAmountInput"
+            v-model="financialAction.amountInput"
+            class="admin-input"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            readonly
+          />
+          <span class="admin-table__subtext">
+            {{ financialAction.kind === "payment" ? "付款回写金额锁定为订单金额。" : `当前入口仅支持整单全额退款，金额锁定为 ${financialAction.expectedAmount ?? "未知"} 分。` }}
+          </span>
+        </label>
+        <div v-if="financialSubmitError || financialInputError" class="admin-alert admin-alert--danger" role="alert">
+          {{ financialSubmitError || financialInputError }}
+        </div>
+        <div class="admin-note">
+          {{
+            financialAction.kind === "refund"
+              ? "此步骤只校验退款信息，不会发起退款请求。"
+              : "此步骤只校验付款回写信息，不会回写付款状态。"
+          }}
+          Ctrl + Enter 可继续。
+        </div>
+        <div class="remote-open-dialog__actions">
+          <button type="button" class="admin-button admin-button--ghost" @click="closeFinancialDialog">取消</button>
+          <button type="button" class="admin-button" :disabled="Boolean(financialInputError)" @click="continueFinancialAction">
+            下一步：核对信息
+          </button>
+        </div>
+      </div>
+
+      <div v-else class="remote-open-dialog__body">
+        <p id="financial-action-dialog-description" class="admin-copy">
+          {{
+            isCurrentFinancialOutcomePending
+              ? financialAction.kind === "refund" && financialAction.refundRecordId
+                ? "退款请求已经发出，但结果尚未确认。可复用当前本地退款单向支付渠道主动核对；确认前不要重新发起退款。"
+                : "请求已经发出，但结果尚未确认。请关闭并刷新订单状态；确认前不要重复提交。"
+              : financialAction.kind === "refund"
+                ? "请逐项核对。确认后会立即向支付渠道发起退款请求；如有不一致，请返回修改或取消。"
+                : "请逐项核对。确认后会立即回写付款成功状态；如有不一致，请返回修改或取消。"
+          }}
+        </p>
+        <dl class="remote-open-dialog__summary">
+          <div>
+            <dt>操作</dt>
+            <dd>{{ financialAction.kind === "payment" ? `回写${financialAction.label}付款成功` : `发起${financialAction.label}退款` }}</dd>
+          </div>
+          <div>
+            <dt>订单号</dt>
+            <dd class="admin-code">{{ financialAction.orderNo }}</dd>
+          </div>
+          <div>
+            <dt>事件 / 柜机</dt>
+            <dd class="admin-code">{{ financialAction.event.eventId }} / {{ financialAction.event.deviceCode }}</dd>
+          </div>
+          <div>
+            <dt>交易号</dt>
+            <dd class="admin-code">{{ financialAction.transactionId.trim() }}</dd>
+          </div>
+          <div v-if="financialAction.kind === 'refund'">
+            <dt>操作请求编号</dt>
+            <dd class="admin-code">{{ financialAction.refundNo.trim() }}</dd>
+          </div>
+          <div>
+            <dt>金额</dt>
+            <dd><strong>{{ financialAmount }} 分（{{ (financialAmount / 100).toFixed(2) }} 元）</strong></dd>
+          </div>
+        </dl>
+        <div v-if="financialSubmitError" class="admin-alert admin-alert--danger" role="alert">
+          {{ financialSubmitError }}
+        </div>
+        <div v-if="!isCurrentFinancialOutcomePending" class="admin-alert admin-alert--danger">
+          {{
+            financialAction.kind === "refund"
+              ? "这是实际退款动作。若订单、原付款交易号、操作请求编号或金额任一项不一致，请返回修改或取消。"
+              : "这是实际付款状态回写动作。若订单、事件、交易号或金额任一项不一致，请返回修改或取消。"
+          }}
+        </div>
+        <div class="remote-open-dialog__actions">
+          <template v-if="isCurrentFinancialOutcomePending">
+            <button
+              v-if="financialAction.kind !== 'refund' || !financialAction.refundRecordId"
+              ref="financialSafeButton"
+              type="button"
+              class="admin-button"
+              :disabled="Boolean(reconcilingRefundId)"
+              @click="closeFinancialDialog"
+            >
+              关闭并刷新订单
+            </button>
+            <template v-else>
+              <button
+                type="button"
+                class="admin-button admin-button--ghost"
+                :disabled="Boolean(reconcilingRefundId)"
+                @click="closeFinancialDialog"
+              >
+                关闭并刷新订单
+              </button>
+              <button
+                ref="financialSafeButton"
+                type="button"
+                class="admin-button"
+                :disabled="Boolean(reconcilingRefundId)"
+                @click="reconcilePendingRefund"
+              >
+                {{ reconcilingRefundId ? "正在向渠道核对" : "向支付渠道核对退款状态" }}
+              </button>
+            </template>
+          </template>
+          <template v-else>
+            <button
+              ref="financialSafeButton"
+              type="button"
+              class="admin-button admin-button--ghost"
+              :disabled="Boolean(notifyingPaymentOrderNo || refundingOrderNo)"
+              @click="returnToFinancialInput"
+            >
+              返回修改
+            </button>
+            <button
+              type="button"
+              class="admin-button admin-button--danger"
+              :disabled="Boolean(notifyingPaymentOrderNo || refundingOrderNo)"
+              @click="confirmFinancialAction"
+            >
+              {{ notifyingPaymentOrderNo || refundingOrderNo ? "正在提交" : financialAction.kind === "payment" ? "确认回写付款成功" : "确认发起退款" }}
+            </button>
+          </template>
+        </div>
+      </div>
+    </dialog>
 
     <div v-if="mapPickerVisible" class="device-map-backdrop" @click.self="mapPickerVisible = false">
       <section class="device-map-panel admin-panel">
@@ -1588,6 +2609,100 @@ onUnmounted(() => {
   width: 100%;
 }
 
+.remote-open-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.remote-open-dialog {
+  box-sizing: border-box;
+  width: min(620px, calc(100% - 48px));
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--admin-line);
+  border-top: 4px solid #b42318;
+  box-shadow: 0 22px 55px rgba(15, 23, 42, 0.28);
+}
+
+.remote-open-dialog[open] {
+  display: grid;
+}
+
+.remote-open-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.remote-open-dialog__title {
+  margin: 5px 0 0;
+  color: var(--admin-text);
+  font-size: 1.3rem;
+}
+
+.remote-open-dialog__body {
+  display: grid;
+  gap: 14px;
+}
+
+.remote-open-dialog__reason {
+  min-height: 118px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.remote-open-dialog__reason-meta,
+.remote-open-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.remote-open-dialog__counter--invalid {
+  color: #b42318;
+}
+
+.remote-open-dialog__summary {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.remote-open-dialog__summary > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+  padding: 11px 13px;
+  background: #fff;
+}
+
+.remote-open-dialog__summary > div + div {
+  border-top: 1px solid var(--admin-line);
+}
+
+.remote-open-dialog__summary dt {
+  color: var(--admin-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.remote-open-dialog__summary dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--admin-text);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
 .device-map-backdrop {
   position: fixed;
   inset: 0;
@@ -1611,6 +2726,57 @@ onUnmounted(() => {
 
 .device-table-scroll :deep(table) {
   min-width: 780px;
+}
+
+.device-served-list {
+  display: grid;
+  gap: 10px;
+}
+
+.device-served-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.device-served-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.device-served-card__details {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.device-served-card__details > div {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.device-served-card__details dt {
+  color: var(--admin-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.device-served-card__details dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--admin-text);
+  overflow-wrap: anywhere;
+}
+
+.financial-action-dialog .admin-input[readonly] {
+  background: #f6f8fa;
+  color: var(--admin-text-muted);
 }
 
 .admin-field--inline {
@@ -1661,6 +2827,24 @@ onUnmounted(() => {
   .device-detail-status,
   .device-detail-actions {
     grid-template-columns: 1fr;
+  }
+
+  .remote-open-dialog {
+    width: calc(100% - 24px);
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    margin: auto auto 12px;
+  }
+
+  .remote-open-dialog__head,
+  .remote-open-dialog__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .remote-open-dialog__summary > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }
 </style>

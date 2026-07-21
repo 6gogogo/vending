@@ -1,4 +1,12 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type {
@@ -14,6 +22,8 @@ import { VerificationCodeService } from "../auth/verification-code.service";
 
 @Injectable()
 export class RegistrationApplicationsService {
+  private readonly publicLookupHistory = new Map<string, number[]>();
+
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
     @Inject(VerificationCodeService)
@@ -45,12 +55,18 @@ export class RegistrationApplicationsService {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   }
 
-  async lookupByPhone(phone: string, code?: string): Promise<RegistrationPhoneLookup> {
+  async lookupByPhone(
+    phone: string,
+    code?: string,
+    sourceKey = "anonymous"
+  ): Promise<RegistrationPhoneLookup> {
     const normalizedPhone = phone.trim();
     const includePrivateDetails = Boolean(code?.trim());
 
     if (includePrivateDetails) {
       await this.ensureVerifiedCode(normalizedPhone, code!.trim());
+    } else {
+      this.assertPublicLookupAllowed(sourceKey);
     }
 
     if (!normalizedPhone) {
@@ -130,6 +146,22 @@ export class RegistrationApplicationsService {
     };
   }
 
+  private assertPublicLookupAllowed(sourceKey: string) {
+    const now = Date.now();
+    const windowMs = 10 * 60_000;
+    const limit = 30;
+    const recent = (this.publicLookupHistory.get(sourceKey) ?? []).filter(
+      (timestamp) => now - timestamp < windowMs
+    );
+
+    if (recent.length >= limit) {
+      throw new HttpException("查询过于频繁，请稍后再试。", 429);
+    }
+
+    recent.push(now);
+    this.publicLookupHistory.set(sourceKey, recent);
+  }
+
   async createOrUpdateByPhone(payload: {
     phone: string;
     code: string;
@@ -170,14 +202,20 @@ export class RegistrationApplicationsService {
     }
   ) {
     const application = this.detail(id);
-    const normalizedProfile = this.normalizeProfile(payload.profile);
 
     if (!["pending", "rejected"].includes(application.status)) {
       throw new BadRequestException("当前申请已结束，不能继续修改。");
     }
 
     const phone = payload.phone.trim();
+
+    if (phone !== application.phone) {
+      // 公开更新入口只能由原手机号持有人继续填写，不能拿自己的验证码改写其他申请 ID。
+      throw new UnauthorizedException("手机号或验证码不正确。");
+    }
+
     await this.ensureVerifiedCode(phone, payload.code);
+    const normalizedProfile = this.normalizeProfile(payload.profile);
 
     const existingUser = this.store.users.find((entry) => entry.phone === phone);
 
@@ -235,6 +273,11 @@ export class RegistrationApplicationsService {
     actorUserId?: string
   ) {
     const application = this.detail(id);
+
+    if (application.status !== "pending") {
+      throw new ConflictException("该注册申请已完成审核，不能重复或改写审核结果。");
+    }
+
     const now = new Date().toISOString();
 
     if (payload.decision === "rejected") {
@@ -298,7 +341,7 @@ export class RegistrationApplicationsService {
   }
 
   private async ensureVerifiedCode(phone: string, code: string) {
-    if (!(await this.verificationCodeService.verifyCode(phone, code))) {
+    if (!(await this.verificationCodeService.verifyCode(phone, code, "register"))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
   }
@@ -489,11 +532,7 @@ export class RegistrationApplicationsService {
   }
 
   private normalizeProfile(profile: RegistrationApplicationProfile): RegistrationApplicationProfile {
-    const normalizedName = profile.name?.trim();
-
-    if (!normalizedName) {
-      throw new BadRequestException("姓名不能为空。");
-    }
+    const normalizedName = this.normalizeRequiredProfileText(profile.name, "姓名", 100);
 
     const region = this.resolveConfiguredRegion(profile.regionId, profile.regionName ?? profile.neighborhood);
 
@@ -503,13 +542,45 @@ export class RegistrationApplicationsService {
       neighborhood: region.name,
       regionId: region.id,
       regionName: region.name,
-      note: profile.note?.trim() || undefined,
-      merchantName: profile.merchantName?.trim() || undefined,
-      contactName: profile.contactName?.trim() || undefined,
-      address: profile.address?.trim() || undefined,
-      organization: profile.organization?.trim() || undefined,
-      title: profile.title?.trim() || undefined
+      note: this.normalizeOptionalProfileText(profile.note, "备注", 1_000),
+      merchantName: this.normalizeOptionalProfileText(profile.merchantName, "商户名称", 100),
+      contactName: this.normalizeOptionalProfileText(profile.contactName, "联系人", 100),
+      address: this.normalizeOptionalProfileText(profile.address, "地址", 300),
+      organization: this.normalizeOptionalProfileText(profile.organization, "所属单位", 150),
+      title: this.normalizeOptionalProfileText(profile.title, "职务", 100)
     };
+  }
+
+  private normalizeRequiredProfileText(value: string | undefined, label: string, maxLength: number) {
+    const normalized = value?.trim();
+
+    if (!normalized) {
+      throw new BadRequestException(`${label}不能为空。`);
+    }
+
+    if (normalized.length > maxLength) {
+      throw new BadRequestException(`${label}不能超过 ${maxLength} 个字符。`);
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalProfileText(
+    value: string | undefined,
+    label: string,
+    maxLength: number
+  ) {
+    const normalized = value?.trim();
+
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (normalized.length > maxLength) {
+      throw new BadRequestException(`${label}不能超过 ${maxLength} 个字符。`);
+    }
+
+    return normalized;
   }
 
   private resolveConfiguredRegion(regionId?: string, regionName?: string) {

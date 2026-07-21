@@ -163,11 +163,15 @@ function hasNoProviderPermissions(permissions) {
     assert(overview.totals && typeof overview.totals.tenants === "number", "全局概览结构异常");
   });
 
-  await expectError(
-    "未注册手机号不能请求登录验证码",
-    () => req("POST", "/auth/request-code", { phone: uniquePhone("136"), scene: "app-login" }),
-    { status: 400, includes: "注册" }
-  );
+  await step("未注册手机号请求登录验证码不暴露注册状态", async () => {
+    const response = await req("POST", "/auth/request-code", {
+      phone: uniquePhone("136"),
+      scene: "app-login"
+    });
+    const serialized = JSON.stringify(response);
+    assert(response.provider === "mock", "隔离环境未使用 mock 验证码");
+    assert(!/registered|application|pending|rejected/i.test(serialized), "验证码接口泄漏了注册状态");
+  });
 
   state.regionName = `专项区域${runId}`;
   await expectError(
@@ -602,11 +606,32 @@ function hasNoProviderPermissions(permissions) {
     () => req("PATCH", `/merchant-goods-templates/${state.templateA.id}`, { goodsName: `越权修改${runId}` }, state.merchantB.token),
     { status: 403, includes: "不能修改" }
   );
+  await step("商家 A 补货事件完成关门确认", async () => {
+    state.merchantRestockEvent = await req("POST", "/cabinet-events/open", {
+      phone: state.merchantA.phone,
+      deviceCode: state.deviceCode,
+      doorNum: "1",
+      hasInboundGoods: true
+    }, state.merchantA.token);
+    await req("POST", "/cabinet-events/callbacks/door-status", {
+      eventId: state.merchantRestockEvent.eventId,
+      deviceCode: state.deviceCode,
+      status: "SUCCESS",
+      doorIsOpen: "Y"
+    });
+    await req("POST", "/cabinet-events/callbacks/door-status", {
+      eventId: state.merchantRestockEvent.eventId,
+      deviceCode: state.deviceCode,
+      status: "CLOSED",
+      doorIsOpen: "N"
+    });
+  });
   await expectError(
     "商家补货生产日期格式错误会被拒绝",
     () => req("POST", "/merchant-restocks", {
       templateId: state.templateA.id,
       deviceCode: state.deviceCode,
+      cabinetEventId: state.merchantRestockEvent.eventId,
       quantity: 1,
       productionDate: "not-a-date",
       confirmed: true
@@ -617,6 +642,7 @@ function hasNoProviderPermissions(permissions) {
     await req("POST", "/merchant-restocks", {
       templateId: state.templateA.id,
       deviceCode: state.deviceCode,
+      cabinetEventId: state.merchantRestockEvent.eventId,
       quantity: 1,
       productionDate: "2026-06-01",
       confirmed: true,

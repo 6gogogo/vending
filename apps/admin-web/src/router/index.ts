@@ -100,8 +100,8 @@ export const router = createRouter({
           component: GoodsOverviewPage,
           meta: {
             group: "总览",
-            eyebrow: "货物总览",
-            title: "货物总览与预警模板",
+            eyebrow: "货品总览",
+            title: "货品总览与预警模板",
             description: "查看各商品种类数量、柜机分布，并批量设置货品预警模板。",
             permission: "goods:view"
           }
@@ -155,8 +155,8 @@ export const router = createRouter({
           component: GoodsDetailPage,
           meta: {
             group: "总览",
-            eyebrow: "货物详情",
-            title: "货物批次与阈值设置",
+            eyebrow: "货品详情",
+            title: "货品批次与阈值设置",
             description: "查看单个货品的批次、来源、保质期和柜机级阈值。",
             permission: "goods:view"
           }

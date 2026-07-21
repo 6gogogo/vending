@@ -122,6 +122,10 @@ const edit = (template: MerchantGoodsTemplate) => {
 };
 
 const chooseImage = async (sourceType: Array<"album" | "camera">) => {
+  if (uploading.value) {
+    return;
+  }
+
   if (!sessionStore.token) {
     showOperationFailure(new Error("登录状态已失效"));
     return;
@@ -146,7 +150,7 @@ const chooseImage = async (sourceType: Array<"album" | "camera">) => {
 
     const uploaded = await mobileApi.uploadImage(filePath, sessionStore.token);
     form.imageUrl = uploaded.url;
-    showOperationSuccess();
+    showOperationSuccess("图片已上传");
   } catch (error) {
     showOperationFailure(error);
   } finally {
@@ -155,6 +159,10 @@ const chooseImage = async (sourceType: Array<"album" | "camera">) => {
 };
 
 const openImagePicker = () => {
+  if (saving.value || uploading.value) {
+    return;
+  }
+
   uni.showActionSheet({
     itemList: ["拍摄", "从相册选择", "移除图片"],
     success: ({ tapIndex }) => {
@@ -174,6 +182,10 @@ const openImagePicker = () => {
 };
 
 const submit = async () => {
+  if (saving.value) {
+    return;
+  }
+
   if (!form.goodsName.trim()) {
     showOperationFailure(new Error("请输入商品名称"));
     return;
@@ -186,6 +198,7 @@ const submit = async () => {
 
   saving.value = true;
   try {
+    const wasEditing = Boolean(editingId.value);
     const payload = {
       goodsCode: form.goodsCode.trim() || undefined,
       goodsName: form.goodsName.trim(),
@@ -208,7 +221,7 @@ const submit = async () => {
 
     resetForm();
     await load();
-    showOperationSuccess();
+    showOperationSuccess(wasEditing ? "常用商品已保存" : "常用商品已新增");
   } catch (error) {
     showOperationFailure(error);
   } finally {
@@ -237,19 +250,19 @@ watch(
         <view class="form-grid">
           <view class="vm-field">
             <text class="vm-field__label">商品编号</text>
-            <input v-model="form.goodsCode" class="vm-field__input" placeholder="例如：6901234567895" />
+            <input v-model="form.goodsCode" aria-label="商品编号" class="vm-field__input" placeholder="例如：6901234567895" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">商品全称</text>
-            <input v-model="form.fullName" class="vm-field__input" placeholder="例如：鲜牛奶250ml" />
+            <input v-model="form.fullName" aria-label="商品全称" class="vm-field__input" placeholder="例如：鲜牛奶250ml" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">商品名称</text>
-            <input v-model="form.goodsName" class="vm-field__input" placeholder="例如：牛奶" />
+            <input v-model="form.goodsName" aria-label="商品名称" class="vm-field__input" placeholder="例如：牛奶" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">商品大类</text>
-            <picker :range="categories" @change="form.category = categories[$event.detail.value] ?? 'food'">
+            <picker aria-label="选择商品大类" :range="categories" @change="form.category = categories[$event.detail.value] ?? 'food'">
               <view class="vm-field__input picker-value">
                 {{ categoryLabelMap[form.category] }}
               </view>
@@ -257,7 +270,7 @@ watch(
           </view>
           <view class="vm-field">
             <text class="vm-field__label">分类</text>
-            <picker :range="categoryOptions" range-key="name" @change="form.categoryName = categoryOptions[$event.detail.value]?.name ?? ''">
+            <picker aria-label="选择商品分类" :range="categoryOptions" range-key="name" @change="form.categoryName = categoryOptions[$event.detail.value]?.name ?? ''">
               <view class="vm-field__input picker-value">
                 {{ form.categoryName || "请选择分类" }}
               </view>
@@ -265,7 +278,7 @@ watch(
           </view>
           <view class="vm-field">
             <text class="vm-field__label">包装形式</text>
-            <picker :range="packageFormOptions" @change="form.packageForm = packageFormOptions[$event.detail.value] ?? '盒装'">
+            <picker aria-label="选择包装形式" :range="packageFormOptions" @change="form.packageForm = packageFormOptions[$event.detail.value] ?? '盒装'">
               <view class="vm-field__input picker-value">
                 {{ form.packageForm }}
               </view>
@@ -273,33 +286,33 @@ watch(
           </view>
           <view class="vm-field">
             <text class="vm-field__label">商品规格</text>
-            <input v-model="form.specification" class="vm-field__input" placeholder="例如：250ml / 2片装" />
+            <input v-model="form.specification" aria-label="商品规格" class="vm-field__input" placeholder="例如：250ml / 2片装" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">厂家</text>
-            <input v-model="form.manufacturer" class="vm-field__input" placeholder="例如：本地商家" />
+            <input v-model="form.manufacturer" aria-label="商品厂家" class="vm-field__input" placeholder="例如：本地商家" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">默认数量</text>
-            <input v-model.number="form.defaultQuantity" class="vm-field__input" type="number" />
+            <input v-model.number="form.defaultQuantity" aria-label="默认数量" class="vm-field__input" type="number" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">默认保质天数</text>
-            <input v-model.number="form.defaultShelfLifeDays" class="vm-field__input" type="number" />
+            <input v-model.number="form.defaultShelfLifeDays" aria-label="默认保质天数" class="vm-field__input" type="number" />
           </view>
         </view>
 
         <view class="vm-field">
           <text class="vm-field__label">图片（选填）</text>
-          <button class="vm-button vm-button--ghost" :loading="uploading" @tap="openImagePicker">
+          <button class="vm-button vm-button--ghost" :disabled="saving || uploading" :loading="uploading" @tap="openImagePicker">
             {{ form.imageUrl ? "更换图片" : "选择拍摄或本地图片" }}
           </button>
-          <image v-if="form.imageUrl" class="template-preview" :src="form.imageUrl" mode="aspectFill" />
+          <image v-if="form.imageUrl" class="template-preview" :src="form.imageUrl" mode="aspectFill" alt="商品图片预览" />
         </view>
 
         <view class="action-row">
-          <button class="vm-button" :loading="saving" @tap="submit">{{ editingId ? "保存修改" : "新增常用商品" }}</button>
-          <button v-if="editingId" class="vm-button vm-button--ghost" @tap="resetForm">取消编辑</button>
+          <button class="vm-button" :disabled="saving || uploading" :loading="saving" @tap="submit">{{ editingId ? "保存修改" : "新增常用商品" }}</button>
+          <button v-if="editingId" class="vm-button vm-button--ghost" :disabled="saving || uploading" @tap="resetForm">取消编辑</button>
         </view>
       </view>
     </GlassCard>
@@ -313,7 +326,7 @@ watch(
 
         <view class="vm-field">
           <text class="vm-field__label">搜索商品名称</text>
-          <input v-model="keyword" class="vm-field__input" placeholder="输入名称、编号、分类、规格或厂家" />
+          <input v-model="keyword" aria-label="搜索常用商品" class="vm-field__input" placeholder="输入名称、编号、分类、规格或厂家" />
         </view>
 
         <view v-if="filteredTemplates.length" class="template-list">

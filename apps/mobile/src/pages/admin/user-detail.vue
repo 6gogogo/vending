@@ -10,6 +10,7 @@ import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { formatBeijingDateTime } from "../../utils/datetime";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 
 const sessionStore = useSessionStore();
@@ -36,6 +37,9 @@ const editForm = ref({
   status: "active" as "active" | "inactive",
   tags: ""
 });
+const isCurrentUser = computed(
+  () => Boolean(detail.value?.user.id && detail.value.user.id === sessionStore.user?.id)
+);
 
 const selectedGoodsOptions = computed(() => {
   const device = devices.value.find((item) => item.deviceCode === deviceCode.value);
@@ -117,6 +121,11 @@ const load = async () => {
 
 const save = async () => {
   if (!detail.value) {
+    return;
+  }
+  if (isCurrentUser.value && editForm.value.status !== "active") {
+    editForm.value.status = "active";
+    showOperationFailure(new Error("不能停用当前登录账号，请由其他管理员处理"));
     return;
   }
 
@@ -231,8 +240,17 @@ onLoad((query) => {
           <text class="vm-field__label">状态</text>
           <view class="type-row">
             <button class="filter-chip" :class="{ 'filter-chip--active': editForm.status === 'active' }" @tap="editForm.status = 'active'">启用</button>
-            <button class="filter-chip" :class="{ 'filter-chip--active': editForm.status === 'inactive' }" @tap="editForm.status = 'inactive'">停用</button>
+            <button
+              class="filter-chip"
+              :class="{ 'filter-chip--active': editForm.status === 'inactive' }"
+              :disabled="isCurrentUser"
+              :aria-label="isCurrentUser ? '当前登录账号不能停用' : '停用该账号'"
+              @tap="editForm.status = 'inactive'"
+            >
+              停用
+            </button>
           </view>
+          <text v-if="isCurrentUser" class="field-hint">当前登录账号不能自行停用，需由其他管理员处理。</text>
         </view>
         <button class="vm-button" :loading="saving" @tap="save">保存信息</button>
       </view>
@@ -284,7 +302,7 @@ onLoad((query) => {
         <view v-if="detail?.recentRecords?.length" class="list-block">
           <view v-for="record in detail.recentRecords.slice(0, 6)" :key="record.id" class="list-item">
             <text class="list-item__title">{{ record.goodsName }}</text>
-            <text class="list-item__meta">{{ record.deviceCode }} · {{ record.happenedAt.slice(0, 16).replace('T', ' ') }} · {{ record.quantity }} 件</text>
+            <text class="list-item__meta">{{ record.deviceCode }} · {{ formatBeijingDateTime(record.happenedAt) }} · {{ record.quantity }} 件</text>
           </view>
         </view>
         <EmptyState v-else :title="loading ? '正在加载记录' : '暂无记录'" description="当前人员还没有相关库存或领取记录。" />
@@ -324,6 +342,12 @@ onLoad((query) => {
   border-color: var(--vm-info-line);
   background: var(--vm-info-bg);
   color: var(--vm-info);
+}
+
+.field-hint {
+  color: var(--vm-text-soft);
+  font-size: 22rpx;
+  line-height: 1.6;
 }
 
 .picker-value {

@@ -5,12 +5,15 @@ import type { AlertTask } from "@vm/shared-types";
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 const sessionStore = useAdminSessionStore();
 const alerts = ref<AlertTask[]>([]);
 const loading = ref(false);
 const resolvingId = ref("");
 const activeAlert = ref<AlertTask>();
+const loadError = ref("");
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
 
 const openAlerts = computed(() => alerts.value.filter((alert) => alert.status !== "resolved"));
@@ -19,27 +22,48 @@ const gradeCount = (grade: AlertTask["grade"]) => openAlerts.value.filter((alert
 const resolveLabel = (alert: AlertTask) => (alert.grade === "fault" ? "标记已知晓" : "手动完成");
 const statusLabel = (alert: AlertTask) => alert.status === "open" ? "待处理" : alert.status === "acknowledged" ? "已知晓" : "已完成";
 const gradeLabel = (alert: AlertTask) => alert.grade === "fault" ? "故障" : alert.grade === "feedback" ? "反馈" : "预警";
-
 const load = async () => {
   loading.value = true;
+  loadError.value = "";
   try {
     alerts.value = await adminApi.alerts();
+  } catch (error) {
+    loadError.value = readErrorMessage(error, "任务列表加载失败");
   } finally {
     loading.value = false;
   }
 };
 
 const resolve = async (alert: AlertTask) => {
-  if (!canManageAlerts.value) {
-    window.alert("当前账号没有预警处理权限。");
+  if (resolvingId.value) {
     return;
   }
 
-  if (!window.confirm(`确认${resolveLabel(alert)}？`)) return;
+  if (!canManageAlerts.value) {
+    actionMessage.value = {
+      type: "error",
+      text: "当前账号没有预警处理权限，不能处理待办。"
+    };
+    return;
+  }
+
+  if (!window.confirm(alert.grade === "fault" ? "确认标记为已知晓？该任务仍会保留在未完成列表，需要继续跟进设备状态。" : `确认${resolveLabel(alert)}？完成后会移入最近已完成记录。`)) return;
   resolvingId.value = alert.id;
+  actionMessage.value = undefined;
   try {
     await adminApi.resolveAlert(alert.id);
     await load();
+    actionMessage.value = {
+      type: "success",
+      text: alert.grade === "fault"
+        ? "已标记为知晓。故障类任务仍会保留为未完成，请继续到柜机、日志或现场流程跟进。"
+        : "待办已完成，记录已移入最近已完成。"
+    };
+  } catch (error) {
+    actionMessage.value = {
+      type: "error",
+      text: `处理失败：${readErrorMessage(error, "请稍后重试")}`
+    };
   } finally {
     resolvingId.value = "";
   }
@@ -57,6 +81,13 @@ onMounted(load);
           <h3 class="admin-page__section-title">未完成任务优先，故障与反馈可直接查看完整详情</h3>
         </div>
         <p class="admin-copy">{{ loading ? "任务列表正在刷新。" : "处理按钮统一需要二次确认。" }}</p>
+      </div>
+      <div v-if="loadError" class="admin-alert admin-alert--danger">
+        {{ loadError }}
+        <button class="admin-text-button" type="button" @click="load">重试</button>
+      </div>
+      <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
+        {{ actionMessage.text }}
       </div>
 
       <div class="admin-grid admin-grid--stats-4">

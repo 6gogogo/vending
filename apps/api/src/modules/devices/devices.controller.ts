@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
-import type { DeviceStatus, GoodsCategory } from "@vm/shared-types";
+import type { DeviceStatus, GoodsCategory, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import {
@@ -21,13 +21,14 @@ export class DevicesController {
   @AllowedBackofficeSessionPermissions("devices:view")
   list(
     @Query("longitude") longitude?: string,
-    @Query("latitude") latitude?: string
+    @Query("latitude") latitude?: string,
+    @Req() request?: { authUser?: { role: UserRole } }
   ) {
     return ok(
       this.devicesService.list({
         longitude: longitude ? Number(longitude) : undefined,
         latitude: latitude ? Number(latitude) : undefined
-      })
+      }, request?.authUser?.role)
     );
   }
 
@@ -56,8 +57,11 @@ export class DevicesController {
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant", "special")
   @AllowedBackofficeSessionPermissions("devices:view")
-  detail(@Param("deviceCode") deviceCode: string) {
-    return ok(this.devicesService.getByCode(deviceCode));
+  detail(
+    @Param("deviceCode") deviceCode: string,
+    @Req() request?: { authUser?: { role: UserRole } }
+  ) {
+    return ok(this.devicesService.getViewByCode(deviceCode, request?.authUser?.role));
   }
 
   @Delete(":deviceCode")
@@ -74,7 +78,7 @@ export class DevicesController {
   @Get(":deviceCode/monitoring")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("devices:view", "warehouse:view")
+  @AllowedBackofficeSessionPermissions("devices:view", "warehouse:view")
   monitoring(@Param("deviceCode") deviceCode: string) {
     return ok(this.devicesService.monitoringDetail(deviceCode));
   }
@@ -83,14 +87,18 @@ export class DevicesController {
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant", "special")
   @AllowedBackofficeSessionPermissions("devices:view")
-  async goods(@Param("deviceCode") deviceCode: string, @Query("doorNum") doorNum?: string) {
-    return ok(await this.devicesService.getGoods(deviceCode, doorNum));
+  async goods(
+    @Param("deviceCode") deviceCode: string,
+    @Query("doorNum") doorNum?: string,
+    @Req() request?: { authUser?: { role: UserRole } }
+  ) {
+    return ok(await this.devicesService.getGoods(deviceCode, doorNum, request?.authUser?.role));
   }
 
   @Post(":deviceCode/refresh")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("devices:operate")
+  @AllowedBackofficeSessionPermissions("devices:operate")
   async refresh(
     @Param("deviceCode") deviceCode: string,
     @Req() request: { authUser?: { id: string } }
@@ -108,7 +116,8 @@ export class DevicesController {
     @Body()
     body: {
       doorNum?: string;
-    } = {}
+      reason: string;
+    }
   ) {
     return ok(await this.devicesService.remoteOpen(deviceCode, body, request.authUser?.id), "操作成功");
   }

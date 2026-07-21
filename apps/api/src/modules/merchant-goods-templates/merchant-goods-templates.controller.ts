@@ -93,6 +93,7 @@ export class MerchantGoodsTemplatesController {
       productionDate: string;
       note?: string;
       confirmed?: boolean;
+      cabinetEventId?: string;
     },
     @Req() request: { authUser?: { id: string } }
   ) {

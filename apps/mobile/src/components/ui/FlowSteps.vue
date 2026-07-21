@@ -1,17 +1,23 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 export type FlowStepState = "done" | "current" | "todo" | "warning";
 
-defineProps<{
+const props = defineProps<{
   steps: Array<{
     label: string;
     description?: string;
     state: FlowStepState;
   }>;
 }>();
+
+const stepCountStyle = computed(() => ({
+  "--flow-step-count": String(Math.min(Math.max(props.steps.length, 1), 4))
+}));
 </script>
 
 <template>
-  <view class="flow-steps">
+  <view class="flow-steps" :style="stepCountStyle" :class="{ 'flow-steps--many': steps.length >= 4 }">
     <view
       v-for="(step, index) in steps"
       :key="`${index}-${step.label}`"
@@ -34,7 +40,7 @@ defineProps<{
 .flow-steps {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--flow-step-count), minmax(0, 1fr));
   gap: 12rpx;
   width: 100%;
   min-width: 0;
@@ -102,6 +108,36 @@ defineProps<{
   line-height: 1.42;
   color: var(--vm-text-soft);
   overflow-wrap: anywhere;
+}
+
+.flow-steps--many {
+  gap: 6rpx;
+  padding-inline: 0;
+}
+
+.flow-steps--many::before {
+  left: 42rpx;
+  right: 42rpx;
+}
+
+.flow-steps--many .flow-step {
+  padding: 0;
+}
+
+.flow-steps--many .flow-step__mark {
+  width: 50rpx;
+  height: 50rpx;
+  font-size: 22rpx;
+}
+
+.flow-steps--many .flow-step__label {
+  font-size: 22rpx;
+}
+
+.flow-steps--many .flow-step__description {
+  max-width: 118rpx;
+  font-size: 18rpx;
+  line-height: 1.35;
 }
 
 .flow-step--done {

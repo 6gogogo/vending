@@ -1,7 +1,6 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type {
-  CabinetOpenRequest,
   SmartVmAdjustmentPayload,
   SmartVmDoorStatusPayload,
   SmartVmPaymentPayload,
@@ -9,7 +8,9 @@ import type {
 } from "@vm/shared-types";
 
 import { ack, ok } from "../../common/dto/api-response";
+import { parseCabinetOpenRequest } from "../../common/validation/cabinet-operation-input";
 import {
+  AllowedBackofficeAllPermissions,
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
   AllowedRoles
@@ -24,6 +25,7 @@ export class CabinetEventsController {
   @Get()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant", "special")
+  @AllowedBackofficeSessionPermissions("operation-logs:view")
   list(
     @Query("userId") userId?: string,
     @Req() request?: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
@@ -34,6 +36,7 @@ export class CabinetEventsController {
   @Get("event/:eventId")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin", "merchant", "special")
+  @AllowedBackofficeSessionPermissions("operation-logs:view")
   detail(
     @Param("eventId") eventId: string,
     @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
@@ -64,10 +67,15 @@ export class CabinetEventsController {
   @AllowedRoles("admin", "merchant", "special")
   @AllowedBackofficeSessionPermissions("devices:operate")
   async open(
-    @Body() body: CabinetOpenRequest,
+    @Body() body: unknown,
     @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
   ) {
-    return ok(await this.cabinetEventsService.openCabinet(body, request.authUser));
+    return ok(
+      await this.cabinetEventsService.openCabinet(
+        parseCabinetOpenRequest(body),
+        request.authUser
+      )
+    );
   }
 
   @Post("open/pre-settlement")
@@ -76,10 +84,15 @@ export class CabinetEventsController {
   @AllowedRoles("admin", "merchant", "special")
   @AllowedBackofficeSessionPermissions("devices:operate")
   preSettlement(
-    @Body() body: CabinetOpenRequest,
+    @Body() body: unknown,
     @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
   ) {
-    return ok(this.cabinetEventsService.previewOpenSettlement(body, request.authUser));
+    return ok(
+      this.cabinetEventsService.previewOpenSettlement(
+        parseCabinetOpenRequest(body),
+        request.authUser
+      )
+    );
   }
 
   @Post("callbacks/door-status")
@@ -114,7 +127,7 @@ export class CabinetEventsController {
   @HttpCode(200)
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("devices:operate")
+  @AllowedBackofficeAllPermissions("devices:operate", "payments:refund")
   async notifyPaymentSuccess(
     @Body()
     body: SmartVmPaymentPayload & {

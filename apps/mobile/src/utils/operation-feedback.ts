@@ -1,8 +1,8 @@
 import { getErrorMessage } from "./error-message";
 
-export const showOperationSuccess = () => {
+export const showOperationSuccess = (message = "操作成功") => {
   uni.showToast({
-    title: "操作成功",
+    title: message,
     icon: "none"
   });
 };

@@ -10,6 +10,7 @@ import type {
 import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
+  AllowedBackofficeSessionPermissions,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -18,11 +19,11 @@ import { OperationLogsService } from "./operation-logs.service";
 @Controller("operation-logs")
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
-@AllowedBackofficePermissions("operation-logs:view")
 export class OperationLogsController {
   constructor(@Inject(OperationLogsService) private readonly operationLogsService: OperationLogsService) {}
 
   @Get()
+  @AllowedBackofficeSessionPermissions("operation-logs:view")
   list(
     @Query("category") category?: OperationLogCategory,
     @Query("status") status?: OperationLogStatus,
@@ -106,6 +107,7 @@ export class OperationLogsController {
   }
 
   @Get(":id")
+  @AllowedBackofficeSessionPermissions("operation-logs:view")
   detail(
     @Param("id") id: string,
     @Req() request: { authUser?: { backofficeRole?: BackofficeRole } }
@@ -114,7 +116,7 @@ export class OperationLogsController {
   }
 
   @Post(":id/undo")
-  @AllowedBackofficePermissions("operation-logs:undo")
+  @AllowedBackofficeSessionPermissions("operation-logs:undo")
   undo(
     @Param("id") id: string,
     @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }

@@ -1,4 +1,11 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException
+} from "@nestjs/common";
 
 import type {
   GoodsCategory,
@@ -9,6 +16,8 @@ import type {
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AlertsService } from "../alerts/alerts.service";
+
+const GOODS_CATEGORIES = new Set<GoodsCategory>(["food", "drink", "daily"]);
 
 @Injectable()
 export class MerchantGoodsTemplatesService {
@@ -131,8 +140,9 @@ export class MerchantGoodsTemplatesService {
     }>
   ) {
     const owner = this.getMerchant(ownerUserId);
-    const template = this.findOrCreateTemplateFromCatalog(ownerUserId, templateId);
     const normalized = this.normalizeTemplatePatch(payload);
+    // 先校验补丁，再按需从公共目录创建商户模板，避免失败请求留下空壳模板。
+    const template = this.findOrCreateTemplateFromCatalog(ownerUserId, templateId);
 
     Object.assign(template, normalized, {
       updatedAt: new Date().toISOString()
@@ -174,9 +184,10 @@ export class MerchantGoodsTemplatesService {
       productionDate: string;
       note?: string;
       confirmed?: boolean;
+      cabinetEventId?: string;
     }
   ) {
-    if (!payload.confirmed) {
+    if (payload.confirmed !== true) {
       throw new BadRequestException("补货登记前需要先确认补货明细。");
     }
 
@@ -187,10 +198,10 @@ export class MerchantGoodsTemplatesService {
       throw new BadRequestException("当前货品模板已停用。");
     }
 
-    const quantity = payload.quantity ?? template.defaultQuantity;
+    const quantity = Number(payload.quantity ?? template.defaultQuantity);
 
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new BadRequestException("补货数量必须大于 0。");
+    if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
+      throw new BadRequestException("补货数量必须是正整数。");
     }
 
     const device = this.store.devices.find((entry) => entry.deviceCode === payload.deviceCode);
@@ -199,98 +210,194 @@ export class MerchantGoodsTemplatesService {
       throw new NotFoundException("未找到对应柜机。");
     }
 
-    const goods = this.ensureCatalogItemFromTemplate(template);
-    const expiresAt = this.calculateExpiresAt(payload.productionDate, template.defaultShelfLifeDays);
-    const happenedAt = new Date().toISOString();
+    const cabinetEventId = payload.cabinetEventId?.trim();
 
-    const change = this.inventoryBatchChanges.recordRestockMovement({
-      movement: {
-        id: this.store.createId("movement"),
-        userId: owner.id,
-        deviceCode: device.deviceCode,
-        goodsId: goods.goodsId,
-        goodsName: goods.name,
-        category: goods.category,
-        quantity,
-        unitPrice: goods.price,
-        type: "donation",
-        happenedAt,
-        expiresAt
-      },
-      deviceGoods: goods,
-      batch: {
-        expiresAt,
-        sourceType: owner.role === "admin" ? "admin" : "merchant",
-        sourceUserId: owner.id,
-        sourceUserName: owner.name,
-        note: payload.note,
-        createdAt: happenedAt
-      }
-    });
-    const batch = change.createdBatches[0];
-
-    if (!batch) {
-      throw new BadRequestException("补货登记未产生库存变化。");
+    if (!cabinetEventId) {
+      throw new BadRequestException("补货登记必须关联已完成关门确认的入柜事件。");
     }
 
-    this.store.logOperation({
-      category: "restock",
-      type: "merchant-restock-template",
-      status: "success",
-      actor: {
-        type: owner.role === "admin" ? "admin" : "merchant",
-        id: owner.id,
-        name: owner.name,
-        role: owner.role
-      },
-      primarySubject: {
-        type: "device",
-        id: device.deviceCode,
-        label: device.name
-      },
-      secondarySubject: {
-        type: "goods",
-        id: goods.goodsId,
-        label: goods.name
-      },
-      detail: `${owner.name} 使用模板向 ${device.name} 补充了 ${goods.name} x${quantity}。`,
-      description: `${owner.name} 向 ${device.name} 补充了 ${goods.name} x${quantity}。`,
-      metadata: {
-        templateId: template.id,
-        batchId: batch.batchId,
-        confirmation: {
-          confirmed: true,
-          confirmedAt: batch.createdAt,
-          confirmedByUserId: owner.id,
-          batchSelection: "new_batch"
+    {
+      const event = this.store.events.find((entry) => entry.eventId === cabinetEventId);
+
+      if (!event) {
+        throw new NotFoundException("未找到对应入柜事件。");
+      }
+
+      if (event.userId !== owner.id || event.deviceCode !== device.deviceCode) {
+        throw new ForbiddenException("当前入柜事件不属于该用户或柜机。");
+      }
+
+      if (event.operationType !== "restock" || event.hasInboundGoods !== true) {
+        throw new BadRequestException("当前柜机事件不是补货入柜事件。");
+      }
+
+      if (!["closed", "settled"].includes(event.status)) {
+        throw new BadRequestException("柜门关闭并完成事件确认后才能登记补货。");
+      }
+
+      const existingMovement = this.store.inventory.find(
+        (entry) => entry.eventId === cabinetEventId && entry.type === "donation"
+      );
+
+      if (existingMovement) {
+        const existingLog = this.store.logs.find(
+          (entry) =>
+            entry.type === "merchant-restock-template" &&
+            entry.metadata?.cabinetEventId === cabinetEventId
+        );
+        const existingQuantity = Number(existingLog?.metadata?.quantity ?? existingMovement.quantity);
+        const existingTemplateId = existingLog?.metadata?.templateId;
+        const existingProductionDate = existingLog?.metadata?.productionDate;
+
+        if (
+          existingMovement.deviceCode !== device.deviceCode ||
+          existingQuantity !== quantity ||
+          existingTemplateId !== template.id ||
+          existingProductionDate !== payload.productionDate
+        ) {
+          throw new ConflictException("该入柜事件已用另一组补货明细完成登记，不能重复改写。");
+        }
+
+        const existingBatch = this.store.goodsBatches.find(
+          (entry) => entry.batchId === existingMovement.batchId
+        );
+        const existingGoods = this.store.goodsCatalog.find(
+          (entry) => entry.goodsId === existingMovement.goodsId
+        );
+
+        if (!existingBatch || !existingGoods) {
+          throw new ConflictException("该入柜事件已有登记记录，但关联批次不完整，请联系管理员核对。");
+        }
+
+        return {
+          template,
+          batch: existingBatch,
+          goods: existingGoods,
+          expiresAt: existingBatch.expiresAt,
+          idempotentReplay: true
+        };
+      }
+    }
+
+    const expiresAt = this.calculateExpiresAt(payload.productionDate, template.defaultShelfLifeDays);
+    const beforeMutation = {
+      merchantGoodsTemplates: structuredClone(this.store.merchantGoodsTemplates),
+      goodsCatalog: structuredClone(this.store.goodsCatalog),
+      devices: structuredClone(this.store.devices),
+      goodsBatches: structuredClone(this.store.goodsBatches),
+      inventory: structuredClone(this.store.inventory),
+      logs: structuredClone(this.store.logs),
+      alerts: structuredClone(this.store.alerts)
+    };
+
+    try {
+      const goods = this.ensureCatalogItemFromTemplate(template);
+      const happenedAt = new Date().toISOString();
+      const change = this.inventoryBatchChanges.recordRestockMovement({
+        movement: {
+          id: this.store.createId("movement"),
+          eventId: cabinetEventId,
+          userId: owner.id,
+          deviceCode: device.deviceCode,
+          goodsId: goods.goodsId,
+          goodsName: goods.name,
+          category: goods.category,
+          quantity,
+          unitPrice: goods.price,
+          type: "donation",
+          happenedAt,
+          expiresAt
         },
+        deviceGoods: goods,
+        batch: {
+          expiresAt,
+          sourceType: owner.role === "admin" ? "admin" : "merchant",
+          sourceUserId: owner.id,
+          sourceUserName: owner.name,
+          note: payload.note,
+          createdAt: happenedAt
+        }
+      });
+      const batch = change.createdBatches[0];
+
+      if (!batch) {
+        throw new BadRequestException("补货登记未产生库存变化。");
+      }
+
+      this.store.logOperation({
+        category: "restock",
+        type: "merchant-restock-template",
+        status: "success",
+        actor: {
+          type: owner.role === "admin" ? "admin" : "merchant",
+          id: owner.id,
+          name: owner.name,
+          role: owner.role
+        },
+        primarySubject: {
+          type: "device",
+          id: device.deviceCode,
+          label: device.name
+        },
+        secondarySubject: {
+          type: "goods",
+          id: goods.goodsId,
+          label: goods.name
+        },
+        detail: `${owner.name} 使用模板向 ${device.name} 补充了 ${goods.name} x${quantity}。`,
+        description: `${owner.name} 向 ${device.name} 补充了 ${goods.name} x${quantity}。`,
+        metadata: {
+          templateId: template.id,
+          batchId: batch.batchId,
+          confirmation: {
+            confirmed: true,
+            confirmedAt: batch.createdAt,
+            confirmedByUserId: owner.id,
+            batchSelection: "new_batch"
+          },
+          goodsId: goods.goodsId,
+          goodsName: goods.name,
+          deviceCode: device.deviceCode,
+          quantity,
+          expiresAt,
+          productionDate: payload.productionDate,
+          cabinetEventId,
+          undoState: "not_undoable"
+        }
+      });
+
+      this.alertsService.create({
+        type: "expiry",
+        title: owner.role === "admin" ? "管理员入柜批次待到期跟进" : "商家补货批次待到期跟进",
+        deviceCode: device.deviceCode,
+        targetUserId: owner.id,
         goodsId: goods.goodsId,
         goodsName: goods.name,
-        deviceCode: device.deviceCode,
-        quantity,
+        dueAt: expiresAt,
+        detail: `${device.name} 的 ${goods.name} 批次已入柜，请在到期前关注去向。`
+      });
+
+      return {
+        template,
+        batch,
+        goods,
         expiresAt,
-        productionDate: payload.productionDate,
-        undoState: "not_undoable"
-      }
-    });
-
-    this.alertsService.create({
-      type: "expiry",
-      title: owner.role === "admin" ? "管理员入柜批次待到期跟进" : "商家补货批次待到期跟进",
-      deviceCode: device.deviceCode,
-      targetUserId: owner.id,
-      goodsId: goods.goodsId,
-      goodsName: goods.name,
-      dueAt: expiresAt,
-      detail: `${device.name} 的 ${goods.name} 批次已入柜，请在到期前关注去向。`
-    });
-
-    return {
-      template,
-      batch,
-      goods,
-      expiresAt
-    };
+        idempotentReplay: false
+      };
+    } catch (error) {
+      this.store.merchantGoodsTemplates.splice(
+        0,
+        this.store.merchantGoodsTemplates.length,
+        ...beforeMutation.merchantGoodsTemplates
+      );
+      this.store.goodsCatalog.splice(0, this.store.goodsCatalog.length, ...beforeMutation.goodsCatalog);
+      this.store.devices.splice(0, this.store.devices.length, ...beforeMutation.devices);
+      this.store.goodsBatches.splice(0, this.store.goodsBatches.length, ...beforeMutation.goodsBatches);
+      this.store.inventory.splice(0, this.store.inventory.length, ...beforeMutation.inventory);
+      this.store.logs.splice(0, this.store.logs.length, ...beforeMutation.logs);
+      this.store.alerts.splice(0, this.store.alerts.length, ...beforeMutation.alerts);
+      throw error;
+    }
   }
 
   listRestockTraces(ownerUserId: string) {
@@ -413,10 +520,30 @@ export class MerchantGoodsTemplatesService {
   }
 
   private calculateExpiresAt(productionDate: string, shelfLifeDays: number) {
-    const baseDate = new Date(`${productionDate}T00:00:00`);
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(productionDate);
 
-    if (Number.isNaN(baseDate.getTime())) {
+    if (!match) {
       throw new BadRequestException("生产日期格式不正确。");
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const baseDate = new Date(year, month - 1, day);
+
+    if (
+      baseDate.getFullYear() !== year ||
+      baseDate.getMonth() !== month - 1 ||
+      baseDate.getDate() !== day
+    ) {
+      throw new BadRequestException("生产日期格式不正确。");
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (baseDate.getTime() > today.getTime()) {
+      throw new BadRequestException("生产日期不能晚于今天。");
     }
 
     const expires = new Date(baseDate.getTime() + shelfLifeDays * 24 * 60 * 60 * 1000);
@@ -463,7 +590,31 @@ export class MerchantGoodsTemplatesService {
     const template = this.store.merchantGoodsTemplates.find((entry) => entry.id === templateId);
 
     if (template) {
-      if (template.ownerUserId !== ownerUserId && template.ownerUserId !== "system") {
+      if (template.ownerUserId === "system") {
+        const existingClone = this.store.merchantGoodsTemplates.find(
+          (entry) =>
+            entry.ownerUserId === ownerUserId &&
+            entry.goodsId === template.goodsId &&
+            entry.goodsCode === template.goodsCode
+        );
+
+        if (existingClone) {
+          return existingClone;
+        }
+
+        const now = new Date().toISOString();
+        const created: MerchantGoodsTemplate = {
+          ...structuredClone(template),
+          id: this.store.createId("template"),
+          ownerUserId,
+          createdAt: now,
+          updatedAt: now
+        };
+        this.store.merchantGoodsTemplates.unshift(created);
+        return created;
+      }
+
+      if (template.ownerUserId !== ownerUserId) {
         throw new ForbiddenException("不能修改其他商家的常用商品模板。");
       }
 
@@ -553,19 +704,27 @@ export class MerchantGoodsTemplatesService {
     imageUrl?: string;
   }) {
     const goodsName = payload.goodsName?.trim();
-    const defaultQuantity = Math.floor(Number(payload.defaultQuantity));
-    const defaultShelfLifeDays = Math.floor(Number(payload.defaultShelfLifeDays));
+    const defaultQuantity = Number(payload.defaultQuantity);
+    const defaultShelfLifeDays = Number(payload.defaultShelfLifeDays);
 
     if (!goodsName) {
       throw new BadRequestException("常用商品名称不能为空。");
     }
 
-    if (!Number.isFinite(defaultQuantity) || defaultQuantity <= 0) {
-      throw new BadRequestException("默认数量必须大于 0。");
+    if (!GOODS_CATEGORIES.has(payload.category)) {
+      throw new BadRequestException("常用商品品类不正确。");
     }
 
-    if (!Number.isFinite(defaultShelfLifeDays) || defaultShelfLifeDays <= 0) {
-      throw new BadRequestException("保质期天数必须大于 0。");
+    if (!Number.isFinite(defaultQuantity) || !Number.isInteger(defaultQuantity) || defaultQuantity <= 0) {
+      throw new BadRequestException("默认数量必须是正整数。");
+    }
+
+    if (
+      !Number.isFinite(defaultShelfLifeDays) ||
+      !Number.isInteger(defaultShelfLifeDays) ||
+      defaultShelfLifeDays <= 0
+    ) {
+      throw new BadRequestException("保质期天数必须是正整数。");
     }
 
     return {
@@ -614,23 +773,31 @@ export class MerchantGoodsTemplatesService {
     }
 
     if (payload.defaultQuantity !== undefined) {
-      const defaultQuantity = Math.floor(Number(payload.defaultQuantity));
+      const defaultQuantity = Number(payload.defaultQuantity);
 
-      if (!Number.isFinite(defaultQuantity) || defaultQuantity <= 0) {
-        throw new BadRequestException("默认数量必须大于 0。");
+      if (!Number.isFinite(defaultQuantity) || !Number.isInteger(defaultQuantity) || defaultQuantity <= 0) {
+        throw new BadRequestException("默认数量必须是正整数。");
       }
 
       patch.defaultQuantity = defaultQuantity;
     }
 
     if (payload.defaultShelfLifeDays !== undefined) {
-      const defaultShelfLifeDays = Math.floor(Number(payload.defaultShelfLifeDays));
+      const defaultShelfLifeDays = Number(payload.defaultShelfLifeDays);
 
-      if (!Number.isFinite(defaultShelfLifeDays) || defaultShelfLifeDays <= 0) {
-        throw new BadRequestException("保质期天数必须大于 0。");
+      if (
+        !Number.isFinite(defaultShelfLifeDays) ||
+        !Number.isInteger(defaultShelfLifeDays) ||
+        defaultShelfLifeDays <= 0
+      ) {
+        throw new BadRequestException("保质期天数必须是正整数。");
       }
 
       patch.defaultShelfLifeDays = defaultShelfLifeDays;
+    }
+
+    if (payload.category !== undefined && !GOODS_CATEGORIES.has(payload.category)) {
+      throw new BadRequestException("常用商品品类不正确。");
     }
 
     return patch;
@@ -638,7 +805,10 @@ export class MerchantGoodsTemplatesService {
 
   private getRestockActor(ownerUserId: string) {
     const actor = this.store.users.find(
-      (entry) => entry.id === ownerUserId && (entry.role === "merchant" || entry.role === "admin")
+      (entry) =>
+        entry.id === ownerUserId &&
+        entry.status === "active" &&
+        (entry.role === "merchant" || entry.role === "admin")
     );
 
     if (!actor) {
@@ -649,7 +819,9 @@ export class MerchantGoodsTemplatesService {
   }
 
   private getMerchant(ownerUserId: string) {
-    const merchant = this.store.users.find((entry) => entry.id === ownerUserId && entry.role === "merchant");
+    const merchant = this.store.users.find(
+      (entry) => entry.id === ownerUserId && entry.role === "merchant" && entry.status === "active"
+    );
 
     if (!merchant) {
       throw new ForbiddenException("当前账号不是商家。");

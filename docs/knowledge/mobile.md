@@ -59,10 +59,7 @@
 
 这里是你最值得学习的部分。
 
-例如：
-
-- `useAuthFlow.ts`
-- `useCabinetFlow.ts`
+例如 `useAuthFlow.ts`。
 
 可以把它们理解为：
 
@@ -80,11 +77,15 @@
 
 ### 5. 页面和逻辑分离
 
-当前项目故意这样拆：
+当前项目按风险拆分：
 
 - 页面 `.vue` 负责展示
-- `composables` 负责业务流程
+- `composables` 负责可安全复用的通用业务流程
 - `api` 负责接口调用
+
+开柜属于安全敏感流程，当前集中保留在
+`pages/special/device-detail.vue` 的“预览报价 → 用户确认 → 一次性开柜”链路中，
+避免其他页面绕过预结算和确认直接调用开柜接口。
 
 这就是你之前要求的“逻辑和 UI 分开”。
 
@@ -95,4 +96,4 @@
 3. `apps/mobile/src/pages/common/login.vue`
 4. `apps/mobile/src/composables/useAuthFlow.ts`
 5. `apps/mobile/src/pages/special/home.vue`
-6. `apps/mobile/src/composables/useCabinetFlow.ts`
+6. `apps/mobile/src/pages/special/device-detail.vue`

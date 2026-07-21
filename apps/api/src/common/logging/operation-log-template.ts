@@ -134,6 +134,55 @@ const hasLowLevelTrace = (entry: OperationLogDraft) =>
 const lowLevelTraceLabel = (entry: OperationLogDraft) =>
   hasLowLevelTrace(entry) ? "底层收发 已记录" : undefined;
 
+const formatDoorStatusDescription = (device: string, rawStatus?: string) => {
+  const normalizedStatus = rawStatus?.toUpperCase();
+
+  if (normalizedStatus === "CLOSED") {
+    return `系统确认“${device}”的柜门已关闭。`;
+  }
+
+  if (normalizedStatus === "SUCCESS") {
+    return `系统确认“${device}”的柜门已打开。`;
+  }
+
+  if (normalizedStatus === "OPENDING") {
+    return `系统确认“${device}”的柜门正在开启。`;
+  }
+
+  if (normalizedStatus === "FAIL") {
+    return `系统记录“${device}”开门失败。`;
+  }
+
+  return `系统收到了“${device}”的门状态回调，当前结果待确认。`;
+};
+
+const hasDeviceReference = (entry: OperationLogDraft) =>
+  entry.primarySubject?.type === "device" ||
+  entry.secondarySubject?.type === "device" ||
+  Boolean(readMetadataString(entry, "deviceCode"));
+
+const formatCreateAlertDescription = (
+  entry: OperationLogDraft,
+  device: string,
+  alertLabel: string
+) => {
+  const normalizedLabel = alertLabel.trim().replace(/[。.!！]+$/u, "");
+
+  if (!hasDeviceReference(entry)) {
+    return `系统创建了预警：${normalizedLabel}。`;
+  }
+
+  const titleWithoutRepeatedDevice = normalizedLabel.startsWith(device)
+    ? normalizedLabel
+        .slice(device.length)
+        .replace(/^[\s:：,，·—-]+/u, "")
+        .trim()
+    : normalizedLabel;
+  const alertTitle = titleWithoutRepeatedDevice || "待处理任务";
+
+  return `系统为“${device}”创建了预警：${alertTitle}。`;
+};
+
 export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogRecord, "description" | "detail"> => {
   const actor = actorLabel(entry.actor);
   const device = pickDeviceLabel(entry);
@@ -199,19 +248,21 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
         description: `${actor}刷新了${device}的状态。`,
         detail: baseDetail([`动作人 ${actor}`, `柜机 ${device}`, `状态 ${result}`])
       };
-    case "door-status-callback":
+    case "door-status-callback": {
+      const rawStatus = readMetadataString(entry, "status");
       return {
-        description: `系统更新了${device}的门状态，结果为${String(entry.metadata?.status ?? result)}。`,
+        description: formatDoorStatusDescription(device, rawStatus),
         detail: baseDetail([
           `柜机 ${device}`,
           relatedUser ? `关联人员 ${relatedUser}` : undefined,
           goodsSummary ? `相关商品 ${goodsSummary}` : undefined,
           eventReference ? `关联单据 ${eventReference}` : undefined,
-          `回调状态 ${String(entry.metadata?.status ?? entry.status)}`,
+          rawStatus ? `平台原始状态 ${rawStatus}` : undefined,
           lowLevelTraceLabel(entry),
           `状态 ${result}`
         ])
       };
+    }
     case "open-cabinet":
       return {
         description: `${actor}向${device}发起了开柜请求${goodsSummary ? `，计划处理${goodsSummary}` : ""}。`,
@@ -326,7 +377,7 @@ export const formatOperationLog = (entry: OperationLogDraft): Pick<OperationLogR
       };
     case "create-alert":
       return {
-        description: `系统为${device}创建了${primary}。`,
+        description: formatCreateAlertDescription(entry, device, primary),
         detail: baseDetail([
           `柜机 ${device}`,
           relatedUser ? `关联人员 ${relatedUser}` : undefined,

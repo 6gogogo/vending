@@ -14,6 +14,8 @@ export interface StoredMobileSessionState {
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
     usedCount?: number;
+    remainingDaily?: number;
+    remainingFreeTotal?: number;
     activeWindows?: Array<{
       policyId: string;
       policyName: string;

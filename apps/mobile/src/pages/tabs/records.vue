@@ -8,13 +8,15 @@ import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
-import { roleLabelMap } from "../../constants/labels";
+import { operationLogStatusLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { formatBeijingDate, formatBeijingDateTime } from "../../utils/datetime";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import { syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
+const loadError = ref("");
 const records = ref<InventoryMovement[]>([]);
 const merchantLogs = ref<OperationLogRecord[]>([]);
 const merchantBatches = ref<Array<{
@@ -41,6 +43,28 @@ const pendingApplications = ref<RegistrationApplication[]>([]);
 const adminLogs = ref<OperationLogRecord[]>([]);
 const rejectReasons = reactive<Record<string, string>>({});
 const adminView = ref<"users" | "reviews" | "logs">("users");
+const adminLoadErrors = reactive<Record<"users" | "reviews" | "logs", string>>({
+  users: "",
+  reviews: "",
+  logs: ""
+});
+const reviewingApplicationId = ref("");
+const readLoadError = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+const visibleLoadError = computed(() =>
+  sessionStore.user?.role === "admin" ? adminLoadErrors[adminView.value] : loadError.value
+);
+const visibleLoadErrorTitle = computed(() => {
+  if (sessionStore.user?.role !== "admin") {
+    return "记录数据加载失败";
+  }
+
+  return adminView.value === "users"
+    ? "人员数据加载失败"
+    : adminView.value === "reviews"
+      ? "审批数据加载失败"
+      : "日志数据加载失败";
+});
 
 const title = computed(() => {
   if (sessionStore.user?.role === "special") {
@@ -56,11 +80,11 @@ const title = computed(() => {
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return "查看本人在哪些柜机领取过什么货物。";
+    return "查看本人在哪些柜机领取过什么物资。";
   }
 
   if (sessionStore.user?.role === "merchant") {
-    return "按日查看货物被领取的件数、帮助人数和累计帮助人次。";
+    return "按日查看物资被领取的件数、服务人数和累计服务人次。";
   }
 
   return "可切换查看人员信息、审批申请和处理记录。";
@@ -76,6 +100,7 @@ const load = async () => {
 
   syncRoleTabBar(sessionStore.user.role);
   loading.value = true;
+  loadError.value = "";
 
   try {
     if (sessionStore.user.role === "special") {
@@ -92,15 +117,34 @@ const load = async () => {
       return;
     }
 
-    const [users, applications, logs] = await Promise.all([
+    const [usersResult, applicationsResult, logsResult] = await Promise.allSettled([
       mobileApi.users(),
       mobileApi.registrationApplications("pending"),
       mobileApi.logs()
     ]);
-    adminUsers.value = users;
-    pendingApplications.value = applications;
-    adminLogs.value = logs;
+
+    if (usersResult.status === "fulfilled") {
+      adminUsers.value = usersResult.value;
+      adminLoadErrors.users = "";
+    } else {
+      adminLoadErrors.users = readLoadError(usersResult.reason, "人员数据加载失败，请稍后重试");
+    }
+
+    if (applicationsResult.status === "fulfilled") {
+      pendingApplications.value = applicationsResult.value;
+      adminLoadErrors.reviews = "";
+    } else {
+      adminLoadErrors.reviews = readLoadError(applicationsResult.reason, "审批数据加载失败，请稍后重试");
+    }
+
+    if (logsResult.status === "fulfilled") {
+      adminLogs.value = logsResult.value;
+      adminLoadErrors.logs = "";
+    } else {
+      adminLoadErrors.logs = readLoadError(logsResult.reason, "日志数据加载失败，请稍后重试");
+    }
   } catch (error) {
+    loadError.value = readLoadError(error, "记录数据加载失败，请稍后重试");
     showOperationFailure(error);
   } finally {
     loading.value = false;
@@ -120,15 +164,46 @@ const openLog = (id: string) => {
 };
 
 const reviewApplication = async (applicationId: string, decision: "approved" | "rejected") => {
+  if (reviewingApplicationId.value) {
+    return;
+  }
+
+  const application = pendingApplications.value.find((item) => item.id === applicationId);
+  const applicantName = application?.profile.merchantName || application?.profile.name || application?.phone || applicationId;
+  const roleName = application?.requestedRole ? roleLabelMap[application.requestedRole] : "未知角色";
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: decision === "approved" ? "确认通过申请" : "确认驳回申请",
+      content: [
+        `申请人：${applicantName}`,
+        `申请角色：${roleName}`,
+        decision === "rejected" ? `驳回原因：${rejectReasons[applicationId]?.trim() || "未填写"}` : "通过后将立即生效。"
+      ].join("\n"),
+      confirmText: decision === "approved" ? "确认通过" : "确认驳回",
+      cancelText: "取消",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
+  reviewingApplicationId.value = applicationId;
   try {
     await mobileApi.reviewRegistration(applicationId, {
       decision,
       reason: decision === "rejected" ? rejectReasons[applicationId] : undefined
     });
-    showOperationSuccess();
+    pendingApplications.value = pendingApplications.value.filter((item) => item.id !== applicationId);
+    delete rejectReasons[applicationId];
+    showOperationSuccess(decision === "approved" ? "已通过申请" : "已驳回申请");
     await load();
   } catch (error) {
     showOperationFailure(error);
+  } finally {
+    reviewingApplicationId.value = "";
   }
 };
 
@@ -152,14 +227,23 @@ onShow(() => {
       </view>
     </GlassCard>
 
-    <GlassCard tone="quiet">
+    <GlassCard v-if="visibleLoadError" tone="warning">
+      <view class="vm-stack">
+        <EmptyState :title="visibleLoadErrorTitle" :description="visibleLoadError" />
+        <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">
+          重新加载
+        </button>
+      </view>
+    </GlassCard>
+
+    <GlassCard v-else tone="quiet">
       <view v-if="sessionStore.user?.role === 'special'" class="vm-stack">
         <view v-if="records.length" class="simple-list">
           <view v-for="record in records" :key="record.id" class="simple-card simple-card--timeline">
             <MenuIcon :name="record.type === 'manual-deduction' ? 'warning' : 'success'" size="md" :tone="record.type === 'manual-deduction' ? 'warning' : 'accent'" />
             <view class="simple-card__main">
               <text class="simple-card__title">{{ record.goodsName }}</text>
-              <text class="simple-card__meta">{{ record.deviceCode }} · {{ record.happenedAt.slice(0, 16).replace("T", " ") }}</text>
+              <text class="simple-card__meta">{{ record.deviceCode }} · {{ formatBeijingDateTime(record.happenedAt) }}</text>
             </view>
             <text class="vm-status" :class="record.type === 'manual-deduction' ? 'vm-status--warning' : 'vm-status--success'">
               {{ record.type === "manual-deduction" ? `补扣 ${record.quantity} 件` : `领取 ${record.quantity} 件` }}
@@ -190,7 +274,7 @@ onShow(() => {
             <view class="simple-card__main">
               <text class="simple-card__title">{{ batch.goodsName }}</text>
               <text class="simple-card__meta">{{ batch.deviceName }} · 当前剩余 {{ batch.remainingQuantity }}/{{ batch.quantity }} 件</text>
-              <text class="simple-card__meta">{{ batch.expiresAt ? `到期 ${batch.expiresAt.slice(0, 10)}` : "未设置保质期" }}</text>
+              <text class="simple-card__meta">{{ batch.expiresAt ? `到期 ${formatBeijingDate(batch.expiresAt)}` : "未设置保质期" }}</text>
             </view>
           </view>
         </view>
@@ -199,7 +283,7 @@ onShow(() => {
         <view v-if="merchantLogs.length" class="simple-list">
           <view v-for="log in merchantLogs.slice(0, 5)" :key="log.id" class="simple-card">
             <text class="simple-card__title">{{ log.description }}</text>
-            <text class="simple-card__meta">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</text>
+            <text class="simple-card__meta">{{ formatBeijingDateTime(log.occurredAt) }}</text>
           </view>
         </view>
       </view>
@@ -221,10 +305,10 @@ onShow(() => {
             <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
               <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
               <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }}</text>
-              <input v-model="rejectReasons[item.id]" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
+              <input v-model="rejectReasons[item.id]" :aria-label="`${item.profile.name || item.phone} 的驳回原因`" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
               <view class="action-row">
-                <button class="vm-button" @tap="reviewApplication(item.id, 'approved')">通过</button>
-                <button class="vm-button vm-button--ghost" @tap="reviewApplication(item.id, 'rejected')">驳回</button>
+                <button class="vm-button" :disabled="Boolean(reviewingApplicationId)" :loading="reviewingApplicationId === item.id" @tap="reviewApplication(item.id, 'approved')">通过</button>
+                <button class="vm-button vm-button--ghost" :disabled="Boolean(reviewingApplicationId)" :loading="reviewingApplicationId === item.id" @tap="reviewApplication(item.id, 'rejected')">驳回</button>
               </view>
             </view>
           </view>
@@ -235,7 +319,7 @@ onShow(() => {
           <view v-if="adminLogs.length" class="simple-list">
             <button v-for="log in adminLogs" :key="log.id" class="simple-card simple-card--button" @tap="openLog(log.id)">
               <text class="simple-card__title">{{ log.description }}</text>
-              <text class="simple-card__meta">{{ log.occurredAt.slice(0, 16).replace("T", " ") }} · {{ log.status }}</text>
+              <text class="simple-card__meta">{{ formatBeijingDateTime(log.occurredAt) }} · {{ operationLogStatusLabelMap[log.status] }}</text>
             </button>
           </view>
           <EmptyState v-else :title="loading ? '正在加载日志' : '当前没有日志数据'" description="新的系统操作和处理动作会同步展示在这里。" />

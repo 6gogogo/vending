@@ -429,12 +429,12 @@ onLoad(async (query) => {
         <view class="form-grid">
           <view class="vm-field">
             <text class="vm-field__label">{{ effectiveRole === "merchant" ? "联系人姓名" : "姓名" }}</text>
-            <input v-model="form.name" class="vm-field__input" placeholder="请输入姓名" />
+            <input v-model="form.name" :aria-label="effectiveRole === 'merchant' ? '联系人姓名' : '姓名'" class="vm-field__input" placeholder="请输入姓名" />
           </view>
 
           <view class="vm-field">
             <text class="vm-field__label">区域</text>
-            <picker :range="regionOptions" range-key="label" :value="Math.max(0, regionOptions.findIndex((item) => item.value === selectedRegionId))" @change="selectedRegionId = regionOptions[$event.detail.value]?.value ?? ''">
+            <picker aria-label="选择区域" :range="regionOptions" range-key="label" :value="Math.max(0, regionOptions.findIndex((item) => item.value === selectedRegionId))" @change="selectedRegionId = regionOptions[$event.detail.value]?.value ?? ''">
               <view class="vm-field__input picker-value">
                 {{ selectedRegionLabel }}
               </view>
@@ -445,26 +445,26 @@ onLoad(async (query) => {
         <template v-if="effectiveRole === 'merchant'">
           <view class="vm-field">
             <text class="vm-field__label">商家名称</text>
-            <input v-model="form.merchantName" class="vm-field__input" placeholder="请输入商家名称" />
+            <input v-model="form.merchantName" aria-label="商家名称" class="vm-field__input" placeholder="请输入商家名称" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">联系人姓名</text>
-            <input v-model="form.contactName" class="vm-field__input" placeholder="请输入联系人姓名" />
+            <input v-model="form.contactName" aria-label="商家联系人姓名" class="vm-field__input" placeholder="请输入联系人姓名" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">经营地址</text>
-            <input v-model="form.address" class="vm-field__input" placeholder="请输入经营地址" />
+            <input v-model="form.address" aria-label="经营地址" class="vm-field__input" placeholder="请输入经营地址" />
           </view>
         </template>
 
         <template v-if="effectiveRole === 'admin'">
           <view class="vm-field">
             <text class="vm-field__label">所属单位</text>
-            <input v-model="form.organization" class="vm-field__input" placeholder="请输入所属单位" />
+            <input v-model="form.organization" aria-label="所属单位" class="vm-field__input" placeholder="请输入所属单位" />
           </view>
           <view class="vm-field">
             <text class="vm-field__label">职务</text>
-            <input v-model="form.title" class="vm-field__input" placeholder="请输入职务" />
+            <input v-model="form.title" aria-label="职务" class="vm-field__input" placeholder="请输入职务" />
           </view>
         </template>
       </view>
@@ -476,6 +476,7 @@ onLoad(async (query) => {
           <text class="vm-field__label">备注（选填）</text>
           <textarea
             v-model="form.note"
+            aria-label="注册备注"
             class="vm-textarea"
             maxlength="200"
             placeholder="补充说明身份信息或特殊情况"

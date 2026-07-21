@@ -6,8 +6,10 @@ import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import {
   getActiveWindowCategoryQuota,
-  sumNetPickupQuantity
+  sumNetQuotaQuantity
 } from "../../common/policies/special-access-policy.utils";
+
+const GOODS_CATEGORIES = new Set<GoodsCategory>(["food", "drink", "daily"]);
 
 @Injectable()
 export class AccessRulesService {
@@ -17,7 +19,11 @@ export class AccessRulesService {
     return this.store.rules;
   }
 
-  update(role: "special" | "merchant", patch: { dailyLimit?: number; categoryLimit?: Record<string, number> }) {
+  update(
+    role: "special" | "merchant",
+    patch: { dailyLimit?: number; categoryLimit?: Record<string, number> },
+    actorUserId?: string
+  ) {
     if (!role) {
       throw new BadRequestException("请选择要配置的角色。");
     }
@@ -28,51 +34,74 @@ export class AccessRulesService {
       throw new BadRequestException("未找到对应规则。");
     }
 
-    if (patch.dailyLimit !== undefined) {
-      const dailyLimit = Math.floor(Number(patch.dailyLimit));
+    let nextDailyLimit = rule.dailyLimit;
+    let nextCategoryLimit = rule.categoryLimit;
 
-      if (!Number.isFinite(dailyLimit) || dailyLimit < 0) {
-        throw new BadRequestException("每日额度不能为负数。");
+    if (patch.dailyLimit !== undefined) {
+      const dailyLimit = Number(patch.dailyLimit);
+
+      if (!Number.isFinite(dailyLimit) || !Number.isInteger(dailyLimit) || dailyLimit < 0) {
+        throw new BadRequestException("每日额度必须是非负整数。");
       }
 
-      rule.dailyLimit = dailyLimit;
+      nextDailyLimit = dailyLimit;
     }
 
     if (patch.categoryLimit) {
-      const nextCategoryLimit: Record<string, number> = {};
+      const normalizedCategoryLimit: Partial<Record<GoodsCategory, number>> = {};
 
       for (const [category, value] of Object.entries(patch.categoryLimit)) {
-        const limit = Math.floor(Number(value));
-
-        if (!Number.isFinite(limit) || limit < 0) {
-          throw new BadRequestException("品类额度不能为负数。");
+        if (!GOODS_CATEGORIES.has(category as GoodsCategory)) {
+          throw new BadRequestException(`不支持的货品品类：${category}`);
         }
 
-        nextCategoryLimit[category] = limit;
+        const limit = Number(value);
+
+        if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 0) {
+          throw new BadRequestException("品类额度必须是非负整数。");
+        }
+
+        normalizedCategoryLimit[category as GoodsCategory] = limit;
       }
 
-      rule.categoryLimit = nextCategoryLimit;
+      nextCategoryLimit = normalizedCategoryLimit;
     }
 
-    this.store.logOperation({
-      category: "admin",
-      type: "update-access-rule",
-      status: "success",
-      actor: {
-        type: "admin",
-        id: this.store.users.find((entry) => entry.role === "admin")?.id,
-        name: this.store.users.find((entry) => entry.role === "admin")?.name ?? "管理员",
-        role: "admin"
-      },
-      description: `管理员更新了 ${role} 角色的领取规则。`,
-      detail: `每日上限 ${rule.dailyLimit}，品类限制 ${JSON.stringify(rule.categoryLimit)}。`,
-      metadata: {
-        role,
-        dailyLimit: rule.dailyLimit
-      }
-    });
+    const actor = actorUserId
+      ? this.store.users.find((entry) => entry.id === actorUserId && entry.role === "admin")
+      : undefined;
+    const beforeMutation = structuredClone(rule);
+    const logsBeforeMutation = structuredClone(this.store.logs);
 
-    return rule;
+    try {
+      // 全部字段校验通过后再一次性提交，避免失败请求留下半更新状态。
+      rule.dailyLimit = nextDailyLimit;
+      rule.categoryLimit = nextCategoryLimit;
+
+      this.store.logOperation({
+        category: "admin",
+        type: "update-access-rule",
+        status: "success",
+        actor: {
+          type: "admin",
+          id: actor?.id,
+          name: actor?.name ?? "管理员",
+          role: "admin"
+        },
+        description: `管理员更新了 ${role} 角色的领取规则。`,
+        detail: `每日上限 ${rule.dailyLimit}，品类限制 ${JSON.stringify(rule.categoryLimit)}。`,
+        metadata: {
+          role,
+          dailyLimit: rule.dailyLimit
+        }
+      });
+
+      return rule;
+    } catch (error) {
+      Object.assign(rule, beforeMutation);
+      this.store.logs.splice(0, this.store.logs.length, ...logsBeforeMutation);
+      throw error;
+    }
   }
 
   getQuotaSummaryForUser(user: UserRecord) {
@@ -95,12 +124,19 @@ export class AccessRulesService {
       new Date()
     );
 
-    const remainingToday =
+    const usedCount = sumNetQuotaQuantity(
+      this.store.inventory,
+      (entry) =>
+        entry.userId === user.id &&
+        getBusinessDayKey(entry.happenedAt) === currentBusinessDayKey
+    );
+    const remainingDaily = Math.max(0, (quota?.dailyLimit ?? 0) - usedCount);
+    const uncappedRemainingToday =
       Object.keys(policyQuota.remainingByCategory).length > 0
         ? policyQuota.remainingByCategory
         : Object.entries(quota?.categoryLimit ?? {}).reduce<Record<string, number>>(
             (accumulator, [category, limit]) => {
-              const usedByCategory = sumNetPickupQuantity(
+              const usedByCategory = sumNetQuotaQuantity(
                 this.store.inventory,
                 (entry) =>
                   entry.userId === user.id &&
@@ -112,18 +148,21 @@ export class AccessRulesService {
             },
             {}
           );
+    const remainingToday = this.capEachQuotaByTotal(uncappedRemainingToday, remainingDaily);
+    const remainingByGoods = this.capEachQuotaByTotal(policyQuota.remainingByGoods, remainingDaily);
+    const aggregateRemaining = Object.values(
+      Object.keys(remainingByGoods).length ? remainingByGoods : remainingToday
+    ).reduce((sum, value) => sum + value, 0);
+    const remainingFreeTotal = Math.min(remainingDaily, aggregateRemaining);
 
     return {
       role: user.role,
       limit: quota,
       remainingToday,
-      remainingByGoods: policyQuota.remainingByGoods,
-      usedCount: sumNetPickupQuantity(
-        this.store.inventory,
-        (entry) =>
-          entry.userId === user.id &&
-          getBusinessDayKey(entry.happenedAt) === currentBusinessDayKey
-      ),
+      remainingByGoods,
+      usedCount,
+      remainingDaily,
+      remainingFreeTotal,
       activeWindows: policyQuota.activeWindows
     };
   }
@@ -148,29 +187,25 @@ export class AccessRulesService {
     return this.getQuotaSummaryForUser(user);
   }
 
-  assertCanOpenSpecialCabinet(user: UserRecord, category?: GoodsCategory) {
+  assertCanOpenSpecialCabinet(user: UserRecord) {
     const summary = this.getQuotaSummaryForUser(user);
     const activeWindows = summary.activeWindows ?? [];
 
-    // 先拦住不在服务窗口的请求，避免用户走到柜前才发现今天这个时段根本不能领取。
+    // 服务时段决定用户当前是否具备开柜资格；免费额度只参与后续预结算，
+    // 额度为零时仍可按货品价格继续，不能在计价前把请求直接拦掉。
     if (!activeWindows.length) {
       throw new BadRequestException("当前不在可领取时间段内。");
     }
 
-    if (category) {
-      const remainingForCategory = (summary.remainingToday as Record<string, number>)[category] ?? 0;
-
-      if (remainingForCategory <= 0) {
-        throw new BadRequestException(`当前品类 ${category} 的领取额度已用完。`);
-      }
-    } else if (
-      Object.values((summary.remainingByGoods as Record<string, number> | undefined) ?? {}).every(
-        (value) => value <= 0
-      )
-    ) {
-      throw new BadRequestException("当前时间段内没有可领取额度。");
-    }
-
     return summary;
+  }
+
+  private capEachQuotaByTotal(values: Record<string, number>, totalLimit: number) {
+    const remaining = Math.max(0, totalLimit);
+    return Object.entries(values).reduce<Record<string, number>>((result, [key, rawValue]) => {
+      const value = Number.isFinite(rawValue) ? Math.max(0, Math.floor(rawValue)) : 0;
+      result[key] = Math.min(value, remaining);
+      return result;
+    }, {});
   }
 }

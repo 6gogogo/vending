@@ -2,13 +2,17 @@ import "reflect-metadata";
 
 import { mkdirSync } from "node:fs";
 import { NestFactory } from "@nestjs/core";
-import { ConfigService } from "@nestjs/config";
+import { ConfigModule, ConfigService } from "@nestjs/config";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 
 import { AppModule } from "./app.module";
 import { assertProductionSafety, isProductionRuntime } from "./common/config/production-safety";
+import { FinancialSingleWriterService } from "./common/coordination/financial-single-writer.service";
+import { acquireFinancialSingleWriterForApiBootstrap } from "./common/coordination/financial-single-writer-runtime";
+import { resolveTrustProxySetting } from "./common/config/http-runtime";
 import { resolveUploadDir } from "./common/store/persistence";
 import { InMemoryStoreService } from "./common/store/in-memory-store.service";
+import { PaymentsService } from "./modules/payments/payments.service";
 
 const parseCorsOrigins = (raw?: string) =>
   raw?.split(",").map((origin) => origin.trim()).filter(Boolean) ?? [];
@@ -33,38 +37,106 @@ const normalizeBodyParserError = (
   next(error);
 };
 
+const setApiSecurityHeaders = (
+  request: { path?: string },
+  response: { setHeader: (name: string, value: string) => void },
+  next: () => void
+) => {
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+  if (request.path === "/api" || request.path?.startsWith("/api/")) {
+    response.setHeader("Cache-Control", "no-store");
+  }
+
+  next();
+};
+
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  const configService = app.get(ConfigService);
-  const store = app.get(InMemoryStoreService);
-  assertProductionSafety(configService, store);
+  // AppModule 的 ConfigModule.forRoot 会先加载 .env；租约随后必须早于 Nest DI/Store 构造取得。
+  await ConfigModule.envVariablesLoaded;
+  const preAcquiredFinancialWriter =
+    acquireFinancialSingleWriterForApiBootstrap();
+  let app: NestExpressApplication | undefined;
+  let financialSingleWriter: FinancialSingleWriterService | undefined;
 
-  const configuredCorsOrigins = parseCorsOrigins(configService.get<string>("CORS_ORIGINS"));
-  app.enableCors({
-    origin: configuredCorsOrigins.length > 0 ? configuredCorsOrigins : !isProductionRuntime(),
-    credentials: false
-  });
-  app.set("trust proxy", 1);
+  try {
+    app = await NestFactory.create<NestExpressApplication>(AppModule);
+    const configService = app.get(ConfigService);
+    const resolvedFinancialSingleWriter = app.get(
+      FinancialSingleWriterService
+    );
+    financialSingleWriter = resolvedFinancialSingleWriter;
+    resolvedFinancialSingleWriter.adoptPreAcquiredRuntime(
+      preAcquiredFinancialWriter
+    );
+    const store = app.get(InMemoryStoreService);
+    assertProductionSafety(configService, store);
+    store.flushBootstrapPersistence();
+    app.enableShutdownHooks();
 
-  const captureRawBody = (request: { rawBody?: string }, _response: unknown, buffer: Buffer) => {
-    request.rawBody = buffer.toString("utf8");
-  };
-  app.useBodyParser("json", { limit: "1mb", verify: captureRawBody });
-  app.useBodyParser("urlencoded", { extended: true, limit: "256kb", verify: captureRawBody });
-  app.use(normalizeBodyParserError);
+    const configuredCorsOrigins = parseCorsOrigins(configService.get<string>("CORS_ORIGINS"));
+    const localCorsOrigins = [
+      "http://127.0.0.1:5173",
+      "http://localhost:5173",
+      "http://127.0.0.1:5174",
+      "http://localhost:5174"
+    ];
+    app.enableCors({
+      origin: configuredCorsOrigins.length > 0
+        ? configuredCorsOrigins
+        : isProductionRuntime()
+          ? []
+          : localCorsOrigins,
+      credentials: false
+    });
+    // 仅在明确知道前方代理层数时信任转发头，避免公网直连时伪造 X-Forwarded-For 绕过限流。
+    app.set("trust proxy", resolveTrustProxySetting(configService.get<string>("TRUST_PROXY_HOPS")));
+    app.use(setApiSecurityHeaders);
 
-  app.setGlobalPrefix("api");
+    const captureRawBody = (request: { rawBody?: string }, _response: unknown, buffer: Buffer) => {
+      request.rawBody = buffer.toString("utf8");
+    };
+    app.useBodyParser("json", { limit: "1mb", verify: captureRawBody });
+    app.useBodyParser("urlencoded", { extended: true, limit: "256kb", verify: captureRawBody });
+    app.use(normalizeBodyParserError);
 
-  const uploadDir = resolveUploadDir();
-  mkdirSync(uploadDir, { recursive: true });
-  app.useStaticAssets(uploadDir, {
-    prefix: "/uploads"
-  });
+    app.setGlobalPrefix("api");
 
-  const port = Number(process.env.PORT ?? 4000);
-  await app.listen(port);
+    const uploadDir = resolveUploadDir();
+    mkdirSync(uploadDir, { recursive: true });
+    app.useStaticAssets(uploadDir, {
+      prefix: "/uploads",
+      setHeaders: (response) => {
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+        response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    });
 
-  console.log(`接口服务已启动：http://localhost:${port}/api`);
+    const port = Number(process.env.PORT ?? 4000);
+    const host = configService.get<string>("API_HOST")?.trim() || (isProductionRuntime() ? "0.0.0.0" : "127.0.0.1");
+    await app.listen(port, host);
+
+    const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
+    console.log(`接口服务已启动：http://${displayHost}:${port}/api（监听 ${host}）`);
+    for (const line of app.get(PaymentsService).formatPaymentDiagnosticsForLog()) {
+      console.log(line);
+    }
+  } catch (error) {
+    try {
+      await app?.close();
+    } finally {
+      financialSingleWriter?.release();
+      preAcquiredFinancialWriter.release();
+    }
+    throw error;
+  }
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  console.error(error instanceof Error ? error.message : "接口服务启动失败。");
+  process.exitCode = 1;
+});

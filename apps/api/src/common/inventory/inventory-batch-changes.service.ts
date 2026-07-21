@@ -30,6 +30,7 @@ interface RecordConsumptiveMovementPayload {
     batchId: string;
     quantity: number;
   }>;
+  allowExpiredBatches?: boolean;
   trace?: ConsumptionTraceOptions;
 }
 
@@ -73,6 +74,7 @@ interface ConsumeBatchesOnlyPayload {
   deviceCode: string;
   goodsId: string;
   quantity: number;
+  allowExpiredBatches?: boolean;
 }
 
 interface InventoryBatchChangeLocation {
@@ -140,11 +142,21 @@ export class InventoryBatchChangesService {
 
   recordConsumptiveMovement(payload: RecordConsumptiveMovementPayload): InventoryBatchChangeResult {
     const { movement } = payload;
+    this.assertMovement(movement);
+    this.assertPositiveInteger(movement.quantity, "库存扣减数量");
+    for (const requested of payload.requestedBatches ?? []) {
+      if (!requested.batchId?.trim()) {
+        throw new BadRequestException("指定扣减批次编号不能为空。");
+      }
+      this.assertPositiveInteger(requested.quantity, "指定批次扣减数量");
+    }
+
     const consumed = this.store.consumeGoodsBatches(
       movement.deviceCode,
       movement.goodsId,
       movement.quantity,
-      payload.requestedBatches
+      payload.requestedBatches,
+      { allowExpired: payload.allowExpiredBatches === true }
     );
     const consumedBatches = this.cloneConsumedBatches(consumed.consumed);
 
@@ -164,6 +176,8 @@ export class InventoryBatchChangesService {
 
   recordRestockMovement(payload: RecordRestockMovementPayload): InventoryBatchChangeResult {
     const { movement } = payload;
+    this.assertMovement(movement);
+    this.assertPositiveInteger(movement.quantity, "库存补货数量");
 
     if (payload.deviceGoods) {
       this.store.ensureDeviceGoodsEntry(movement.deviceCode, this.pickDeviceGoods(payload.deviceGoods));
@@ -194,6 +208,19 @@ export class InventoryBatchChangesService {
   }
 
   recordSpecificBatchDeduction(payload: RecordSpecificBatchDeductionPayload): InventoryBatchChangeResult {
+    this.assertMovement(payload.movement);
+    this.assertPositiveInteger(payload.quantity, "指定批次扣减数量");
+
+    if (!payload.batchId?.trim()) {
+      throw new BadRequestException("指定扣减批次编号不能为空。");
+    }
+
+    const sourceBatch = this.store.getGoodsBatches().find((entry) => entry.batchId === payload.batchId);
+
+    if (!sourceBatch || sourceBatch.remainingQuantity < payload.quantity) {
+      throw new BadRequestException("指定批次库存不足，不能执行扣减。");
+    }
+
     const removed = this.store.removeBatchQuantity(payload.batchId, payload.quantity);
 
     if (!removed) {
@@ -217,6 +244,9 @@ export class InventoryBatchChangesService {
   }
 
   recordBatchOnly(payload: RecordBatchOnlyPayload): InventoryBatchChangeResult {
+    this.assertLocationAndGoods(payload.deviceCode, payload.goodsId);
+    this.assertPositiveInteger(payload.quantity, "库存批次数量");
+
     const batch = this.store.createGoodsBatch({
       goodsId: payload.goodsId,
       deviceCode: payload.deviceCode,
@@ -237,7 +267,16 @@ export class InventoryBatchChangesService {
   }
 
   consumeBatchesOnly(payload: ConsumeBatchesOnlyPayload): InventoryBatchChangeResult {
-    const consumed = this.store.consumeGoodsBatches(payload.deviceCode, payload.goodsId, payload.quantity);
+    this.assertLocationAndGoods(payload.deviceCode, payload.goodsId);
+    this.assertPositiveInteger(payload.quantity, "库存扣减数量");
+
+    const consumed = this.store.consumeGoodsBatches(
+      payload.deviceCode,
+      payload.goodsId,
+      payload.quantity,
+      undefined,
+      { allowExpired: payload.allowExpiredBatches === true }
+    );
     const consumedBatches = this.cloneConsumedBatches(consumed.consumed);
 
     return this.change({
@@ -247,6 +286,37 @@ export class InventoryBatchChangesService {
   }
 
   recordTransfer(payload: RecordTransferPayload): InventoryBatchChangeResult {
+    this.assertLocationAndGoods(payload.from.code, payload.goods.goodsId);
+
+    if (!payload.to.code?.trim()) {
+      throw new BadRequestException("调拨去向不能为空。");
+    }
+
+    if (payload.from.code === payload.to.code) {
+      throw new BadRequestException("调拨来源和去向不能相同。");
+    }
+
+    this.assertPositiveInteger(payload.quantity, "调拨数量");
+    const now = Date.now();
+
+    if (payload.sourceBatchId) {
+      const sourceBatch = this.store
+        .getGoodsBatches(payload.from.code, payload.goods.goodsId)
+        .find((entry) => entry.batchId === payload.sourceBatchId);
+
+      if (sourceBatch?.expiresAt && !this.store.isGoodsBatchAvailable(sourceBatch, now)) {
+        throw new BadRequestException("所选来源批次已到期，不能执行正常调拨。");
+      }
+
+      if (!sourceBatch || sourceBatch.remainingQuantity < payload.quantity) {
+        throw new BadRequestException("未找到对应来源批次，或调拨数量超过该批次库存。");
+      }
+    }
+
+    if (this.store.getAvailableStock(payload.from.code, payload.goods.goodsId, now) < payload.quantity) {
+      throw new BadRequestException("可调拨的有效批次库存不足，过期批次不能作为正常调拨来源。");
+    }
+
     if (payload.to.type === "device") {
       this.store.ensureDeviceGoodsEntry(payload.to.code, this.pickDeviceGoods(payload.goods));
     }
@@ -255,8 +325,20 @@ export class InventoryBatchChangesService {
       this.store.getGoodsBatches(payload.from.code, payload.goods.goodsId).map((entry) => [entry.batchId, entry])
     );
     const consumed = payload.sourceBatchId
-      ? this.consumeSpecificBatch(payload.sourceBatchId, payload.quantity)
-      : this.store.consumeGoodsBatches(payload.from.code, payload.goods.goodsId, payload.quantity);
+      ? this.consumeSpecificBatch(
+          payload.sourceBatchId,
+          payload.quantity,
+          payload.from.code,
+          payload.goods.goodsId,
+          now
+        )
+      : this.store.consumeGoodsBatches(
+          payload.from.code,
+          payload.goods.goodsId,
+          payload.quantity,
+          undefined,
+          { now }
+        );
     const consumedBatches = this.cloneConsumedBatches(consumed.consumed);
     const createdBatches = consumedBatches.map((entry) => {
       const sourceBatch = sourceBatches.get(entry.batchId);
@@ -304,11 +386,19 @@ export class InventoryBatchChangesService {
   }
 
   applyStocktakeCorrection(payload: ApplyStocktakeCorrectionPayload): InventoryBatchChangeResult {
+    this.assertLocationAndGoods(payload.deviceCode, payload.goods.goodsId);
+
+    if (!Number.isFinite(payload.delta) || !Number.isInteger(payload.delta)) {
+      throw new BadRequestException("盘点差异必须是整数。");
+    }
+
     if (payload.delta < 0) {
       const consumed = this.store.consumeGoodsBatches(
         payload.deviceCode,
         payload.goods.goodsId,
-        Math.abs(payload.delta)
+        Math.abs(payload.delta),
+        undefined,
+        { allowExpired: true }
       );
       const consumedBatches = this.cloneConsumedBatches(consumed.consumed);
 
@@ -339,6 +429,15 @@ export class InventoryBatchChangesService {
   }
 
   undoRestockBatchChange(payload: UndoRestockBatchChangePayload): InventoryBatchChangeResult {
+    this.assertMovement(payload.movement);
+    this.assertPositiveInteger(payload.quantity, "撤销补货数量");
+
+    const sourceBatch = this.store.getGoodsBatches().find((entry) => entry.batchId === payload.batchId);
+
+    if (!sourceBatch || sourceBatch.remainingQuantity < payload.quantity) {
+      throw new BadRequestException("当前批次库存不足，不能完整撤销补货。");
+    }
+
     const removed = this.store.removeBatchQuantity(payload.batchId, payload.quantity);
 
     if (!removed) {
@@ -356,6 +455,19 @@ export class InventoryBatchChangesService {
   }
 
   undoConsumptiveBatchChange(payload: UndoConsumptiveBatchChangePayload): InventoryBatchChangeResult {
+    this.assertMovement(payload.movement);
+
+    if (!payload.consumedBatches.length) {
+      throw new BadRequestException("缺少可恢复的批次消耗明细。");
+    }
+
+    for (const item of payload.consumedBatches) {
+      if (!item.batchId?.trim()) {
+        throw new BadRequestException("恢复库存的批次编号不能为空。");
+      }
+      this.assertPositiveInteger(item.quantity, "恢复库存数量");
+    }
+
     this.store.restoreGoodsBatchConsumption(payload.deviceCode, payload.consumedBatches);
     const restoredQuantity = payload.consumedBatches.reduce((sum, entry) => sum + entry.quantity, 0);
 
@@ -368,6 +480,15 @@ export class InventoryBatchChangesService {
   }
 
   restoreRemovedBatch(payload: RestoreRemovedBatchPayload): InventoryBatchChangeResult {
+    this.assertMovement(payload.movement);
+    this.assertPositiveInteger(payload.quantity, "恢复批次数量");
+
+    const sourceBatch = this.store.getGoodsBatches().find((entry) => entry.batchId === payload.batchId);
+
+    if (!sourceBatch || sourceBatch.quantity - sourceBatch.remainingQuantity < payload.quantity) {
+      throw new BadRequestException("恢复数量超过该批次已扣减数量。");
+    }
+
     const restored = this.store.restoreBatchQuantity(payload.batchId, payload.quantity);
 
     if (!restored) {
@@ -407,6 +528,11 @@ export class InventoryBatchChangesService {
     const traces: BatchConsumptionTrace[] = [];
 
     for (const item of consumedBatches) {
+      if (!item.batchId?.trim()) {
+        throw new BadRequestException("批次消耗追踪缺少批次编号。");
+      }
+      this.assertPositiveInteger(item.quantity, "批次消耗数量");
+
       const batch = this.store.goodsBatches.find((entry) => entry.batchId === item.batchId);
       const trace = this.store.recordBatchConsumption({
         id: this.store.createId("consumption-trace"),
@@ -454,11 +580,26 @@ export class InventoryBatchChangesService {
     };
   }
 
-  private consumeSpecificBatch(batchId: string, quantity: number) {
+  private consumeSpecificBatch(
+    batchId: string,
+    quantity: number,
+    expectedLocationCode: string,
+    expectedGoodsId: string,
+    now: number
+  ) {
     const batch = this.store.getGoodsBatches().find((entry) => entry.batchId === batchId);
 
-    if (!batch || batch.remainingQuantity <= 0) {
+    if (
+      !batch ||
+      batch.deviceCode !== expectedLocationCode ||
+      batch.goodsId !== expectedGoodsId ||
+      batch.remainingQuantity <= 0
+    ) {
       throw new BadRequestException("未找到对应来源批次，或该批次已无库存。");
+    }
+
+    if (batch.expiresAt && !this.store.isGoodsBatchAvailable(batch, now)) {
+      throw new BadRequestException("所选来源批次已到期，不能执行正常调拨。");
     }
 
     if (batch.remainingQuantity < quantity) {
@@ -497,6 +638,26 @@ export class InventoryBatchChangesService {
   private recordMovement(movement: InventoryMovement) {
     this.store.inventory.unshift(movement);
     return movement;
+  }
+
+  private assertMovement(movement: InventoryMovement) {
+    this.assertLocationAndGoods(movement.deviceCode, movement.goodsId);
+
+    if (!movement.id?.trim()) {
+      throw new BadRequestException("库存流水编号不能为空。");
+    }
+  }
+
+  private assertLocationAndGoods(deviceCode: string, goodsId: string) {
+    if (!deviceCode?.trim() || !goodsId?.trim()) {
+      throw new BadRequestException("库存位置和货品编号不能为空。");
+    }
+  }
+
+  private assertPositiveInteger(value: number, fieldName: string) {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+      throw new BadRequestException(`${fieldName}必须是正整数。`);
+    }
   }
 
   private pickDeviceGoods(goods: InventoryBatchGoods): InventoryBatchGoods {

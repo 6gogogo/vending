@@ -20,6 +20,8 @@ import type {
   DashboardSnapshot,
   DeviceMonitoringDetail,
   DeviceRecord,
+  ExpiredBatchDispositionMethod,
+  ExpiredBatchDispositionRecord,
   GoodsAlertPolicy,
   GoodsCatalogItem,
   GoodsCategoryRecord,
@@ -30,6 +32,8 @@ import type {
   OperationLogCategory,
   OperationLogRecord,
   OperationLogStatus,
+  PaymentDiagnosticsResult,
+  PaymentRefundRecord,
   PlatformOverviewSnapshot,
   PlatformTenantRecord,
   RegionRecord,
@@ -113,6 +117,9 @@ export const adminApi = {
   },
   session() {
     return adminClient.get<AdminLoginResponse>("/auth/backoffice-session");
+  },
+  logout() {
+    return adminClient.post<{ revoked: boolean }>("/auth/logout");
   },
   createBackofficeCredential(payload: {
     userId: string;
@@ -417,11 +424,11 @@ export const adminApi = {
     requireBackofficePermission("devices:operate");
     return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/refresh`);
   },
-  remoteOpenDevice(deviceCode: string, doorNum = "1") {
+  remoteOpenDevice(deviceCode: string, doorNum: string, reason: string) {
     requireBackofficePermission("devices:operate");
     return adminClient.post<{ eventId: string; orderNo: string; deviceCode: string; doorNum: string }>(
       `/devices/${deviceCode}/remote-open`,
-      { doorNum }
+      { doorNum, reason }
     );
   },
   notifyPaymentSuccess(payload: {
@@ -436,6 +443,7 @@ export const adminApi = {
     noticeUrl?: string;
   }) {
     requireBackofficePermission("devices:operate");
+    requireBackofficePermission("payments:refund");
     return adminClient.post("/cabinet-events/payment-success", payload);
   },
   refundOrder(payload: {
@@ -446,7 +454,13 @@ export const adminApi = {
     amount: number;
   }) {
     requireBackofficePermission("payments:refund");
-    return adminClient.post("/inventory-orders/refund", payload);
+    return adminClient.post<PaymentRefundRecord>("/inventory-orders/refund", payload);
+  },
+  reconcileRefund(id: string) {
+    requireBackofficePermission("payments:refund");
+    return adminClient.post<PaymentRefundRecord>(
+      `/payments/refunds/${encodeURIComponent(id)}/reconcile`
+    );
   },
   goodsOverview() {
     requireBackofficePermission("goods:view");
@@ -647,6 +661,10 @@ export const adminApi = {
     requireBackofficePermission("system-settings:view");
     return adminClient.get<SystemSettingsSnapshot>("/system-settings");
   },
+  paymentDiagnostics() {
+    requireBackofficePermission("system-settings:view");
+    return adminClient.get<PaymentDiagnosticsResult>("/payments/diagnostics");
+  },
   saveSystemSettings(payload: SystemSettingsUpdatePayload) {
     requireBackofficePermission("system-settings:update");
     return adminClient.patch<SystemSettingsUpdateResult>("/system-settings", payload);
@@ -718,6 +736,22 @@ export const adminApi = {
   }) {
     requireBackofficePermission("warehouse:stocktake");
     return adminClient.post("/stocktakes", payload);
+  },
+  createExpiredBatchDisposition(
+    batchId: string,
+    payload: {
+      confirmed: boolean;
+      quantity: number;
+      method: ExpiredBatchDispositionMethod;
+      reason: string;
+      idempotencyKey?: string;
+    }
+  ) {
+    requireBackofficePermission("warehouse:dispose-expired");
+    return adminClient.post<ExpiredBatchDispositionRecord>(
+      `/expired-batches/${encodeURIComponent(batchId)}/dispositions`,
+      payload
+    );
   },
   async exportStocktake(id: string, token: string) {
     requireBackofficePermission("warehouse:export");

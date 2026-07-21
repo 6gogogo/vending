@@ -1,14 +1,38 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { cloneSeedState, type AlertTask, type BackofficePermission, type BackofficeRole, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CabinetReservationRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type PaymentOrderRecord, type PaymentRefundRecord, type RegionRecord, type RegistrationApplication, type ReservationSettings, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
+import { cloneSeedState, type AlertTask, type BackofficePermission, type BackofficeRole, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CabinetReservationRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type ExpiredBatchDispositionRecord, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type PaymentOrderRecord, type PaymentRefundRecord, type RegionRecord, type RegistrationApplication, type ReservationSettings, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
+
+import { sanitizeAuditLogEntry } from "../logging/audit-log-sanitizer";
+import {
+  envFilesDeclareProductionRuntime,
+  isProductionRuntime
+} from "../config/runtime-environment";
+import { runWithFinancialWriterFence } from "../coordination/financial-writer-fence";
+
+export type VerificationPurpose = "app-login" | "register" | "general";
 
 export interface VerificationRecord {
   code: string;
+  purpose: VerificationPurpose;
   expiresAt: string;
   requestedAt?: string;
   resendAvailableAt?: string;
+  failedAttempts?: number;
+  consumedAt?: string;
 }
 
 export interface SessionRecord {
@@ -17,7 +41,10 @@ export interface SessionRecord {
   role: UserRole;
   backofficeRole?: BackofficeRole;
   tenantId?: string;
+  mobileAdminCredentialUpdatedAt?: string;
+  mobileAdminTenantCredentialUpdatedAt?: string;
   createdAt: string;
+  expiresAt: string;
 }
 
 export interface DraftSessionRecord {
@@ -27,6 +54,7 @@ export interface DraftSessionRecord {
   linkedUserId?: string;
   applicationId?: string;
   createdAt: string;
+  expiresAt: string;
 }
 
 export interface AdminCredentialRecord {
@@ -70,6 +98,7 @@ export interface PersistedStoreState {
   batchConsumptionTraces: BatchConsumptionTrace[];
   inventoryTransfers: InventoryTransferRecord[];
   stocktakes: StocktakeRecord[];
+  expiredBatchDispositions: ExpiredBatchDispositionRecord[];
   events: CabinetEventRecord[];
   inventory: InventoryMovement[];
   paymentOrders: PaymentOrderRecord[];
@@ -136,19 +165,25 @@ const findApiWorkspaceRoot = () => {
 
 const apiWorkspaceRoot = findApiWorkspaceRoot();
 
+export const resolveApiWorkspaceRoot = () => apiWorkspaceRoot;
+
 const loadApiEnvFile = () => {
   const processWithEnvLoader = process as typeof process & {
     loadEnvFile?: (path?: string) => void;
   };
 
-  const runtime = (process.env.NODE_ENV ?? process.env.APP_ENV ?? "").trim().toLowerCase();
   const envPaths = [
     ".env.local",
     ".env",
     "apps/api/.env.local",
-    "apps/api/.env",
-    ...(runtime === "production" ? [] : [".env.example", "apps/api/.env.example"])
+    "apps/api/.env"
   ];
+  const shouldLoadExamples =
+    !isProductionRuntime() && !envFilesDeclareProductionRuntime(envPaths);
+
+  if (shouldLoadExamples) {
+    envPaths.push(".env.example", "apps/api/.env.example");
+  }
 
   for (const envPath of envPaths) {
     try {
@@ -190,6 +225,19 @@ export const resolveSystemLogFile = () => {
   return resolveApiWorkspacePath(configuredPath, "runtime-data/system-audit.ndjson");
 };
 
+export const resolveApiBackupDir = () => {
+  const configuredPath = process.env.API_BACKUP_DIR ?? "runtime-backups";
+  return resolveApiWorkspacePath(configuredPath, "runtime-backups");
+};
+
+export const resolveFinancialSingleWriterLeaseFile = (configuredPath?: string) =>
+  resolveApiWorkspacePath(
+    configuredPath?.trim() ||
+      process.env.FINANCIAL_SINGLE_WRITER_LEASE_FILE ||
+      "runtime-data/financial-writer.lock",
+    "runtime-data/financial-writer.lock"
+  );
+
 export const resolveApiEnvFile = () => resolve(apiWorkspaceRoot, ".env");
 
 export const createSeededPersistedState = (): PersistedStoreState => {
@@ -204,6 +252,7 @@ export const createSeededPersistedState = (): PersistedStoreState => {
     backofficeCredentials: [],
     paymentOrders: [],
     paymentRefunds: [],
+    expiredBatchDispositions: [],
     reservations: [],
     reservationSettings: structuredClone(DEFAULT_RESERVATION_SETTINGS),
     callbackLog: [],
@@ -249,6 +298,7 @@ export const createEmptyPersistedState = (): PersistedStoreState => ({
   batchConsumptionTraces: [],
   inventoryTransfers: [],
   stocktakes: [],
+  expiredBatchDispositions: [],
   events: [],
   inventory: [],
   paymentOrders: [],
@@ -287,11 +337,16 @@ const normalizePersistedState = (raw: Partial<PersistedStoreState>): PersistedSt
     batchConsumptionTraces: raw.batchConsumptionTraces ?? seeded.batchConsumptionTraces,
     inventoryTransfers: raw.inventoryTransfers ?? seeded.inventoryTransfers,
     stocktakes: raw.stocktakes ?? seeded.stocktakes,
+    expiredBatchDispositions: raw.expiredBatchDispositions ?? seeded.expiredBatchDispositions,
     events: raw.events ?? seeded.events,
     inventory: raw.inventory ?? seeded.inventory,
     paymentOrders: raw.paymentOrders ?? seeded.paymentOrders,
     paymentRefunds: raw.paymentRefunds ?? seeded.paymentRefunds,
-    reservations: raw.reservations ?? seeded.reservations,
+    reservations: (raw.reservations ?? seeded.reservations).map((reservation) => ({
+      ...reservation,
+      inventoryReservationMode: "goods_quantity",
+      batchAllocationTiming: "on_open"
+    })),
     reservationSettings: {
       ...DEFAULT_RESERVATION_SETTINGS,
       ...(raw.reservationSettings ?? seeded.reservationSettings)
@@ -320,15 +375,38 @@ export const readPersistedState = () => {
 };
 
 export const writePersistedState = (state: PersistedStoreState) => {
-  const filePath = resolveApiDataFile();
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify(state, null, 2), "utf8");
-  return filePath;
+  return runWithFinancialWriterFence(() => {
+    const filePath = resolveApiDataFile();
+    mkdirSync(dirname(filePath), { recursive: true });
+    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    let fileDescriptor: number | undefined;
+
+    try {
+      fileDescriptor = openSync(temporaryPath, "wx");
+      writeFileSync(fileDescriptor, JSON.stringify(state, null, 2), "utf8");
+      fsyncSync(fileDescriptor);
+      closeSync(fileDescriptor);
+      fileDescriptor = undefined;
+      renameSync(temporaryPath, filePath);
+    } catch (error) {
+      if (fileDescriptor !== undefined) {
+        closeSync(fileDescriptor);
+      }
+
+      if (existsSync(temporaryPath)) {
+        unlinkSync(temporaryPath);
+      }
+
+      throw error;
+    }
+
+    return filePath;
+  });
 };
 
 export const appendSystemAuditLog = (entry: SystemAuditLogEntry) => {
   const filePath = resolveSystemLogFile();
   mkdirSync(dirname(filePath), { recursive: true });
-  appendFileSync(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+  appendFileSync(filePath, `${JSON.stringify(sanitizeAuditLogEntry(entry))}\n`, "utf8");
   return filePath;
 };

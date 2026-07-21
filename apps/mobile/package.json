@@ -12,6 +12,7 @@
     "build:weixin": "uni build -p mp-weixin",
     "build:alipay": "uni build -p mp-alipay",
     "build:app": "uni build -p app",
+    "test": "tsx --test src/utils/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@dcloudio/vite-plugin-uni": "3.0.0-4030620241128001",
     "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "vite": "^5.4.14"
   }

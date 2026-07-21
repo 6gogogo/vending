@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, HttpException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type {
   AiAdminCustomQueryReply,
@@ -17,9 +17,11 @@ import type {
   AlertTask,
   CabinetEventRecord,
   DataMonitorRange,
-  OperationLogRecord
+  OperationLogRecord,
+  ServiceOverviewBucket
 } from "@vm/shared-types";
 
+import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { getBusinessDayKey } from "../../common/time/business-day";
 import { AlertsService } from "../alerts/alerts.service";
@@ -33,6 +35,7 @@ import { OpenAiCompatibleService } from "./openai-compatible.service";
 @Injectable()
 export class AiInsightsService {
   private readonly cache = new Map<string, { expiresAt: number; value: unknown }>();
+  private readonly supportAssistantHistory = new Map<string, number[]>();
 
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
@@ -46,8 +49,23 @@ export class AiInsightsService {
     @Inject(WarehousesService) private readonly warehousesService: WarehousesService
   ) {}
 
-  status() {
-    return this.openAiCompatibleService.getStatus();
+  status(viewerRole: "admin" | "merchant" | "special" = "admin") {
+    const status = this.openAiCompatibleService.getStatus();
+
+    if (viewerRole === "admin") {
+      return status;
+    }
+
+    // 普通移动端只需要知道助手能否使用，不应看到上游地址、模型和缺失配置名。
+    return {
+      ...status,
+      baseUrl: "",
+      model: "",
+      missingConfig: [],
+      apiKeyConfigured: false,
+      usingDefaultBaseUrl: true,
+      usingDefaultModel: true
+    };
   }
 
   saveProviderConfig(payload: AiProviderConfigPayload) {
@@ -109,16 +127,48 @@ export class AiInsightsService {
     role: "admin" | "merchant" | "special";
     actorUserId?: string;
   }) {
-    const question = payload.question.trim();
+    const question = typeof payload.question === "string" ? payload.question.trim() : "";
 
     if (!question) {
       throw new BadRequestException("请输入需要协助的问题。");
     }
 
+    if (question.length > 1_000) {
+      throw new BadRequestException("问题不能超过 1000 个字符。");
+    }
+
+    const scene = typeof payload.scene === "string" ? payload.scene.trim() : "";
+
+    if (scene.length > 100) {
+      throw new BadRequestException("问题场景不能超过 100 个字符。");
+    }
+
+    const history = this.normalizeAiHistory(payload.history);
+
+    this.assertSupportAssistantAllowed(`support:${payload.actorUserId ?? `role:${payload.role}`}`);
+
     return this.buildSupportAssistantReply({
       ...payload,
-      question
+      question,
+      scene: scene || undefined,
+      history
     });
+  }
+
+  private assertSupportAssistantAllowed(sourceKey: string) {
+    const now = Date.now();
+    const windowMs = 10 * 60_000;
+    const limit = 10;
+    const recent = (this.supportAssistantHistory.get(sourceKey) ?? []).filter(
+      (timestamp) => now - timestamp < windowMs
+    );
+
+    if (recent.length >= limit) {
+      throw new HttpException("AI 助手使用过于频繁，请稍后再试。", 429);
+    }
+
+    recent.push(now);
+    this.supportAssistantHistory.set(sourceKey, recent);
   }
 
   async adminCustomQuery(payload: {
@@ -131,15 +181,23 @@ export class AiInsightsService {
     }>;
     actorUserId?: string;
   }) {
-    const question = payload.question.trim();
+    const question = typeof payload.question === "string" ? payload.question.trim() : "";
 
     if (!question) {
       throw new BadRequestException("请输入需要分析的问题。");
     }
 
+    if (question.length > 1_000) {
+      throw new BadRequestException("问题不能超过 1000 个字符。");
+    }
+
+    const history = this.normalizeAiHistory(payload.history);
+    this.assertSupportAssistantAllowed(`admin-query:${payload.actorUserId ?? "unknown"}`);
+
     return this.buildAdminCustomQueryReply({
       ...payload,
       question,
+      history,
       dateKey: this.normalizeDateKey(payload.dateKey),
       range: this.normalizeRange(payload.range)
     });
@@ -202,8 +260,8 @@ export class AiInsightsService {
         quantity: entry.quantity,
         happenedAt: entry.happenedAt,
         unitPrice: entry.unitPrice,
-        refundNo: entry.refundNo,
-        transactionId: entry.transactionId
+        hasTransactionReference: Boolean(entry.transactionId),
+        hasRefundReference: Boolean(entry.refundNo)
       }));
     const batchTraces = this.store.batchConsumptionTraces
       .filter((entry) => entry.eventId === event.eventId || entry.orderNo === event.orderNo)
@@ -211,8 +269,6 @@ export class AiInsightsService {
       .map((entry) => ({
         goodsName: entry.goodsName,
         quantity: entry.quantity,
-        sourceUserName: entry.sourceUserName,
-        consumerUserName: entry.consumerUserName,
         happenedAt: entry.happenedAt
       }));
 
@@ -227,7 +283,6 @@ export class AiInsightsService {
         createdAt: event.createdAt,
         updatedAt: event.updatedAt,
         role: event.role,
-        phone: event.phone,
         amount: event.amount,
         paymentNotifyStatus: event.paymentNotifyStatus,
         paymentNotifyMessage: event.paymentNotifyMessage,
@@ -593,12 +648,8 @@ export class AiInsightsService {
       alert: this.toAlertSummary(alert),
       targetUser: targetUser
         ? {
-            id: targetUser.id,
-            name: targetUser.name,
             role: targetUser.role,
-            phone: targetUser.phone,
-            regionName: targetUser.regionName ?? targetUser.neighborhood,
-            tags: targetUser.tags
+            regionName: targetUser.regionName ?? targetUser.neighborhood
           }
         : undefined,
       device: deviceMonitoring
@@ -725,9 +776,9 @@ export class AiInsightsService {
         status: entry.status
       })),
       serviceOverview: {
-        completeUsers: dashboard.serviceOverview.completeUsers.users.slice(0, 10),
-        partialUsers: dashboard.serviceOverview.partialUsers.users.slice(0, 10),
-        unservedUsers: dashboard.serviceOverview.unservedUsers.users.slice(0, 10),
+        completeUsers: this.summarizeServiceBucketForAi(dashboard.serviceOverview.completeUsers),
+        partialUsers: this.summarizeServiceBucketForAi(dashboard.serviceOverview.partialUsers),
+        unservedUsers: this.summarizeServiceBucketForAi(dashboard.serviceOverview.unservedUsers),
         totalUsers: dashboard.serviceOverview.totalUsers
       },
       dataMonitor: {
@@ -940,12 +991,14 @@ export class AiInsightsService {
       type: "ai-admin-custom-query",
       status: "success",
       actor: this.getAdminActor(payload.actorUserId),
-      detail: `AI 完成了管理员自定义问询：${payload.question}`,
+      detail: "AI 完成了管理员自定义问询。",
       description: "AI 已生成管理端自定义运营分析建议。",
       metadata: {
         aiTask: "admin-custom-query",
         dateKey: payload.dateKey,
         range: payload.range,
+        questionLength: payload.question.length,
+        historyCount: payload.history?.length ?? 0,
         undoState: "not_undoable"
       }
     });
@@ -1030,12 +1083,14 @@ export class AiInsightsService {
       type: "ai-support-assistant",
       status: "success",
       actor: this.getActorByRole(payload.role, payload.actorUserId),
-      detail: `AI 辅助回答了${this.getRoleLabel(payload.role)}的问题：${payload.question}`,
+      detail: `AI 辅助回答了${this.getRoleLabel(payload.role)}的问题。`,
       description: `AI 助手完成了${this.getRoleLabel(payload.role)}问题排查建议。`,
       metadata: {
         aiTask: "support-assistant",
         role: payload.role,
-        scene: payload.scene,
+        questionLength: payload.question.length,
+        historyCount: payload.history?.length ?? 0,
+        sceneProvided: Boolean(payload.scene),
         undoState: "not_undoable"
       }
     });
@@ -1209,7 +1264,7 @@ export class AiInsightsService {
       .map((entry) => ({
         type: entry.type,
         receivedAt: entry.receivedAt,
-        payload: entry.payload
+        payload: sanitizeAuditLogEntry(entry.payload)
       }));
   }
 
@@ -1229,10 +1284,10 @@ export class AiInsightsService {
         occurredAt: entry.occurredAt,
         path: entry.path,
         statusCode: entry.statusCode,
-        body: entry.body,
-        response: entry.response,
-        error: entry.error,
-        metadata: entry.metadata
+        body: sanitizeAuditLogEntry(entry.body),
+        response: sanitizeAuditLogEntry(entry.response),
+        error: sanitizeAuditLogEntry(entry.error),
+        metadata: sanitizeAuditLogEntry(entry.metadata)
       }));
   }
 
@@ -1279,6 +1334,68 @@ export class AiInsightsService {
       expiresAt: Date.now() + 10 * 60_000
     });
     return created;
+  }
+
+  private normalizeAiHistory(value: unknown) {
+    if (value === undefined) {
+      return [];
+    }
+
+    if (!Array.isArray(value) || value.length > 10) {
+      throw new BadRequestException("对话历史最多 10 条，且每条不能超过 1000 个字符。");
+    }
+
+    return value.map((entry) => {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        !["user", "assistant"].includes(String((entry as { role?: unknown }).role)) ||
+        typeof (entry as { content?: unknown }).content !== "string"
+      ) {
+        throw new BadRequestException("对话历史格式不正确。");
+      }
+
+      const content = (entry as { content: string }).content.trim();
+
+      if (!content || content.length > 1_000) {
+        throw new BadRequestException("对话历史最多 10 条，且每条不能超过 1000 个字符。");
+      }
+
+      return {
+        role: (entry as { role: "user" | "assistant" }).role,
+        content
+      };
+    });
+  }
+
+  private summarizeServiceBucketForAi(bucket: ServiceOverviewBucket) {
+    const byNeighborhood = new Map<string, {
+      neighborhood: string;
+      users: number;
+      fulfilledGoods: number;
+      totalGoods: number;
+    }>();
+
+    for (const person of bucket.users) {
+      const neighborhood = person.neighborhood?.trim() || "未标注片区";
+      const current = byNeighborhood.get(neighborhood) ?? {
+        neighborhood,
+        users: 0,
+        fulfilledGoods: 0,
+        totalGoods: 0
+      };
+      current.users += 1;
+      current.fulfilledGoods += person.fulfilledGoods;
+      current.totalGoods += person.totalGoods;
+      byNeighborhood.set(neighborhood, current);
+    }
+
+    return {
+      count: bucket.count,
+      byNeighborhood: [...byNeighborhood.values()].sort(
+        (left, right) => right.users - left.users || left.neighborhood.localeCompare(right.neighborhood)
+      )
+    };
   }
 
   private getAdminActor(actorUserId?: string) {
@@ -1425,12 +1542,15 @@ export class AiInsightsService {
       category: entry.category,
       type: entry.type,
       status: entry.status,
-      description: entry.description,
-      detail: entry.detail,
-      actor: entry.actor.name,
+      description: sanitizeAuditLogEntry(entry.description),
+      detail: sanitizeAuditLogEntry(entry.detail),
+      actor: {
+        type: entry.actor.type,
+        role: entry.actor.role
+      },
       relatedEventId: entry.relatedEventId,
       relatedOrderNo: entry.relatedOrderNo,
-      metadata: entry.metadata
+      metadata: sanitizeAuditLogEntry(entry.metadata)
     };
   }
 
@@ -1442,10 +1562,9 @@ export class AiInsightsService {
       title: entry.title,
       status: entry.status,
       dueAt: entry.dueAt,
-      detail: entry.detail,
-      previewDetail: entry.previewDetail,
+      detail: sanitizeAuditLogEntry(entry.detail),
+      previewDetail: sanitizeAuditLogEntry(entry.previewDetail),
       deviceCode: entry.deviceCode,
-      targetUserId: entry.targetUserId,
       relatedEventId: entry.relatedEventId
     };
   }

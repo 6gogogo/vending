@@ -18,8 +18,8 @@ export class AiInsightsController {
 
   @Get("status")
   @AllowedRoles("admin", "merchant", "special")
-  status() {
-    return ok(this.aiInsightsService.status());
+  status(@Req() request: { authUser?: { role: UserRole } }) {
+    return ok(this.aiInsightsService.status(request.authUser?.role));
   }
 
   @Patch("config")

@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
-import type { SystemSettingEntry, SystemSettingsSnapshot, SystemSettingsUpdateResult } from "@vm/shared-types";
+import type {
+  PaymentDiagnosticsResult,
+  PaymentEffectiveMode,
+  PaymentRuntimeMode,
+  SystemSettingEntry,
+  SystemSettingsSnapshot,
+  SystemSettingsUpdateResult
+} from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 type LeaveDecision = "save" | "discard" | "stay";
 
@@ -19,6 +27,9 @@ const saving = ref(false);
 const loadError = ref("");
 const saveMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const lastSaveResult = ref<SystemSettingsUpdateResult>();
+const paymentDiagnostics = ref<PaymentDiagnosticsResult>();
+const paymentDiagnosticsLoading = ref(false);
+const paymentDiagnosticsError = ref("");
 const revealedKeys = ref<Set<string>>(new Set());
 const leaveDialogOpen = ref(false);
 const sessionStore = useAdminSessionStore();
@@ -70,6 +81,23 @@ const sourceSummary = computed(() => {
 
   return { envCount, exampleCount, runtimeCount };
 });
+const paymentSummaryClass = computed(() => {
+  const summary = paymentDiagnostics.value?.summary;
+
+  if (!summary) {
+    return "payment-diagnostics__summary--neutral";
+  }
+
+  if (summary.strictRealEnabled && summary.allProvidersReadyForReal) {
+    return "payment-diagnostics__summary--success";
+  }
+
+  if (summary.effectiveMode === "mock" || summary.effectiveMode === "mixed") {
+    return "payment-diagnostics__summary--warning";
+  }
+
+  return "payment-diagnostics__summary--danger";
+});
 
 const applySnapshot = (snapshot: SystemSettingsSnapshot) => {
   settingsSnapshot.value = snapshot;
@@ -90,8 +118,18 @@ const applySnapshot = (snapshot: SystemSettingsSnapshot) => {
   }
 };
 
-const readErrorMessage = (error: unknown, fallback: string) =>
-  error instanceof Error ? error.message : fallback;
+const loadPaymentDiagnostics = async () => {
+  paymentDiagnosticsLoading.value = true;
+  paymentDiagnosticsError.value = "";
+
+  try {
+    paymentDiagnostics.value = await adminApi.paymentDiagnostics();
+  } catch (error) {
+    paymentDiagnosticsError.value = readErrorMessage(error, "加载支付自检失败。");
+  } finally {
+    paymentDiagnosticsLoading.value = false;
+  }
+};
 
 const loadSettings = async () => {
   loading.value = true;
@@ -100,6 +138,7 @@ const loadSettings = async () => {
 
   try {
     applySnapshot(await adminApi.systemSettings());
+    void loadPaymentDiagnostics();
     lastSaveResult.value = undefined;
   } catch (error) {
     loadError.value = readErrorMessage(error, "加载系统设置失败。");
@@ -126,6 +165,7 @@ const saveSettings = async () => {
     });
     lastSaveResult.value = response;
     applySnapshot(response);
+    void loadPaymentDiagnostics();
     saveMessage.value = {
       type: "success",
       text: response.changedKeys.length
@@ -198,6 +238,42 @@ const sourceLabel = (source: SystemSettingEntry["source"]) => {
   }
 
   return "示例默认";
+};
+
+const paymentRuntimeModeLabel = (mode: PaymentRuntimeMode) => {
+  if (mode === "real") {
+    return "严格真实";
+  }
+
+  if (mode === "mock") {
+    return "强制模拟";
+  }
+
+  return "自动";
+};
+
+const paymentEffectiveModeLabel = (mode: PaymentEffectiveMode | "mixed") => {
+  if (mode === "real") {
+    return "真实支付";
+  }
+
+  if (mode === "mock") {
+    return "模拟支付";
+  }
+
+  return "混合模式";
+};
+
+const providerStateClass = (provider: PaymentDiagnosticsResult["providers"][number]) => {
+  if (provider.effectiveMode === "mock") {
+    return "payment-diagnostics__provider--warning";
+  }
+
+  if (provider.readyForRealPayment) {
+    return "payment-diagnostics__provider--success";
+  }
+
+  return "payment-diagnostics__provider--danger";
 };
 
 const fieldPillClass = (entry: SystemSettingEntry) => {
@@ -337,6 +413,92 @@ onBeforeUnmount(() => {
       <div v-if="hasDirtyChanges" class="admin-note settings-page__note settings-page__note--warning">
         当前有 {{ dirtyKeys.length }} 项未保存；{{ runtimeDirtyKeys.length }} 项保存后立即写入运行时，{{ restartDirtyKeys.length }} 项需要重启后完全生效。
       </div>
+
+      <section class="admin-panel admin-panel-block payment-diagnostics">
+        <div class="admin-panel__head payment-diagnostics__head">
+          <div>
+            <span class="admin-kicker">支付自检</span>
+            <h3 class="admin-panel__title">当前支付运行状态</h3>
+          </div>
+          <button
+            class="admin-button admin-button--ghost"
+            type="button"
+            :disabled="paymentDiagnosticsLoading"
+            @click="loadPaymentDiagnostics"
+          >
+            {{ paymentDiagnosticsLoading ? "刷新中" : "刷新自检" }}
+          </button>
+        </div>
+
+        <div v-if="paymentDiagnosticsError" class="admin-note settings-page__note settings-page__note--danger">
+          {{ paymentDiagnosticsError }}
+        </div>
+
+        <div v-if="paymentDiagnostics" class="payment-diagnostics__body">
+          <div class="payment-diagnostics__summary" :class="paymentSummaryClass">
+            <span>总体：{{ paymentEffectiveModeLabel(paymentDiagnostics.summary.effectiveMode) }}</span>
+            <span>请求模式：{{ paymentRuntimeModeLabel(paymentDiagnostics.requestedMode) }}</span>
+            <span>严格真实：{{ paymentDiagnostics.summary.strictRealEnabled ? "已开启" : "未开启" }}</span>
+            <span>模拟完成接口：{{ paymentDiagnostics.summary.mockPaymentEndpointEnabled ? "可用" : "关闭" }}</span>
+          </div>
+
+          <div class="payment-diagnostics__reconciliation">
+            <div>
+              <span class="admin-kicker">资金恢复</span>
+              <strong>自动对账：{{ paymentDiagnostics.reconciliation.automaticEnabled ? "已启用" : "未启用" }}</strong>
+            </div>
+            <span>单写者：{{ paymentDiagnostics.reconciliation.singleWriterHeld ? "租约正常" : "未持有" }}</span>
+            <span>待确认支付：{{ paymentDiagnostics.reconciliation.pendingPayments }}</span>
+            <span>待补回写：{{ paymentDiagnostics.reconciliation.pendingSmartVmForwards }}</span>
+            <span>待确认退款：{{ paymentDiagnostics.reconciliation.pendingRefunds }}</span>
+            <span>当前到期：{{ paymentDiagnostics.reconciliation.dueNow }}</span>
+            <span>人工核对：{{ paymentDiagnostics.reconciliation.manualReview }}</span>
+            <span>已告警：{{ paymentDiagnostics.reconciliation.alerted }}</span>
+          </div>
+
+          <div class="payment-diagnostics__providers">
+            <section
+              v-for="provider in paymentDiagnostics.providers"
+              :key="provider.provider"
+              class="payment-diagnostics__provider"
+              :class="providerStateClass(provider)"
+            >
+              <div class="payment-diagnostics__provider-head">
+                <span class="payment-diagnostics__provider-title">{{ provider.label }}</span>
+                <span class="admin-pill" :class="provider.effectiveMode === 'real' ? 'admin-pill--success' : 'admin-pill--warning'">
+                  {{ paymentEffectiveModeLabel(provider.effectiveMode) }}
+                </span>
+              </div>
+              <p class="admin-copy">
+                {{ provider.readyForRealPayment ? "真实支付配置自检通过。" : "真实支付配置不完整。" }}
+              </p>
+              <p v-if="provider.simulatedReason" class="admin-copy">
+                {{ provider.simulatedReason }}
+              </p>
+              <p v-if="provider.missingRequiredKeys.length" class="admin-copy">
+                缺少：<span class="admin-code">{{ provider.missingRequiredKeys.join("、") }}</span>
+              </p>
+              <p v-for="blocker in provider.blockers" :key="blocker" class="admin-copy payment-diagnostics__danger-text">
+                {{ blocker }}
+              </p>
+              <p v-for="warning in provider.warnings" :key="warning" class="admin-copy payment-diagnostics__warning-text">
+                {{ warning }}
+              </p>
+            </section>
+          </div>
+
+          <div v-if="paymentDiagnostics.warnings.length" class="payment-diagnostics__warnings">
+            <p v-for="warning in paymentDiagnostics.warnings" :key="warning" class="admin-copy payment-diagnostics__warning-text">
+              {{ warning }}
+            </p>
+          </div>
+        </div>
+
+        <div v-else-if="paymentDiagnosticsLoading" class="admin-empty">
+          <div class="admin-empty__title">正在加载支付自检</div>
+          <div class="admin-empty__body">请稍候。</div>
+        </div>
+      </section>
     </section>
 
     <section class="settings-page__workspace">
@@ -453,6 +615,9 @@ onBeforeUnmount(() => {
                   class="admin-input admin-code"
                   :type="inputTypeFor(entry)"
                   :placeholder="entry.exampleValue || entry.key"
+                  :min="entry.numberConstraints?.min"
+                  :max="entry.numberConstraints?.max"
+                  :step="entry.numberConstraints?.integerOnly ? 1 : undefined"
                   :disabled="!canEditEntry(entry)"
                 />
                 <button
@@ -535,6 +700,128 @@ onBeforeUnmount(() => {
   border-left-color: #a9d2b5;
   background: #effaf2;
   color: #1d6b3d;
+}
+
+.payment-diagnostics {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.payment-diagnostics__head,
+.payment-diagnostics__provider-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.payment-diagnostics__body {
+  display: grid;
+  gap: 12px;
+}
+
+.payment-diagnostics__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.payment-diagnostics__summary span {
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.payment-diagnostics__reconciliation {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(7, minmax(110px, 1fr));
+  gap: 10px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid #d6e0ea;
+  border-radius: 12px;
+  background: #f6f8fb;
+  color: #31465a;
+}
+
+.payment-diagnostics__reconciliation > div {
+  display: grid;
+  gap: 4px;
+}
+
+.payment-diagnostics__reconciliation > span {
+  white-space: nowrap;
+}
+
+.payment-diagnostics__summary--success {
+  border-color: #a9d2b5;
+  background: #effaf2;
+  color: #1d6b3d;
+}
+
+.payment-diagnostics__summary--warning,
+.payment-diagnostics__summary--neutral {
+  border-color: #efcf8d;
+  background: #fff8ea;
+  color: #7a520b;
+}
+
+.payment-diagnostics__summary--danger {
+  border-color: #d9a6a1;
+  background: #fff3f1;
+  color: #8d342e;
+}
+
+.payment-diagnostics__providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.payment-diagnostics__provider {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel);
+}
+
+.payment-diagnostics__provider--success {
+  border-color: #b8d8c0;
+}
+
+.payment-diagnostics__provider--warning {
+  border-color: #efcf8d;
+  background: #fffdf8;
+}
+
+.payment-diagnostics__provider--danger {
+  border-color: #d9a6a1;
+  background: #fff8f7;
+}
+
+.payment-diagnostics__provider-title {
+  font-weight: 800;
+}
+
+.payment-diagnostics__warnings {
+  display: grid;
+  gap: 6px;
+}
+
+.payment-diagnostics__warning-text {
+  color: #7a520b;
+}
+
+.payment-diagnostics__danger-text {
+  color: #8d342e;
 }
 
 .settings-page__workspace {
@@ -711,8 +998,13 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1120px) {
   .settings-page__workspace,
-  .settings-page__field-row {
+  .settings-page__field-row,
+  .payment-diagnostics__providers {
     grid-template-columns: 1fr;
+  }
+
+  .payment-diagnostics__reconciliation {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-page__sidebar {
@@ -721,6 +1013,10 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 680px) {
+  .payment-diagnostics__reconciliation {
+    grid-template-columns: 1fr;
+  }
+
   .settings-page__input-wrap,
   .settings-page__secret-box {
     grid-template-columns: 1fr;

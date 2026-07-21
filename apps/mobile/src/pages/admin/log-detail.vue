@@ -7,6 +7,8 @@ import type { OperationLogRecord } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { operationLogStatusLabelMap } from "../../constants/labels";
+import { formatBeijingDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
 import { useSessionStore } from "../../stores/session";
 
@@ -38,7 +40,22 @@ const load = async () => {
 };
 
 const undo = async () => {
-  if (!detail.value) {
+  if (!detail.value || undoing.value) {
+    return;
+  }
+
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: "确认撤销操作",
+      content: `将撤销“${detail.value?.description ?? "本次操作"}”。撤销可能影响库存、人员记录或关联柜机状态，请确认已经核对日志详情。`,
+      confirmText: "确认撤销",
+      cancelText: "再核对",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
     return;
   }
 
@@ -46,7 +63,7 @@ const undo = async () => {
   try {
     detail.value = await mobileApi.undoLog(detail.value.id);
     uni.showToast({
-      title: "撤销已记录",
+      title: "撤销已完成",
       icon: "none"
     });
   } catch (error) {
@@ -87,13 +104,14 @@ onLoad((query) => {
   <MobileShell eyebrow="日志详情" :title="detail?.description ?? '日志详情'" :subtitle="detail?.detail ?? '正在加载日志内容'">
     <GlassCard tone="accent">
       <view class="vm-stack">
-        <text class="meta-line">时间：{{ detail?.occurredAt.slice(0, 16).replace('T', ' ') || "暂无" }}</text>
-        <text class="meta-line">状态：{{ detail?.status ?? "暂无" }}</text>
+        <text class="meta-line">时间：{{ formatBeijingDateTime(detail?.occurredAt, "暂无") }}</text>
+        <text class="meta-line">状态：{{ detail ? operationLogStatusLabelMap[detail.status] : "暂无" }}</text>
         <text class="meta-line">类型：{{ detail?.type ?? "暂无" }}</text>
         <button
           v-if="detail?.metadata?.undoState === 'undoable'"
           class="vm-button"
           :loading="undoing"
+          :disabled="undoing"
           @tap="undo"
         >
           撤销本次操作

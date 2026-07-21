@@ -31,47 +31,85 @@ export class ReservationsService {
     patch: Partial<Pick<ReservationSettings, "enabled" | "holdMinutes" | "maxTimeouts">>,
     actorUserId?: string
   ) {
-    if (patch.holdMinutes !== undefined) {
-      const holdMinutes = Math.round(Number(patch.holdMinutes));
+    let nextHoldMinutes = this.store.reservationSettings.holdMinutes;
+    let nextMaxTimeouts = this.store.reservationSettings.maxTimeouts;
+    let nextEnabled = this.store.reservationSettings.enabled;
 
-      if (!Number.isFinite(holdMinutes) || holdMinutes < 5 || holdMinutes > 24 * 60) {
-        throw new BadRequestException("预约保留时间必须在 5 分钟到 24 小时之间。");
+    if (patch.holdMinutes !== undefined) {
+      const holdMinutes = Number(patch.holdMinutes);
+
+      if (
+        !Number.isFinite(holdMinutes) ||
+        !Number.isInteger(holdMinutes) ||
+        holdMinutes < 5 ||
+        holdMinutes > 24 * 60
+      ) {
+        throw new BadRequestException("预约保留时间必须是 5 分钟到 24 小时之间的整数。");
       }
 
-      this.store.reservationSettings.holdMinutes = holdMinutes;
+      nextHoldMinutes = holdMinutes;
     }
 
     if (patch.maxTimeouts !== undefined) {
-      const maxTimeouts = Math.round(Number(patch.maxTimeouts));
+      const maxTimeouts = Number(patch.maxTimeouts);
 
-      if (!Number.isFinite(maxTimeouts) || maxTimeouts < 1 || maxTimeouts > 20) {
-        throw new BadRequestException("预约超时封禁阈值必须在 1 到 20 次之间。");
+      if (
+        !Number.isFinite(maxTimeouts) ||
+        !Number.isInteger(maxTimeouts) ||
+        maxTimeouts < 1 ||
+        maxTimeouts > 20
+      ) {
+        throw new BadRequestException("预约超时封禁阈值必须是 1 到 20 之间的整数。");
       }
 
-      this.store.reservationSettings.maxTimeouts = maxTimeouts;
+      nextMaxTimeouts = maxTimeouts;
     }
 
     if (patch.enabled !== undefined) {
-      this.store.reservationSettings.enabled = Boolean(patch.enabled);
+      if (typeof patch.enabled !== "boolean") {
+        throw new BadRequestException("预约启用状态必须是布尔值。");
+      }
+
+      nextEnabled = patch.enabled;
     }
 
-    this.store.reservationSettings.updatedAt = new Date().toISOString();
-    this.store.reservationSettings.updatedByUserId = actorUserId;
+    const beforeMutation = structuredClone(this.store.reservationSettings);
+    const logsBeforeMutation = structuredClone(this.store.logs);
 
-    this.store.logOperation({
-      category: "admin",
-      type: "update-reservation-settings",
-      status: "success",
-      actor: this.getActorLog(actorUserId, "admin"),
-      description: "管理员更新了预约规则。",
-      detail: `预约保留 ${this.store.reservationSettings.holdMinutes} 分钟，超时 ${this.store.reservationSettings.maxTimeouts} 次后禁用预约。`,
-      metadata: {
-        reservationSettings: this.store.reservationSettings,
-        undoState: "not_undoable"
+    try {
+      Object.assign(this.store.reservationSettings, {
+        holdMinutes: nextHoldMinutes,
+        maxTimeouts: nextMaxTimeouts,
+        enabled: nextEnabled,
+        updatedAt: new Date().toISOString(),
+        updatedByUserId: actorUserId
+      });
+
+      this.store.logOperation({
+        category: "admin",
+        type: "update-reservation-settings",
+        status: "success",
+        actor: this.getActorLog(actorUserId, "admin"),
+        description: "管理员更新了预约规则。",
+        detail: `预约保留 ${this.store.reservationSettings.holdMinutes} 分钟，超时 ${this.store.reservationSettings.maxTimeouts} 次后禁用预约。`,
+        metadata: {
+          reservationSettings: structuredClone(this.store.reservationSettings),
+          undoState: "not_undoable"
+        }
+      });
+
+      return this.store.reservationSettings;
+    } catch (error) {
+      Object.assign(this.store.reservationSettings, beforeMutation);
+      if (beforeMutation.updatedAt === undefined) {
+        delete this.store.reservationSettings.updatedAt;
       }
-    });
-
-    return this.store.reservationSettings;
+      if (beforeMutation.updatedByUserId === undefined) {
+        delete this.store.reservationSettings.updatedByUserId;
+      }
+      this.store.logs.splice(0, this.store.logs.length, ...logsBeforeMutation);
+      throw error;
+    }
   }
 
   list(actor?: Actor) {
@@ -101,9 +139,15 @@ export class ReservationsService {
     this.assertUserCanUseRelatedFeatures(user.id);
     this.assertReservationAllowed(user);
 
-    const doorNum = payload.doorNum ?? "1";
+    const doorNum = String(payload.doorNum ?? "1").trim();
+
+    if (!doorNum) {
+      throw new BadRequestException("预约柜门编号不能为空。");
+    }
+
     const intentItems = this.resolveIntentItems(
       payload.deviceCode,
+      doorNum,
       payload.intentItems ?? [],
       payload.intentItems?.[0]?.category ?? "daily"
     );
@@ -112,7 +156,7 @@ export class ReservationsService {
       throw new BadRequestException("预约前请先选择要保留的货品。");
     }
 
-    this.accessRulesService.assertCanOpenSpecialCabinet(user, intentItems[0]?.category);
+    this.accessRulesService.assertCanOpenSpecialCabinet(user);
 
     const now = new Date();
     const record: CabinetReservationRecord = {
@@ -123,6 +167,8 @@ export class ReservationsService {
       deviceCode: payload.deviceCode,
       doorNum,
       status: "active",
+      inventoryReservationMode: "goods_quantity",
+      batchAllocationTiming: "on_open",
       items: intentItems,
       reservedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + settings.holdMinutes * 60_000).toISOString(),
@@ -236,7 +282,7 @@ export class ReservationsService {
     return user;
   }
 
-  getReservationForOpen(userId: string, reservationId: string, deviceCode: string) {
+  getReservationForOpen(userId: string, reservationId: string, deviceCode: string, doorNum: string) {
     this.expireOverdueReservations();
     const reservation = this.findReservation(reservationId);
 
@@ -246,6 +292,10 @@ export class ReservationsService {
 
     if (reservation.deviceCode !== deviceCode) {
       throw new BadRequestException("预约柜机与当前开柜柜机不一致。");
+    }
+
+    if (reservation.doorNum !== doorNum) {
+      throw new BadRequestException("预约柜门与当前开柜柜门不一致。");
     }
 
     if (reservation.status !== "active") {
@@ -291,19 +341,46 @@ export class ReservationsService {
   }
 
   findBlockingBillingEvent(userId: string) {
-    const blockingStatuses = new Set(["payable", "supplement_pending", "mismatch", "blocked"]);
+    const blockingStatuses = new Set([
+      "pending",
+      "payable",
+      "supplement_pending",
+      "mismatch",
+      "blocked"
+    ]);
 
     return this.store.events.find((event) => {
       if (
         event.userId !== userId ||
-        event.role !== "special" ||
-        event.billingResolvedAt ||
-        event.paymentNotifyStatus === "success"
+        event.role !== "special"
       ) {
         return false;
       }
 
-      if (event.billingStatus && blockingStatuses.has(event.billingStatus)) {
+      const fallbackPhysicalStatus =
+        event.status === "created" ||
+        event.status === "opening" ||
+        event.status === "opened" ||
+        event.status === "stuck_open";
+      const physicalStateUnresolved =
+        event.physicalDoorState !== undefined
+          ? event.physicalDoorState !== "closed"
+          : fallbackPhysicalStatus;
+
+      if (physicalStateUnresolved) {
+        return true;
+      }
+
+      if (event.billingResolvedAt || event.paymentNotifyStatus === "success") {
+        return false;
+      }
+
+      if (
+        event.billingStatus &&
+        blockingStatuses.has(event.billingStatus) &&
+        event.status !== "failed" &&
+        event.status !== "refunded"
+      ) {
         return true;
       }
 
@@ -316,6 +393,8 @@ export class ReservationsService {
   }
 
   expireOverdueReservations(now = new Date()) {
+    let expiredAny = false;
+
     for (const reservation of this.store.reservations) {
       if (reservation.status !== "active") {
         continue;
@@ -323,8 +402,17 @@ export class ReservationsService {
 
       if (Date.parse(reservation.expiresAt) <= now.getTime()) {
         this.expireReservation(reservation, now);
+        expiredAny = true;
       }
     }
+
+    if (expiredAny) {
+      // 预约列表属于读取接口，但“到期”本身是业务状态迁移；必须在此处落盘，
+      // 不能依赖会跳过 GET 和失败响应的全局持久化拦截器。
+      this.store.persist();
+    }
+
+    return expiredAny;
   }
 
   private expireReservation(reservation: CabinetReservationRecord, now: Date) {
@@ -408,36 +496,57 @@ export class ReservationsService {
 
   private resolveIntentItems(
     deviceCode: string,
+    doorNum: string,
     intentItems: CabinetReservationCreatePayload["intentItems"],
     fallbackCategory: GoodsCategory = "daily"
   ): CabinetIntentItem[] {
     this.store.syncDeviceStocksFromBatches(deviceCode);
+    const device = this.store.devices.find((entry) => entry.deviceCode === deviceCode);
+
+    if (!device) {
+      throw new NotFoundException("未找到对应柜机。");
+    }
+
+    const door = device.doors.find((entry) => entry.doorNum === doorNum);
+
+    if (!door) {
+      throw new NotFoundException("未找到对应柜门。");
+    }
+
     const resolved = new Map<string, CabinetIntentItem>();
 
     for (const item of intentItems) {
-      const quantity = Math.floor(Number(item.quantity));
+      const goodsId = String(item.goodsId ?? "").trim();
+      const quantity = Number(item.quantity);
 
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new BadRequestException("预约商品数量必须大于 0。");
+      if (!goodsId) {
+        throw new BadRequestException("预约货品编号不能为空。");
       }
 
-      const deviceGoods = this.store.devices
-        .find((device) => device.deviceCode === deviceCode)
-        ?.doors.flatMap((door) => door.goods)
-        .find((goods) => goods.goodsId === item.goodsId);
-      const catalogGoods = this.store.goodsCatalog.find((goods) => goods.goodsId === item.goodsId);
-      const existing = resolved.get(item.goodsId);
-      const goodsName = item.goodsName || deviceGoods?.name || catalogGoods?.name || item.goodsId;
-      const category = item.category || deviceGoods?.category || catalogGoods?.category || fallbackCategory;
+      if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
+        throw new BadRequestException("预约商品数量必须是正整数。");
+      }
+
+      const deviceGoods = door.goods.find((goods) => goods.goodsId === goodsId);
+
+      if (!deviceGoods) {
+        throw new BadRequestException(`货品 ${goodsId} 不属于柜门 ${doorNum}，不能预约。`);
+      }
+
+      const catalogGoods = this.store.goodsCatalog.find((goods) => goods.goodsId === goodsId);
+      const existing = resolved.get(goodsId);
+      // 名称和品类只采用后端柜门/目录数据，不能信任客户端可改写字段。
+      const goodsName = deviceGoods.name || catalogGoods?.name || goodsId;
+      const category = deviceGoods.category || catalogGoods?.category || fallbackCategory;
       const nextQuantity = (existing?.quantity ?? 0) + quantity;
-      const stock = this.getReservableStock(deviceCode, item.goodsId);
+      const stock = this.getReservableStock(deviceCode, goodsId);
 
       if (stock < nextQuantity) {
         throw new BadRequestException(`${goodsName} 当前库存不足，最多可预约 ${Math.max(0, stock)} 件。`);
       }
 
-      resolved.set(item.goodsId, {
-        goodsId: item.goodsId,
+      resolved.set(goodsId, {
+        goodsId,
         goodsName,
         category,
         quantity: nextQuantity
@@ -454,7 +563,7 @@ export class ReservationsService {
       .filter((item) => item.goodsId === goodsId)
       .reduce((sum, item) => sum + item.quantity, 0);
 
-    return Math.max(0, this.store.getCurrentStock(deviceCode, goodsId) - reservedQuantity);
+    return Math.max(0, this.store.getAvailableStock(deviceCode, goodsId) - reservedQuantity);
   }
 
   private getActorLog(userId: string | undefined, fallbackRole: UserRole | "admin"): OperationLogActor {

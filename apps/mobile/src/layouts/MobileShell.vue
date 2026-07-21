@@ -187,7 +187,7 @@ const showUtilityBar = computed(
   --vm-text-soft: #857b71;
   --vm-accent: #2e7d46;
   --vm-accent-strong: #1f6a3a;
-  --vm-warning: #ff8a2b;
+  --vm-warning: #9a4f00;
   --vm-danger: #d94f41;
   --vm-shadow: 0 18rpx 44rpx rgba(88, 61, 30, 0.08);
   --vm-button-shadow: 0 18rpx 38rpx rgba(46, 125, 70, 0.16);

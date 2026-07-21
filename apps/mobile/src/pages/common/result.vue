@@ -10,16 +10,87 @@ import { resolveHomePath } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const status = ref<"success" | "warning" | "danger">("success");
+const resultType = ref<
+  "generic" |
+  "pickup" |
+  "feedback" |
+  "payment" |
+  "payment-unpaid" |
+  "restock" |
+  "register" |
+  "open-pending" |
+  "open-stopped"
+>("generic");
 const title = ref("操作结果");
 const detail = ref("系统已处理本次请求。");
 const actionText = ref("返回首页");
 const backUrl = ref("");
 const resultMeta = computed(() => {
+  if (resultType.value === "feedback") {
+    return {
+      label: "反馈已进入待办",
+      symbol: "✓",
+      suggestion: "处理结果会在首页提醒中同步；需要补充信息时可再次提交。"
+    };
+  }
+
+  if (resultType.value === "payment") {
+    return {
+      label: status.value === "success" ? "支付已完成" : "支付需要确认",
+      symbol: status.value === "success" ? "✓" : "!",
+      suggestion: status.value === "success"
+        ? "系统会同步柜机结算状态，可回到记录页查看。"
+        : "未支付不会扣款，也不会回写付款成功。"
+    };
+  }
+
+  if (resultType.value === "payment-unpaid") {
+    return {
+      label: "支付未完成",
+      symbol: "!",
+      suggestion: "订单会保留为待支付；你可以返回支付面板继续处理。"
+    };
+  }
+
+  if (resultType.value === "restock") {
+    return {
+      label: "补货登记成功",
+      symbol: "✓",
+      suggestion: "入柜批次已写入库存，可继续查看批次流转。"
+    };
+  }
+
+  if (resultType.value === "register") {
+    return {
+      label: "资料已提交",
+      symbol: "✓",
+      suggestion: "审核通过后即可登录对应身份入口。"
+    };
+  }
+
+  if (resultType.value === "open-pending") {
+    return {
+      label: "开门结果仍在确认",
+      symbol: "!",
+      suggestion: "请先查看现场柜门并等待状态更新，不要重复发起开柜。"
+    };
+  }
+
+  if (resultType.value === "open-stopped") {
+    return {
+      label: "本次开门未完成",
+      symbol: "!",
+      suggestion: "请先确认柜门状态并返回首页，不要立即重复开柜。"
+    };
+  }
+
   if (status.value === "success") {
     return {
-      label: "领取成功",
+      label: resultType.value === "pickup" ? "领取成功" : "操作成功",
       symbol: "✓",
-      suggestion: "感谢你的信任与爱心。可继续查看领取记录。"
+      suggestion: resultType.value === "pickup"
+        ? "可继续查看领取记录和剩余额度。"
+        : "请求已完成，可返回首页继续操作。"
     };
   }
 
@@ -37,6 +108,7 @@ const resultMeta = computed(() => {
     suggestion: "请按提示重新尝试；如果柜机不可用，请联系工作人员。"
   };
 });
+const feedbackActionText = computed(() => (resultType.value === "feedback" ? "补充反馈" : "提交反馈"));
 
 const goHome = async () => {
   if (backUrl.value) {
@@ -61,6 +133,17 @@ const goFeedback = () => {
 onLoad((query) => {
   status.value =
     query.status === "warning" || query.status === "danger" ? query.status : "success";
+  resultType.value =
+    query.resultType === "pickup" ||
+    query.resultType === "feedback" ||
+    query.resultType === "payment" ||
+    query.resultType === "payment-unpaid" ||
+    query.resultType === "restock" ||
+    query.resultType === "register" ||
+    query.resultType === "open-pending" ||
+    query.resultType === "open-stopped"
+      ? query.resultType
+      : "generic";
   title.value = typeof query.title === "string" ? decodeURIComponent(query.title) : title.value;
   detail.value = typeof query.detail === "string" ? decodeURIComponent(query.detail) : detail.value;
   actionText.value =
@@ -86,7 +169,7 @@ onLoad((query) => {
         </view>
         <view class="result-actions">
           <button class="vm-button" @tap="goHome">{{ actionText }}</button>
-          <button class="vm-button vm-button--ghost" @tap="goFeedback">提交反馈</button>
+          <button class="vm-button vm-button--ghost" @tap="goFeedback">{{ feedbackActionText }}</button>
         </view>
       </view>
     </GlassCard>

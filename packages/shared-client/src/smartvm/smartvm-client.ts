@@ -13,6 +13,7 @@ interface SmartVmClientOptions {
   baseUrl: string;
   credentials: SmartVmCredentials;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
   onExchange?: (payload: {
     method: "GET" | "POST";
     path: string;
@@ -40,12 +41,20 @@ export class SmartVmClient {
   private readonly baseUrl: string;
   private readonly credentials: SmartVmCredentials;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
   private readonly onExchange?: SmartVmClientOptions["onExchange"];
 
-  constructor({ baseUrl, credentials, fetchImpl = fetch, onExchange }: SmartVmClientOptions) {
+  constructor({
+    baseUrl,
+    credentials,
+    fetchImpl = fetch,
+    timeoutMs = 15_000,
+    onExchange
+  }: SmartVmClientOptions) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.credentials = credentials;
     this.fetchImpl = fetchImpl;
+    this.timeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.round(timeoutMs) : 15_000;
     this.onExchange = onExchange;
   }
 
@@ -107,16 +116,70 @@ export class SmartVmClient {
     }
   }
 
+  private async fetchSigned(
+    path: string,
+    requestUrl: string,
+    requestBody: SmartVmPayload,
+    init: RequestInit
+  ) {
+    const controller = new AbortController();
+    let timedOut = false;
+    let rejectForTimeout: ((reason: Error) => void) | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      rejectForTimeout = reject;
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      rejectForTimeout?.(new Error("SmartVM request timed out"));
+    }, this.timeoutMs);
+
+    try {
+      const requestPromise = (async () => {
+        const response = await this.fetchImpl(requestUrl, { ...init, signal: controller.signal });
+        const parsed = await this.parseResponseBody(response);
+        return { response, parsed };
+      })();
+
+      return await Promise.race([
+        requestPromise,
+        timeoutPromise
+      ]);
+    } catch (error) {
+      const message = timedOut
+        ? `SmartVM 请求超过 ${this.timeoutMs} 毫秒，已中止。`
+        : `SmartVM 网络请求失败：${error instanceof Error ? error.message : "未知错误"}`;
+      const statusCode = timedOut ? 504 : 502;
+      const responseBody = {
+        message,
+        reason: timedOut ? "timeout" : "network_error"
+      };
+
+      this.onExchange?.({
+        method: init.method === "GET" ? "GET" : "POST",
+        path,
+        requestUrl,
+        requestBody,
+        statusCode,
+        responseBody,
+        ok: false
+      });
+
+      throw new SmartVmRequestError(message, statusCode, path, requestBody, responseBody);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async signedPostToUrl<T>(path: string, targetUrl: string, payload: SmartVmPayload): Promise<T> {
     const signedPayload = withSmartVmSignature(payload, this.credentials);
-    const response = await this.fetchImpl(targetUrl, {
+    const { response, parsed } = await this.fetchSigned(path, targetUrl, signedPayload, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(signedPayload)
     });
-    const parsed = await this.parseResponseBody(response);
 
     if (!response.ok) {
       const detail = this.extractDetail(parsed, `SmartVM request failed with status ${response.status}`);
@@ -176,13 +239,12 @@ export class SmartVmClient {
   private async signedGet<T>(path: string, payload: SmartVmPayload): Promise<T> {
     const signedPayload = withSmartVmSignature(payload, this.credentials);
     const requestUrl = this.appendQuery(`${this.baseUrl}${path}`, signedPayload);
-    const response = await this.fetchImpl(requestUrl, {
+    const { response, parsed } = await this.fetchSigned(path, requestUrl, signedPayload, {
       method: "GET",
       headers: {
         "Content-Type": "application/json"
       }
     });
-    const parsed = await this.parseResponseBody(response);
 
     if (!response.ok) {
       const detail = this.extractDetail(parsed, `SmartVM request failed with status ${response.status}`);

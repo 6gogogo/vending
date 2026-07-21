@@ -16,6 +16,10 @@ const errorMessage = ref("");
 const busyLabel = computed(() => (busy.value ? "登录中..." : "进入后台"));
 
 const submit = async () => {
+  if (busy.value) {
+    return;
+  }
+
   busy.value = true;
   errorMessage.value = "";
   try {
@@ -32,7 +36,7 @@ const submit = async () => {
 
 <template>
   <section class="login-shell">
-    <article class="login-panel admin-panel">
+    <form class="login-panel admin-panel" @submit.prevent="submit">
       <div class="login-panel__head">
         <span class="admin-kicker">后台登录</span>
         <h1 class="login-panel__title">公益智助柜后台</h1>
@@ -41,7 +45,13 @@ const submit = async () => {
 
       <label class="admin-field">
         <span class="admin-field__label">账号</span>
-        <input v-model="username" class="admin-input" placeholder="请输入管理员账号" />
+        <input
+          v-model="username"
+          class="admin-input"
+          name="username"
+          autocomplete="username"
+          placeholder="请输入管理员账号"
+        />
       </label>
 
       <label class="admin-field">
@@ -50,17 +60,18 @@ const submit = async () => {
           v-model="password"
           class="admin-input"
           type="password"
+          name="password"
+          autocomplete="current-password"
           placeholder="请输入管理员密码"
-          @keyup.enter="submit"
         />
       </label>
 
-      <div v-if="errorMessage" class="admin-note login-panel__error">{{ errorMessage }}</div>
+      <div v-if="errorMessage" class="admin-note login-panel__error" role="alert">{{ errorMessage }}</div>
 
-      <button class="admin-button" :disabled="busy || !username || !password" @click="submit">
+      <button class="admin-button" type="submit" :disabled="busy || !username || !password">
         {{ busyLabel }}
       </button>
-    </article>
+    </form>
   </section>
 </template>
 

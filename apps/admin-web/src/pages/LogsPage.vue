@@ -7,6 +7,7 @@ import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 import {
   buildLogContextSummary,
   buildLogReferenceSummary,
@@ -25,6 +26,7 @@ const loading = ref(false);
 const undoingLogId = ref("");
 const exporting = ref(false);
 const exportingSystem = ref(false);
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 const category = ref<"" | OperationLogCategory>("");
 const status = ref<"" | OperationLogStatus>("");
 const subjectType = ref<"" | OperationLogSubject["type"]>("");
@@ -33,6 +35,9 @@ const dateFrom = ref("");
 const dateTo = ref("");
 const visibleLogs = computed(() => logs.value.slice(0, 12));
 const hiddenLogsCount = computed(() => Math.max(0, logs.value.length - visibleLogs.value.length));
+const showActionMessage = (type: "success" | "error", text: string) => {
+  actionMessage.value = { type, text };
+};
 
 const resolveActorRoute = (log: OperationLogRecord) => resolveActorLink(log.actor);
 const logContextSummary = (log: OperationLogRecord) =>
@@ -98,7 +103,7 @@ const applyFilters = async () => {
 
 const exportLogs = async () => {
   if (!sessionStore.token) {
-    window.alert("操作失败：登录状态已失效");
+    showActionMessage("error", "导出失败：登录状态已失效，请重新登录后再试。");
     return;
   }
 
@@ -118,8 +123,9 @@ const exportLogs = async () => {
     link.download = exported.filename;
     link.click();
     window.URL.revokeObjectURL(url);
+    showActionMessage("success", `日志导出文件已生成：${exported.filename}。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `日志导出失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     exporting.value = false;
   }
@@ -127,11 +133,12 @@ const exportLogs = async () => {
 
 const exportSystemLogs = async () => {
   if (!sessionStore.token) {
-    window.alert("操作失败：登录状态已失效");
+    showActionMessage("error", "完整日志下载失败：登录状态已失效，请重新登录后再试。");
     return;
   }
 
   if (!sessionStore.can("system-audit:export")) {
+    showActionMessage("error", "当前账号没有完整系统日志导出权限。");
     return;
   }
 
@@ -144,8 +151,9 @@ const exportSystemLogs = async () => {
     link.download = exported.filename;
     link.click();
     window.URL.revokeObjectURL(url);
+    showActionMessage("success", `完整系统日志已生成：${exported.filename}。`);
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `完整日志下载失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     exportingSystem.value = false;
   }
@@ -153,17 +161,21 @@ const exportSystemLogs = async () => {
 
 const undoLog = async (logId: string) => {
   if (!canUndoLogs.value) {
-    window.alert("当前账号没有撤销操作日志权限。");
+    showActionMessage("error", "当前账号没有撤销操作日志权限。");
     return;
   }
 
-  if (!window.confirm("确认撤销这条操作记录？")) {
+  const target = logs.value.find((entry) => entry.id === logId);
+  if (!window.confirm(`确认撤销这条操作记录？\n${target?.description ?? logId}\n撤销后会写入新的审计记录。`)) {
     return;
   }
   undoingLogId.value = logId;
   try {
     await adminApi.undoLog(logId);
     await load();
+    showActionMessage("success", `操作记录已撤销：${target?.description ?? logId}。`);
+  } catch (error) {
+    showActionMessage("error", `撤销失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     undoingLogId.value = "";
   }
@@ -195,6 +207,10 @@ onMounted(async () => {
 
       <div class="admin-note">
         日志列表默认优先展示商品、服务对象和柜机信息，订单号、事件号与主体编号保留在追溯信息中。
+      </div>
+
+      <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
+        {{ actionMessage.text }}
       </div>
 
       <div class="logs-filters admin-panel admin-panel-block">

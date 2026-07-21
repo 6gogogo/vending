@@ -1,10 +1,12 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
 
-import type { CabinetReservationCreatePayload, ReservationSettings, UserRole } from "@vm/shared-types";
+import type { ReservationSettings, UserRole } from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
+import { parseCabinetReservationCreatePayload } from "../../common/validation/cabinet-operation-input";
 import {
   AllowedBackofficePermissions,
+  AllowedBackofficeSessionPermissions,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -54,13 +56,19 @@ export class ReservationsController {
   @Post()
   @HttpCode(200)
   @AllowedRoles("special")
-  create(@Body() body: CabinetReservationCreatePayload, @Req() request: Required<AuthRequest>) {
-    return ok(this.reservationsService.create(body, request.authUser));
+  create(@Body() body: unknown, @Req() request: Required<AuthRequest>) {
+    return ok(
+      this.reservationsService.create(
+        parseCabinetReservationCreatePayload(body),
+        request.authUser
+      )
+    );
   }
 
   @Post(":id/cancel")
   @HttpCode(200)
   @AllowedRoles("admin", "special")
+  @AllowedBackofficeSessionPermissions("reservations:manage")
   cancel(@Param("id") id: string, @Req() request: Required<AuthRequest>) {
     return ok(this.reservationsService.cancel(id, request.authUser));
   }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, HttpException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
 import type { AlertGrade, AlertTask } from "@vm/shared-types";
 
@@ -6,6 +6,8 @@ import { InMemoryStoreService } from "../../common/store/in-memory-store.service
 
 @Injectable()
 export class AlertsService {
+  private readonly feedbackSubmissionHistory = new Map<string, number[]>();
+
   constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
 
   list(status?: AlertTask["status"], targetUserId?: string) {
@@ -104,7 +106,7 @@ export class AlertsService {
     alert.resolutionNote = note;
     if (alert.type === "user_feedback" && alert.targetUserId) {
       alert.userNoticeStatus = "pending";
-      alert.userNoticeTitle = "反馈已接受";
+      alert.userNoticeTitle = "反馈处理结果";
       alert.userNoticeContent = this.buildFeedbackUserNotice(alert, note);
       alert.userNotifiedAt = undefined;
     }
@@ -141,8 +143,8 @@ export class AlertsService {
     const adminNote = note?.trim();
 
     return adminNote
-      ? `管理员已接受你的${feedbackType}：${adminNote}`
-      : `管理员已接受你的${feedbackType}，后续会继续跟进处理。`;
+      ? `工作人员已处理你的${feedbackType}：${adminNote}。若问题仍存在，可继续补充反馈。`
+      : `工作人员已处理你的${feedbackType}。若问题仍存在，可继续补充反馈。`;
   }
 
   createFeedbackTask(payload: {
@@ -151,14 +153,36 @@ export class AlertsService {
     deviceCode?: string;
     targetUserId?: string;
     feedbackType?: "机器故障" | "服务问题" | "其他";
+    sourceKey?: string;
   }) {
+    const trimmedDetail = payload.detail.trim();
+
+    if (trimmedDetail.length < 5 || trimmedDetail.length > 1_000) {
+      throw new BadRequestException("反馈内容需为 5 至 1000 个字符。");
+    }
+
+    if (payload.title && payload.title.trim().length > 100) {
+      throw new BadRequestException("反馈标题不能超过 100 个字符。");
+    }
+
+    if (
+      payload.deviceCode &&
+      !this.store.devices.some((entry) => entry.deviceCode === payload.deviceCode)
+    ) {
+      throw new BadRequestException("未找到反馈关联的柜机。");
+    }
+
+    this.assertFeedbackSubmissionAllowed(
+      payload.sourceKey ?? payload.targetUserId ?? "anonymous",
+      Boolean(payload.targetUserId)
+    );
+
     const targetUser = payload.targetUserId
       ? this.store.users.find((entry) => entry.id === payload.targetUserId)
       : undefined;
     const actorLabel = targetUser
       ? `${targetUser.role === "special" ? "用户" : targetUser.role === "merchant" ? "商家" : "管理员"}${targetUser.name}`
       : "访客";
-    const trimmedDetail = payload.detail.trim();
     const previewDetail =
       trimmedDetail.length > 24 ? `${trimmedDetail.slice(0, 24)}...` : trimmedDetail;
     const titleBase = `${actorLabel}反馈${payload.feedbackType ?? "其他"}问题`;
@@ -181,6 +205,22 @@ export class AlertsService {
       targetUserId: payload.targetUserId,
       dueAt: new Date(Date.now() + 30 * 60_000).toISOString()
     });
+  }
+
+  private assertFeedbackSubmissionAllowed(sourceKey: string, authenticated: boolean) {
+    const now = Date.now();
+    const windowMs = 10 * 60_000;
+    const limit = authenticated ? 5 : 3;
+    const recent = (this.feedbackSubmissionHistory.get(sourceKey) ?? []).filter(
+      (timestamp) => now - timestamp < windowMs
+    );
+
+    if (recent.length >= limit) {
+      throw new HttpException("反馈提交过于频繁，请稍后再试。", 429);
+    }
+
+    recent.push(now);
+    this.feedbackSubmissionHistory.set(sourceKey, recent);
   }
 
   refreshOperationalTasks() {

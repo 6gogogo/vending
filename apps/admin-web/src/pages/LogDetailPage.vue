@@ -7,6 +7,7 @@ import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTimeSeconds } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 import {
   buildLogContextSummary,
   buildLogReferenceSummary,
@@ -22,6 +23,8 @@ const canUndoLogs = computed(() => sessionStore.can("operation-logs:undo"));
 const log = ref<OperationLogRecord>();
 const loading = ref(false);
 const undoing = ref(false);
+const loadError = ref("");
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 const relatedAuditLogs = ref<SystemAuditLogEntry[]>([]);
 const relatedCallbackLogs = ref<CallbackLogRecord[]>([]);
 
@@ -166,7 +169,6 @@ const readObject = (value: unknown) =>
     : undefined;
 
 const readString = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
-
 const embeddedLowLevelTraces = computed(() => {
   const metadata = log.value?.metadata;
   const rows: Array<{
@@ -207,6 +209,7 @@ const embeddedLowLevelTraces = computed(() => {
 
 const load = async () => {
   loading.value = true;
+  loadError.value = "";
   try {
     log.value = await adminApi.logDetail(String(route.params.logId));
     if (deviceCode.value && sessionStore.can("system-audit:view")) {
@@ -228,25 +231,44 @@ const load = async () => {
       relatedAuditLogs.value = [];
       relatedCallbackLogs.value = [];
     }
+  } catch (error) {
+    loadError.value = readErrorMessage(error, "日志详情加载失败");
   } finally {
     loading.value = false;
   }
 };
 
 const undoLog = async () => {
-  if (!log.value) {
+  if (!log.value || undoing.value) {
     return;
   }
 
   if (!canUndoLogs.value) {
-    window.alert("当前账号没有撤销操作日志权限。");
+    actionMessage.value = {
+      type: "error",
+      text: "当前账号没有撤销操作日志权限。"
+    };
+    return;
+  }
+
+  if (!window.confirm(`确认撤销“${log.value.description}”吗？撤销可能影响库存、人员记录或关联柜机状态，请确认已核对业务对象和底层记录。`)) {
     return;
   }
 
   undoing.value = true;
+  actionMessage.value = undefined;
   try {
     await adminApi.undoLog(log.value.id);
     await load();
+    actionMessage.value = {
+      type: "success",
+      text: "撤销已完成，日志状态和关联业务记录已刷新。"
+    };
+  } catch (error) {
+    actionMessage.value = {
+      type: "error",
+      text: `撤销失败：${readErrorMessage(error, "请稍后重试")}`
+    };
   } finally {
     undoing.value = false;
   }
@@ -257,6 +279,14 @@ onMounted(load);
 
 <template>
   <section class="admin-page">
+    <div v-if="loadError" class="admin-alert admin-alert--danger">
+      {{ loadError }}
+      <button class="admin-text-button" type="button" @click="load">重试</button>
+    </div>
+    <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
+      {{ actionMessage.text }}
+    </div>
+
     <section v-if="log" class="admin-grid admin-grid--main-aside">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">

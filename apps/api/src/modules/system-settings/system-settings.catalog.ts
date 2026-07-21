@@ -1,16 +1,35 @@
-import type { SystemSettingInputType, SystemSettingOption } from "@vm/shared-types";
+import type {
+  SystemSettingInputType,
+  SystemSettingNumberConstraints,
+  SystemSettingOption
+} from "@vm/shared-types";
+
+import { productionConfigurationSafetyCriticalKeys } from "../../common/config/production-safety";
 
 interface SystemSettingMetadata {
   label: string;
   description: string;
   inputType?: SystemSettingInputType;
   options?: SystemSettingOption[];
+  numberConstraints?: SystemSettingNumberConstraints;
   sensitive?: boolean;
   required?: boolean;
   restartRequired?: boolean;
 }
 
 export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
+  NODE_ENV: {
+    label: "Node 运行环境",
+    description: "由受控部署环境设置；生产运行中禁止在线修改。",
+    inputType: "text",
+    restartRequired: true
+  },
+  APP_ENV: {
+    label: "应用运行环境",
+    description: "由受控部署环境设置；生产运行中禁止在线修改。",
+    inputType: "text",
+    restartRequired: true
+  },
   PORT: {
     label: "API 服务端口",
     description: "Nest 后端监听端口，修改后需要重启服务才会切换监听端口。",
@@ -90,8 +109,13 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   OPENAI_BASE_URL: {
     label: "大模型 Base URL",
-    description: "OpenAI 兼容接口地址，例如 DashScope 或自建代理的 /v1 地址。",
+    description: "OpenAI 兼容接口地址；默认只接受 HTTPS 公网主机。",
     inputType: "url"
+  },
+  OPENAI_BASE_URL_EXACT_HOST_ALLOWLIST: {
+    label: "大模型精确主机允许名单",
+    description: "仅供本地或私网模型例外使用，填写逗号分隔的精确主机名或 IP；不支持 URL、端口或通配符。",
+    inputType: "text"
   },
   OPENAI_MODEL: {
     label: "大模型名称",
@@ -107,6 +131,26 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     label: "柜机平台地址",
     description: "智能柜平台 API 根地址。",
     inputType: "url"
+  },
+  SMARTVM_TIMEOUT_MS: {
+    label: "柜机平台超时毫秒",
+    description: "柜机查询、开门、付款回写和退款外呼的最长等待时间。",
+    inputType: "number"
+  },
+  SMARTVM_STATUS_STALE_AFTER_MS: {
+    label: "柜机状态过期毫秒",
+    description: "设备最后一次可信在线活动超过该时长后按状态过期处理，并在重新验证前禁止开门。",
+    inputType: "number"
+  },
+  SMARTVM_OPEN_COMMAND_LEASE_MS: {
+    label: "开门命令在途保护毫秒",
+    description: "开门命令等待设备响应期间，同一柜门禁止重复下发的最长保护时间。",
+    inputType: "number"
+  },
+  SMARTVM_ALLOWED_NOTIFY_ORIGINS: {
+    label: "柜机回写允许来源",
+    description: "额外允许的付款回写 URL 来源，多个用英文逗号分隔；柜机平台根地址会自动允许。",
+    inputType: "text"
   },
   SMARTVM_CLIENT_ID: {
     label: "柜机平台 Client ID",
@@ -181,14 +225,126 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "向柜机平台转发支付成功通知时使用的接口路径。",
     inputType: "path"
   },
-  PAYMENT_MOCK_ENABLED: {
-    label: "启用本地模拟支付",
-    description: "为空时按商户配置自动判断；true 强制模拟，false 强制真实支付。",
+  PAYMENT_MODE: {
+    label: "支付运行模式",
+    description: "auto 会在配置或付款人身份不完整时使用本地模拟；mock 强制模拟；real 为严格真实支付，缺配置直接报错。",
     inputType: "select",
     options: [
-      { label: "自动", value: "" },
-      { label: "启用", value: "true" },
-      { label: "停用", value: "false" }
+      { label: "自动：缺配置时模拟", value: "auto" },
+      { label: "强制模拟支付", value: "mock" },
+      { label: "严格真实支付", value: "real" }
+    ]
+  },
+  PAYMENT_PROVIDER_TIMEOUT_MS: {
+    label: "支付平台超时毫秒",
+    description: "微信支付和支付宝外呼的最长等待时间。",
+    inputType: "number"
+  },
+  FINANCIAL_SINGLE_WRITER_ENABLED: {
+    label: "金融单写者租约",
+    description: "JSON 账本仅允许一个 API 实例写入支付与退款；生产环境必须启用。",
+    inputType: "boolean",
+    restartRequired: true
+  },
+  FINANCIAL_INSTANCE_ID: {
+    label: "金融实例标识",
+    description: "单写者租约的实例标识。留空会自动生成；多进程排障时可填写稳定且唯一的值。",
+    inputType: "text",
+    restartRequired: true
+  },
+  FINANCIAL_SINGLE_WRITER_LEASE_FILE: {
+    label: "金融单写者租约文件",
+    description: "跨进程互斥租约的本地文件路径。所有同一账本实例必须共享该路径。",
+    inputType: "path",
+    restartRequired: true
+  },
+  FINANCIAL_SINGLE_WRITER_LEASE_MS: {
+    label: "金融租约有效期毫秒",
+    description: "心跳失联后租约等待过期的最长时间，建议保持 30000。",
+    inputType: "number",
+    restartRequired: true
+  },
+  FINANCIAL_SINGLE_WRITER_HEARTBEAT_MS: {
+    label: "金融租约心跳毫秒",
+    description: "单写者续租频率，必须小于租约有效期的一半。",
+    inputType: "number",
+    restartRequired: true
+  },
+  PAYMENT_RECONCILIATION_ENABLED: {
+    label: "支付后台自动对账",
+    description: "仅对真实支付和退款的待确认状态查询原渠道；生产环境必须启用。",
+    inputType: "boolean",
+    restartRequired: true
+  },
+  PAYMENT_RECONCILIATION_INTERVAL_MS: {
+    label: "支付对账扫描间隔毫秒",
+    description: "后台扫描到期支付或退款的间隔，范围为 1000 至 3600000 毫秒。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1_000,
+      max: 3_600_000,
+      integerOnly: true
+    },
+    restartRequired: true
+  },
+  PAYMENT_RECONCILIATION_INITIAL_DELAY_MS: {
+    label: "支付对账首次等待毫秒",
+    description: "渠道结果未明确时，首次自动核对前等待 1000 至 3600000 毫秒，且不能大于最大退避。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1_000,
+      max: 3_600_000,
+      integerOnly: true
+    }
+  },
+  PAYMENT_RECONCILIATION_MAX_DELAY_MS: {
+    label: "支付对账最大退避毫秒",
+    description: "连续待确认或失败时，自动对账间隔上限为 1000 至 86400000 毫秒，且不能小于首次等待。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1_000,
+      max: 86_400_000,
+      integerOnly: true
+    }
+  },
+  PAYMENT_RECONCILIATION_BATCH_SIZE: {
+    label: "支付对账单轮上限",
+    description: "每个后台周期最多核对的支付和退款总数，必须是 1 至 100 的整数。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      max: 100,
+      integerOnly: true
+    }
+  },
+  PAYMENT_RECONCILIATION_ALERT_AFTER_ATTEMPTS: {
+    label: "支付对账告警阈值",
+    description: "连续自动核对达到 1 至 100 次仍无终态时，仅创建一次人工核对告警。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      max: 100,
+      integerOnly: true
+    }
+  },
+  PAYMENT_RECONCILIATION_USER_REQUEST_COOLDOWN_MS: {
+    label: "本人核对请求冷却毫秒",
+    description: "特殊群体本人重复请求后台核对原支付单的最短间隔，范围为 1000 至 3600000 毫秒；请求线程不会直接访问支付渠道。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1_000,
+      max: 3_600_000,
+      integerOnly: true
+    }
+  },
+  PAYMENT_MOCK_ENABLED: {
+    label: "旧版模拟支付开关",
+    description: "兼容旧配置；PAYMENT_MODE 优先。留空跟随 PAYMENT_MODE；true 强制模拟；false 等价严格真实支付。",
+    inputType: "select",
+    options: [
+      { label: "跟随 PAYMENT_MODE", value: "" },
+      { label: "强制模拟", value: "true" },
+      { label: "严格真实", value: "false" }
     ]
   },
   WECHAT_PAY_APP_ID: {
@@ -243,6 +399,12 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   WECHAT_PAY_MERCHANT_CERT_SERIAL_NO: {
     label: "微信支付商户证书序列号",
     description: "微信支付商户 API 证书序列号。",
+    inputType: "password",
+    sensitive: true
+  },
+  WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: {
+    label: "微信支付平台证书序列号",
+    description: "用于校验 Wechatpay-Serial 回调头，必须与当前平台证书或平台公钥标识匹配。",
     inputType: "password",
     sensitive: true
   },
@@ -327,3 +489,11 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "url"
   }
 };
+
+for (const key of productionConfigurationSafetyCriticalKeys) {
+  const metadata = systemSettingCatalog[key];
+
+  if (metadata) {
+    metadata.restartRequired = true;
+  }
+}

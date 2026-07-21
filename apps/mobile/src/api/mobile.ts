@@ -23,6 +23,8 @@ import type {
   PaymentOrderCreatePayload,
   PaymentOrderCreateResult,
   PaymentOrderRecord,
+  PaymentOrderRecoverySummary,
+  PaymentOrderReconciliationRequestResult,
   PaymentPayerIdentityPayload,
   PaymentPayerIdentityResult,
   RegionRecord,
@@ -62,6 +64,9 @@ export const mobileApi = {
       phone,
       code
     });
+  },
+  logout() {
+    return mobileClient.post<{ revoked: boolean }>("/auth/logout");
   },
   submitMobileProfile(payload: {
     draftToken: string;
@@ -125,7 +130,13 @@ export const mobileApi = {
     return mobileClient.post<PaymentPayerIdentityResult>("/payments/payer-identity", payload);
   },
   paymentOrder(id: string) {
-    return mobileClient.get<PaymentOrderRecord>(`/payments/orders/${id}`);
+    return mobileClient.get<PaymentOrderRecoverySummary>(`/payments/orders/${id}`);
+  },
+  requestPaymentOrderReconciliation(id: string) {
+    return mobileClient.post<PaymentOrderReconciliationRequestResult>(
+      `/payments/orders/${id}/reconciliation-requests`,
+      {}
+    );
   },
   mockPaymentPaid(id: string) {
     return mobileClient.post<PaymentOrderRecord>(`/payments/orders/${id}/mock-paid`, {});
@@ -257,6 +268,7 @@ export const mobileApi = {
   createMerchantRestock(payload: {
     templateId: string;
     deviceCode: string;
+    cabinetEventId?: string;
     quantity?: number;
     productionDate: string;
     note?: string;
@@ -430,10 +442,10 @@ export const mobileApi = {
   refreshDevice(deviceCode: string) {
     return mobileClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/refresh`);
   },
-  remoteOpenDevice(deviceCode: string, doorNum = "1") {
+  remoteOpenDevice(deviceCode: string, doorNum: string, reason: string) {
     return mobileClient.post<{ eventId: string; orderNo: string; deviceCode: string; doorNum: string }>(
       `/devices/${deviceCode}/remote-open`,
-      { doorNum }
+      { doorNum, reason }
     );
   },
   logs(filters?: {

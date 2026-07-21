@@ -230,6 +230,17 @@ onShow(() => {
   align-items: center;
 }
 
+.ops-banner > view {
+  display: grid;
+  min-width: 0;
+  gap: 6rpx;
+}
+
+.ops-banner__title,
+.ops-banner__body {
+  display: block;
+}
+
 .menu-card {
   display: flex;
   flex-direction: column;

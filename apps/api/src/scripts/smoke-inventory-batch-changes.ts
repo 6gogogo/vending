@@ -17,6 +17,7 @@ process.env.SYSTEM_LOG_FILE = systemLogFile;
 const now = "2026-01-01T00:00:00.000Z";
 const laterExpiry = "2026-06-01T00:00:00.000Z";
 const earlierExpiry = "2026-05-01T00:00:00.000Z";
+const originalDateNow = Date.now;
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) {
@@ -88,6 +89,7 @@ const resetStore = (store: InMemoryStoreService, goods: GoodsCatalogItem, device
 };
 
 try {
+  Date.now = () => Date.parse(now);
   const store = new InMemoryStoreService();
   const inventoryBatchChanges = new InventoryBatchChangesService(store);
   const goods: GoodsCatalogItem = {
@@ -325,6 +327,7 @@ try {
 
   console.log("库存批次变化烟测通过。");
 } finally {
+  Date.now = originalDateNow;
   for (const filePath of [dataFile, systemLogFile]) {
     if (existsSync(filePath)) {
       rmSync(filePath, { force: true });

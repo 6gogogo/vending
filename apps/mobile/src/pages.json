@@ -130,7 +130,7 @@
     {
       "path": "pages/merchant/traces",
       "style": {
-        "navigationBarTitleText": "货物去向"
+        "navigationBarTitleText": "货品去向"
       }
     },
     {

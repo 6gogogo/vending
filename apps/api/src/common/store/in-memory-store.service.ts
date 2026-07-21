@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { randomInt } from "node:crypto";
+import { BadRequestException, Injectable } from "@nestjs/common";
+import { randomBytes, randomInt } from "node:crypto";
 
 import {
   cloneSeedState,
@@ -16,6 +16,7 @@ import {
   type DeviceGoodsSetting,
   type DeviceRuntimeState,
   type DeviceRecord,
+  type ExpiredBatchDispositionRecord,
   type GoodsBatchSource,
   type GoodsAlertPolicy,
   type GoodsBatchRecord,
@@ -49,9 +50,11 @@ import {
   type DraftSessionRecord,
   type PersistedStoreState,
   type SessionRecord,
+  type VerificationPurpose,
   type VerificationRecord,
   writePersistedState
 } from "./persistence";
+import { isProductionRuntime } from "../config/runtime-environment";
 
 interface BatchConsumptionEntry {
   batchId: string;
@@ -63,6 +66,9 @@ interface BatchConsumptionEntry {
 }
 
 const MAX_CALLBACK_LOGS = 1000;
+const MAX_VERIFICATION_FAILURES = 5;
+const SESSION_TTL_MS = 24 * 60 * 60_000;
+const DRAFT_SESSION_TTL_MS = 30 * 60_000;
 const NEGATIVE_STOCK_BALANCE_NOTE = "库存透支调整";
 const HIDDEN_BACKOFFICE_USER_TAG = "hidden-backoffice";
 const SUPER_ADMIN_TAG = "super-admin";
@@ -91,6 +97,7 @@ type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "descrip
 export class InMemoryStoreService {
   private readonly seed = cloneSeedState();
   private persistenceFlags: PersistedStoreState["flags"];
+  private bootstrapPersistencePending = false;
 
   readonly users: UserRecord[] = this.seed.users;
   readonly rules: CabinetAccessRule[] = this.seed.rules;
@@ -108,6 +115,7 @@ export class InMemoryStoreService {
   readonly batchConsumptionTraces: BatchConsumptionTrace[] = this.seed.batchConsumptionTraces;
   readonly inventoryTransfers: InventoryTransferRecord[] = this.seed.inventoryTransfers;
   readonly stocktakes: StocktakeRecord[] = this.seed.stocktakes;
+  readonly expiredBatchDispositions: ExpiredBatchDispositionRecord[] = [];
   readonly events: CabinetEventRecord[] = this.seed.events;
   readonly inventory: InventoryMovement[] = this.seed.inventory;
   readonly paymentOrders: PaymentOrderRecord[] = [];
@@ -168,17 +176,22 @@ export class InMemoryStoreService {
 
     if (persisted) {
       this.hydrate(persisted);
+      // 短期认证状态只应存在于当前进程内；升级后顺手清除旧版本可能落盘的明文 token。
+      shouldPersist =
+        persisted.verificationCodes.length > 0 ||
+        persisted.sessions.length > 0 ||
+        persisted.draftSessions.length > 0;
     } else {
-      this.persist();
+      shouldPersist = true;
     }
 
     shouldPersist = this.normalizeRegionsState() || shouldPersist;
     shouldPersist = this.ensureBootstrapAdmin() || shouldPersist;
 
     const allowTestDeviceBootstrap =
-      process.env.NODE_ENV !== "production" &&
+      !isProductionRuntime() &&
       ["1", "true", "yes", "on"].includes(
-        (process.env.ENABLE_TEST_DEVICE_BOOTSTRAP ?? "true").trim().toLowerCase()
+        (process.env.ENABLE_TEST_DEVICE_BOOTSTRAP ?? "").trim().toLowerCase()
       );
 
     if (allowTestDeviceBootstrap && !persisted?.flags?.skipCompetitionTestDevice) {
@@ -187,9 +200,18 @@ export class InMemoryStoreService {
     this.syncDeviceStocksFromBatches();
     this.refreshAlertPresentation();
 
-    if (shouldPersist) {
-      this.persist();
+    // Nest 构造依赖图时保持只读；由 main 在取得进程级金融租约后统一落盘。
+    this.bootstrapPersistencePending = shouldPersist;
+  }
+
+  flushBootstrapPersistence() {
+    if (!this.bootstrapPersistencePending) {
+      return false;
     }
+
+    this.persist();
+    this.bootstrapPersistencePending = false;
+    return true;
   }
 
   createId(prefix: string) {
@@ -233,63 +255,124 @@ export class InMemoryStoreService {
     return `${this.normalizePrefix(prefix)}-${this.createCompactSuffix(4)}`;
   }
 
-  issueVerificationCode(phone: string) {
+  issueVerificationCode(phone: string, purpose: VerificationPurpose = "general") {
     const code = randomInt(100_000, 1_000_000).toString();
     const now = Date.now();
     const expiresAt = new Date(now + 5 * 60_000).toISOString();
     const requestedAt = new Date(now).toISOString();
     const resendAvailableAt = new Date(now + 60_000).toISOString();
-    this.verificationCodes.set(phone, {
+    this.verificationCodes.set(this.getVerificationCodeKey(phone, purpose), {
       code,
+      purpose,
       expiresAt,
       requestedAt,
-      resendAvailableAt
+      resendAvailableAt,
+      failedAttempts: 0
     });
     return code;
   }
 
-  rememberVerificationRequest(phone: string) {
+  rememberVerificationRequest(phone: string, purpose: VerificationPurpose = "general") {
     const now = Date.now();
-    const existing = this.verificationCodes.get(phone);
+    const key = this.getVerificationCodeKey(phone, purpose);
 
-    this.verificationCodes.set(phone, {
-      code: existing?.code ?? "",
-      expiresAt: existing?.expiresAt ?? new Date(now + 5 * 60_000).toISOString(),
+    this.verificationCodes.set(key, {
+      code: "",
+      purpose,
+      expiresAt: new Date(now + 5 * 60_000).toISOString(),
       requestedAt: new Date(now).toISOString(),
-      resendAvailableAt: new Date(now + 60_000).toISOString()
+      resendAvailableAt: new Date(now + 60_000).toISOString(),
+      failedAttempts: 0
     });
   }
 
-  verifyCode(phone: string, code: string) {
-    const record = this.verificationCodes.get(phone);
+  getVerificationRecord(phone: string, purpose: VerificationPurpose = "general") {
+    return this.verificationCodes.get(this.getVerificationCodeKey(phone, purpose));
+  }
 
-    if (!record) {
+  verifyCode(phone: string, code: string, purpose: VerificationPurpose = "general") {
+    const record = this.getVerificationRecord(phone, purpose);
+
+    if (!record || !this.canAttemptVerification(phone, purpose)) {
       return false;
     }
 
-    return record.code === code && new Date(record.expiresAt).getTime() > Date.now();
+    if (record.code !== code) {
+      this.recordVerificationFailure(phone, purpose);
+      return false;
+    }
+
+    return this.consumeVerificationRequest(phone, purpose);
+  }
+
+  canAttemptVerification(phone: string, purpose: VerificationPurpose = "general") {
+    const record = this.getVerificationRecord(phone, purpose);
+
+    return Boolean(
+      record &&
+      !record.consumedAt &&
+      this.isFutureExpiration(record.expiresAt) &&
+      (record.failedAttempts ?? 0) < MAX_VERIFICATION_FAILURES
+    );
+  }
+
+  recordVerificationFailure(phone: string, purpose: VerificationPurpose = "general") {
+    const record = this.getVerificationRecord(phone, purpose);
+
+    if (!record || record.consumedAt || !this.isFutureExpiration(record.expiresAt)) {
+      return false;
+    }
+
+    record.failedAttempts = Math.min(
+      MAX_VERIFICATION_FAILURES,
+      (record.failedAttempts ?? 0) + 1
+    );
+    return true;
+  }
+
+  consumeVerificationRequest(phone: string, purpose: VerificationPurpose = "general") {
+    const record = this.getVerificationRecord(phone, purpose);
+
+    if (!record || !this.canAttemptVerification(phone, purpose)) {
+      return false;
+    }
+
+    record.code = "";
+    record.consumedAt = new Date().toISOString();
+    return true;
   }
 
   createSession(user: UserRecord) {
-    const token = this.createId("session");
+    const token = this.createSecureToken("session");
+    const now = Date.now();
+    const mobileAdminCredential =
+      user.role === "admin" ? this.findAdminCredentialByUserId(user.id) : undefined;
+    const mobileAdminTenantCredential =
+      user.role === "admin" ? this.findBackofficeCredentialByUserId(user.id, "admin") : undefined;
     this.sessions.set(token, {
       token,
       userId: user.id,
       role: user.role,
-      createdAt: new Date().toISOString()
+      tenantId: mobileAdminTenantCredential?.tenantId,
+      mobileAdminCredentialUpdatedAt: mobileAdminCredential?.passwordUpdatedAt,
+      mobileAdminTenantCredentialUpdatedAt: mobileAdminTenantCredential?.passwordUpdatedAt,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + SESSION_TTL_MS).toISOString()
     });
     return token;
   }
 
   createBackofficeSession(user: UserRecord, backofficeRole: BackofficeRole, tenantId?: string) {
-    const token = this.createId("session");
+    const token = this.createSecureToken("session");
+    const now = Date.now();
     this.sessions.set(token, {
       token,
       userId: user.id,
       role: user.role,
       backofficeRole,
       tenantId,
-      createdAt: new Date().toISOString()
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + SESSION_TTL_MS).toISOString()
     });
     return token;
   }
@@ -312,14 +395,16 @@ export class InMemoryStoreService {
     linkedUserId?: string;
     applicationId?: string;
   }) {
-    const token = this.createId("draft");
+    const token = this.createSecureToken("draft");
+    const now = Date.now();
     this.draftSessions.set(token, {
       token,
       phone: payload.phone,
       requestedRole: payload.requestedRole,
       linkedUserId: payload.linkedUserId,
       applicationId: payload.applicationId,
-      createdAt: new Date().toISOString()
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + DRAFT_SESSION_TTL_MS).toISOString()
     });
     return token;
   }
@@ -329,7 +414,14 @@ export class InMemoryStoreService {
       return undefined;
     }
 
-    return this.sessions.get(token);
+    const session = this.sessions.get(token);
+
+    if (!session || !this.isFutureExpiration(session.expiresAt)) {
+      this.sessions.delete(token);
+      return undefined;
+    }
+
+    return session;
   }
 
   getSessionUser(token?: string) {
@@ -339,7 +431,79 @@ export class InMemoryStoreService {
       return undefined;
     }
 
-    return this.users.find((entry) => entry.id === session.userId);
+    const user = this.users.find((entry) => entry.id === session.userId);
+
+    if (!session.backofficeRole && session.role === "admin") {
+      const mobileAdminCredential = this.findAdminCredentialByUserId(session.userId);
+      const mobileAdminTenantCredential = this.findBackofficeCredentialByUserId(
+        session.userId,
+        "admin"
+      );
+      const mobileAdminBindingIsValid = Boolean(
+        mobileAdminCredential &&
+          mobileAdminTenantCredential &&
+          session.tenantId === DEFAULT_TENANT_ID &&
+          mobileAdminTenantCredential.tenantId === session.tenantId &&
+          session.mobileAdminCredentialUpdatedAt === mobileAdminCredential.passwordUpdatedAt &&
+          session.mobileAdminTenantCredentialUpdatedAt ===
+            mobileAdminTenantCredential.passwordUpdatedAt
+      );
+
+      if (!mobileAdminBindingIsValid) {
+        this.sessions.delete(session.token);
+        return undefined;
+      }
+    }
+
+    // 当前业务数据仍是单实例模型。租户级后台会话只有绑定当前实例时才可进入业务域，
+    // 避免未来出现第二租户凭证后，在数据尚未完成租户分区前误读当前实例数据。
+    if (
+      session.backofficeRole &&
+      session.backofficeRole !== "super_admin" &&
+      session.tenantId !== DEFAULT_TENANT_ID
+    ) {
+      this.sessions.delete(session.token);
+      return undefined;
+    }
+
+    if (!user || user.status !== "active" || user.role !== session.role) {
+      this.sessions.delete(session.token);
+      return undefined;
+    }
+
+    return user;
+  }
+
+  revokeSession(token?: string) {
+    if (!token) {
+      return false;
+    }
+
+    return this.sessions.delete(token);
+  }
+
+  revokeSessionsForUser(userId: string, exceptToken?: string) {
+    let revokedCount = 0;
+
+    for (const [token, session] of this.sessions.entries()) {
+      if (session.userId !== userId || token === exceptToken) {
+        continue;
+      }
+
+      this.sessions.delete(token);
+      revokedCount += 1;
+    }
+
+    for (const [token, draft] of this.draftSessions.entries()) {
+      if (draft.linkedUserId !== userId) {
+        continue;
+      }
+
+      this.draftSessions.delete(token);
+      revokedCount += 1;
+    }
+
+    return revokedCount;
   }
 
   getBackofficeSessionUser(token?: string) {
@@ -349,9 +513,19 @@ export class InMemoryStoreService {
       return undefined;
     }
 
-    const user = this.users.find((entry) => entry.id === session.userId);
+    const user = this.getSessionUser(token);
+    const credential = this.findBackofficeCredentialByUserId(
+      session.userId,
+      session.backofficeRole
+    );
 
-    if (!user) {
+    if (
+      !user ||
+      !credential ||
+      !this.isUserValidForBackofficeRole(user, session.backofficeRole) ||
+      credential.tenantId !== session.tenantId
+    ) {
+      this.sessions.delete(session.token);
       return undefined;
     }
 
@@ -366,7 +540,24 @@ export class InMemoryStoreService {
       return undefined;
     }
 
-    return this.draftSessions.get(token);
+    const draft = this.draftSessions.get(token);
+
+    const linkedUser = draft?.linkedUserId
+      ? this.users.find((entry) => entry.id === draft.linkedUserId)
+      : undefined;
+    const linkedUserInvalid = Boolean(
+      draft?.linkedUserId &&
+      (!linkedUser ||
+        linkedUser.status !== "active" ||
+        (draft.requestedRole !== undefined && draft.requestedRole !== linkedUser.role))
+    );
+
+    if (!draft || !this.isFutureExpiration(draft.expiresAt) || linkedUserInvalid) {
+      this.draftSessions.delete(token);
+      return undefined;
+    }
+
+    return draft;
   }
 
   findAdminCredentialByUsername(username: string) {
@@ -529,7 +720,14 @@ export class InMemoryStoreService {
   private ensureCompetitionTestDevice() {
     const competitionDeviceCode = "91120149";
 
-    if (this.devices.some((entry) => entry.deviceCode === competitionDeviceCode)) {
+    const existingCompetitionDevice = this.devices.find(
+      (entry) => entry.deviceCode === competitionDeviceCode
+    );
+
+    if (existingCompetitionDevice) {
+      if (existingCompetitionDevice.name === "测试平台柜机 91120149") {
+        existingCompetitionDevice.isMock = true;
+      }
       if (!this.deviceRuntime.has(competitionDeviceCode)) {
         this.deviceRuntime.set(competitionDeviceCode, {
           deviceCode: competitionDeviceCode,
@@ -549,6 +747,7 @@ export class InMemoryStoreService {
 
     this.devices.unshift({
       deviceCode: competitionDeviceCode,
+      isMock: true,
       name: "测试平台柜机 91120149",
       location: "比赛测试平台指定柜机",
       address: "测试平台设备编号 91120149",
@@ -603,6 +802,23 @@ export class InMemoryStoreService {
     const timePart = Date.now().toString(36);
     const randomPart = Math.random().toString(36).slice(2, 2 + randomLength);
     return `${timePart}${randomPart}`;
+  }
+
+  private createSecureToken(prefix: "session" | "draft") {
+    return `${prefix}_${randomBytes(32).toString("base64url")}`;
+  }
+
+  private getVerificationCodeKey(phone: string, purpose: VerificationPurpose) {
+    return `${purpose}:${phone}`;
+  }
+
+  private isFutureExpiration(expiresAt?: string) {
+    if (!expiresAt) {
+      return false;
+    }
+
+    const expirationTime = new Date(expiresAt).getTime();
+    return Number.isFinite(expirationTime) && expirationTime > Date.now();
   }
 
   getDeviceRuntime(deviceCode: string) {
@@ -694,6 +910,37 @@ export class InMemoryStoreService {
     );
   }
 
+  isGoodsBatchAvailable(batch: GoodsBatchRecord, now = Date.now()) {
+    if (batch.remainingQuantity <= 0) {
+      return false;
+    }
+
+    if (!batch.expiresAt) {
+      return true;
+    }
+
+    const expirationTime = Date.parse(batch.expiresAt);
+    return Number.isFinite(expirationTime) && expirationTime > now;
+  }
+
+  getAvailableGoodsBatches(deviceCode?: string, goodsId?: string, now = Date.now()) {
+    return this.getGoodsBatches(deviceCode, goodsId).filter((entry) =>
+      this.isGoodsBatchAvailable(entry, now)
+    );
+  }
+
+  getAvailableStock(deviceCode: string, goodsId: string, now = Date.now()) {
+    const availableStock = this.getAvailableGoodsBatches(deviceCode, goodsId, now).reduce(
+      (sum, entry) => sum + entry.remainingQuantity,
+      0
+    );
+    const negativeBalance = this.getGoodsBatches(deviceCode, goodsId)
+      .filter((entry) => this.isNegativeStockBalanceBatch(entry))
+      .reduce((sum, entry) => sum + entry.remainingQuantity, 0);
+
+    return Math.max(0, availableStock + negativeBalance);
+  }
+
   getGoodsCategoryRecord(categoryId?: string) {
     if (!categoryId) {
       return undefined;
@@ -706,7 +953,15 @@ export class InMemoryStoreService {
     return this.getGoodsBatches(deviceCode, goodsId)
       .filter((entry) => entry.remainingQuantity > 0 && entry.expiresAt)
       .map((entry) => entry.expiresAt as string)
-      .sort((left, right) => left.localeCompare(right))
+      .sort((left, right) => this.compareExpiryValues(left, right))
+      .at(0);
+  }
+
+  getNearestAvailableExpiryAt(deviceCode: string, goodsId: string, now = Date.now()) {
+    return this.getAvailableGoodsBatches(deviceCode, goodsId, now)
+      .filter((entry) => entry.expiresAt)
+      .map((entry) => entry.expiresAt as string)
+      .sort((left, right) => this.compareExpiryValues(left, right))
       .at(0);
   }
 
@@ -915,10 +1170,34 @@ export class InMemoryStoreService {
     deviceCode: string,
     goodsId: string,
     quantity: number,
-    requestedBatches?: Array<{ batchId: string; quantity: number }>
+    requestedBatches?: Array<{ batchId: string; quantity: number }>,
+    options?: { allowExpired?: boolean; now?: number }
   ) {
     let remaining = Math.max(0, quantity);
     const consumed: BatchConsumptionEntry[] = [];
+    const now = options?.now ?? Date.now();
+    const allowExpired = options?.allowExpired === true;
+
+    if (!allowExpired) {
+      for (const request of requestedBatches ?? []) {
+        const requestedQuantity = Math.max(0, Math.floor(Number(request.quantity)));
+
+        if (!request.batchId || requestedQuantity <= 0) {
+          continue;
+        }
+
+        const requestedBatch = this.goodsBatches.find(
+          (entry) =>
+            entry.batchId === request.batchId &&
+            entry.deviceCode === deviceCode &&
+            entry.goodsId === goodsId
+        );
+
+        if (requestedBatch?.expiresAt && !this.isGoodsBatchAvailable(requestedBatch, now)) {
+          throw new BadRequestException("指定批次已到期，不能用于领取或正常调拨。");
+        }
+      }
+    }
 
     for (const request of requestedBatches ?? []) {
       if (remaining <= 0) {
@@ -936,7 +1215,8 @@ export class InMemoryStoreService {
           entry.batchId === request.batchId &&
           entry.deviceCode === deviceCode &&
           entry.goodsId === goodsId &&
-          entry.remainingQuantity > 0
+          entry.remainingQuantity > 0 &&
+          (allowExpired || this.isGoodsBatchAvailable(entry, now))
       );
 
       if (!batch) {
@@ -955,13 +1235,16 @@ export class InMemoryStoreService {
     }
 
     const ordered = this.getGoodsBatches(deviceCode, goodsId)
-      .filter((entry) => entry.remainingQuantity > 0)
+      .filter(
+        (entry) =>
+          entry.remainingQuantity > 0 &&
+          (allowExpired || this.isGoodsBatchAvailable(entry, now))
+      )
       .sort((left, right) => {
-        const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
-        const rightExpiry = right.expiresAt ?? "9999-12-31T23:59:59.999Z";
+        const expiryOrder = this.compareExpiryValues(left.expiresAt, right.expiresAt);
 
-        if (leftExpiry !== rightExpiry) {
-          return leftExpiry.localeCompare(rightExpiry);
+        if (expiryOrder !== 0) {
+          return expiryOrder;
         }
 
         return left.createdAt.localeCompare(right.createdAt);
@@ -1076,6 +1359,15 @@ export class InMemoryStoreService {
 
   private isNegativeStockBalanceBatch(batch: GoodsBatchRecord) {
     return batch.sourceType === "system" && batch.quantity === 0 && batch.note === NEGATIVE_STOCK_BALANCE_NOTE;
+  }
+
+  private compareExpiryValues(left?: string, right?: string) {
+    const leftTime = left ? Date.parse(left) : Number.POSITIVE_INFINITY;
+    const rightTime = right ? Date.parse(right) : Number.POSITIVE_INFINITY;
+    const normalizedLeft = Number.isFinite(leftTime) ? leftTime : Number.POSITIVE_INFINITY;
+    const normalizedRight = Number.isFinite(rightTime) ? rightTime : Number.POSITIVE_INFINITY;
+
+    return normalizedLeft - normalizedRight || (left ?? "").localeCompare(right ?? "");
   }
 
   private recordNegativeStockBalance(deviceCode: string, goodsId: string, quantity: number) {
@@ -1418,6 +1710,7 @@ export class InMemoryStoreService {
       batchConsumptionTraces: structuredClone(this.batchConsumptionTraces),
       inventoryTransfers: structuredClone(this.inventoryTransfers),
       stocktakes: structuredClone(this.stocktakes),
+      expiredBatchDispositions: structuredClone(this.expiredBatchDispositions),
       events: structuredClone(this.events),
       inventory: structuredClone(this.inventory),
       paymentOrders: structuredClone(this.paymentOrders),
@@ -1426,9 +1719,10 @@ export class InMemoryStoreService {
       reservationSettings: structuredClone(this.reservationSettings),
       alerts: structuredClone(this.alerts),
       logs: structuredClone(this.logs),
-      verificationCodes: Array.from(this.verificationCodes.entries()).map(([key, value]) => [key, structuredClone(value)]),
-      sessions: Array.from(this.sessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
-      draftSessions: Array.from(this.draftSessions.entries()).map(([key, value]) => [key, structuredClone(value)]),
+      // 验证码、Bearer 会话和资料草稿都属于短期认证状态，不进入业务快照或备份。
+      verificationCodes: [],
+      sessions: [],
+      draftSessions: [],
       adminCredentials: structuredClone(this.adminCredentials),
       backofficeCredentials: structuredClone(this.backofficeCredentials),
       callbackLog: structuredClone(this.callbackLog),
@@ -1464,6 +1758,7 @@ export class InMemoryStoreService {
     this.replaceArray(this.batchConsumptionTraces, state.batchConsumptionTraces);
     this.replaceArray(this.inventoryTransfers, state.inventoryTransfers);
     this.replaceArray(this.stocktakes, state.stocktakes);
+    this.replaceArray(this.expiredBatchDispositions, state.expiredBatchDispositions);
     this.replaceArray(this.events, state.events);
     this.replaceArray(this.inventory, state.inventory);
     this.replaceArray(this.paymentOrders, state.paymentOrders);
@@ -1477,19 +1772,9 @@ export class InMemoryStoreService {
     );
 
     this.verificationCodes.clear();
-    for (const [key, value] of state.verificationCodes) {
-      this.verificationCodes.set(key, value);
-    }
-
+    // 历史快照可能含有明文 token；启动时主动丢弃，避免恢复旧登录态。
     this.sessions.clear();
-    for (const [key, value] of state.sessions) {
-      this.sessions.set(key, value);
-    }
-
     this.draftSessions.clear();
-    for (const [key, value] of state.draftSessions) {
-      this.draftSessions.set(key, value);
-    }
 
     this.replaceArray(this.adminCredentials, state.adminCredentials);
     this.replaceArray(this.backofficeCredentials, state.backofficeCredentials);

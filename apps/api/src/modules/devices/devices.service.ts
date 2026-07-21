@@ -1,29 +1,47 @@
-import { BadGatewayException, BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadGatewayException,
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional
+} from "@nestjs/common";
 
 import type {
+  CabinetEventRecord,
   DeviceGoods,
   DeviceMonitoringDetail,
   DeviceRecord,
   DeviceRuntimeState,
   DeviceStatus,
   GoodsCategory,
-  SmartVmRouterStatusResult
+  PaymentRefundRecoverySummary,
+  SmartVmRouterStatusResult,
+  UserRole
 } from "@vm/shared-types";
 
+import { isProductionRuntime } from "../../common/config/runtime-environment";
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import { DeviceOperationCoordinator } from "./device-operation-coordinator";
 import { SmartVmGateway } from "./smartvm.gateway";
 
 @Injectable()
 export class DevicesService {
+  private readonly deviceOperations: DeviceOperationCoordinator;
+
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
     @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
-    @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway
-  ) {}
+    @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway,
+    @Optional() @Inject(DeviceOperationCoordinator) deviceOperations?: DeviceOperationCoordinator
+  ) {
+    this.deviceOperations = deviceOperations ?? new DeviceOperationCoordinator(store);
+  }
 
-  list(origin?: { longitude?: number; latitude?: number }) {
+  list(origin?: { longitude?: number; latitude?: number }, viewerRole?: UserRole) {
     this.store.syncDeviceStocksFromBatches();
     const devices = this.store.devices.map((device) => {
       const distanceMeters =
@@ -35,7 +53,7 @@ export class DevicesService {
           : undefined;
 
       return {
-        ...this.decorateDevice(device),
+        ...this.decorateDevice(device, viewerRole),
         distanceMeters,
         runtime: this.store.getDeviceRuntime(device.deviceCode)
       };
@@ -72,6 +90,15 @@ export class DevicesService {
     }
 
     return device;
+  }
+
+  getViewByCode(deviceCode: string, viewerRole?: UserRole) {
+    const device = this.getByCode(deviceCode);
+
+    return {
+      ...this.decorateDevice(device, viewerRole),
+      runtime: this.store.getDeviceRuntime(device.deviceCode)
+    };
   }
 
   upsertDevice(
@@ -176,9 +203,9 @@ export class DevicesService {
     this.store.devices.unshift(created);
     this.store.updateDeviceRuntime(deviceCode, {
       deviceCode,
-      doorState: "closed",
-      lastRefreshAt: now,
-      openedAfterLastCommand: true
+      // 录入后台只证明设备档案存在，不能替代平台返回的可信物理关门状态。
+      doorState: "unknown",
+      openedAfterLastCommand: false
     });
 
     this.store.logOperation({
@@ -242,7 +269,8 @@ export class DevicesService {
     const recentEvents = this.store.events
       .filter((entry) => entry.deviceCode === deviceCode)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .slice(0, 12);
+      .slice(0, 12)
+      .map((event) => this.attachPaymentRecoveryState(event));
     const recentLogs = this.store.logs
       .filter(
         (entry) =>
@@ -355,14 +383,79 @@ export class DevicesService {
     };
   }
 
-  private decorateDevice(device: DeviceRecord): DeviceRecord {
+  private attachPaymentRecoveryState(event: CabinetEventRecord): CabinetEventRecord {
+    return {
+      ...event,
+      paymentRecovery: {
+        pendingRefund: this.findPendingRefundRecovery(event, event.orderNo)
+      },
+      adjustments: event.adjustments?.map((adjustment) => ({
+        ...adjustment,
+        paymentRecovery: {
+          pendingRefund: this.findPendingRefundRecovery(event, adjustment.orderNo)
+        }
+      }))
+    };
+  }
+
+  private findPendingRefundRecovery(
+    event: CabinetEventRecord,
+    businessOrderNo: string
+  ): PaymentRefundRecoverySummary | undefined {
+    const paymentOrderIds = new Set(
+      this.store.paymentOrders
+        .filter(
+          (order) =>
+            order.eventId === event.eventId &&
+            (order.adjustmentOrderNo ?? order.orderNo) === businessOrderNo
+        )
+        .map((order) => order.id)
+    );
+    const refund = this.store.paymentRefunds
+      .filter(
+        (entry) =>
+          entry.status === "pending" &&
+          (
+            entry.businessOrderNo === businessOrderNo ||
+            paymentOrderIds.has(entry.paymentOrderId)
+          )
+      )
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+
+    if (!refund) {
+      return undefined;
+    }
+
+    return {
+      id: refund.id,
+      paymentOrderId: refund.paymentOrderId,
+      refundNo: refund.refundNo,
+      provider: refund.provider,
+      status: refund.status,
+      amount: refund.amount,
+      sourceRequestId: refund.sourceRequestId,
+      providerOutcome: refund.providerOutcome,
+      businessApplyState: refund.businessApplyState,
+      failReason: refund.failReason,
+      createdAt: refund.createdAt,
+      updatedAt: refund.updatedAt
+    };
+  }
+
+  private decorateDevice(device: DeviceRecord, viewerRole?: UserRole): DeviceRecord {
+    const readiness = this.deviceOperations.getReadiness(device.deviceCode);
+
     return {
       ...device,
+      readiness,
       doors: device.doors.map((door) => ({
         ...door,
         goods: door.goods.map((goods) => {
           const setting = this.store.getDeviceGoodsSetting(device.deviceCode, goods.goodsId);
-          const nearestExpiryAt = this.store.getNearestExpiryAt(device.deviceCode, goods.goodsId);
+          const nearestExpiryAt =
+            viewerRole === "special"
+              ? this.store.getNearestAvailableExpiryAt(device.deviceCode, goods.goodsId)
+              : this.store.getNearestExpiryAt(device.deviceCode, goods.goodsId);
           const expiringSoon =
             nearestExpiryAt !== undefined &&
             new Date(nearestExpiryAt).getTime() - Date.now() < 24 * 60 * 60_000 &&
@@ -372,7 +465,7 @@ export class DevicesService {
 
           return {
             ...goods,
-            stock: this.store.getCurrentStock(device.deviceCode, goods.goodsId),
+            stock: this.getStockForViewer(device.deviceCode, goods.goodsId, viewerRole),
             expiresAt: nearestExpiryAt,
             thresholdEnabled,
             lowStockThreshold: thresholdEnabled ? setting?.lowStockThreshold : undefined,
@@ -383,7 +476,7 @@ export class DevicesService {
     };
   }
 
-  async getGoods(deviceCode: string, doorNum?: string) {
+  async getGoods(deviceCode: string, doorNum?: string, viewerRole?: UserRole) {
     const localDevice = this.getByCode(deviceCode);
 
     try {
@@ -429,11 +522,16 @@ export class DevicesService {
           const localMatch = localDevice.doors
             .flatMap((door) => door.goods)
             .find((goods) => goods.goodsId === remoteItem.goodsId);
+          const availableExpiryAt =
+            viewerRole === "special"
+              ? this.store.getNearestAvailableExpiryAt(deviceCode, remoteItem.goodsId)
+              : remoteItem.expiresAt;
 
           return {
             ...remoteItem,
             category: localMatch?.category ?? "daily",
-            stock: this.store.getCurrentStock(deviceCode, remoteItem.goodsId)
+            stock: this.getStockForViewer(deviceCode, remoteItem.goodsId, viewerRole),
+            expiresAt: availableExpiryAt
           };
         });
       }
@@ -446,9 +544,19 @@ export class DevicesService {
       .flatMap((door) =>
         door.goods.map((goods) => ({
           ...goods,
-          stock: this.store.getCurrentStock(deviceCode, goods.goodsId)
+          stock: this.getStockForViewer(deviceCode, goods.goodsId, viewerRole),
+          expiresAt:
+            viewerRole === "special"
+              ? this.store.getNearestAvailableExpiryAt(deviceCode, goods.goodsId)
+              : goods.expiresAt
         }))
       );
+  }
+
+  private getStockForViewer(deviceCode: string, goodsId: string, viewerRole?: UserRole) {
+    return viewerRole === "special"
+      ? this.store.getAvailableStock(deviceCode, goodsId)
+      : this.store.getCurrentStock(deviceCode, goodsId);
   }
 
   async refreshDevice(deviceCode: string, actorUserId?: string) {
@@ -498,6 +606,15 @@ export class DevicesService {
       runtimePatch.doorState = remoteDoorState;
     }
 
+    const recoveredPhysicalDoorEventCount =
+      remoteStatus && remoteDoorState === "closed"
+        ? this.reconcilePendingDoorEventsAfterTrustedClose(deviceCode, now)
+        : 0;
+
+    if (remoteStatus && remoteDoorState === "closed") {
+      runtimePatch.lastClosedAt = now;
+    }
+
     this.store.updateDeviceRuntime(deviceCode, runtimePatch);
     this.store.logOperation({
       category: "device",
@@ -511,15 +628,53 @@ export class DevicesService {
       },
       description: `管理员刷新了 ${device.name} 的设备状态。`,
       detail: remoteStatus
-        ? `设备 ${device.deviceCode} 已从平台读取状态：${remoteDeviceStatus ? `设备${remoteDeviceStatus}` : "设备状态未返回"}，${remoteDoorState ? `门${remoteDoorState}` : "门状态未返回"}。`
+        ? `设备 ${device.deviceCode} 已从平台读取状态：${remoteDeviceStatus ? `设备${remoteDeviceStatus}` : "设备状态未返回"}，${remoteDoorState ? `门${remoteDoorState}` : "门状态未返回"}；恢复未决门事件 ${recoveredPhysicalDoorEventCount} 笔。`
         : `设备 ${device.deviceCode} 已刷新本地状态；当前未配置 SmartVM 凭据，未读取平台状态。`,
       metadata: {
         deviceCode: device.deviceCode,
-        remoteStatus
+        remoteStatus,
+        recoveredPhysicalDoorEventCount,
+        doorRecoveryEvidence: remoteStatus
+          ? remoteDoorState === "closed"
+            ? "trusted-remote-closed"
+            : remoteDoorState
+              ? `trusted-remote-${remoteDoorState}`
+              : "remote-door-state-missing"
+          : "smartvm-not-configured"
       }
     });
 
     return this.monitoringDetail(deviceCode);
+  }
+
+  private reconcilePendingDoorEventsAfterTrustedClose(deviceCode: string, observedAt: string) {
+    let recoveredCount = 0;
+
+    for (const event of this.store.events) {
+      if (
+        event.deviceCode !== deviceCode ||
+        (event.physicalDoorState !== "unknown" && event.physicalDoorState !== "open")
+      ) {
+        continue;
+      }
+
+      event.physicalDoorState = "closed";
+
+      if (
+        event.status === "created" ||
+        event.status === "opening" ||
+        event.status === "opened" ||
+        event.status === "stuck_open"
+      ) {
+        event.status = "closed";
+      }
+
+      // settled / refunded 等业务终态只协调物理门状态，绝不因设备刷新而回退账务状态。
+      event.updatedAt = observedAt;
+      recoveredCount += 1;
+    }
+
+    return recoveredCount;
   }
 
   private normalizeSmartVmState(value: unknown) {
@@ -558,30 +713,153 @@ export class DevicesService {
     return undefined;
   }
 
-  async remoteOpen(deviceCode: string, payload?: { doorNum?: string }, actorUserId?: string) {
-    const device = this.getByCode(deviceCode);
-    const admin =
-      this.store.users.find((entry) => entry.id === actorUserId) ??
-      this.store.users.find((entry) => entry.role === "admin");
-    const eventId = this.store.createId("event");
-    const createdAt = new Date().toISOString();
-    let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
+  async remoteOpen(
+    deviceCode: string,
+    payload: { doorNum?: string; reason: string },
+    actorUserId?: string
+  ) {
+    const reason = payload?.reason?.trim();
+    const nonWhitespaceReasonLength = reason ? [...reason.replace(/\s/gu, "")].length : 0;
 
-    try {
-      openResult = await this.smartVmGateway.openDoor({
-        userId: admin?.id ?? "admin-virtual",
+    if (!reason || nonWhitespaceReasonLength < 4 || reason.length > 200) {
+      throw new BadRequestException("远程开门原因需包含至少 4 个非空字符，且总长度不能超过 200 个字符。");
+    }
+
+    const device = this.getByCode(deviceCode);
+
+    if (device.status === "offline") {
+      throw new BadRequestException("柜机当前离线，不能远程开门。");
+    }
+
+    if (this.store.getDeviceRuntime(deviceCode).doorState === "open") {
+      throw new BadRequestException("柜门当前已开启，不能重复远程开门。");
+    }
+
+    const requestedDoorNum: unknown = payload?.doorNum ?? "1";
+
+    if (typeof requestedDoorNum !== "string") {
+      throw new BadRequestException("柜门编号必须为有效的正整数。");
+    }
+
+    const doorNum = requestedDoorNum.trim();
+    const numericDoorNum = Number(doorNum);
+
+    if (!/^[1-9]\d*$/u.test(doorNum) || !Number.isSafeInteger(numericDoorNum)) {
+      throw new BadRequestException("柜门编号必须为有效的正整数。");
+    }
+
+    if (!device.doors.some((door) => door.doorNum === doorNum)) {
+      throw new BadRequestException("该柜机不存在对应柜门。");
+    }
+
+    return this.deviceOperations.runExclusiveOpen({ deviceCode, doorNum }, async () => {
+      const admin =
+        this.store.users.find((entry) => entry.id === actorUserId) ??
+        this.store.users.find((entry) => entry.role === "admin");
+      const eventId = this.store.createId("event");
+      const createdAt = new Date().toISOString();
+      const commandEvent: CabinetEventRecord = {
         eventId,
+        orderNo: `pending-${eventId}`,
+        userId: admin?.id ?? "admin-virtual",
+        phone: admin?.phone ?? "13800000001",
+        role: "admin",
         deviceCode,
-        doorNum: payload?.doorNum ?? "1",
-        phone: admin?.phone ?? "13800000001"
+        doorNum,
+        status: "created",
+        createdAt,
+        updatedAt: createdAt,
+        amount: 0,
+        goods: []
+      };
+      this.store.events.unshift(commandEvent);
+      this.store.updateDeviceRuntime(deviceCode, {
+        lastCommandAt: createdAt,
+        openedAfterLastCommand: false
       });
-    } catch (error) {
-      const detail = this.smartVmGateway.extractErrorMessage(error);
-      const smartVmExchange = this.smartVmGateway.extractExchangeTrace(error);
+      // 先保存稳定 eventId 的命令意图，再向远端下发，进程重启后仍可识别在途命令。
+      this.store.persist();
+
+      let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
+
+      try {
+        openResult = await this.smartVmGateway.openDoor({
+          userId: admin?.id ?? "admin-virtual",
+          eventId,
+          deviceCode,
+          doorNum,
+          phone: admin?.phone ?? "13800000001"
+        });
+      } catch (error) {
+        const detail = this.smartVmGateway.extractErrorMessage(error);
+        const smartVmExchange = this.smartVmGateway.extractExchangeTrace(error);
+        const definitelyRejected =
+          this.smartVmGateway.isDefiniteOpenDoorRejection?.(error) ?? false;
+
+        if (commandEvent.status === "created" || commandEvent.status === "opening") {
+          commandEvent.status = definitelyRejected ? "failed" : commandEvent.status;
+          commandEvent.updatedAt = new Date().toISOString();
+        }
+
+        const commandRejected = definitelyRejected || commandEvent.status === "failed";
+        const outcomeUnknown =
+          commandEvent.status === "created" || commandEvent.status === "opening";
+
+        this.store.logOperation({
+          category: "admin",
+          type: "remote-open-device",
+          status: commandRejected ? "failed" : outcomeUnknown ? "pending" : "success",
+          actor: this.getAdminActor(actorUserId),
+          primarySubject: {
+            type: "device",
+            id: device.deviceCode,
+            label: device.name
+          },
+          secondarySubject: {
+            type: "event",
+            id: eventId,
+            label: eventId
+          },
+          description: commandRejected
+            ? `管理员向 ${device.name} 下发的远程开门指令被平台拒绝。`
+            : outcomeUnknown
+              ? `管理员向 ${device.name} 下发的远程开门指令结果待确认。`
+              : `管理员向 ${device.name} 下发的远程开门指令已由设备回调确认。`,
+          detail: commandRejected
+            ? `柜机平台明确拒绝：${detail}`
+            : outcomeUnknown
+              ? `柜机平台结果未知：${detail}；为避免重复开门，命令租约仍保留。`
+              : `柜机网关响应异常，但设备回调已确认事件状态为 ${commandEvent.status}。`,
+          relatedEventId: eventId,
+          metadata: {
+            deviceCode,
+            doorNum,
+            reason,
+            commandOutcome: commandRejected
+              ? "rejected"
+              : outcomeUnknown
+                ? "unknown"
+                : "callback_confirmed",
+            smartVmExchange,
+            undoState: "not_undoable"
+          }
+        });
+        this.store.persist();
+        throw new BadGatewayException(
+          commandRejected
+            ? `柜机平台开柜失败：${detail}`
+            : outcomeUnknown
+              ? `柜机平台响应异常，开门结果待确认，请勿重复操作：${detail}`
+              : `柜机平台响应异常，但设备回调已确认门状态为 ${commandEvent.status}。`
+        );
+      }
+
+      commandEvent.orderNo = openResult.orderNo;
+      commandEvent.updatedAt = new Date().toISOString();
       this.store.logOperation({
         category: "admin",
         type: "remote-open-device",
-        status: "failed",
+        status: "pending",
         actor: this.getAdminActor(actorUserId),
         primarySubject: {
           type: "device",
@@ -591,72 +869,28 @@ export class DevicesService {
         secondarySubject: {
           type: "event",
           id: eventId,
-          label: eventId
+          label: openResult.orderNo
         },
-        description: `管理员向 ${device.name} 下发的远程开门指令失败。`,
-        detail: `柜机平台返回：${detail}`,
+        description: `管理员向 ${device.name} 下发了远程开门指令。`,
+        detail: `设备 ${device.deviceCode} 已收到远程开门请求，等待门状态回调。`,
+        relatedEventId: eventId,
+        relatedOrderNo: openResult.orderNo,
         metadata: {
           deviceCode,
-          doorNum: payload?.doorNum ?? "1",
-          smartVmExchange,
-          undoState: "not_undoable"
+          doorNum,
+          reason,
+          smartVmExchange: openResult.smartVmExchange
         }
       });
-      throw new BadGatewayException(`柜机平台开柜失败：${detail}`);
-    }
+      this.store.persist();
 
-    this.store.events.unshift({
-      eventId,
-      orderNo: openResult.orderNo,
-      userId: admin?.id ?? "admin-virtual",
-      phone: admin?.phone ?? "13800000001",
-      role: "admin",
-      deviceCode,
-      doorNum: payload?.doorNum ?? "1",
-      status: "created",
-      createdAt,
-      updatedAt: createdAt,
-      amount: 0,
-      goods: []
-    });
-
-    this.store.updateDeviceRuntime(deviceCode, {
-      lastCommandAt: createdAt,
-      openedAfterLastCommand: false
-    });
-
-    this.store.logOperation({
-      category: "admin",
-      type: "remote-open-device",
-      status: "pending",
-      actor: this.getAdminActor(actorUserId),
-      primarySubject: {
-        type: "device",
-        id: device.deviceCode,
-        label: device.name
-      },
-      secondarySubject: {
-        type: "event",
-        id: eventId,
-        label: openResult.orderNo
-      },
-      description: `管理员向 ${device.name} 下发了远程开门指令。`,
-      detail: `设备 ${device.deviceCode} 已收到远程开门请求，等待门状态回调。`,
-      relatedEventId: eventId,
-      relatedOrderNo: openResult.orderNo,
-      metadata: {
+      return {
+        eventId,
+        orderNo: openResult.orderNo,
         deviceCode,
-        doorNum: payload?.doorNum ?? "1",
-        smartVmExchange: openResult.smartVmExchange
-      }
+        doorNum
+      };
     });
-
-    return {
-      eventId,
-      orderNo: openResult.orderNo,
-      deviceCode,
-      doorNum: payload?.doorNum ?? "1"
-    };
   }
 
   findGoods(deviceCode: string, goodsId: string) {
@@ -682,7 +916,8 @@ export class DevicesService {
     this.inventoryBatchChanges.consumeBatchesOnly({
       deviceCode,
       goodsId,
-      quantity: Math.abs(delta)
+      quantity: Math.abs(delta),
+      allowExpiredBatches: true
     });
   }
 
@@ -874,6 +1109,12 @@ export class DevicesService {
       expiresAt?: string;
     }>;
   }, actorUserId?: string) {
+    if (!this.isLocalMockDeviceApiEnabled()) {
+      throw new ForbiddenException(
+        "模拟柜机接口未启用，仅可在本机联调环境显式开启。"
+      );
+    }
+
     const now = new Date().toISOString();
     const doorNum = payload.doorNum ?? "1";
     const normalizedGoods: DeviceGoods[] = payload.goods.map((goods) => ({
@@ -892,6 +1133,10 @@ export class DevicesService {
     const existing = this.store.devices.find((entry) => entry.deviceCode === payload.deviceCode);
 
     if (existing) {
+      if (existing.isMock !== true) {
+        throw new ForbiddenException("不能用模拟柜机接口覆盖真实设备档案。");
+      }
+
       existing.name = payload.name;
       existing.location = payload.location;
       existing.address = payload.address;
@@ -940,6 +1185,13 @@ export class DevicesService {
         }
       }
       this.store.syncDeviceStocksFromBatches(existing.deviceCode);
+      this.store.updateDeviceRuntime(existing.deviceCode, {
+        deviceCode: existing.deviceCode,
+        doorState: "closed",
+        lastClosedAt: now,
+        lastRefreshAt: now,
+        openedAfterLastCommand: true
+      });
       this.store.logOperation({
         category: "device",
         type: "upsert-mock-device",
@@ -961,6 +1213,7 @@ export class DevicesService {
 
     const created: DeviceRecord = {
       deviceCode: payload.deviceCode,
+      isMock: true,
       name: payload.name,
       location: payload.location,
       address: payload.address,
@@ -1000,6 +1253,13 @@ export class DevicesService {
       }
     }
     this.store.syncDeviceStocksFromBatches(created.deviceCode);
+    this.store.updateDeviceRuntime(created.deviceCode, {
+      deviceCode: created.deviceCode,
+      doorState: "closed",
+      lastClosedAt: now,
+      lastRefreshAt: now,
+      openedAfterLastCommand: true
+    });
     this.store.logOperation({
       category: "device",
       type: "create-mock-device",
@@ -1017,6 +1277,23 @@ export class DevicesService {
       }
     });
     return created;
+  }
+
+  private isLocalMockDeviceApiEnabled() {
+    if (isProductionRuntime()) {
+      return false;
+    }
+
+    const explicitlyEnabled = ["1", "true", "yes", "on"].includes(
+      (process.env.ENABLE_LOCAL_MOCK_DEVICE_API ?? "").trim().toLowerCase()
+    );
+    const apiHost = (process.env.API_HOST ?? "127.0.0.1").trim().toLowerCase();
+    const isLoopbackHost =
+      apiHost === "localhost" ||
+      apiHost === "::1" ||
+      apiHost.startsWith("127.");
+
+    return explicitlyEnabled && isLoopbackHost;
   }
 
   private getAdminActor(actorUserId?: string) {

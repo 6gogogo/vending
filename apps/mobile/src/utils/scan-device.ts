@@ -32,9 +32,24 @@ export const parseScannedDeviceCode = (raw: string) => {
 };
 
 export const scanDeviceCode = async () => {
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: "现场扫码",
+      content: "为避免远程误开柜门，仅支持使用相机扫描柜机现场二维码，不支持从相册选择图片。",
+      confirmText: "开始扫码",
+      cancelText: "取消",
+      success: (result: { confirm: boolean }) => resolve(result.confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return "";
+  }
+
   const result = await new Promise<{ result?: string }>((resolve, reject) => {
     uni.scanCode({
-      onlyFromCamera: false,
+      onlyFromCamera: true,
       scanType: ["qrCode", "barCode"],
       success: resolve,
       fail: reject

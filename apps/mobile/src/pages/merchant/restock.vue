@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 
 import type { DeviceRecord, MerchantGoodsTemplate } from "@vm/shared-types";
@@ -13,7 +13,9 @@ import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
+import { formatBeijingDate } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
+import { syncNativeInputAccessibility } from "../../utils/native-input-accessibility";
 
 const sessionStore = useSessionStore();
 const templates = ref<MerchantGoodsTemplate[]>([]);
@@ -22,11 +24,35 @@ const selectedTemplateId = ref("");
 const selectedDeviceCode = ref("");
 const templateKeyword = ref("");
 const quantity = ref(0);
-const productionDate = ref(new Date().toISOString().slice(0, 10));
+const productionDate = ref(formatBeijingDate(new Date()));
 const batchNo = ref("");
 const note = ref("");
 const submitting = ref(false);
 const presetDeviceCode = ref("");
+const loading = ref(false);
+const loadError = ref("");
+
+const syncRestockInputAccessibility = async () => {
+  await nextTick();
+  syncNativeInputAccessibility("merchant-restock-quantity", {
+    labelId: "merchant-restock-quantity-label",
+    name: "quantity",
+    min: 1,
+    step: 1
+  });
+  syncNativeInputAccessibility("merchant-restock-batch", {
+    labelId: "merchant-restock-batch-label",
+    name: "batch-number"
+  });
+  syncNativeInputAccessibility("merchant-restock-note", {
+    labelId: "merchant-restock-note-label",
+    name: "restock-note"
+  });
+  syncNativeInputAccessibility("merchant-restock-search", {
+    labelId: "merchant-restock-search-label",
+    name: "template-search"
+  });
+};
 
 const selectedTemplate = computed(() =>
   templates.value.find((entry) => entry.id === selectedTemplateId.value)
@@ -99,6 +125,10 @@ const restockFlowSteps = computed(() => [
 ]);
 
 const load = async () => {
+  if (loading.value) {
+    return;
+  }
+
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
@@ -106,6 +136,8 @@ const load = async () => {
     return;
   }
 
+  loading.value = true;
+  loadError.value = "";
   try {
     const [templateResponse, deviceResponse] = await Promise.all([
       mobileApi.merchantTemplates(),
@@ -122,10 +154,13 @@ const load = async () => {
       "";
     quantity.value = selectedTemplate.value?.defaultQuantity ?? templates.value[0]?.defaultQuantity ?? 0;
   } catch (error) {
+    loadError.value = getErrorMessage(error);
     uni.showToast({
-      title: getErrorMessage(error),
+      title: loadError.value,
       icon: "none"
     });
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -139,6 +174,14 @@ const adjustQuantity = (delta: number) => {
 };
 
 const submit = async () => {
+  if (loadError.value) {
+    uni.showToast({
+      title: "请先重新加载柜机和商品数据",
+      icon: "none"
+    });
+    return;
+  }
+
   if (!selectedTemplateId.value || !selectedDeviceCode.value) {
     uni.showToast({
       title: "请选择常用商品和柜机",
@@ -181,7 +224,7 @@ const submit = async () => {
     });
 
     uni.reLaunch({
-      url: `/pages/common/result?status=success&title=${encodeURIComponent("补货登记成功")}&detail=${encodeURIComponent("补货批次已写入系统，可在货物去向页查看剩余量和保质期。")}`
+      url: `/pages/common/result?status=success&title=${encodeURIComponent("补货登记成功")}&detail=${encodeURIComponent("补货批次已写入系统，可在货品去向页查看剩余量和保质期。")}`
     });
   } catch (error) {
     uni.showToast({
@@ -206,16 +249,29 @@ onLoad((query) => {
     presetDeviceCode.value = query.deviceCode;
   }
 });
+
+onMounted(() => {
+  void syncRestockInputAccessibility();
+});
 </script>
 
 <template>
   <MobileShell eyebrow="补货登记" title="登记补货" subtitle="选择柜机、常用商品、数量、生产日期和批次号。">
     <template #hero-actions>
       <view class="hero-action-grid">
-        <button class="vm-button vm-button--warning" @tap="submit" :loading="submitting">提交补货登记</button>
+        <button class="vm-button" :disabled="loading || Boolean(loadError)" @tap="submit" :loading="submitting">提交补货登记</button>
         <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">常用商品</button>
       </view>
     </template>
+
+    <GlassCard v-if="loadError" tone="warning">
+      <view class="vm-stack">
+        <EmptyState title="补货数据加载失败" :description="loadError" />
+        <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">
+          重新加载
+        </button>
+      </view>
+    </GlassCard>
 
     <GlassCard tone="accent">
       <view class="vm-stack">
@@ -252,6 +308,7 @@ onLoad((query) => {
         <view class="vm-field">
           <text class="vm-field__label">补货柜机</text>
           <picker
+            aria-label="选择补货柜机"
             :range="devices"
             range-key="name"
             :value="Math.max(devices.findIndex((item) => item.deviceCode === selectedDeviceCode), 0)"
@@ -264,30 +321,54 @@ onLoad((query) => {
         </view>
 
         <view class="vm-field">
-          <text class="vm-field__label">补货数量</text>
+          <text id="merchant-restock-quantity-label" class="vm-field__label">补货数量</text>
           <view class="quantity-stepper">
-            <button class="quantity-stepper__button" @tap="adjustQuantity(-1)">-</button>
-            <input v-model.number="quantity" class="quantity-stepper__input" type="number" placeholder="0" />
-            <button class="quantity-stepper__button" @tap="adjustQuantity(1)">+</button>
+            <button class="quantity-stepper__button" aria-label="减少补货数量" @tap="adjustQuantity(-1)">-</button>
+            <input
+              v-model.number="quantity"
+              id="merchant-restock-quantity"
+              name="quantity"
+              aria-label="补货数量"
+              class="quantity-stepper__input"
+              type="number"
+              min="1"
+              step="1"
+              placeholder="0"
+            />
+            <button class="quantity-stepper__button" aria-label="增加补货数量" @tap="adjustQuantity(1)">+</button>
             <text class="quantity-stepper__unit">件</text>
           </view>
         </view>
 
         <view class="vm-field">
           <text class="vm-field__label">生产日期</text>
-          <picker mode="date" :value="productionDate" @change="productionDate = $event.detail.value">
+          <picker aria-label="选择生产日期" mode="date" :value="productionDate" @change="productionDate = $event.detail.value">
             <view class="vm-field__input picker-value">{{ productionDate || "请选择生产日期" }}</view>
           </picker>
         </view>
 
         <view class="restock-field-grid">
           <view class="vm-field">
-            <text class="vm-field__label">批次号（选填）</text>
-            <input v-model="batchNo" class="vm-field__input" placeholder="例如：20240519001" />
+            <text id="merchant-restock-batch-label" class="vm-field__label">批次号（选填）</text>
+            <input
+              v-model="batchNo"
+              id="merchant-restock-batch"
+              name="batch-number"
+              aria-label="补货批次号"
+              class="vm-field__input"
+              placeholder="例如：20240519001"
+            />
           </view>
           <view class="vm-field">
-            <text class="vm-field__label">备注（选填）</text>
-            <input v-model="note" class="vm-field__input" placeholder="例如：上午批次、临期处理补投" />
+            <text id="merchant-restock-note-label" class="vm-field__label">备注（选填）</text>
+            <input
+              v-model="note"
+              id="merchant-restock-note"
+              name="restock-note"
+              aria-label="补货备注"
+              class="vm-field__input"
+              placeholder="例如：上午批次、临期处理补投"
+            />
           </view>
         </view>
 
@@ -301,7 +382,7 @@ onLoad((query) => {
         </view>
 
         <view class="action-grid">
-          <button class="vm-button vm-button--warning" :loading="submitting" @tap="submit">提交补货登记</button>
+          <button class="vm-button" :disabled="loading || Boolean(loadError)" :loading="submitting" @tap="submit">提交补货登记</button>
           <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">维护常用商品</button>
         </view>
       </view>
@@ -315,17 +396,24 @@ onLoad((query) => {
         </view>
 
         <view class="vm-field">
-          <text class="vm-field__label">搜索常用商品</text>
-          <input v-model="templateKeyword" class="vm-field__input" placeholder="输入名称、编号、分类或规格" />
+          <text id="merchant-restock-search-label" class="vm-field__label">搜索常用商品</text>
+          <input
+            v-model="templateKeyword"
+            id="merchant-restock-search"
+            name="template-search"
+            aria-label="搜索常用商品"
+            class="vm-field__input"
+            placeholder="输入名称、编号、分类或规格"
+          />
         </view>
 
         <EmptyState
-          v-if="!filteredTemplates.length"
+          v-if="!loadError && !filteredTemplates.length"
           title="暂无可选常用商品"
           description="请先维护常用商品，再回来登记本次补货。"
         />
 
-        <view v-else class="template-list template-list--compact">
+        <view v-else-if="!loadError" class="template-list template-list--compact">
           <button
             v-for="item in filteredTemplates"
             :key="item.id"

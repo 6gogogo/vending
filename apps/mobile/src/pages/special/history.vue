@@ -10,6 +10,7 @@ import { appCopy } from "../../constants/copy";
 import { categoryLabelMap } from "../../constants/labels";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
+import { formatBeijingDate, formatBeijingTime } from "../../utils/datetime";
 import { showOperationFailure } from "../../utils/operation-feedback";
 
 const sessionStore = useSessionStore();
@@ -20,7 +21,7 @@ const groupedRecords = computed(() => {
   const groups = new Map<string, InventoryMovement[]>();
 
   for (const record of records.value) {
-    const key = record.happenedAt.slice(0, 10);
+    const key = formatBeijingDate(record.happenedAt);
     const bucket = groups.get(key) ?? [];
     bucket.push(record);
     groups.set(key, bucket);
@@ -52,8 +53,6 @@ const load = async () => {
   }
 };
 
-const formatDateTime = (value: string) => value.slice(11, 16);
-
 onShow(load);
 </script>
 
@@ -80,7 +79,7 @@ onShow(load);
               <view class="timeline__body">
                 <view class="timeline__head">
                   <text class="timeline__title">{{ record.goodsName }}</text>
-                  <text class="timeline__time">{{ formatDateTime(record.happenedAt) }}</text>
+                  <text class="timeline__time">{{ formatBeijingTime(record.happenedAt) }}</text>
                 </view>
                 <text class="timeline__meta">
                   {{ categoryLabelMap[record.category] }} · {{ record.deviceCode }} ·

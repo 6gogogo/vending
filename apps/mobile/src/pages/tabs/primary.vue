@@ -18,7 +18,8 @@ import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
-import { getErrorMessage } from "../../utils/error-message";
+import { formatBeijingDateTime } from "../../utils/datetime";
+import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import { syncRoleTabBar } from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
@@ -28,15 +29,21 @@ type AdminTaskFilter = "all" | "expiry" | "feedback" | "system";
 const sessionStore = useSessionStore();
 const loading = ref(false);
 const loadError = ref("");
+const specialHasLoadedData = ref(false);
 const records = ref<InventoryMovement[]>([]);
 const templates = ref<MerchantGoodsTemplate[]>([]);
 const pendingApplications = ref<RegistrationApplication[]>([]);
 const alerts = ref<AlertTask[]>([]);
 const rejectReasons = reactive<Record<string, string>>({});
 const adminTaskFilter = ref<AdminTaskFilter>("all");
+const adminApplicationsError = ref("");
+const adminAlertsError = ref("");
+const resolvingTaskIds = ref<string[]>([]);
+const reviewingApplicationId = ref("");
 const adminAiLoading = ref(false);
 const adminAiReport = ref<AiOperationsReport | null>(null);
 const adminAiError = ref("");
+let latestLoadRequestId = 0;
 const merchantSummary = ref({
   donatedUnits: 0,
   expiredUnits: 0,
@@ -78,9 +85,32 @@ const activeWindows = computed(() =>
       `${String(item.startHour).padStart(2, "0")}:00-${String(item.endHour).padStart(2, "0")}:00`
   )
 );
-const remainingTotal = computed(() => permissions.value.reduce((sum, item) => sum + item.quantity, 0));
+const remainingTotal = computed(() => {
+  const visibleGoodsTotal = permissions.value.reduce((sum, item) => sum + item.quantity, 0);
+  return (
+    sessionStore.quota?.remainingFreeTotal ??
+    Math.min(sessionStore.quota?.remainingDaily ?? visibleGoodsTotal, visibleGoodsTotal)
+  );
+});
 const usedCount = computed(() => sessionStore.quota?.usedCount ?? 0);
+const loadErrorTitle = computed(() =>
+  sessionStore.user?.role === "special" ? "资格与领取数据未更新" : "数据同步失败"
+);
+const loadErrorBody = computed(() => {
+  if (sessionStore.user?.role !== "special") {
+    return loadError.value;
+  }
+
+  const guidance = specialHasLoadedData.value
+    ? "下方保留最近一次成功数据供参考，但扫码开柜和柜机选择已暂停。"
+    : "这不是“无额度”，恢复前不会把未确认数据当作空结果。";
+  return appendErrorContext(loadError.value, guidance);
+});
 const todayStatus = computed(() => {
+  if (loadError.value) {
+    return "待重新确认";
+  }
+
   if (!activeWindows.value.length) {
     return "暂未开放";
   }
@@ -88,9 +118,15 @@ const todayStatus = computed(() => {
   return remainingTotal.value > 0 ? "今日可领取" : "免费额度已用完";
 });
 const todayStatusClass = computed(() =>
-  activeWindows.value.length && remainingTotal.value > 0 ? "vm-status--available" : "vm-status--warning"
+  !loadError.value && activeWindows.value.length && remainingTotal.value > 0
+    ? "vm-status--available"
+    : "vm-status--warning"
 );
 const todaySuggestion = computed(() => {
+  if (loadError.value) {
+    return "资格、领取记录和提醒尚未重新确认，请先同步；恢复前不要发起开柜。";
+  }
+
   if (!activeWindows.value.length) {
     return "开放时段开始后可前往柜机，必要时可联系工作人员确认资格。";
   }
@@ -181,6 +217,10 @@ const specialReminderText = computed(() => {
     return "";
   }
 
+  if (loadError.value) {
+    return "资格数据待重新确认，恢复前扫码开柜和柜机选择均已暂停。";
+  }
+
   if (activeWindows.value.length) {
     return `今日可领取时段：${activeWindows.value.join("、")}`;
   }
@@ -190,6 +230,17 @@ const specialReminderText = computed(() => {
 
 const heroSupport = computed(() => {
   if (sessionStore.user?.role === "special") {
+    if (loadError.value) {
+      return {
+        title: "同步提示",
+        lines: [
+          "资格与领取数据同步失败，当前状态不能用于开柜判断。",
+          specialHasLoadedData.value ? "页面只保留最近一次成功数据供参考。" : "这不是无额度，也不是资格被取消。",
+          "请先点击重新同步；恢复前扫码开柜和柜机选择均已暂停。"
+        ]
+      };
+    }
+
     return {
       title: "领取提示",
       lines: [
@@ -238,8 +289,8 @@ const resolveFeedbackNoticeContent = (task: AlertTask) => {
     task.detail.match(/反馈类型：([^。；]+)/)?.[1]?.trim();
 
   return feedbackType
-    ? `管理员已接受你的${feedbackType}反馈，感谢你的反馈`
-    : "管理员已接受你的反馈，感谢你的反馈";
+    ? `工作人员已处理你的${feedbackType}反馈。若问题仍存在，可继续补充反馈。`
+    : "工作人员已处理你的反馈。若问题仍存在，可继续补充反馈。";
 };
 
 const maybeNotifyResolvedFeedback = () => {
@@ -265,7 +316,7 @@ const maybeNotifyResolvedFeedback = () => {
 
   uni.setStorageSync(`mobile:resolved-feedback:${resolvedFeedback.id}`, "1");
   uni.showModal({
-    title: resolvedFeedback.userNoticeTitle || "反馈已接受",
+    title: resolvedFeedback.userNoticeTitle || "反馈处理结果",
     content: resolveFeedbackNoticeContent(resolvedFeedback),
     showCancel: false
   });
@@ -305,29 +356,48 @@ const maybeNotifyUserAlert = () => {
 };
 
 const load = async () => {
+  const requestId = ++latestLoadRequestId;
   await sessionStore.bootstrap();
 
-  if (!sessionStore.user) {
+  if (requestId !== latestLoadRequestId) {
+    return;
+  }
+
+  const user = sessionStore.user;
+  const sessionToken = sessionStore.token;
+
+  if (!user) {
     uni.reLaunch({ url: "/pages/common/login" });
     return;
   }
 
-  syncRoleTabBar(sessionStore.user.role);
+  const ownsLatestLoad = () =>
+    requestId === latestLoadRequestId &&
+    sessionStore.user?.id === user.id &&
+    sessionStore.token === sessionToken;
+
+  syncRoleTabBar(user.role);
   loading.value = true;
 
   try {
-    if (sessionStore.user.role === "special") {
+    if (user.role === "special") {
       adminAiReport.value = null;
       adminAiError.value = "";
       adminAiLoading.value = false;
       const [quota, recordResponse, alertResponse] = await Promise.all([
-        mobileApi.getQuotaSummary(sessionStore.user.phone),
-        mobileApi.listRecords(sessionStore.user.id, sessionStore.user.role),
-        mobileApi.alerts(undefined, sessionStore.user.id)
+        mobileApi.getQuotaSummary(user.phone),
+        mobileApi.listRecords(user.id, user.role),
+        mobileApi.alerts(undefined, user.id)
       ]);
+
+      if (!ownsLatestLoad()) {
+        return;
+      }
+
       sessionStore.setQuota(quota);
       records.value = recordResponse;
       alerts.value = alertResponse;
+      specialHasLoadedData.value = true;
       if (!maybeNotifyResolvedFeedback()) {
         maybeNotifyUserAlert();
       }
@@ -335,15 +405,20 @@ const load = async () => {
       return;
     }
 
-    if (sessionStore.user.role === "merchant") {
+    if (user.role === "merchant") {
       adminAiReport.value = null;
       adminAiError.value = "";
       adminAiLoading.value = false;
       const [templateResponse, summaryResponse, traceResponse] = await Promise.all([
         mobileApi.merchantTemplates(),
-        mobileApi.merchantSummary(sessionStore.user.id),
+        mobileApi.merchantSummary(user.id),
         mobileApi.merchantRestockTraces()
       ]);
+
+      if (!ownsLatestLoad()) {
+        return;
+      }
+
       templates.value = templateResponse;
       merchantSummary.value = {
         donatedUnits: summaryResponse.donatedUnits,
@@ -357,40 +432,63 @@ const load = async () => {
     }
 
     adminAiLoading.value = true;
-    const adminAiPromise = mobileApi
-      .aiOperationsReport({
-        reportType: "daily"
-      })
-      .then((report) => {
-        adminAiReport.value = report;
-        adminAiError.value = "";
-      })
-      .catch((error) => {
-        adminAiReport.value = null;
-        adminAiError.value = getErrorMessage(error);
-      })
-      .finally(() => {
-        adminAiLoading.value = false;
-      });
-
-    const [applicationResponse, alertResponse] = await Promise.all([
+    const [applicationResult, alertResult, aiResult] = await Promise.allSettled([
       mobileApi.registrationApplications("pending"),
-      mobileApi.alerts()
+      mobileApi.alerts(),
+      mobileApi.aiOperationsReport({ reportType: "daily" })
     ]);
-    pendingApplications.value = applicationResponse;
-    alerts.value = alertResponse;
-    maybeNotifyResolvedFeedback();
-    await adminAiPromise;
+
+    if (!ownsLatestLoad()) {
+      return;
+    }
+
+    if (applicationResult.status === "fulfilled") {
+      pendingApplications.value = applicationResult.value;
+      adminApplicationsError.value = "";
+    } else {
+      adminApplicationsError.value = getErrorMessage(applicationResult.reason);
+    }
+
+    if (alertResult.status === "fulfilled") {
+      alerts.value = alertResult.value;
+      adminAlertsError.value = "";
+      maybeNotifyResolvedFeedback();
+    } else {
+      adminAlertsError.value = getErrorMessage(alertResult.reason);
+    }
+
+    if (aiResult.status === "fulfilled") {
+      adminAiReport.value = aiResult.value;
+      adminAiError.value = "";
+    } else {
+      adminAiReport.value = null;
+      adminAiError.value = getErrorMessage(aiResult.reason);
+    }
+    adminAiLoading.value = false;
     loadError.value = "";
   } catch (error) {
+    if (!ownsLatestLoad()) {
+      return;
+    }
+
     loadError.value = getErrorMessage(error);
-    showOperationFailure(error);
   } finally {
-    loading.value = false;
+    if (ownsLatestLoad()) {
+      loading.value = false;
+    }
   }
 };
 
 const goNearby = () => {
+  if (sessionStore.user?.role === "special" && loadError.value) {
+    uni.showModal({
+      title: "资格与领取数据尚未确认",
+      content: "请先重新同步，确认资格和领取状态后再选择柜机。",
+      showCancel: false
+    });
+    return;
+  }
+
   uni.switchTab({
     url: "/pages/tabs/nearby"
   });
@@ -403,6 +501,15 @@ const goRecords = () => {
 };
 
 const goScanPickup = async () => {
+  if (loadError.value) {
+    uni.showModal({
+      title: "资格与领取数据尚未确认",
+      content: "请先重新同步，确认资格和领取状态后再扫码开柜。",
+      showCancel: false
+    });
+    return;
+  }
+
   try {
     const deviceCode = await scanDeviceCode();
 
@@ -443,38 +550,76 @@ const taskContextText = (task: AlertTask) =>
     .join(" · ");
 
 const resolveTask = (task: AlertTask) => {
+  if (resolvingTaskIds.value.includes(task.id)) {
+    return;
+  }
+
   uni.showModal({
     title: "确认处理",
-    content: task.grade === "fault" ? "确认标记为已知晓？" : "确认手动完成这条待办？",
+    content: task.grade === "fault" ? "确认标记为已知晓？该任务仍会保留为需继续跟进的故障状态。" : "确认手动完成这条待办？完成后会移入已处理记录。",
     success: async ({ confirm }) => {
       if (!confirm) {
         return;
       }
 
+      resolvingTaskIds.value = [...resolvingTaskIds.value, task.id];
       try {
         await mobileApi.resolveAlert(
           task.id,
           task.grade === "fault" ? "管理员已知晓并接手处理" : "管理员手动完成"
         );
-        showOperationSuccess();
+        showOperationSuccess(task.grade === "fault" ? "已标记为知晓" : "待办已完成");
         await load();
       } catch (error) {
         showOperationFailure(error);
+      } finally {
+        resolvingTaskIds.value = resolvingTaskIds.value.filter((taskId) => taskId !== task.id);
       }
     }
   });
 };
 
 const reviewApplication = async (applicationId: string, decision: "approved" | "rejected") => {
+  if (reviewingApplicationId.value) {
+    return;
+  }
+
+  const application = pendingApplications.value.find((item) => item.id === applicationId);
+  const applicantName = application?.profile.merchantName || application?.profile.name || application?.phone || applicationId;
+  const roleName = application?.requestedRole ? roleLabelMap[application.requestedRole] : "未知角色";
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: decision === "approved" ? "确认通过申请" : "确认驳回申请",
+      content: [
+        `申请人：${applicantName}`,
+        `申请角色：${roleName}`,
+        decision === "rejected" ? `驳回原因：${rejectReasons[applicationId]?.trim() || "未填写"}` : "通过后将立即生效。"
+      ].join("\n"),
+      confirmText: decision === "approved" ? "确认通过" : "确认驳回",
+      cancelText: "取消",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
+  reviewingApplicationId.value = applicationId;
   try {
     await mobileApi.reviewRegistration(applicationId, {
       decision,
       reason: decision === "rejected" ? rejectReasons[applicationId] : undefined
     });
-    showOperationSuccess();
+    pendingApplications.value = pendingApplications.value.filter((item) => item.id !== applicationId);
+    delete rejectReasons[applicationId];
+    showOperationSuccess(decision === "approved" ? "已通过申请" : "已驳回申请");
     await load();
   } catch (error) {
     showOperationFailure(error);
+  } finally {
+    reviewingApplicationId.value = "";
   }
 };
 
@@ -504,12 +649,12 @@ onShow(() => {
         <text class="vm-status" :class="todayStatusClass">{{ todayStatus }}</text>
         <view class="hero-status-panel__metrics">
           <view>
-            <text class="hero-status-panel__value vm-number">{{ remainingTotal }}</text>
+            <text class="hero-status-panel__value vm-number">{{ loadError ? "—" : remainingTotal }}</text>
             <text class="hero-status-panel__meta">剩余次数</text>
           </view>
           <view>
-            <text class="hero-status-panel__value vm-number">{{ usedCount }}</text>
-            <text class="hero-status-panel__meta">已领取</text>
+            <text class="hero-status-panel__value vm-number">{{ loadError ? "—" : usedCount }}</text>
+            <text class="hero-status-panel__meta">已用免费额度</text>
           </view>
         </view>
       </view>
@@ -518,21 +663,21 @@ onShow(() => {
     <template #hero-actions>
       <view class="hero-action-grid">
         <template v-if="sessionStore.user?.role === 'special'">
-          <button class="vm-button vm-button--warning action-button" @tap="goScanPickup">
+          <button class="vm-button vm-button--warning action-button" :disabled="Boolean(loadError)" @tap="goScanPickup">
             <view class="action-button__content">
               <MenuIcon name="scan" size="sm" tone="contrast" />
-              <text>扫码开柜</text>
+              <text>{{ loadError ? "扫码开柜（待同步）" : "扫码开柜" }}</text>
             </view>
           </button>
-          <button class="vm-button vm-button--ghost action-button" @tap="goNearby">
+          <button class="vm-button vm-button--ghost action-button" :disabled="Boolean(loadError)" @tap="goNearby">
             <view class="action-button__content">
               <MenuIcon name="nearby" size="sm" tone="neutral" />
-              <text>就近找柜机</text>
+              <text>{{ loadError ? "选择柜机（待同步）" : "就近找柜机" }}</text>
             </view>
           </button>
         </template>
         <template v-else-if="sessionStore.user?.role === 'merchant'">
-          <button class="vm-button vm-button--warning action-button" @tap="goNearby">
+          <button class="vm-button action-button" @tap="goNearby">
             <view class="action-button__content">
               <MenuIcon name="device" size="sm" tone="contrast" />
               <text>选择柜机补货</text>
@@ -563,13 +708,13 @@ onShow(() => {
     </template>
 
     <GlassCard v-if="loadError" tone="warning" compact>
-      <view class="state-banner">
+      <view class="state-banner" role="alert" aria-live="assertive" aria-atomic="true">
         <view class="state-banner__copy">
-          <text class="state-banner__title">数据同步失败</text>
-          <text class="state-banner__body">{{ loadError }}</text>
+          <text class="state-banner__title">{{ loadErrorTitle }}</text>
+          <text class="state-banner__body">{{ loadErrorBody }}</text>
         </view>
         <button class="vm-button vm-button--ghost state-banner__button" :disabled="loading" @tap="load">
-          {{ loading ? "重试中" : "重试" }}
+          {{ loading ? "同步中" : "重新同步" }}
         </button>
       </view>
     </GlassCard>
@@ -591,9 +736,10 @@ onShow(() => {
           </view>
           <text class="vm-subtitle">{{ todaySuggestion }}</text>
         </view>
+        <template v-if="!loadError || specialHasLoadedData">
         <view class="metric-grid">
           <ServiceMetric label="可领取次数" :value="remainingTotal" hint="今日剩余额度" tone="accent" />
-          <ServiceMetric label="已领取" :value="usedCount" hint="今日已完成领取" />
+          <ServiceMetric label="已用免费额度" :value="usedCount" hint="今日实际占用的免费额度" />
           <ServiceMetric label="提醒事项" :value="activeAlerts.length" hint="识别差异或核对提醒会在这里显示" tone="warning" />
         </view>
         <view class="info-list">
@@ -609,9 +755,19 @@ onShow(() => {
           </view>
         </view>
         <EmptyState v-else title="当前没有免费额度" description="仍可选择柜机，超出免费额度的部分会按商品价格结算。" />
+        </template>
+        <EmptyState
+          v-else
+          title="资格数据等待重新确认"
+          description="同步失败不代表没有额度；重新同步成功后才会恢复开柜入口。"
+        />
         <view class="action-grid">
-          <button class="vm-button vm-button--warning" @tap="goScanPickup">扫码开柜</button>
-          <button class="vm-button vm-button--ghost" @tap="goNearby">附近柜机</button>
+          <button class="vm-button vm-button--warning" :disabled="Boolean(loadError)" @tap="goScanPickup">
+            {{ loadError ? "扫码开柜（待同步）" : "扫码开柜" }}
+          </button>
+          <button class="vm-button vm-button--ghost" :disabled="Boolean(loadError)" @tap="goNearby">
+            {{ loadError ? "附近柜机（待同步）" : "附近柜机" }}
+          </button>
           <button class="vm-button vm-button--ghost action-grid__wide" @tap="goRecords">查看领取记录</button>
         </view>
       </view>
@@ -634,24 +790,24 @@ onShow(() => {
         </view>
 
         <view class="merchant-action-grid">
-          <button class="merchant-action-card merchant-action-card--primary" @tap="goNearby">
-            <MenuIcon name="restock" size="lg" tone="contrast" />
+          <button class="merchant-action-card merchant-action-card--recommended" @tap="goNearby">
+            <MenuIcon name="restock" size="lg" tone="accent" />
             <view class="merchant-action-card__copy">
-              <text class="merchant-action-card__title">开始补货</text>
-              <text class="merchant-action-card__body">选择在线柜机并开门</text>
+              <text class="merchant-action-card__title">选择柜机</text>
+              <text class="merchant-action-card__body">先选点位再补货</text>
             </view>
           </button>
           <button class="merchant-action-card" @tap="navigate('/pages/merchant/restock')">
             <MenuIcon name="template" size="lg" tone="accent" />
             <view class="merchant-action-card__copy">
               <text class="merchant-action-card__title">补货登记</text>
-              <text class="merchant-action-card__body">登记数量、日期和批次</text>
+              <text class="merchant-action-card__body">记录数量和批次</text>
             </view>
           </button>
           <button class="merchant-action-card" @tap="goRecords">
             <MenuIcon name="trace" size="lg" tone="accent" />
             <view class="merchant-action-card__copy">
-              <text class="merchant-action-card__title">补货记录</text>
+              <text class="merchant-action-card__title">流转明细</text>
               <text class="merchant-action-card__body">查看批次和去向</text>
             </view>
           </button>
@@ -659,7 +815,7 @@ onShow(() => {
             <MenuIcon name="feedback" size="lg" tone="warning" />
             <view class="merchant-action-card__copy">
               <text class="merchant-action-card__title">异常上报</text>
-              <text class="merchant-action-card__body">低库存、柜机异常</text>
+              <text class="merchant-action-card__body">上报库存或柜机问题</text>
             </view>
           </button>
         </view>
@@ -723,7 +879,11 @@ onShow(() => {
             <text class="section-heading__title">待处理事件</text>
             <text class="vm-subtitle">支持按分类筛选，处理前先核对柜机、商品和用户信息。</text>
           </view>
-          <scroll-view v-if="filteredActiveAlerts.length" class="scroll-list" scroll-y>
+          <view v-if="adminAlertsError" class="vm-stack">
+            <EmptyState title="待办数据加载失败" :description="adminAlertsError" />
+            <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">重新加载</button>
+          </view>
+          <scroll-view v-else-if="filteredActiveAlerts.length" class="scroll-list" scroll-y>
             <view class="simple-list">
               <view v-for="task in filteredActiveAlerts" :key="task.id" class="simple-card">
                 <view class="simple-card__header">
@@ -734,7 +894,14 @@ onShow(() => {
                 <text class="simple-card__meta">{{ task.previewDetail || task.detail }}</text>
                 <view class="inline-actions">
                   <button class="vm-inline-button" @tap="showTaskDetail(task)">详情</button>
-                  <button class="vm-inline-button" @tap="resolveTask(task)">{{ taskButtonText(task) }}</button>
+                  <button
+                    class="vm-inline-button"
+                    :disabled="resolvingTaskIds.includes(task.id)"
+                    :loading="resolvingTaskIds.includes(task.id)"
+                    @tap="resolveTask(task)"
+                  >
+                    {{ resolvingTaskIds.includes(task.id) ? "处理中" : taskButtonText(task) }}
+                  </button>
                 </view>
               </view>
             </view>
@@ -753,15 +920,33 @@ onShow(() => {
             <text class="section-heading__title">注册审批</text>
             <text class="vm-subtitle">可在这里直接通过或驳回申请。</text>
           </view>
-          <scroll-view v-if="pendingApplications.length" class="scroll-list" scroll-y>
+          <view v-if="adminApplicationsError" class="vm-stack">
+            <EmptyState title="审批数据加载失败" :description="adminApplicationsError" />
+            <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">重新加载</button>
+          </view>
+          <scroll-view v-else-if="pendingApplications.length" class="scroll-list" scroll-y>
             <view class="simple-list">
               <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
                 <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
                 <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }}</text>
-                <input v-model="rejectReasons[item.id]" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
+                <input v-model="rejectReasons[item.id]" :aria-label="`${item.profile.name || item.phone} 的驳回原因`" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
                 <view class="action-grid">
-                  <button class="vm-button" @tap="reviewApplication(item.id, 'approved')">通过</button>
-                  <button class="vm-button vm-button--ghost" @tap="reviewApplication(item.id, 'rejected')">驳回</button>
+                  <button
+                    class="vm-button"
+                    :disabled="Boolean(reviewingApplicationId)"
+                    :loading="reviewingApplicationId === item.id"
+                    @tap="reviewApplication(item.id, 'approved')"
+                  >
+                    通过
+                  </button>
+                  <button
+                    class="vm-button vm-button--ghost"
+                    :disabled="Boolean(reviewingApplicationId)"
+                    :loading="reviewingApplicationId === item.id"
+                    @tap="reviewApplication(item.id, 'rejected')"
+                  >
+                    驳回
+                  </button>
                 </view>
               </view>
             </view>
@@ -774,13 +959,13 @@ onShow(() => {
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">{{ sessionStore.user?.role === "special" ? "最近领取记录" : sessionStore.user?.role === "merchant" ? "最近货物流动" : "常用入口" }}</text>
+          <text class="section-heading__title">{{ sessionStore.user?.role === "special" ? "最近领取记录" : sessionStore.user?.role === "merchant" ? "最近货品流转" : "常用入口" }}</text>
           <text class="vm-subtitle">
             {{
               sessionStore.user?.role === "special"
                 ? "最近三次领取会展示在这里。"
                 : sessionStore.user?.role === "merchant"
-                  ? "补货和去向记录会同步到这里。"
+                  ? "补货、调拨和去向记录会同步到这里。"
                   : "可继续进入柜机列表、人员日志和设置页。"
             }}
           </text>
@@ -791,7 +976,7 @@ onShow(() => {
             <view class="simple-list__main">
               <text>{{ record.goodsName }}</text>
               <text class="simple-list__meta">
-                {{ record.deviceCode }} · {{ record.happenedAt.slice(0, 16).replace("T", " ") }}
+                {{ record.deviceCode }} · {{ formatBeijingDateTime(record.happenedAt) }}
               </text>
             </view>
             <text class="vm-status vm-status--success">
@@ -1063,47 +1248,66 @@ onShow(() => {
 
 .merchant-action-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
 }
 
 .merchant-action-card {
   display: grid;
-  gap: 14rpx;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12rpx;
   align-content: start;
-  min-height: 166rpx;
+  align-items: start;
+  box-sizing: border-box;
+  width: 100%;
+  height: 208rpx;
+  min-height: 208rpx;
+  margin: 0;
   padding: 22rpx;
   border-radius: 22rpx;
   border: 1rpx solid var(--vm-line);
-  background: var(--vm-surface-soft);
+  background: var(--vm-card-bg);
+  box-shadow: var(--vm-shadow-soft);
   text-align: left;
+  line-height: 1.25;
 }
 
-.merchant-action-card--primary {
-  background: linear-gradient(135deg, var(--vm-warning), #ffb764);
-  border-color: transparent;
-  color: #ffffff;
-  box-shadow: 0 16rpx 32rpx rgba(255, 138, 43, 0.18);
+.merchant-action-card--recommended {
+  border-color: var(--vm-accent-line);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(234, 246, 228, 0.88)),
+    var(--vm-card-bg);
+  box-shadow: 0 14rpx 30rpx rgba(46, 125, 70, 0.12);
 }
 
 .merchant-action-card__copy {
   display: grid;
   gap: 6rpx;
+  min-width: 0;
 }
 
 .merchant-action-card__title {
+  display: block;
+  overflow: hidden;
   font-size: 28rpx;
   font-weight: 800;
   color: var(--vm-text);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.merchant-action-card--primary .merchant-action-card__title,
-.merchant-action-card--primary .merchant-action-card__body {
-  color: #ffffff;
+.merchant-action-card--recommended .merchant-action-card__title {
+  color: var(--vm-accent-strong);
 }
 
 .merchant-action-card__body {
+  display: -webkit-box;
+  overflow: hidden;
   font-size: 22rpx;
   line-height: 1.5;
   color: var(--vm-text-soft);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .task-filter-chip {
@@ -1180,6 +1384,11 @@ onShow(() => {
 :global(.vm-page--accessible) .state-banner__body {
   font-size: 28rpx;
   color: var(--vm-text);
+}
+
+:global(.vm-page--accessible) .merchant-action-card {
+  height: auto;
+  min-height: 244rpx;
 }
 
 :global(.vm-page--accessible) .loading-panel__bar {

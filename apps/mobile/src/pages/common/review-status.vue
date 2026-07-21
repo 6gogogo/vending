@@ -9,6 +9,7 @@ import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { formatBeijingDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
 
 const phone = ref("");
@@ -145,7 +146,7 @@ onShow(() => {
             {{ accountRoleLabel }}
           </text>
           <text v-if="lookup.application?.updatedAt" class="status-box__item">
-            更新时间：{{ lookup.application.updatedAt.slice(0, 16).replace("T", " ") }}
+            更新时间：{{ formatBeijingDateTime(lookup.application.updatedAt) }}
           </text>
           <text v-if="lookup.application?.reviewReason" class="status-box__item">
             驳回原因：{{ lookup.application.reviewReason }}

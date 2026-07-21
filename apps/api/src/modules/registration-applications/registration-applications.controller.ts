@@ -5,6 +5,7 @@ import type { RegistrationStatus } from "@vm/shared-types";
 import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
+  AllowedBackofficeSessionPermissions,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -20,14 +21,24 @@ export class RegistrationApplicationsController {
   @Get()
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("users:view")
+  @AllowedBackofficeSessionPermissions("users:view")
   list(@Query("status") status?: RegistrationStatus) {
     return ok(this.registrationApplicationsService.list(status));
   }
 
   @Get("by-phone")
-  async byPhone(@Query("phone") phone: string, @Query("code") code?: string) {
-    return ok(await this.registrationApplicationsService.lookupByPhone(phone, code));
+  async byPhone(
+    @Query("phone") phone: string,
+    @Query("code") code?: string,
+    @Req() request?: { ip?: string }
+  ) {
+    return ok(
+      await this.registrationApplicationsService.lookupByPhone(
+        phone,
+        code,
+        request?.ip ?? "anonymous"
+      )
+    );
   }
 
   @Get(":id")
@@ -96,7 +107,7 @@ export class RegistrationApplicationsController {
   @Patch(":id/review")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("users:review")
+  @AllowedBackofficeSessionPermissions("users:review")
   review(
     @Param("id") id: string,
     @Body()

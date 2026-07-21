@@ -17,6 +17,7 @@ import type {
 
 import { adminApi } from "../api/admin";
 import { formatDateTime, getTodayDateKeyInBeijing } from "../utils/datetime";
+import { getAdminErrorMessage } from "../utils/error-message";
 
 type WorkspaceTab = "report" | "custom" | "diagnosis" | "restock" | "feedback" | "policy";
 type WorkspaceResultPayload =
@@ -284,7 +285,7 @@ const readTab = (value: string): WorkspaceTab =>
   tabOptions.some((item) => item.key === value) ? (value as WorkspaceTab) : "report";
 
 const readErrorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : "AI 请求失败，请稍后重试。";
+  getAdminErrorMessage(error, "AI 请求失败，请稍后重试。");
 const truncateText = (value: string, maxLength = 18) =>
   value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 

@@ -7,6 +7,11 @@ const key = process.env.SMARTVM_KEY;
 const deviceCode = process.argv[2] ?? process.env.SMARTVM_DEVICE_CODE ?? sandboxConfig.smartVmDeviceCode ?? "91120149";
 const phone = process.argv[3] ?? "13800000002";
 const userId = process.argv[4] ?? "00000001";
+const confirmedDeviceCode = process.argv
+  .find((argument) => argument.startsWith("--confirm-device="))
+  ?.slice("--confirm-device=".length)
+  .trim();
+const confirmedMultipleRequests = process.argv.includes("--confirm-multiple-open-requests");
 const extraPayStyles = (process.env.SMARTVM_EXTRA_PAY_STYLES ?? "duan3")
   .split(",")
   .map((item) => item.trim())
@@ -18,6 +23,12 @@ if (!clientId || !key) {
 
 if (!deviceCode) {
   throw new Error("必须提供设备编号。");
+}
+
+if (confirmedDeviceCode !== deviceCode || !confirmedMultipleRequests) {
+  throw new Error(
+    `已阻止批量开门探测。确需执行时必须同时追加 --confirm-device=${deviceCode} 和 --confirm-multiple-open-requests。`
+  );
 }
 
 const buildPayload = (patch = {}) => {

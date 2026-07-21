@@ -4,6 +4,7 @@ import * as Dysmsapi20170525 from "@alicloud/dysmsapi20170525";
 
 import { isProductionRuntime } from "../../common/config/production-safety";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import type { VerificationPurpose } from "../../common/store/persistence";
 
 type VerificationProvider = "mock" | "aliyun";
 type Constructor<T = unknown> = new (...args: any[]) => T;
@@ -70,13 +71,17 @@ export class VerificationCodeService {
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService
   ) {}
 
-  async requestCode(phone: string): Promise<VerificationCodeResult> {
+  async requestCode(
+    phone: string,
+    purpose: VerificationPurpose = "general"
+  ): Promise<VerificationCodeResult> {
     const normalizedPhone = this.normalizePhone(phone);
-    this.assertCanRequestCode(normalizedPhone);
+    const normalizedPurpose = this.normalizePurpose(purpose);
+    this.assertCanRequestCode(normalizedPhone, normalizedPurpose);
 
     if (this.getProvider() === "aliyun") {
       await this.requestAliyunCode(normalizedPhone);
-      this.store.rememberVerificationRequest(normalizedPhone);
+      this.store.rememberVerificationRequest(normalizedPhone, normalizedPurpose);
       return {
         phone: normalizedPhone,
         expiresInSeconds: 300,
@@ -84,7 +89,7 @@ export class VerificationCodeService {
       };
     }
 
-    const code = this.store.issueVerificationCode(normalizedPhone);
+    const code = this.store.issueVerificationCode(normalizedPhone, normalizedPurpose);
     return {
       phone: normalizedPhone,
       expiresInSeconds: 300,
@@ -93,15 +98,33 @@ export class VerificationCodeService {
     };
   }
 
-  async verifyCode(phone: string, code: string): Promise<boolean> {
+  async verifyCode(
+    phone: string,
+    code: string,
+    purpose: VerificationPurpose = "general"
+  ): Promise<boolean> {
     const normalizedPhone = this.normalizePhone(phone);
     const normalizedCode = this.normalizeVerificationCode(code);
+    const normalizedPurpose = this.normalizePurpose(purpose);
 
     if (this.getProvider() === "aliyun") {
-      return this.verifyAliyunCode(normalizedPhone, normalizedCode);
+      if (!this.store.canAttemptVerification(normalizedPhone, normalizedPurpose)) {
+        return false;
+      }
+
+      const verified = await this.verifyAliyunCode(normalizedPhone, normalizedCode);
+
+      if (verified) {
+        // 以本地一次性状态成功消费为最终结果，避免并发校验同时获得登录资格。
+        return this.store.consumeVerificationRequest(normalizedPhone, normalizedPurpose);
+      } else {
+        this.store.recordVerificationFailure(normalizedPhone, normalizedPurpose);
+      }
+
+      return false;
     }
 
-    return this.store.verifyCode(normalizedPhone, normalizedCode);
+    return this.store.verifyCode(normalizedPhone, normalizedCode, normalizedPurpose);
   }
 
   getRuntimeConfig() {
@@ -128,7 +151,18 @@ export class VerificationCodeService {
       return false;
     }
 
-    return !isProductionRuntime() && this.isLocalPublicBaseUrl();
+    return !isProductionRuntime() && this.isLocalPublicBaseUrl() && this.isLoopbackApiHost();
+  }
+
+  private isLoopbackApiHost() {
+    const rawHost = this.configService.get<string>("API_HOST")?.trim();
+
+    if (!rawHost) {
+      // 非生产环境未显式配置时，main.ts 默认只监听回环地址。
+      return true;
+    }
+
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(rawHost.toLowerCase());
   }
 
   private isLocalPublicBaseUrl() {
@@ -140,7 +174,7 @@ export class VerificationCodeService {
 
     try {
       const url = new URL(raw);
-      return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+      return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname.toLowerCase());
     } catch {
       return false;
     }
@@ -166,8 +200,16 @@ export class VerificationCodeService {
     return normalizedCode;
   }
 
-  private assertCanRequestCode(phone: string) {
-    const existing = this.store.verificationCodes.get(phone);
+  private normalizePurpose(purpose: VerificationPurpose): VerificationPurpose {
+    if (purpose === "app-login" || purpose === "register") {
+      return purpose;
+    }
+
+    return "general";
+  }
+
+  private assertCanRequestCode(phone: string, purpose: VerificationPurpose) {
+    const existing = this.store.getVerificationRecord(phone, purpose);
     const nextAvailableAt = existing?.resendAvailableAt
       ? new Date(existing.resendAvailableAt).getTime()
       : 0;

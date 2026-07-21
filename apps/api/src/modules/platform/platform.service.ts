@@ -3,10 +3,14 @@ import { Inject, Injectable } from "@nestjs/common";
 import type { PlatformOverviewSnapshot, PlatformTenantUsageSummary } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import { DeviceOperationCoordinator } from "../devices/device-operation-coordinator";
 
 @Injectable()
 export class PlatformService {
-  constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
+  constructor(
+    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(DeviceOperationCoordinator) private readonly deviceOperations: DeviceOperationCoordinator
+  ) {}
 
   listTenants() {
     return this.store.listPlatformTenants();
@@ -37,7 +41,9 @@ export class PlatformService {
           users: users.filter((entry) => entry.role === "special").length,
           merchants: users.filter((entry) => entry.role === "merchant").length,
           devices: devices.length,
-          onlineDevices: devices.filter((entry) => entry.status === "online").length,
+          onlineDevices: devices.filter(
+            (entry) => this.deviceOperations.getEffectiveStatus(entry.deviceCode) === "online"
+          ).length,
           inventoryUnits: this.store.goodsBatches
             .filter(() => ownsCurrentInstanceData)
             .reduce((sum, entry) => sum + entry.remainingQuantity, 0),

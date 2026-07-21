@@ -9,7 +9,6 @@ import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
-import { getErrorMessage } from "../../utils/error-message";
 
 const eventId = ref("");
 const deviceCode = ref("");
@@ -83,10 +82,10 @@ const goClosed = () => {
   });
 };
 
-const goFailure = (title: string, detail: string) => {
+const goStopped = (title: string, detail: string) => {
   stopPolling();
   uni.reLaunch({
-    url: `/pages/common/result?status=danger&title=${encodeURIComponent(title)}&detail=${encodeURIComponent(detail)}&actionText=${encodeURIComponent("返回首页")}`
+    url: `/pages/common/result?status=warning&resultType=open-stopped&title=${encodeURIComponent(title)}&detail=${encodeURIComponent(detail)}&actionText=${encodeURIComponent("返回首页")}`
   });
 };
 
@@ -125,23 +124,37 @@ const applyEventState = (nextEvent: CabinetEventRecord) => {
   }
 
   if (nextEvent.status === "timeout_unopened") {
-    goFailure("开门超时", "柜机在规定时间内没有成功打开，已记录到后台，请稍后重试。");
+    goStopped(
+      "本次未能确认开门",
+      "规定时间内未收到可信开门结果。请先确认现场柜门保持关闭，不要立即重复操作；后台已保留记录，必要时请联系工作人员。"
+    );
     return;
   }
 
   if (nextEvent.status === "failed") {
-    goFailure("开门失败", "柜机返回了开门失败结果，请稍后重试或联系工作人员。");
+    goStopped(
+      "本次开门未完成",
+      "柜机返回了未完成结果。请先核对柜门状态并返回首页，不要立即重复开柜；如仍需领取，请稍后重新进入或联系工作人员。"
+    );
     return;
   }
 
   if (nextEvent.status === "stuck_open") {
-    goFailure("柜门状态异常", "柜门长时间未关闭，后台已收到异常记录，请联系工作人员处理。");
+    goStopped("柜门状态异常", "柜门长时间未关闭，后台已收到异常记录。请保持现场安全并联系工作人员处理。");
+    return;
   }
+
+  statusText.value = "开门结果仍在确认";
+  hintText.value = "暂未识别到可信的最终门状态，请勿重复开柜；页面会继续自动查询。";
 };
 
 const loadEvent = async () => {
+  if (busy.value) {
+    return;
+  }
+
   if (!eventId.value) {
-    goFailure("缺少事件信息", "未识别到本次开柜事件，请重新发起。");
+    goStopped("缺少事件信息", "未识别到本次开柜事件。请先返回首页核对记录，不要立即重复开柜。");
     return;
   }
 
@@ -149,8 +162,9 @@ const loadEvent = async () => {
   try {
     const response = await mobileApi.getCabinetEvent(eventId.value);
     applyEventState(response);
-  } catch (error) {
-    goFailure("开门状态获取失败", getErrorMessage(error));
+  } catch {
+    statusText.value = "暂时无法同步柜门状态";
+    hintText.value = "请勿重复开柜；页面会继续自动查询。请观察现场柜门，必要时联系工作人员。";
   } finally {
     busy.value = false;
   }

@@ -1,31 +1,122 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { lstatSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import {
   createEmptyPersistedState,
   resolveApiDataFile,
+  resolveApiWorkspaceRoot,
   resolveSystemLogFile,
   resolveUploadDir,
   writePersistedState
 } from "../common/store/persistence.js";
+import { isProductionRuntime } from "../common/config/runtime-environment.js";
+import { acquireFinancialSingleWriterForMaintenance } from "../common/coordination/financial-single-writer-runtime.js";
+
+const dataFileTarget = resolveApiDataFile();
+const systemLogFile = resolveSystemLogFile();
+const uploadDir = resolveUploadDir();
+const apiWorkspaceRoot = resolveApiWorkspaceRoot();
+
+const normalizePath = (path: string) => {
+  const normalized = resolve(path);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+};
+
+const isSameOrInside = (childPath: string, parentPath: string) => {
+  const child = normalizePath(childPath);
+  const parent = normalizePath(parentPath);
+
+  if (child === parent) {
+    return true;
+  }
+
+  const relativePath = relative(parent, child);
+  return Boolean(relativePath) && !relativePath.startsWith("..") && !isAbsolute(relativePath);
+};
+
+const readOption = (name: string) => {
+  const prefix = `--${name}=`;
+  const inline = process.argv.find((argument) => argument.startsWith(prefix));
+
+  if (inline) {
+    return inline.slice(prefix.length);
+  }
+
+  const index = process.argv.indexOf(`--${name}`);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+};
+
+if (!process.argv.includes("--confirm-reset")) {
+  console.error("已阻止清空业务数据、系统审计日志和上传目录。确需执行时，请显式追加 --confirm-reset。");
+  console.error(`目标数据文件：${dataFileTarget}`);
+  console.error(`目标系统日志：${systemLogFile}`);
+  console.error(`目标上传目录：${uploadDir}`);
+  process.exit(2);
+}
 
 const keepUploads = process.argv.includes("--keep-uploads");
 
-const dataFile = writePersistedState(createEmptyPersistedState());
-const systemLogFile = resolveSystemLogFile();
-mkdirSync(dirname(systemLogFile), { recursive: true });
-writeFileSync(systemLogFile, "", "utf8");
+const productionConfirmation = readOption("confirm-production-data-file");
 
-const uploadDir = resolveUploadDir();
-
-if (!keepUploads && existsSync(uploadDir)) {
-  rmSync(uploadDir, { recursive: true, force: true });
+if (isProductionRuntime() && normalizePath(productionConfirmation ?? "") !== normalizePath(dataFileTarget)) {
+  console.error("已阻止在生产环境清空运行数据。确需执行时，还必须逐字确认目标数据文件。");
+  console.error(`请追加：--confirm-production-data-file="${dataFileTarget}"`);
+  process.exit(2);
 }
 
-mkdirSync(uploadDir, { recursive: true });
+if (normalizePath(dataFileTarget) === normalizePath(systemLogFile)) {
+  throw new Error("API_DATA_FILE 与 SYSTEM_LOG_FILE 不能指向同一文件。");
+}
+
+for (const filePath of [dataFileTarget, systemLogFile]) {
+  if (isSameOrInside(filePath, uploadDir) || isSameOrInside(uploadDir, filePath)) {
+    throw new Error(`UPLOAD_DIR 不能与运行数据文件重叠：${filePath}`);
+  }
+}
+
+if (existsSync(uploadDir)) {
+  const uploadStat = lstatSync(uploadDir);
+
+  if (uploadStat.isSymbolicLink() || !uploadStat.isDirectory()) {
+    throw new Error(`UPLOAD_DIR 必须是普通目录，不能是文件或符号链接：${uploadDir}`);
+  }
+}
+
+if (!keepUploads && (dirname(resolve(uploadDir)) === resolve(uploadDir) || isSameOrInside(apiWorkspaceRoot, uploadDir))) {
+  throw new Error(`拒绝清空文件系统根目录、API 工作区或其父目录：${uploadDir}`);
+}
+
+for (const filePath of [dataFileTarget, systemLogFile]) {
+  if (!existsSync(filePath)) {
+    continue;
+  }
+
+  const fileStat = lstatSync(filePath);
+
+  if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+    throw new Error(`运行数据目标必须是普通文件，不能是目录或符号链接：${filePath}`);
+  }
+}
+
+const financialWriter = acquireFinancialSingleWriterForMaintenance();
+let dataFile: string;
+try {
+  dataFile = writePersistedState(createEmptyPersistedState());
+  mkdirSync(dirname(systemLogFile), { recursive: true });
+  writeFileSync(systemLogFile, "", "utf8");
+
+  if (!keepUploads && existsSync(uploadDir)) {
+    rmSync(uploadDir, { recursive: true, force: true });
+  }
+
+  mkdirSync(uploadDir, { recursive: true });
+} finally {
+  financialWriter.release();
+}
 
 console.log(`后端业务数据已完全清空并初始化为空库：${dataFile}`);
 console.log("API 服务重新启动后，会自动补建默认超级管理员账号：admin / admin");
 console.log(`系统审计日志已清空：${systemLogFile}`);
 console.log(keepUploads ? `上传目录已保留：${uploadDir}` : `上传目录已清空并重建：${uploadDir}`);
-console.log(`当前 API_DATA_FILE：${resolveApiDataFile()}`);
+console.log(`当前 API_DATA_FILE：${dataFileTarget}`);

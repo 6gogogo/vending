@@ -24,9 +24,12 @@ import { SystemSettingsModule } from "./modules/system-settings/system-settings.
 import { UploadsModule } from "./modules/uploads/uploads.module";
 import { UsersModule } from "./modules/users/users.module";
 import { WarehousesModule } from "./modules/warehouses/warehouses.module";
+import {
+  envFilesDeclareProductionRuntime,
+  isProductionRuntime
+} from "./common/config/runtime-environment";
 
 const resolveEnvFilePath = () => {
-  const runtime = (process.env.NODE_ENV ?? process.env.APP_ENV ?? "").trim().toLowerCase();
   const localEnvFiles = [
     ".env.local",
     ".env",
@@ -34,7 +37,7 @@ const resolveEnvFilePath = () => {
     "apps/api/.env"
   ];
 
-  if (runtime === "production") {
+  if (isProductionRuntime() || envFilesDeclareProductionRuntime(localEnvFiles)) {
     return localEnvFiles;
   }
 

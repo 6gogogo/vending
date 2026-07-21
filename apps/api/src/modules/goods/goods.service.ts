@@ -14,6 +14,7 @@ import type {
 } from "@vm/shared-types";
 
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
+import { toSafeSpreadsheetCell } from "../../common/export/html-workbook";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { SmartVmGateway } from "../devices/smartvm.gateway";
 
@@ -154,11 +155,10 @@ export class GoodsService {
       }))
       .slice()
       .sort((left, right) => {
-        const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
-        const rightExpiry = right.expiresAt ?? "9999-12-31T23:59:59.999Z";
+        const expiryOrder = this.compareExpiryValues(left.expiresAt, right.expiresAt);
 
-        if (leftExpiry !== rightExpiry) {
-          return leftExpiry.localeCompare(rightExpiry);
+        if (expiryOrder !== 0) {
+          return expiryOrder;
         }
 
         return right.createdAt.localeCompare(left.createdAt);
@@ -171,7 +171,7 @@ export class GoodsService {
       nearestExpiryAt: batches
         .filter((entry) => entry.remainingQuantity > 0 && entry.expiresAt)
         .map((entry) => entry.expiresAt as string)
-        .sort((left, right) => left.localeCompare(right))
+        .sort((left, right) => this.compareExpiryValues(left, right))
         .at(0),
       deviceDistribution: distribution,
       batches,
@@ -824,37 +824,41 @@ export class GoodsService {
   buildOverviewExport() {
     const overview = this.getOverview();
     const rows = overview.byGoods
-      .map(
-        (item) => `
+      .map((item) => {
+        const catalogItem = this.findCatalogItem(item.goodsId);
+        const batchSummary = item.batches
+          .map(
+            (batch) =>
+              `${batch.locationName ?? batch.deviceCode}(${batch.deviceCode}) ${batch.expiresAt?.slice(0, 10) ?? "未设保质期"} 剩余 ${batch.remainingQuantity}`
+          )
+          .join("；");
+        const distributionSummary = item.deviceDistribution
+          .map(
+            (distribution) =>
+              `${distribution.deviceName}(${distribution.deviceCode}) 库存 ${distribution.stock}`
+          )
+          .join("；");
+
+        return `
           <tr>
-            <td>${item.goodsId}</td>
-            <td>${this.findCatalogItem(item.goodsId).goodsCode}</td>
-            <td>${item.goodsName}</td>
-            <td>${this.findCatalogItem(item.goodsId).fullName ?? item.goodsName}</td>
-            <td>${item.category}</td>
-            <td>${this.findCatalogItem(item.goodsId).categoryName ?? ""}</td>
-            <td>${item.totalStock}</td>
-            <td>${item.warehouseStock}</td>
-            <td>${item.lowStockDevices}</td>
-            <td>${item.outOfStockDevices}</td>
-            <td>${item.nearestExpiryAt?.slice(0, 10) ?? ""}</td>
-            <td>${item.batches
-              .map(
-                (batch) =>
-                  `${batch.locationName ?? batch.deviceCode}(${batch.deviceCode}) ${batch.expiresAt?.slice(0, 10) ?? "未设保质期"} 剩余 ${batch.remainingQuantity}`
-              )
-              .join("；")}</td>
-            <td>${this.findCatalogItem(item.goodsId).packageForm ?? ""}</td>
-            <td>${this.findCatalogItem(item.goodsId).specification ?? ""}</td>
-            <td>${this.findCatalogItem(item.goodsId).manufacturer ?? ""}</td>
-            <td>${item.deviceDistribution
-              .map(
-                (distribution) =>
-                  `${distribution.deviceName}(${distribution.deviceCode}) 库存 ${distribution.stock}`
-              )
-              .join("；")}</td>
+            <td>${toSafeSpreadsheetCell(item.goodsId)}</td>
+            <td>${toSafeSpreadsheetCell(catalogItem.goodsCode)}</td>
+            <td>${toSafeSpreadsheetCell(item.goodsName)}</td>
+            <td>${toSafeSpreadsheetCell(catalogItem.fullName ?? item.goodsName)}</td>
+            <td>${toSafeSpreadsheetCell(item.category)}</td>
+            <td>${toSafeSpreadsheetCell(catalogItem.categoryName)}</td>
+            <td>${toSafeSpreadsheetCell(item.totalStock)}</td>
+            <td>${toSafeSpreadsheetCell(item.warehouseStock)}</td>
+            <td>${toSafeSpreadsheetCell(item.lowStockDevices)}</td>
+            <td>${toSafeSpreadsheetCell(item.outOfStockDevices)}</td>
+            <td>${toSafeSpreadsheetCell(item.nearestExpiryAt?.slice(0, 10))}</td>
+            <td>${toSafeSpreadsheetCell(batchSummary)}</td>
+            <td>${toSafeSpreadsheetCell(catalogItem.packageForm)}</td>
+            <td>${toSafeSpreadsheetCell(catalogItem.specification)}</td>
+            <td>${toSafeSpreadsheetCell(catalogItem.manufacturer)}</td>
+            <td>${toSafeSpreadsheetCell(distributionSummary)}</td>
           </tr>`
-      )
+      })
       .join("");
 
     return {
@@ -1022,11 +1026,10 @@ export class GoodsService {
   }
 
   private compareGoodsBatchByExpiry(left: GoodsBatchRecord, right: GoodsBatchRecord) {
-    const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
-    const rightExpiry = right.expiresAt ?? "9999-12-31T23:59:59.999Z";
+    const expiryOrder = this.compareExpiryValues(left.expiresAt, right.expiresAt);
 
-    if (leftExpiry !== rightExpiry) {
-      return leftExpiry.localeCompare(rightExpiry);
+    if (expiryOrder !== 0) {
+      return expiryOrder;
     }
 
     if (left.deviceCode !== right.deviceCode) {
@@ -1034,6 +1037,15 @@ export class GoodsService {
     }
 
     return left.createdAt.localeCompare(right.createdAt);
+  }
+
+  private compareExpiryValues(left?: string, right?: string) {
+    const leftTime = left ? Date.parse(left) : Number.POSITIVE_INFINITY;
+    const rightTime = right ? Date.parse(right) : Number.POSITIVE_INFINITY;
+    const normalizedLeft = Number.isFinite(leftTime) ? leftTime : Number.POSITIVE_INFINITY;
+    const normalizedRight = Number.isFinite(rightTime) ? rightTime : Number.POSITIVE_INFINITY;
+
+    return normalizedLeft - normalizedRight || (left ?? "").localeCompare(right ?? "");
   }
 
   private findCatalogItem(goodsId: string) {

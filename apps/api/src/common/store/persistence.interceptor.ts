@@ -8,7 +8,49 @@ const MAX_LOG_DEPTH = 4;
 const MAX_LOG_STRING_LENGTH = 4_000;
 const MAX_LOG_ARRAY_ITEMS = 20;
 const MAX_LOG_OBJECT_KEYS = 40;
-const SENSITIVE_LOG_KEYS = new Set(["password", "currentpassword", "newpassword", "confirmpassword", "code", "token"]);
+const SENSITIVE_LOG_KEY_FRAGMENTS = [
+  "password",
+  "passwd",
+  "passcode",
+  "token",
+  "secret",
+  "authorization",
+  "cookie",
+  "credential"
+] as const;
+const SENSITIVE_LOG_KEY_SUFFIXES = [
+  "apikey",
+  "accesskey",
+  "clientkey",
+  "encryptionkey",
+  "privatekey",
+  "secretkey",
+  "signingkey"
+] as const;
+const SENSITIVE_LOG_CODE_KEYS = new Set([
+  "authcode",
+  "buyerid",
+  "buyerlogonid",
+  "buyeropenid",
+  "buyeruserid",
+  "certifycode",
+  "code",
+  "invitecode",
+  "otp",
+  "otpcode",
+  "previewcode",
+  "payeralipayuserid",
+  "payeridentityhandle",
+  "payeropenid",
+  "package",
+  "paysign",
+  "prepayid",
+  "sign",
+  "signature",
+  "recoverycode",
+  "smscode",
+  "verificationcode"
+]);
 
 @Injectable()
 export class PersistenceInterceptor implements NestInterceptor {
@@ -41,7 +83,9 @@ export class PersistenceInterceptor implements NestInterceptor {
             startedAt,
             responseBody: data
           });
-          this.store.persist();
+          if (this.shouldPersistRequest(request.method, response.statusCode)) {
+            this.store.persist();
+          }
         },
         error: (error) => {
           this.writeAuditLog({
@@ -164,7 +208,7 @@ export class PersistenceInterceptor implements NestInterceptor {
             break;
           }
 
-          if (SENSITIVE_LOG_KEYS.has(key.toLowerCase())) {
+          if (this.isSensitiveLogKey(key)) {
             normalizedObject[key] = "[redacted]";
             continue;
           }
@@ -187,6 +231,31 @@ export class PersistenceInterceptor implements NestInterceptor {
     }
 
     return `${value.slice(0, MAX_LOG_STRING_LENGTH)}...[truncated ${value.length - MAX_LOG_STRING_LENGTH} chars]`;
+  }
+
+  private shouldPersistRequest(method?: string, statusCode = 200) {
+    return (
+      statusCode >= 200 &&
+      statusCode < 400 &&
+      !["GET", "HEAD", "OPTIONS"].includes((method ?? "").toUpperCase())
+    );
+  }
+
+  private isSensitiveLogKey(key: string) {
+    const normalized = key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    const words = key
+      .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+
+    return (
+      SENSITIVE_LOG_CODE_KEYS.has(normalized) ||
+      normalized === "key" ||
+      words.includes("key") ||
+      SENSITIVE_LOG_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment)) ||
+      SENSITIVE_LOG_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
+    );
   }
 
   private readErrorStatus(error: unknown) {

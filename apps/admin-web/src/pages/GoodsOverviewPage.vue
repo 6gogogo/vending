@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import type {
   DeviceRecord,
@@ -15,7 +15,8 @@ import type {
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
 import { useAdminSessionStore } from "../stores/session";
-import { formatDateTime } from "../utils/datetime";
+import { formatDate as formatDateInBeijing, formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 const sessionStore = useAdminSessionStore();
 const canManageGoods = computed(() => sessionStore.can("goods:manage"));
@@ -42,6 +43,13 @@ const loading = ref(false);
 const saving = ref(false);
 const uploadingImage = ref(false);
 const message = ref<{ type: "success" | "error"; text: string }>();
+const transferConfirmation = ref<{
+  rows: Array<{ label: string; value: string }>;
+}>();
+const transferConfirmationDialog = ref<HTMLDialogElement>();
+const transferConfirmationCancelButton = ref<HTMLButtonElement>();
+let transferConfirmationResolver: ((confirmed: boolean) => void) | undefined;
+let transferConfirmationPreviousFocus: HTMLElement | undefined;
 const editingCategoryId = ref("");
 const editingPolicyId = ref("");
 const selectedGoodsStatusId = ref("");
@@ -164,7 +172,7 @@ const sourceGoodsOptions = computed(() => {
     { goodsId: string; goodsName: string; currentStock: number; batchCount: number; nearestExpiryAt?: string }
   >();
 
-  for (const batch of (warehouseSnapshot.value?.availableBatches ?? []).filter(
+  for (const batch of (warehouseSnapshot.value?.transferableBatches ?? []).filter(
     (entry) => entry.deviceCode === transferForm.fromCode
   )) {
     const existing = grouped.get(batch.goodsId);
@@ -189,10 +197,11 @@ const sourceGoodsOptions = computed(() => {
 });
 
 const sourceBatchOptions = computed(() =>
-  (warehouseSnapshot.value?.availableBatches ?? [])
+  (warehouseSnapshot.value?.transferableBatches ?? [])
     .filter(
       (entry) =>
-        entry.deviceCode === transferForm.fromCode && entry.goodsId === transferForm.goodsId
+        entry.deviceCode === transferForm.fromCode &&
+        entry.goodsId === transferForm.goodsId
     )
     .sort(compareBatchByExpiry)
 );
@@ -201,7 +210,50 @@ const selectedBatch = computed(() =>
   sourceBatchOptions.value.find((entry) => entry.batchId === transferForm.sourceBatchId)
 );
 
-const formatDate = (value?: string) => (value ? value.slice(0, 10) : "-");
+const requestTransferConfirmation = async (value: NonNullable<typeof transferConfirmation.value>) => {
+  if (transferConfirmationResolver) {
+    return false;
+  }
+
+  transferConfirmationPreviousFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+  transferConfirmation.value = value;
+  const result = new Promise<boolean>((resolve) => {
+    transferConfirmationResolver = resolve;
+  });
+  await nextTick();
+  if (transferConfirmationDialog.value && !transferConfirmationDialog.value.open) {
+    transferConfirmationDialog.value.showModal();
+  }
+  transferConfirmationCancelButton.value?.focus();
+  return result;
+};
+
+const restoreTransferConfirmationFocus = async () => {
+  const target = transferConfirmationPreviousFocus;
+  transferConfirmationPreviousFocus = undefined;
+  await nextTick();
+
+  if (target?.isConnected && !target.matches(":disabled") && target.getAttribute("aria-disabled") !== "true") {
+    target.focus();
+  }
+};
+
+const answerTransferConfirmation = (confirmed: boolean) => {
+  const resolve = transferConfirmationResolver;
+  transferConfirmationResolver = undefined;
+  if (transferConfirmationDialog.value?.open) {
+    transferConfirmationDialog.value.close();
+  }
+  transferConfirmation.value = undefined;
+  resolve?.(confirmed);
+
+  if (!confirmed) {
+    void restoreTransferConfirmationFocus();
+  }
+};
+
+const formatDate = (value?: string) => formatDateInBeijing(value);
 const formatBatchDate = (value?: string) => (value ? formatDate(value) : "未设保质期");
 
 const formatStockHint = (
@@ -213,8 +265,10 @@ const formatStockHint = (
       : `${item.stock}`;
   const tags: string[] = [];
 
-  if (item.status === "empty" || item.status === "low") {
+  if (item.status === "empty") {
     tags.push("缺货");
+  } else if (item.status === "low") {
+    tags.push("低库存");
   }
 
   if (item.nearestExpiryAt) {
@@ -295,7 +349,6 @@ const closeEditor = () => {
 const showMessage = (type: "success" | "error", text: string) => {
   message.value = { type, text };
 };
-
 const load = async () => {
   loading.value = true;
   try {
@@ -326,7 +379,7 @@ const load = async () => {
       sourceBatchOptions.value[0]?.batchId ??
       "";
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", error instanceof Error ? `货品总览加载失败：${error.message}` : "货品总览加载失败");
   } finally {
     loading.value = false;
   }
@@ -341,7 +394,7 @@ const uploadGoodsImage = async (event: Event) => {
   }
 
   if (!canUploadImages.value) {
-    showMessage("error", "操作失败：当前账号没有图片上传权限");
+    showMessage("error", "当前账号没有图片上传权限，不能上传货品图片。");
     return;
   }
 
@@ -349,9 +402,9 @@ const uploadGoodsImage = async (event: Event) => {
   try {
     const uploaded = await adminApi.uploadImage(file);
     goodsForm.imageUrl = uploaded.url;
-    showMessage("success", "操作成功");
+    showMessage("success", "图片已上传，保存货品后会同步展示到小程序和后台。");
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `图片上传失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     uploadingImage.value = false;
     if (target) {
@@ -362,17 +415,18 @@ const uploadGoodsImage = async (event: Event) => {
 
 const saveGoods = async () => {
   if (!canManageGoods.value) {
-    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    showMessage("error", "当前账号没有货品资料管理权限，不能新增货品。");
     return;
   }
 
   if (!goodsForm.goodsCode.trim() || !goodsForm.name.trim()) {
-    showMessage("error", "操作失败：请先填写商品编号和商品名称");
+    showMessage("error", "新增货品前请先填写商品编号和商品名称。");
     return;
   }
 
   saving.value = true;
   try {
+    const savedGoodsName = goodsForm.name.trim() || goodsForm.fullName.trim() || goodsForm.goodsCode.trim();
     await adminApi.createGoods({
       goodsCode: goodsForm.goodsCode.trim(),
       name: goodsForm.name.trim(),
@@ -387,10 +441,10 @@ const saveGoods = async () => {
     });
     resetGoodsForm();
     closeEditor();
-    showMessage("success", "操作成功");
+    showMessage("success", `货品“${savedGoodsName}”已新增，可继续配置库存、阈值或柜机分布。`);
     await load();
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `新增货品失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -398,17 +452,17 @@ const saveGoods = async () => {
 
 const toggleGoodsStatus = async (goods = selectedGoodsForStatus.value) => {
   if (!canManageGoods.value) {
-    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    showMessage("error", "当前账号没有货品资料管理权限，不能修改货品状态。");
     return;
   }
 
   if (!goods) {
-    showMessage("error", "操作失败：请先选择货物");
+    showMessage("error", "请先选择要停用或重新启用的货品。");
     return;
   }
 
   const nextStatus = goods.status === "inactive" ? "active" : "inactive";
-  const actionLabel = nextStatus === "inactive" ? "删除货物" : "重新启用货物";
+  const actionLabel = nextStatus === "inactive" ? "删除货品" : "重新启用货品";
 
   if (!window.confirm(`确认${actionLabel}“${goods.name}”吗？`)) {
     return;
@@ -419,13 +473,18 @@ const toggleGoodsStatus = async (goods = selectedGoodsForStatus.value) => {
     await adminApi.updateGoods(goods.goodsId, {
       status: nextStatus
     });
-    showMessage("success", "操作成功");
+    showMessage(
+      "success",
+      nextStatus === "inactive"
+        ? `货品“${goods.name}”已停用，历史领取和库存记录仍会保留。`
+        : `货品“${goods.name}”已重新启用，可继续用于补货和领取。`
+    );
     if (editorMode.value === "goods-delete") {
       closeEditor();
     }
     await load();
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `修改货品状态失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -441,17 +500,19 @@ const editCategory = (item: GoodsCategoryRecord) => {
 
 const saveCategory = async () => {
   if (!canManageGoods.value) {
-    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    showMessage("error", "当前账号没有货品资料管理权限，不能维护分类。");
     return;
   }
 
   if (!categoryForm.name.trim()) {
-    showMessage("error", "操作失败：请先填写分类名称");
+    showMessage("error", "保存分类前请先填写分类名称。");
     return;
   }
 
   saving.value = true;
   try {
+    const wasEditing = Boolean(editingCategoryId.value);
+    const savedCategoryName = categoryForm.name.trim();
     if (editingCategoryId.value) {
       await adminApi.updateGoodsCategory(editingCategoryId.value, {
         name: categoryForm.name.trim(),
@@ -467,10 +528,10 @@ const saveCategory = async () => {
     }
     resetCategoryForm();
     closeEditor();
-    showMessage("success", "操作成功");
+    showMessage("success", wasEditing ? `分类“${savedCategoryName}”已保存。` : `分类“${savedCategoryName}”已新增。`);
     await load();
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `保存分类失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -478,7 +539,7 @@ const saveCategory = async () => {
 
 const toggleCategoryStatus = async (item: GoodsCategoryRecord) => {
   if (!canManageGoods.value) {
-    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    showMessage("error", "当前账号没有货品资料管理权限，不能修改分类状态。");
     return;
   }
 
@@ -494,10 +555,15 @@ const toggleCategoryStatus = async (item: GoodsCategoryRecord) => {
     await adminApi.updateGoodsCategory(item.id, {
       status: nextStatus
     });
-    showMessage("success", "操作成功");
+    showMessage(
+      "success",
+      nextStatus === "inactive"
+        ? `分类“${item.name}”已停用，已有货品不会被删除。`
+        : `分类“${item.name}”已重新启用，可继续分配给货品。`
+    );
     await load();
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `修改分类状态失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -533,7 +599,7 @@ const editPolicy = (policy: GoodsAlertPolicy) => {
 
 const savePolicy = async () => {
   if (!canManageGoods.value) {
-    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    showMessage("error", "当前账号没有货品资料管理权限，不能维护预警模板。");
     return;
   }
 
@@ -555,12 +621,14 @@ const savePolicy = async () => {
     });
 
   if (!policyForm.name.trim() || !thresholds.length) {
-    showMessage("error", "操作失败：请先填写模板名称并至少配置一个货品阈值");
+    showMessage("error", "保存模板前请填写模板名称，并至少配置一个有效货品阈值。");
     return;
   }
 
   saving.value = true;
   try {
+    const wasEditing = Boolean(editingPolicyId.value);
+    const savedPolicyName = policyForm.name.trim();
     if (editingPolicyId.value) {
       await adminApi.updateGoodsAlertPolicy(editingPolicyId.value, {
         name: policyForm.name.trim(),
@@ -578,10 +646,15 @@ const savePolicy = async () => {
     }
     resetPolicyForm();
     closeEditor();
-    showMessage("success", "操作成功");
+    showMessage(
+      "success",
+      wasEditing
+        ? `预警模板“${savedPolicyName}”已保存，命中柜机会按新阈值提醒。`
+        : `预警模板“${savedPolicyName}”已新增，可下发到柜机。`
+    );
     await load();
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `保存预警模板失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -589,12 +662,12 @@ const savePolicy = async () => {
 
 const applyPolicies = async () => {
   if (!canManageGoods.value) {
-    showMessage("error", "操作失败：当前账号没有货品资料管理权限");
+    showMessage("error", "当前账号没有货品资料管理权限，不能下发预警模板。");
     return;
   }
 
   if (!assignForm.deviceCodes.length || !assignForm.policyIds.length) {
-    showMessage("error", "操作失败：请先选择柜机和模板");
+    showMessage("error", "下发模板前请先选择柜机和模板。");
     return;
   }
 
@@ -612,10 +685,11 @@ const applyPolicies = async () => {
       policyIds: [...assignForm.policyIds],
       mode: assignForm.mode
     });
-    showMessage("success", "操作成功");
+    const modeLabel = assignForm.mode === "replace" ? "替换" : assignForm.mode === "unbind" ? "解绑" : "绑定";
+    showMessage("success", `已${modeLabel} ${assignForm.deviceCodes.length} 台柜机的预警模板，系统会按新设置生成低库存提醒。`);
     await load();
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `下发预警模板失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -623,7 +697,7 @@ const applyPolicies = async () => {
 
 const submitTransfer = async () => {
   if (!canTransferWarehouse.value) {
-    showMessage("error", "操作失败：当前账号没有仓库调拨权限");
+    showMessage("error", "当前账号没有仓库调拨权限，不能提交库存调拨。");
     return;
   }
 
@@ -633,27 +707,107 @@ const submitTransfer = async () => {
     !transferForm.goodsId ||
     !transferForm.sourceBatchId
   ) {
-    showMessage("error", "操作失败：请先选择完整的调拨信息和来源批次");
+    showMessage("error", "提交调拨前请先选择来源、目标、货品和来源批次。");
+    return;
+  }
+
+  if (transferForm.fromCode === transferForm.toCode) {
+    showMessage("error", "调拨来源与目标不能相同，请重新选择去向。");
+    return;
+  }
+
+  if (
+    !selectedBatch.value ||
+    selectedBatch.value.batchId !== transferForm.sourceBatchId ||
+    selectedBatch.value.deviceCode !== transferForm.fromCode ||
+    selectedBatch.value.goodsId !== transferForm.goodsId
+  ) {
+    showMessage("error", "所选来源批次已不可用，请重新选择货品和批次。");
+    return;
+  }
+
+  if (
+    !Number.isSafeInteger(transferForm.quantity) ||
+    transferForm.quantity <= 0 ||
+    !Number.isSafeInteger(selectedBatch.value.remainingQuantity) ||
+    selectedBatch.value.remainingQuantity <= 0 ||
+    transferForm.quantity > selectedBatch.value.remainingQuantity
+  ) {
+    showMessage("error", `调拨数量必须是 1 至 ${selectedBatch.value.remainingQuantity} 之间的整数。`);
+    return;
+  }
+
+  const sourceExists = locationOptions.value.some((item) => item.code === transferForm.fromCode);
+  const targetExists = locationOptions.value.some((item) => item.code === transferForm.toCode);
+
+  if (!sourceExists || !targetExists) {
+    showMessage("error", "调拨来源或目标已不在可用位置列表中，请刷新后重试。");
+    return;
+  }
+
+  if (
+    selectedBatch.value.expiresAt &&
+    Date.parse(selectedBatch.value.expiresAt) <= Date.now()
+  ) {
+    showMessage("error", "所选批次已经过期，不能进入正常调拨流程。");
+    return;
+  }
+
+  const transferDraft = {
+    fromCode: transferForm.fromCode,
+    toCode: transferForm.toCode,
+    goodsId: transferForm.goodsId,
+    quantity: transferForm.quantity,
+    sourceBatchId: transferForm.sourceBatchId,
+    note: transferForm.note.trim() || undefined
+  };
+  const selectedBatchSnapshot = selectedBatch.value;
+  const goodsName = resolveGoodsName(transferDraft.goodsId);
+  const sourceName = locationOptions.value.find((item) => item.code === transferDraft.fromCode)?.name;
+  const targetName = locationOptions.value.find((item) => item.code === transferDraft.toCode)?.name;
+  const confirmed = await requestTransferConfirmation({
+    rows: [
+      { label: "来源", value: `${sourceName ?? transferDraft.fromCode}（${transferDraft.fromCode}）` },
+      { label: "目标", value: `${targetName ?? transferDraft.toCode}（${transferDraft.toCode}）` },
+      { label: "货品", value: goodsName },
+      { label: "来源批次", value: transferDraft.sourceBatchId },
+      { label: "批次到期", value: formatBatchDate(selectedBatchSnapshot.expiresAt) },
+      { label: "批次可用量", value: `${selectedBatchSnapshot.remainingQuantity} 件` },
+      { label: "本次调拨", value: `${transferDraft.quantity} 件` }
+    ]
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
+  const latestBatch = (warehouseSnapshot.value?.transferableBatches ?? []).find(
+    (entry) =>
+      entry.batchId === transferDraft.sourceBatchId &&
+      entry.deviceCode === transferDraft.fromCode &&
+      entry.goodsId === transferDraft.goodsId
+  );
+
+  if (!latestBatch || latestBatch.remainingQuantity < transferDraft.quantity) {
+    showMessage("error", "确认期间批次可用量发生变化，请返回刷新后重新核对。");
+    await restoreTransferConfirmationFocus();
     return;
   }
 
   saving.value = true;
   try {
-    await adminApi.createInventoryTransfer({
-      fromCode: transferForm.fromCode,
-      toCode: transferForm.toCode,
-      goodsId: transferForm.goodsId,
-      quantity: transferForm.quantity,
-      sourceBatchId: transferForm.sourceBatchId,
-      note: transferForm.note || undefined
-    });
+    await adminApi.createInventoryTransfer(transferDraft);
     transferForm.note = "";
-    showMessage("success", "操作成功");
+    showMessage(
+      "success",
+      `已调拨 ${goodsName} x${transferDraft.quantity}，来源批次 ${transferDraft.sourceBatchId}，目标 ${transferDraft.toCode}。`
+    );
     await load();
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `提交调拨失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
+    await restoreTransferConfirmationFocus();
   }
 };
 
@@ -663,12 +817,12 @@ const toggleAlertBucket = (bucket: "low" | "empty") => {
 
 const exportOverview = async () => {
   if (!canExportGoods.value) {
-    showMessage("error", "操作失败：当前账号没有导出货品数据权限");
+    showMessage("error", "当前账号没有导出货品数据权限。");
     return;
   }
 
   if (!sessionStore.token) {
-    showMessage("error", "操作失败：登录状态已失效");
+    showMessage("error", "导出失败：登录状态已失效，请重新登录后再试。");
     return;
   }
 
@@ -680,9 +834,9 @@ const exportOverview = async () => {
     anchor.download = file.filename;
     anchor.click();
     window.URL.revokeObjectURL(url);
-    showMessage("success", "操作成功");
+    showMessage("success", `货品总览导出文件已生成：${file.filename}。`);
   } catch (error) {
-    showMessage("error", error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showMessage("error", `货品总览导出失败：${readErrorMessage(error, "请稍后重试")}`);
   }
 };
 
@@ -734,6 +888,11 @@ watch(
 );
 
 onMounted(load);
+onUnmounted(() => {
+  transferConfirmationResolver?.(false);
+  transferConfirmationResolver = undefined;
+  transferConfirmationPreviousFocus = undefined;
+});
 
 function compareBatchByExpiry(left: GoodsBatchRecord, right: GoodsBatchRecord) {
   const leftExpiry = left.expiresAt ?? "9999-12-31T23:59:59.999Z";
@@ -768,7 +927,7 @@ function resolveGoodsName(goodsId: string) {
     <section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
-          <p class="admin-kicker">货物总览</p>
+          <p class="admin-kicker">货品总览</p>
           <h3 class="admin-page__section-title">维护货品主数据、分类、阈值模板、库存分布与调拨</h3>
         </div>
         <div class="admin-toolbar">
@@ -780,7 +939,14 @@ function resolveGoodsName(goodsId: string) {
         </div>
       </div>
 
-      <div v-if="message" class="admin-note" :class="{ 'goods-message--error': message.type === 'error' }">
+      <div
+        v-if="message"
+        class="admin-note"
+        :class="{ 'goods-message--error': message.type === 'error' }"
+        :role="message.type === 'error' ? 'alert' : 'status'"
+        :aria-live="message.type === 'error' ? 'assertive' : 'polite'"
+        aria-atomic="true"
+      >
         {{ message.text }}
       </div>
 
@@ -841,8 +1007,8 @@ function resolveGoodsName(goodsId: string) {
           <h3 class="admin-page__section-title">按商品台账方式展示编号、全称、分类、包装和状态</h3>
         </div>
         <div class="admin-toolbar">
-          <button v-if="canManageGoods" class="admin-button" @click="openEditor('goods')">新增货物</button>
-          <button v-if="canManageGoods" class="admin-button admin-button--ghost" @click="openEditor('goods-delete')">删除货物</button>
+          <button v-if="canManageGoods" class="admin-button" @click="openEditor('goods')">新增货品</button>
+          <button v-if="canManageGoods" class="admin-button admin-button--ghost" @click="openEditor('goods-delete')">删除货品</button>
           <button v-if="canManageGoods" class="admin-button admin-button--ghost" @click="openEditor('category')">编辑分类</button>
         </div>
       </div>
@@ -894,7 +1060,7 @@ function resolveGoodsName(goodsId: string) {
                   <RouterLink v-if="canAdjustStock" class="admin-link" :to="`/goods/${item.goodsId}?action=inbound`">手动进货</RouterLink>
                   <RouterLink v-if="canAdjustStock" class="admin-link" :to="`/goods/${item.goodsId}?action=outbound`">手动退货</RouterLink>
                   <button v-if="canManageGoods" class="admin-text-button" @click="toggleGoodsStatus(item)">
-                    {{ item.status === "inactive" ? "重新启用" : "删除货物" }}
+                    {{ item.status === "inactive" ? "重新启用" : "删除货品" }}
                   </button>
                 </div>
               </td>
@@ -1045,7 +1211,7 @@ function resolveGoodsName(goodsId: string) {
             </thead>
             <tbody>
               <tr v-for="item in policies" :key="`inline-${item.id}`">
-                <td><input :checked="assignForm.policyIds.includes(item.id)" type="checkbox" :disabled="!canManageGoods" @change="toggleSelection(assignForm.policyIds, item.id)" /></td>
+                <td><input :checked="assignForm.policyIds.includes(item.id)" type="checkbox" :aria-label="`选择模板 ${item.name}`" :disabled="!canManageGoods" @change="toggleSelection(assignForm.policyIds, item.id)" /></td>
                 <td><span class="admin-table__strong">{{ item.name }}</span><span class="admin-table__subtext">{{ item.id }}</span></td>
                 <td><div class="goods-distribution-list"><span v-for="threshold in item.thresholds" :key="`${item.id}-${threshold.goodsId}`" class="admin-table__subtext">{{ threshold.goodsName }} ≤ {{ threshold.lowStockThreshold }}</span></div></td>
                 <td class="admin-code">{{ item.applicableDeviceCodes.length }}</td>
@@ -1094,7 +1260,7 @@ function resolveGoodsName(goodsId: string) {
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
-            <span class="admin-kicker">货物调拨</span>
+            <span class="admin-kicker">货品调拨</span>
             <h3 class="admin-panel__title">在柜机与本地仓库之间快速调拨物资</h3>
           </div>
         </div>
@@ -1145,10 +1311,11 @@ function resolveGoodsName(goodsId: string) {
           <div v-if="selectedBatch" class="admin-note">
             当前选择批次：保质期 {{ formatBatchDate(selectedBatch.expiresAt) }}，可调拨 {{ selectedBatch.remainingQuantity }} 件。
           </div>
-          <div class="admin-note">货物调拨和仓库流转只维护本地库存台账，不会在平台创建调拨、补货或退货订单。</div>
-          <button class="admin-button" :disabled="saving" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
+          <div v-else class="admin-note">当前来源没有可调拨批次；已过期批次不能进入正常调拨流程。</div>
+          <div class="admin-note">货品调拨和仓库流转只维护本地库存台账，不会在平台创建调拨、补货或退货订单。</div>
+          <button class="admin-button" :disabled="saving || !selectedBatch" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
         </div>
-        <div v-else class="admin-note">当前账号只能查看库存流向，提交货物调拨需要“仓库调拨”权限。</div>
+        <div v-else class="admin-note">当前账号只能查看库存流向，提交货品调拨需要“仓库调拨”权限。</div>
       </article>
 
       <aside class="admin-grid">
@@ -1156,7 +1323,7 @@ function resolveGoodsName(goodsId: string) {
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">最近调拨</span>
-              <h3 class="admin-panel__title">恢复货物调拨栏，并同步显示最近流向</h3>
+              <h3 class="admin-panel__title">最近货品调拨流向</h3>
             </div>
           </div>
           <table v-if="warehouseSnapshot?.transfers.length" class="admin-table">
@@ -1200,12 +1367,64 @@ function resolveGoodsName(goodsId: string) {
       </aside>
     </section>
 
+    <dialog
+      v-if="transferConfirmation"
+      ref="transferConfirmationDialog"
+      class="goods-transfer-confirm admin-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="goods-transfer-confirm-title"
+      aria-describedby="goods-transfer-confirm-description"
+      @cancel.prevent="answerTransferConfirmation(false)"
+    >
+      <header class="goods-transfer-confirm__head">
+        <div>
+          <p class="admin-kicker">第二步 · 提交前核对</p>
+          <h2 id="goods-transfer-confirm-title" class="goods-transfer-confirm__title">最后核对库存调拨</h2>
+        </div>
+        <button
+          type="button"
+          class="admin-button admin-button--ghost"
+          aria-label="关闭库存调拨核对对话框"
+          @click="answerTransferConfirmation(false)"
+        >
+          取消
+        </button>
+      </header>
+
+      <p id="goods-transfer-confirm-description" class="admin-copy">
+        请逐项核对来源、目标、批次和数量。确认后会立即扣减来源批次并写入调拨记录。
+      </p>
+      <dl class="goods-transfer-confirm__summary">
+        <div v-for="row in transferConfirmation.rows" :key="row.label">
+          <dt>{{ row.label }}</dt>
+          <dd>{{ row.value }}</dd>
+        </div>
+      </dl>
+      <div class="admin-note goods-transfer-confirm__warning">
+        如任一信息不正确，请返回修改；不要通过连续点击重复提交。
+      </div>
+      <div class="goods-transfer-confirm__actions">
+        <button
+          ref="transferConfirmationCancelButton"
+          type="button"
+          class="admin-button admin-button--ghost"
+          @click="answerTransferConfirmation(false)"
+        >
+          返回修改
+        </button>
+        <button type="button" class="admin-button admin-button--danger" @click="answerTransferConfirmation(true)">
+          确认并立即调拨
+        </button>
+      </div>
+    </dialog>
+
     <div v-if="editorMode" class="goods-editor-backdrop" @click.self="closeEditor">
       <aside class="goods-editor admin-panel">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">版面集成</span>
-            <h3 class="admin-panel__title">{{ editorMode === "goods" ? "新增货物" : editorMode === "goods-delete" ? "删除货物" : editorMode === "category" ? "编辑货品分类" : editingPolicyId ? "编辑阈值模板" : "新增阈值模板" }}</h3>
+            <h3 class="admin-panel__title">{{ editorMode === "goods" ? "新增货品" : editorMode === "goods-delete" ? "删除货品" : editorMode === "category" ? "编辑货品分类" : editingPolicyId ? "编辑阈值模板" : "新增阈值模板" }}</h3>
           </div>
           <button class="admin-button admin-button--ghost" @click="closeEditor">关闭</button>
         </div>
@@ -1221,12 +1440,12 @@ function resolveGoodsName(goodsId: string) {
           <label class="admin-field"><span class="admin-field__label">商品规格</span><input v-model="goodsForm.specification" class="admin-input" placeholder="例如 500ml / 12枚装" /></label>
           <label class="admin-field"><span class="admin-field__label">厂家</span><input v-model="goodsForm.manufacturer" class="admin-input" placeholder="例如 可口可乐公司" /></label>
           <label class="admin-field"><span class="admin-field__label">商品图片</span><input class="admin-input" type="file" accept="image/*" :disabled="!canUploadImages" @change="uploadGoodsImage" /><span class="admin-table__subtext">{{ canUploadImages ? uploadingImage ? "上传中" : "选择本地图片后会自动上传" : "当前账号没有图片上传权限" }}</span><img v-if="goodsForm.imageUrl" class="goods-overview-preview" :src="goodsForm.imageUrl" alt="货品图片预览" /></label>
-          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving || !canManageGoods" @click="saveGoods">{{ saving ? "保存中" : "新增货物" }}</button><button class="admin-button admin-button--ghost" @click="resetGoodsForm">清空表单</button></div>
+          <div class="admin-toolbar goods-editor__actions"><button class="admin-button" :disabled="saving || !canManageGoods" @click="saveGoods">{{ saving ? "保存中" : "新增货品" }}</button><button class="admin-button admin-button--ghost" @click="resetGoodsForm">清空表单</button></div>
         </div>
 
         <div v-else-if="editorMode === 'goods-delete'" class="goods-overview-form goods-overview-form--single">
           <label class="admin-field">
-            <span class="admin-field__label">选择货物</span>
+            <span class="admin-field__label">选择货品</span>
             <select v-model="selectedGoodsStatusId" class="admin-select">
               <option v-for="item in sortedCatalog" :key="item.goodsId" :value="item.goodsId">
                 {{ item.name }} / {{ item.goodsCode }} / {{ item.status === "inactive" ? "已停用" : "正常" }}
@@ -1234,13 +1453,13 @@ function resolveGoodsName(goodsId: string) {
             </select>
           </label>
           <div v-if="selectedGoodsForStatus" class="admin-note">
-            当前货物：{{ selectedGoodsForStatus.name }}，状态：
+            当前货品：{{ selectedGoodsForStatus.name }}，状态：
             {{ selectedGoodsForStatus.status === "inactive" ? "已停用" : "正常" }}。
             删除会按逻辑停用处理，不会清掉历史记录。
           </div>
           <div class="admin-toolbar goods-editor__actions">
             <button class="admin-button admin-button--danger" :disabled="saving || !canManageGoods || !selectedGoodsForStatus" @click="toggleGoodsStatus()">
-              {{ saving ? "处理中" : selectedGoodsForStatus?.status === "inactive" ? "重新启用货物" : "删除货物" }}
+              {{ saving ? "处理中" : selectedGoodsForStatus?.status === "inactive" ? "重新启用货品" : "删除货品" }}
             </button>
           </div>
         </div>
@@ -1303,8 +1522,14 @@ function resolveGoodsName(goodsId: string) {
 
 .goods-table-actions {
   display: grid;
-  gap: 4px;
-  justify-items: start;
+  grid-template-columns: repeat(2, max-content);
+  align-items: center;
+  gap: 5px 8px;
+  min-width: 168px;
+}
+
+.goods-table-actions :is(.admin-link, .admin-button) {
+  white-space: nowrap;
 }
 
 .goods-contained-table {
@@ -1313,7 +1538,23 @@ function resolveGoodsName(goodsId: string) {
 }
 
 .goods-contained-table .admin-table {
-  min-width: 1080px;
+  min-width: 1180px;
+}
+
+.goods-contained-table .admin-table th:last-child,
+.goods-contained-table .admin-table td:last-child {
+  position: sticky;
+  right: 12px;
+  z-index: 2;
+  min-width: 188px;
+  white-space: normal;
+  background: var(--admin-panel);
+  box-shadow: -1px 0 0 var(--admin-line);
+}
+
+.goods-contained-table .admin-table th:last-child {
+  z-index: 3;
+  background: #f8fafb;
 }
 
 .goods-category-list,
@@ -1355,6 +1596,80 @@ function resolveGoodsName(goodsId: string) {
   margin-top: 12px;
 }
 
+.goods-transfer-confirm::backdrop {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.goods-transfer-confirm {
+  box-sizing: border-box;
+  width: min(620px, calc(100% - 48px));
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--admin-line);
+  border-top: 4px solid #b42318;
+  box-shadow: 0 22px 55px rgba(15, 23, 42, 0.28);
+}
+
+.goods-transfer-confirm[open] {
+  display: grid;
+}
+
+.goods-transfer-confirm__head,
+.goods-transfer-confirm__actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.goods-transfer-confirm__title {
+  margin: 5px 0 0;
+  color: var(--admin-text);
+  font-size: 1.3rem;
+}
+
+.goods-transfer-confirm__summary {
+  display: grid;
+  margin: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.goods-transfer-confirm__summary > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+  padding: 11px 13px;
+}
+
+.goods-transfer-confirm__summary > div + div {
+  border-top: 1px solid var(--admin-line);
+}
+
+.goods-transfer-confirm__summary dt {
+  color: var(--admin-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.goods-transfer-confirm__summary dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.goods-transfer-confirm__warning {
+  color: #8a2c24;
+  background: #fff1ef;
+  border-color: #e4b7b2;
+}
+
 .goods-editor-backdrop {
   position: fixed;
   inset: 0;
@@ -1391,6 +1706,26 @@ function resolveGoodsName(goodsId: string) {
   .goods-overview-form,
   .goods-threshold-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .goods-transfer-confirm {
+    width: calc(100% - 24px);
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    margin: auto auto 12px;
+  }
+
+  .goods-transfer-confirm__head,
+  .goods-transfer-confirm__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .goods-transfer-confirm__summary > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }
 </style>

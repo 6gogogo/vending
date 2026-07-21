@@ -4,6 +4,8 @@
 
 这些脚本现在会先读取 `apps/api/.env*`，再读取 `sandbox/.env*`。如果你已经把第三方地址和密钥统一写在 `apps/api/.env`，`sandbox` 可以直接复用，不需要再填第二份。
 
+安全默认值：`LOCAL_API_BASE_URL` 必须指向 `localhost`、`127.0.0.0/8` 或 `::1`。非回环地址会在发出请求前被拒绝；只有明确的外部联调任务才可临时设置 `ALLOW_REMOTE_LOCAL_API=true`，完成后应立即恢复为 `false`。
+
 ## 根目录可直接执行的命令
 
 ### 1. 查询本地柜机详情
@@ -68,7 +70,7 @@ npm run sandbox:events -- 订单号
 补充说明：
 
 - 这个命令不需要管理员登录
-- 如果你把 `LOCAL_API_BASE_URL` 改成云端后端地址，它就会直接查云端后端事件
+- 默认禁止把 `LOCAL_API_BASE_URL` 直接改成云端地址，避免本地命令误操作远端数据
 
 ---
 
@@ -149,7 +151,7 @@ node sandbox/scripts/query-goods.mjs CAB-1001
 命令：
 
 ```bash
-npm run sandbox:door
+npm run sandbox:door -- --confirm-device=CAB-1001
 ```
 
 实际执行内容：
@@ -176,6 +178,8 @@ node sandbox/scripts/open-door.mjs sandbox/fixtures/open-door.sample.json
 补充说明：
 
 - 与 `sandbox:goods` 一样，请求测试平台前必须把演示签名参数替换成真实 `clientId/key`
+- 脚本默认拒绝发出开门请求；只有 `--confirm-device` 与载荷中的 `deviceCode` 完全一致时才会继续
+- 执行前必须先人工打开载荷文件，核对设备、用户、手机号和环境；普通本地回归不应执行这个命令
 
 ---
 
@@ -367,7 +371,7 @@ npm run sandbox:refund:api -- 订单号 交易号 退款单号 金额
 命令：
 
 ```bash
-npm run sandbox:door:probe -- 91120149 13800000002 00000001
+npm run sandbox:door:probe -- 91120149 13800000002 00000001 --confirm-device=91120149 --confirm-multiple-open-requests
 ```
 
 作用：
@@ -390,6 +394,8 @@ npm run sandbox:door:probe -- 91120149 13800000002 00000001
 
 - 默认除了 `2 / 3 / 7`，还会把 `SMARTVM_EXTRA_PAY_STYLES` 里的自定义支付方式名一起测
 - 多个自定义支付方式可用英文逗号分隔，例如 `SMARTVM_EXTRA_PAY_STYLES=duan3,duan4`
+- 这个命令会连续发出多次开门请求，所以同时要求设备编号确认和 `--confirm-multiple-open-requests` 二次确认；少任一项都会在网络请求前终止
+- 普通本地回归禁止执行此探测，只能在明确的外部联调窗口中使用
 
 ---
 
@@ -449,8 +455,9 @@ node sandbox/scripts/upsert-mock-device.mjs sandbox/fixtures/mock-device.sample.
 
 作用：
 
-- 把示例模拟柜机写入本地后端内存仓储
+- 把示例模拟柜机写入本地后端的隔离持久化数据
 - 适合你快速准备一个“有 N 个商品库存”的测试柜机
+- 会重置同一模拟柜机的货品与库存批次，属于破坏性测试夹具操作
 
 目标地址：
 
@@ -459,6 +466,17 @@ node sandbox/scripts/upsert-mock-device.mjs sandbox/fixtures/mock-device.sample.
 依赖环境变量：
 
 - `LOCAL_API_BASE_URL`
+- `ENABLE_LOCAL_MOCK_DEVICE_API=true`（设置在本地 API 进程）
+- `API_HOST=127.0.0.1`（或其他回环地址）
+- `API_DATA_FILE` 必须指向专用隔离数据文件
+- `SANDBOX_ADMIN_TOKEN`，或可完成本地管理员登录的 `SANDBOX_ADMIN_PHONE` / `SANDBOX_ADMIN_CODE`
+
+安全边界：
+
+- 脚本会在发请求前拒绝非回环 `LOCAL_API_BASE_URL`
+- 后端会再次拒绝生产环境、非回环监听、未显式开启的模拟接口
+- 模拟接口不能覆盖真实设备档案
+- 写入结果会随 `API_DATA_FILE` 持久化，重启不会自动恢复；不要对日常或真实数据文件执行
 
 ---
 
@@ -563,6 +581,61 @@ node sandbox/scripts/verify-sms-code.mjs 13800138000 123456
 - 如果验证码不正确，命令会输出结果并以非 0 退出码结束
 - 目前脚本只验证中国大陆手机号格式，即 11 位手机号
 
+---
+
+### 13. 公网/预发布外部服务预检
+
+命令：
+
+```bash
+npm run sandbox:external-preflight -- --profile=production --api-base-url https://5gogogo.top/api --device-code 91120149
+```
+
+实际执行内容：
+
+```bash
+node sandbox/scripts/external-preflight.mjs --profile=production --api-base-url https://5gogogo.top/api --device-code 91120149
+```
+
+作用：
+
+- 汇总检查公网 / 预发布 API、生产环境安全门禁、SmartVM、短信验证码和真实支付配置
+- 默认只做无副作用检查：SmartVM 只调用商品只读接口，支付只做配置和回调 URL 校验，不创建支付单、不扣款、不退款
+- 自动生成 `sandbox/reports/external-service-preflight-<时间>.json`
+- 自动生成 `sandbox/reports/external-service-preflight-<时间>.html`，可直接打开查看页面化结果
+
+常用参数：
+
+- `--profile=production|preprod`：选择正式公网或预发布检查档位；正式公网会要求 `NODE_ENV=production` 或 `APP_ENV=production`
+- `--api-base-url`：公网 API 地址，可传 `https://域名/api` 或 `https://域名`
+- `SANDBOX_ADMIN_TOKEN`：仅从环境配置或受限的 `sandbox/.env.local` 读取后台管理员 Bearer Token，禁止通过命令行参数传入；未配置时会跳过公网支付自检接口读取，但仍会做离线支付配置自检
+- `--device-code` / `--door-num`：SmartVM 只读探测使用的测试柜机和门号
+- `--send-sms --sms-phone <手机号>`：显式发送一条真实短信验证码
+- `--skip-smartvm-probe`：只做 SmartVM 静态配置检查，不请求平台；发布验收不建议使用
+- `--output-dir <目录>`：指定报告输出目录
+- `--no-fail`：即使存在失败项也以 0 退出码结束，适合本地查看报告，不适合作为发布门禁
+
+依赖环境变量：
+
+- `PUBLIC_BASE_URL`
+- `CORS_ORIGINS`
+- `NODE_ENV` 或 `APP_ENV`
+- `SMARTVM_BASE_URL`
+- `SMARTVM_CLIENT_ID`
+- `SMARTVM_KEY`
+- `VERIFICATION_CODE_PROVIDER`
+- `VERIFICATION_CODE_PREVIEW_ENABLED`
+- `ALIYUN_SMS_ACCESS_KEY_ID`
+- `ALIYUN_SMS_ACCESS_KEY_SECRET`
+- `PAYMENT_MODE`
+- 微信支付和支付宝支付相关真实配置
+
+补充说明：
+
+- 报告只展示配置项名称、URL、检查结果和脱敏后的 SmartVM 请求，不输出任何密钥、token 或私钥内容
+- 如果要读取公网 `/payments/diagnostics`，管理员 token 需要具备 `system-settings:view` 权限
+- 发布流程见 `docs/发布与公网部署验证流程.md`，正式发布要求整体结果不得为“失败”，警告项必须在发布记录中说明
+
 ## 对应脚本文件
 
 - `sandbox/scripts/generate-signature.mjs`
@@ -579,6 +652,7 @@ node sandbox/scripts/verify-sms-code.mjs 13800138000 123456
 - `sandbox/scripts/aliyun-phone-code.mjs`
 - `sandbox/scripts/send-sms-code.mjs`
 - `sandbox/scripts/verify-sms-code.mjs`
+- `sandbox/scripts/external-preflight.mjs`
 
 ## 对应示例载荷
 
@@ -595,7 +669,7 @@ node sandbox/scripts/verify-sms-code.mjs 13800138000 123456
 1. 如果你已知柜机编号，先跑 `npm run sandbox:device -- 柜机编号`
 2. 如果你在测本地业务闭环，再跑 `npm run sandbox:mock-device`
 3. 再跑 `npm run sandbox:sign`
-4. 如果你在测测试平台柜机接口，继续跑 `npm run sandbox:goods -- 柜机编号` 和 `npm run sandbox:door`
+4. 如果你在经过单独授权的外部联调窗口测柜机接口，先跑只读的 `npm run sandbox:goods -- 柜机编号`；真实开门必须再显式加上对应的 `--confirm-device`
 5. 如果你在测本地闭环，用小程序或接口触发一次开柜
 6. 然后跑 `npm run sandbox:latest-event`
 7. 需要补测回写链路时，再跑 `npm run sandbox:payment-success` 或 `npm run sandbox:refund`

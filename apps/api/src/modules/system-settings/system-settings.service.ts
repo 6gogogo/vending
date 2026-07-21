@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type {
@@ -11,6 +11,11 @@ import type {
   SystemSettingsUpdateResult
 } from "@vm/shared-types";
 
+import {
+  assertProductionConfigurationSafety,
+  isProductionRuntime,
+  productionConfigurationSafetyCriticalKeys
+} from "../../common/config/production-safety";
 import { appendSystemAuditLog, resolveApiEnvFile } from "../../common/store/persistence";
 import { systemSettingCatalog } from "./system-settings.catalog";
 
@@ -29,15 +34,44 @@ interface ParsedEnvFile {
   groups: Map<string, string>;
 }
 
+interface SystemSettingsRuntimeAdapter {
+  envFilePath?: string;
+  appendAuditLog?: typeof appendSystemAuditLog;
+}
+
+export const SYSTEM_SETTINGS_RUNTIME_ADAPTER = Symbol(
+  "SYSTEM_SETTINGS_RUNTIME_ADAPTER"
+);
+
 const defaultGroupName = "其他配置";
 const envKeyPattern = /^[A-Z][A-Z0-9_]*$/;
+const productionConfigurationSafetyCriticalKeySet = new Set<string>(
+  productionConfigurationSafetyCriticalKeys
+);
+const runtimeEnvironmentKeys = new Set(["NODE_ENV", "APP_ENV"]);
+// 其他运行数据路径仍受当前租约路径保护；唯独在线切换租约文件会让新维护进程
+// 竞争另一把锁，从而与仍持有旧锁的 API 同时写同一账本。
+const liveCoordinationBoundaryKeys = new Set([
+  "FINANCIAL_SINGLE_WRITER_LEASE_FILE"
+]);
 
 @Injectable()
 export class SystemSettingsService {
-  constructor(@Inject(ConfigService) private readonly configService: ConfigService) {}
+  private readonly envFilePath: string;
+  private readonly appendAuditLog: typeof appendSystemAuditLog;
+
+  constructor(
+    @Inject(ConfigService) private readonly configService: ConfigService,
+    @Optional()
+    @Inject(SYSTEM_SETTINGS_RUNTIME_ADAPTER)
+    runtimeAdapter?: SystemSettingsRuntimeAdapter
+  ) {
+    this.envFilePath = runtimeAdapter?.envFilePath ?? resolveApiEnvFile();
+    this.appendAuditLog = runtimeAdapter?.appendAuditLog ?? appendSystemAuditLog;
+  }
 
   getSettings(options?: { includeSensitiveValues?: boolean }): SystemSettingsSnapshot {
-    const envFilePath = resolveApiEnvFile();
+    const envFilePath = this.envFilePath;
     const exampleFilePath = this.resolveExampleFilePath(envFilePath);
     const envFile = this.parseEnvFile(envFilePath);
     const exampleFile = this.parseEnvFile(exampleFilePath);
@@ -84,14 +118,41 @@ export class SystemSettingsService {
       }
     }
 
+    this.assertCrossSettingConstraints(nextValues);
+
     const changedKeys = snapshotBefore.settings
       .filter((entry) => entry.value !== nextValues.get(entry.key))
       .map((entry) => entry.key);
 
-    this.writeEnvFile(nextValues);
+    if (
+      changedKeys.some((key) => liveCoordinationBoundaryKeys.has(key))
+    ) {
+      throw new BadRequestException(
+        "运行中不能切换金融单写者租约文件；必须先停止 API 和运行数据维护命令，再通过受控配置变更统一修改并重启。"
+      );
+    }
 
-    for (const [key, value] of nextValues) {
-      this.configService.set(key, value);
+    if (
+      isProductionRuntime() &&
+      changedKeys.some((key) => runtimeEnvironmentKeys.has(key))
+    ) {
+      throw new BadRequestException(
+        "生产运行中不能在线修改 NODE_ENV 或 APP_ENV；请由受控部署环境管理运行模式。"
+      );
+    }
+
+    if (
+      isProductionRuntime() &&
+      changedKeys.some((key) =>
+        productionConfigurationSafetyCriticalKeySet.has(key)
+      )
+    ) {
+      const candidateConfigService = {
+        get: (key: string) =>
+          nextValues.has(key) ? nextValues.get(key) : this.configService.get(key)
+      } as unknown as ConfigService;
+
+      assertProductionConfigurationSafety(candidateConfigService);
     }
 
     const restartRequiredKeys = changedKeys.filter(
@@ -100,9 +161,16 @@ export class SystemSettingsService {
     const runtimeAppliedKeys = changedKeys.filter(
       (key) => !entriesByKey.get(key)?.restartRequired
     );
+
+    this.writeEnvFile(nextValues);
+
+    for (const key of runtimeAppliedKeys) {
+      this.configService.set(key, nextValues.get(key));
+    }
+
     const updatedAt = new Date().toISOString();
 
-    appendSystemAuditLog({
+    this.appendAuditLog({
       occurredAt: updatedAt,
       method: "PATCH",
       path: "/api/system-settings",
@@ -161,6 +229,7 @@ export class SystemSettingsService {
       description: metadata?.description ?? `${group}配置项。`,
       inputType,
       options: metadata?.options,
+      numberConstraints: metadata?.numberConstraints,
       sensitive,
       masked,
       required: metadata?.required ?? false,
@@ -171,7 +240,7 @@ export class SystemSettingsService {
   }
 
   private writeEnvFile(values: Map<string, string>) {
-    const envFilePath = resolveApiEnvFile();
+    const envFilePath = this.envFilePath;
     const exampleFilePath = this.resolveExampleFilePath(envFilePath);
     const envFile = this.parseEnvFile(envFilePath);
     const exampleFile = this.parseEnvFile(exampleFilePath);
@@ -234,6 +303,21 @@ export class SystemSettingsService {
         throw new BadRequestException(`${entry.label}必须是数字。`);
       }
 
+      const constraints = entry.numberConstraints;
+      if (constraints?.integerOnly && !Number.isSafeInteger(numericValue)) {
+        throw new BadRequestException(`${entry.label}必须是整数。`);
+      }
+      if (constraints?.min !== undefined && numericValue < constraints.min) {
+        throw new BadRequestException(
+          `${entry.label}不能小于 ${constraints.min}。`
+        );
+      }
+      if (constraints?.max !== undefined && numericValue > constraints.max) {
+        throw new BadRequestException(
+          `${entry.label}不能大于 ${constraints.max}。`
+        );
+      }
+
       if (entry.key === "PORT") {
         if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > 65535) {
           throw new BadRequestException("API 服务端口必须是 1-65535 之间的整数。");
@@ -254,6 +338,32 @@ export class SystemSettingsService {
     }
 
     return entry.inputType === "textarea" ? String(value ?? "").replace(/\r\n/g, "\n") : trimmed;
+  }
+
+  private assertCrossSettingConstraints(values: Map<string, string>) {
+    const initialDelay = this.readOptionalNumericSetting(
+      values,
+      "PAYMENT_RECONCILIATION_INITIAL_DELAY_MS"
+    );
+    const maxDelay = this.readOptionalNumericSetting(
+      values,
+      "PAYMENT_RECONCILIATION_MAX_DELAY_MS"
+    );
+
+    if (
+      initialDelay !== undefined &&
+      maxDelay !== undefined &&
+      initialDelay > maxDelay
+    ) {
+      throw new BadRequestException(
+        "支付对账首次等待毫秒不能大于支付对账最大退避毫秒。"
+      );
+    }
+  }
+
+  private readOptionalNumericSetting(values: Map<string, string>, key: string) {
+    const raw = values.get(key)?.trim();
+    return raw ? Number(raw) : undefined;
   }
 
   private normalizeBooleanValue(value: string) {

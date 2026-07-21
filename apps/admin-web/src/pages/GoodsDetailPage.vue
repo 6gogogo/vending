@@ -6,6 +6,7 @@ import type { GoodsCategory, GoodsCategoryRecord, WarehouseRecord } from "@vm/sh
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDate, formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 const route = useRoute();
 const sessionStore = useAdminSessionStore();
@@ -17,6 +18,7 @@ const goodsCategories = ref<GoodsCategoryRecord[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const uploadingImage = ref(false);
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 
 const goodsForm = ref({
   goodsCode: "",
@@ -52,6 +54,9 @@ const canManageGoods = computed(() => sessionStore.can("goods:manage"));
 const canAdjustStock = computed(() => sessionStore.can("goods:stock-adjust"));
 const canUploadImages = computed(() => sessionStore.can("uploads:images"));
 const formatDate = (value?: string) => (value ? value.slice(0, 10) : "-");
+const showActionMessage = (type: "success" | "error", text: string) => {
+  actionMessage.value = { type, text };
+};
 const filteredGoodsCategories = computed(() =>
   goodsCategories.value.filter(
     (item) => item.status === "active" && item.category === goodsForm.value.category
@@ -162,7 +167,7 @@ const saveGoods = async () => {
   }
 
   if (!canManageGoods.value) {
-    window.alert("当前账号没有货品资料管理权限。");
+    showActionMessage("error", "当前账号没有货品资料管理权限，不能保存货品信息。");
     return;
   }
 
@@ -182,6 +187,9 @@ const saveGoods = async () => {
       status: goodsForm.value.status
     });
     await load();
+    showActionMessage("success", `货品“${goodsForm.value.name}”已保存，小程序和后台会使用更新后的名称、分类、价格和状态。`);
+  } catch (error) {
+    showActionMessage("error", `保存货品失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -196,7 +204,7 @@ const uploadGoodsImage = async (event: Event) => {
   }
 
   if (!canUploadImages.value) {
-    window.alert("当前账号没有图片上传权限。");
+    showActionMessage("error", "当前账号没有图片上传权限，不能上传货品图片。");
     return;
   }
 
@@ -204,8 +212,9 @@ const uploadGoodsImage = async (event: Event) => {
   try {
     const uploaded = await adminApi.uploadImage(file);
     goodsForm.value.imageUrl = uploaded.url;
+    showActionMessage("success", "图片已上传，保存货品信息后会作为货品图片展示。");
   } catch (error) {
-    window.alert(error instanceof Error ? `操作失败：${error.message}` : "操作失败");
+    showActionMessage("error", `图片上传失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     uploadingImage.value = false;
     if (target) {
@@ -220,7 +229,7 @@ const addBatch = async () => {
   }
 
   if (!canAdjustStock.value) {
-    window.alert("当前账号没有货品库存调整权限。");
+    showActionMessage("error", "当前账号没有货品库存调整权限，不能新增补货批次。");
     return;
   }
 
@@ -234,6 +243,8 @@ const addBatch = async () => {
 
   saving.value = true;
   try {
+    const addedQuantity = batchForm.value.quantity;
+    const targetCode = batchForm.value.deviceCode;
     await adminApi.addGoodsBatch(goods.value.goodsId, {
       deviceCode: batchForm.value.deviceCode,
       quantity: batchForm.value.quantity,
@@ -247,6 +258,9 @@ const addBatch = async () => {
     batchForm.value.expiresAt = "";
     batchForm.value.note = "";
     await load();
+    showActionMessage("success", `已向 ${targetCode} 新增 ${goods.value.name} x${addedQuantity} 的补货批次，库存台账已更新。`);
+  } catch (error) {
+    showActionMessage("error", `新增补货批次失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -260,7 +274,7 @@ const removeBatch = async (batchId: string) => {
   }
 
   if (!canAdjustStock.value) {
-    window.alert("当前账号没有货品库存调整权限。");
+    showActionMessage("error", "当前账号没有货品库存调整权限，不能去除批次库存。");
     return;
   }
 
@@ -270,12 +284,16 @@ const removeBatch = async (batchId: string) => {
 
   saving.value = true;
   try {
+    const removedQuantity = form.quantity;
     await adminApi.removeGoodsBatch(batchId, {
       quantity: form.quantity,
       note: form.note || undefined,
       confirmed: true
     });
     await load();
+    showActionMessage("success", `已从批次 ${batchId} 去除 ${removedQuantity} 件，库存台账已记录调整。`);
+  } catch (error) {
+    showActionMessage("error", `批次去除失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -287,7 +305,7 @@ const saveThreshold = async (deviceCode: string) => {
   }
 
   if (!canManageGoods.value) {
-    window.alert("当前账号没有货品资料管理权限。");
+    showActionMessage("error", "当前账号没有货品资料管理权限，不能保存柜机阈值。");
     return;
   }
 
@@ -299,11 +317,21 @@ const saveThreshold = async (deviceCode: string) => {
 
   saving.value = true;
   try {
+    const enabled = form.enabled;
+    const lowStockThreshold = form.lowStockThreshold;
     await adminApi.updateDeviceGoodsThreshold(deviceCode, goods.value.goodsId, {
-      enabled: form.enabled,
-      lowStockThreshold: form.enabled ? form.lowStockThreshold : undefined
+      enabled,
+      lowStockThreshold: enabled ? lowStockThreshold : undefined
     });
     await load();
+    showActionMessage(
+      "success",
+      enabled
+        ? `${deviceCode} 的低库存提醒已开启，阈值为 ${lowStockThreshold} 件。`
+        : `${deviceCode} 的低库存提醒已关闭。`
+    );
+  } catch (error) {
+    showActionMessage("error", `保存柜机阈值失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -341,10 +369,14 @@ onMounted(load);
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
-            <span class="admin-kicker">货物详情</span>
+            <span class="admin-kicker">货品详情</span>
             <h3 class="admin-panel__title">{{ detail.goods.name }}</h3>
           </div>
-          <RouterLink class="admin-link" to="/goods">返回货物总览</RouterLink>
+          <RouterLink class="admin-link" to="/goods">返回货品总览</RouterLink>
+        </div>
+
+        <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
+          {{ actionMessage.text }}
         </div>
 
           <div class="admin-grid admin-grid--stats-4">
@@ -515,7 +547,7 @@ onMounted(load);
             <div class="admin-panel__head">
               <div>
                 <span class="admin-kicker">最近日志</span>
-                <h3 class="admin-panel__title">货物流动与阈值调整</h3>
+                <h3 class="admin-panel__title">货品流转与阈值调整</h3>
               </div>
             </div>
 
@@ -662,8 +694,8 @@ onMounted(load);
     </section>
 
     <div v-else class="admin-empty">
-      <div class="admin-empty__title">{{ loading ? "正在加载货物详情" : "未找到对应货物" }}</div>
-      <div class="admin-empty__body">请返回货物总览重新选择货品，或确认货物编号是否正确。</div>
+      <div class="admin-empty__title">{{ loading ? "正在加载货品详情" : "未找到对应货品" }}</div>
+      <div class="admin-empty__body">请返回货品总览重新选择货品，或确认货品编号是否正确。</div>
     </div>
   </section>
 </template>

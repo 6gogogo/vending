@@ -1,39 +1,40 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
-import type { DeviceRecord, DeviceStatus } from "@vm/shared-types";
+import type { DeviceRecord } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
-import { getErrorMessage } from "../../utils/error-message";
+import { formatBeijingDateTime } from "../../utils/datetime";
+import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
+import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 import { useSessionStore } from "../../stores/session";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
+const loadError = ref("");
 const deviceCards = ref<Array<{
   device: DeviceRecord;
-  pendingCount: number;
-  todayPickupCount: number;
+  pendingCount?: number;
+  todayPickupCount?: number;
+  monitoringUnavailable: boolean;
+  monitoringError?: string;
 }>>([]);
 
-const onlineCount = computed(() => deviceCards.value.filter((item) => item.device.status === "online").length);
-const pendingTotal = computed(() => deviceCards.value.reduce((sum, item) => sum + item.pendingCount, 0));
-const pickupTotal = computed(() => deviceCards.value.reduce((sum, item) => sum + item.todayPickupCount, 0));
-
-const statusLabelMap: Record<DeviceStatus, string> = {
-  online: "在线",
-  offline: "离线",
-  maintenance: "维护中"
-};
-
-const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
-  online: "success",
-  offline: "danger",
-  maintenance: "warning"
-};
+const onlineCount = computed(() => deviceCards.value.filter((item) => canOpenDevice(item.device)).length);
+const unavailableCount = computed(() => deviceCards.value.filter((item) => item.monitoringUnavailable).length);
+const pendingTotal = computed(() =>
+  deviceCards.value.reduce((sum, item) => sum + (item.monitoringUnavailable ? 0 : item.pendingCount ?? 0), 0)
+);
+const pickupTotal = computed(() =>
+  deviceCards.value.reduce((sum, item) => sum + (item.monitoringUnavailable ? 0 : item.todayPickupCount ?? 0), 0)
+);
+const loadErrorBody = computed(() =>
+  appendErrorContext(loadError.value, "当前不会把失败结果显示成“暂无柜机”。")
+);
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -53,32 +54,39 @@ const load = async () => {
           return {
             device,
             pendingCount: detail.pendingTasks.length,
-            todayPickupCount: detail.businessDayServedUsers.length
+            todayPickupCount: detail.businessDayServedUsers.length,
+            monitoringUnavailable: false
           };
-        } catch {
+        } catch (error) {
           return {
             device,
-            pendingCount: 0,
-            todayPickupCount: 0
+            monitoringUnavailable: true,
+            monitoringError: getErrorMessage(error)
           };
         }
       })
     );
 
     deviceCards.value = monitoring.sort((left, right) => {
-      if (left.pendingCount !== right.pendingCount) {
-        return right.pendingCount - left.pendingCount;
+      if (left.monitoringUnavailable !== right.monitoringUnavailable) {
+        return left.monitoringUnavailable ? -1 : 1;
       }
 
-      if (left.device.status !== right.device.status) {
-        return left.device.status === "online" ? -1 : 1;
+      if ((left.pendingCount ?? 0) !== (right.pendingCount ?? 0)) {
+        return (right.pendingCount ?? 0) - (left.pendingCount ?? 0);
+      }
+
+      if (canOpenDevice(left.device) !== canOpenDevice(right.device)) {
+        return canOpenDevice(left.device) ? -1 : 1;
       }
 
       return left.device.name.localeCompare(right.device.name, "zh-CN");
     });
+    loadError.value = "";
   } catch (error) {
+    loadError.value = getErrorMessage(error);
     uni.showToast({
-      title: getErrorMessage(error),
+      title: loadError.value,
       icon: "none"
     });
   } finally {
@@ -105,7 +113,9 @@ onShow(() => {
           <MenuIcon name="device" size="lg" />
           <view>
             <text class="device-overview__title">柜机运行概览</text>
-            <text class="device-overview__hint">{{ pendingTotal > 0 ? `有 ${pendingTotal} 个待处理动作` : "当前无待处理动作" }}</text>
+            <text class="device-overview__hint">
+              {{ unavailableCount > 0 ? `有 ${unavailableCount} 台柜机监控数据不可用` : pendingTotal > 0 ? `有 ${pendingTotal} 个待处理动作` : "当前无待处理动作" }}
+            </text>
           </view>
         </view>
         <view class="overview-grid">
@@ -115,12 +125,22 @@ onShow(() => {
           </view>
           <view class="overview-metric overview-metric--warning">
             <text class="overview-metric__value vm-number">{{ pendingTotal }}</text>
-            <text class="overview-metric__label">待处理</text>
+            <text class="overview-metric__label">{{ unavailableCount ? "已确认待处理" : "待处理" }}</text>
           </view>
           <view class="overview-metric">
             <text class="overview-metric__value vm-number">{{ pickupTotal }}</text>
-            <text class="overview-metric__label">今日领取</text>
+            <text class="overview-metric__label">{{ unavailableCount ? "已确认今日领取" : "今日领取" }}</text>
           </view>
+        </view>
+        <view v-if="loadError" class="monitoring-alert" role="alert" aria-live="assertive">
+          <text class="monitoring-alert__title">柜机列表同步失败</text>
+          <text class="monitoring-alert__body">{{ loadErrorBody }}</text>
+          <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">重新加载</button>
+        </view>
+        <view v-else-if="unavailableCount" class="monitoring-alert" role="alert" aria-live="polite">
+          <text class="monitoring-alert__title">部分监控数据未确认</text>
+          <text class="monitoring-alert__body">{{ unavailableCount }} 台柜机未能读取待办或今日领取数据，已从汇总中排除，请刷新后再判断。</text>
+          <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">刷新监控数据</button>
         </view>
       </view>
     </GlassCard>
@@ -134,7 +154,7 @@ onShow(() => {
             class="device-item"
             @tap="openDetail(item.device.deviceCode)"
           >
-            <view v-if="item.pendingCount" class="device-item__dot" />
+            <view v-if="item.monitoringUnavailable || item.pendingCount" class="device-item__dot" />
             <view class="device-item__header">
               <view class="device-item__media" aria-hidden="true">
                 <view class="device-item__machine" />
@@ -142,32 +162,44 @@ onShow(() => {
               <view class="device-item__main">
                 <view class="device-item__title-row">
                   <text class="device-item__title">{{ item.device.name }}</text>
-                  <text class="vm-status" :class="`vm-status--${statusToneMap[item.device.status]}`">{{ statusLabelMap[item.device.status] }}</text>
+                  <text class="vm-status" :class="`vm-status--${getDeviceStatusPresentation(item.device).tone}`">{{ getDeviceStatusPresentation(item.device).label }}</text>
                 </view>
                 <text class="device-item__meta">{{ item.device.location }}</text>
-                <text class="device-item__meta">编号 {{ item.device.deviceCode }} · 最近在线 {{ item.device.lastSeenAt.slice(0, 16).replace("T", " ") }}</text>
+                <text class="device-item__meta">编号 {{ item.device.deviceCode }} · 最近在线 {{ formatBeijingDateTime(item.device.lastSeenAt) }}</text>
+                <text v-if="!canOpenDevice(item.device)" class="device-item__meta device-item__meta--warning">
+                  {{ getDeviceStatusPresentation(item.device).actionHint }}
+                </text>
+                <text v-if="item.monitoringUnavailable" class="device-item__meta device-item__meta--danger" role="alert">
+                  待办与领取数据不可用：{{ item.monitoringError || "请刷新后重试" }}
+                </text>
               </view>
             </view>
             <view class="device-item__stats">
               <view class="device-item__stat">
                 <text class="device-item__label">待处理</text>
-                <text class="device-item__value" :class="{ 'device-item__value--warning': item.pendingCount > 0 }">{{ item.pendingCount }}</text>
+                <text class="device-item__value" :class="{ 'device-item__value--warning': item.monitoringUnavailable || (item.pendingCount ?? 0) > 0 }">
+                  {{ item.monitoringUnavailable ? "—" : item.pendingCount }}
+                </text>
               </view>
               <view class="device-item__stat">
                 <text class="device-item__label">今日领取</text>
-                <text class="device-item__value">{{ item.todayPickupCount }}</text>
+                <text class="device-item__value">{{ item.monitoringUnavailable ? "—" : item.todayPickupCount }}</text>
               </view>
               <view class="device-item__stat">
                 <text class="device-item__label">任务状态</text>
-                <text class="device-item__value" :class="{ 'device-item__value--warning': item.pendingCount > 0 }">
-                  {{ item.pendingCount > 0 ? "需处理" : "正常" }}
+                <text class="device-item__value" :class="{ 'device-item__value--warning': item.monitoringUnavailable || (item.pendingCount ?? 0) > 0 }">
+                  {{ item.monitoringUnavailable ? "数据不可用" : (item.pendingCount ?? 0) > 0 ? "需处理" : "正常" }}
                 </text>
               </view>
             </view>
             <text class="device-item__link">查看详情 ></text>
           </button>
         </view>
-        <EmptyState v-else :title="loading ? '正在加载柜机' : '暂无柜机数据'" description="请稍后刷新，或先在后台接入柜机。" />
+        <EmptyState
+          v-else
+          :title="loading ? '正在加载柜机' : loadError ? '柜机数据暂时不可用' : '暂无柜机数据'"
+          :description="loadError ? '请点击上方“重新加载”，恢复前不会把请求失败当作空数据。' : '请稍后刷新，或先在后台接入柜机。'"
+        />
       </view>
     </GlassCard>
   </MobileShell>
@@ -316,6 +348,37 @@ onShow(() => {
 
 .device-item__value--warning {
   color: var(--vm-danger);
+}
+
+.device-item__meta--warning {
+  color: var(--vm-warning);
+  font-weight: 700;
+}
+
+.device-item__meta--danger {
+  color: var(--vm-danger);
+  font-weight: 700;
+}
+
+.monitoring-alert {
+  display: grid;
+  gap: 12rpx;
+  padding: 20rpx;
+  border: 2rpx solid var(--vm-danger-line);
+  border-radius: 22rpx;
+  background: var(--vm-danger-bg);
+}
+
+.monitoring-alert__title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--vm-danger);
+}
+
+.monitoring-alert__body {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--vm-text);
 }
 
 .device-item__link {

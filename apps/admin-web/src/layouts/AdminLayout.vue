@@ -18,6 +18,7 @@ const router = useRouter();
 const sessionStore = useAdminSessionStore();
 const showPasswordPanel = ref(false);
 const passwordBusy = ref(false);
+const logoutBusy = ref(false);
 const passwordMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const passwordForm = reactive({
   currentPassword: "",
@@ -59,7 +60,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       },
       {
         to: "/goods",
-        label: "货物总览",
+        label: "货品总览",
         permission: "goods:view",
         icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
       },
@@ -164,8 +165,20 @@ const todayLabel = new Intl.DateTimeFormat("zh-CN", {
 }).format(new Date());
 
 const logout = async () => {
-  sessionStore.clearSession();
-  await router.replace("/login");
+  if (logoutBusy.value) {
+    return;
+  }
+
+  logoutBusy.value = true;
+  try {
+    await adminApi.logout();
+  } catch {
+    window.alert("服务器暂未确认令牌撤销，本机仍会退出登录。请勿在共享设备上保留此页面。");
+  } finally {
+    sessionStore.clearSession();
+    await router.replace("/login");
+    logoutBusy.value = false;
+  }
 };
 
 const togglePasswordPanel = () => {
@@ -186,6 +199,14 @@ const submitPasswordChange = async () => {
     passwordMessage.value = {
       type: "error",
       text: "请先填写当前密码和新密码。"
+    };
+    return;
+  }
+
+  if (passwordForm.newPassword.trim().length < 8) {
+    passwordMessage.value = {
+      type: "error",
+      text: "新密码至少需要 8 位。"
     };
     return;
   }
@@ -269,6 +290,7 @@ const isActive = (target: string) => {
 
 <template>
   <div class="admin-shell workbench">
+    <a class="admin-skip-link" href="#admin-main-content">跳到主要内容</a>
     <aside class="workbench__sidebar">
       <div class="workbench__brand-panel admin-panel">
         <div class="workbench__brand-head">
@@ -283,7 +305,7 @@ const isActive = (target: string) => {
           <span class="admin-kicker">小柜大爱</span>
         </div>
         <h1 class="workbench__brand">运营后台</h1>
-        <p class="workbench__brand-copy">面向街道与政府服务场景，按人员、货物、柜机和日志组织日常值守工作。</p>
+        <p class="workbench__brand-copy">面向社区运营场景，按人员、物资、柜机和日志组织日常值守工作。</p>
       </div>
 
       <nav class="workbench__nav">
@@ -331,6 +353,7 @@ const isActive = (target: string) => {
               v-model="passwordForm.currentPassword"
               class="admin-input"
               type="password"
+              autocomplete="current-password"
               placeholder="请输入当前密码"
             />
           </label>
@@ -340,7 +363,8 @@ const isActive = (target: string) => {
               v-model="passwordForm.newPassword"
               class="admin-input"
               type="password"
-              placeholder="新密码至少 6 位"
+              autocomplete="new-password"
+              placeholder="新密码至少 8 位"
             />
           </label>
           <label class="admin-field">
@@ -349,6 +373,7 @@ const isActive = (target: string) => {
               v-model="passwordForm.confirmPassword"
               class="admin-input"
               type="password"
+              autocomplete="new-password"
               placeholder="请再次输入新密码"
               @keyup.enter="submitPasswordChange"
             />
@@ -360,11 +385,13 @@ const isActive = (target: string) => {
             {{ passwordBusy ? "保存中..." : "保存新密码" }}
           </button>
         </div>
-        <button class="admin-button admin-button--ghost" @click="logout">退出登录</button>
+        <button class="admin-button admin-button--ghost" :disabled="logoutBusy" @click="logout">
+          {{ logoutBusy ? "退出中..." : "退出登录" }}
+        </button>
       </div>
     </aside>
 
-    <main class="workbench__main">
+    <main id="admin-main-content" class="workbench__main" tabindex="-1">
       <header class="workbench__topbar admin-panel">
         <div class="workbench__breadcrumb">
           <span class="workbench__topbar-mark" aria-hidden="true">
@@ -579,6 +606,140 @@ const isActive = (target: string) => {
 
   .workbench__breadcrumb {
     flex-wrap: wrap;
+  }
+}
+
+@media (min-width: 561px) and (max-width: 760px) and (max-height: 650px) {
+  .workbench__topbar {
+    min-height: 44px;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 6px 8px;
+  }
+
+  .workbench__breadcrumb {
+    flex: 1 1 270px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .workbench__topbar-actions {
+    flex: 0 1 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .workbench__topbar-chip,
+  .workbench__topbar-link {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 0.78rem;
+  }
+
+  .workbench__sidebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 0;
+    padding: 6px 8px;
+  }
+
+  .workbench__brand-panel {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+  }
+
+  .workbench__brand-head .admin-kicker,
+  .workbench__status > .admin-kicker,
+  .workbench__status-title,
+  .workbench__status-copy,
+  .workbench__password-warning {
+    display: none;
+  }
+
+  .workbench__brand-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .workbench__brand-mark svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .workbench__brand {
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .workbench__nav {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 0 0 3px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  .workbench__nav-group {
+    display: contents;
+  }
+
+  .workbench__nav-title {
+    display: none;
+  }
+
+  .workbench__nav-link {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 0 8px;
+    white-space: nowrap;
+  }
+
+  .workbench__nav-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 5px;
+  }
+
+  .workbench__status {
+    display: flex;
+    flex: 0 0 auto;
+    align-self: stretch;
+    align-items: center;
+    gap: 6px;
+    padding: 0 0 0 8px;
+    border: 0;
+    border-left: 1px solid var(--admin-line);
+  }
+
+  .workbench__operator {
+    margin: 0;
+  }
+
+  .workbench__status .admin-button {
+    min-height: 32px;
+    padding: 0 8px;
+    white-space: nowrap;
+  }
+
+  .workbench__password-panel {
+    top: calc(100% + 8px);
+    right: 0;
+    bottom: auto;
+    left: auto;
+    width: min(300px, calc(100vw - 20px));
   }
 }
 </style>

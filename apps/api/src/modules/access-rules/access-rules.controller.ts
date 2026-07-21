@@ -43,8 +43,9 @@ export class AccessRulesController {
   @AllowedBackofficePermissions("users:rules:manage")
   update(
     @Query("role") role: "special" | "merchant",
-    @Body() body: { dailyLimit?: number; categoryLimit?: Record<string, number> }
+    @Body() body: { dailyLimit?: number; categoryLimit?: Record<string, number> },
+    @Req() request: { authUser?: { id: string } }
   ) {
-    return ok(this.accessRulesService.update(role, body));
+    return ok(this.accessRulesService.update(role, body, request.authUser?.id));
   }
 }

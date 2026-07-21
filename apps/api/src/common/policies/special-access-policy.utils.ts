@@ -39,9 +39,26 @@ const buildCatalogMap = (catalog: GoodsCatalogItem[]) =>
 const quotaMovementKey = (entry: InventoryMovement) =>
   entry.orderNo && entry.goodsId ? `${entry.orderNo}::${entry.goodsId}` : undefined;
 
-export const sumNetPickupQuantity = (
+const normalizeQuantity = (value: number, maximum: number) => {
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    return 0;
+  }
+
+  return Math.min(Math.max(0, value), Math.max(0, maximum));
+};
+
+const resolveMovementQuantity = (entry: InventoryMovement) =>
+  normalizeQuantity(entry.quantity, entry.quantity);
+
+const resolveQuotaQuantity = (entry: InventoryMovement) =>
+  entry.quotaQuantity === undefined
+    ? resolveMovementQuantity(entry)
+    : normalizeQuantity(entry.quotaQuantity, entry.quantity);
+
+const sumNetConsumptionQuantity = (
   inventory: InventoryMovement[],
-  pickupFilter: (entry: InventoryMovement) => boolean
+  pickupFilter: (entry: InventoryMovement) => boolean,
+  resolveQuantity: (entry: InventoryMovement) => number
 ) => {
   const selectedConsumptions = inventory.filter(
     (entry) => (entry.type === "pickup" || entry.type === "adjustment") && pickupFilter(entry)
@@ -64,21 +81,35 @@ export const sumNetPickupQuantity = (
       continue;
     }
 
-    refundQuantityByKey.set(key, (refundQuantityByKey.get(key) ?? 0) + refund.quantity);
+    refundQuantityByKey.set(
+      key,
+      (refundQuantityByKey.get(key) ?? 0) + resolveQuantity(refund)
+    );
   }
 
   return selectedConsumptions.reduce((sum, pickup) => {
     const key = quotaMovementKey(pickup);
     const refundedQuantity = key ? refundQuantityByKey.get(key) ?? 0 : 0;
-    const consumedRefundQuantity = Math.min(pickup.quantity, refundedQuantity);
+    const pickupQuantity = resolveQuantity(pickup);
+    const consumedRefundQuantity = Math.min(pickupQuantity, refundedQuantity);
 
     if (key && consumedRefundQuantity > 0) {
       refundQuantityByKey.set(key, Math.max(0, refundedQuantity - consumedRefundQuantity));
     }
 
-    return sum + Math.max(0, pickup.quantity - consumedRefundQuantity);
+    return sum + Math.max(0, pickupQuantity - consumedRefundQuantity);
   }, 0);
 };
+
+export const sumNetPickupQuantity = (
+  inventory: InventoryMovement[],
+  pickupFilter: (entry: InventoryMovement) => boolean
+) => sumNetConsumptionQuantity(inventory, pickupFilter, resolveMovementQuantity);
+
+export const sumNetQuotaQuantity = (
+  inventory: InventoryMovement[],
+  pickupFilter: (entry: InventoryMovement) => boolean
+) => sumNetConsumptionQuantity(inventory, pickupFilter, resolveQuotaQuantity);
 
 export const getApplicablePoliciesForUser = (
   policies: SpecialAccessPolicy[],
@@ -280,7 +311,7 @@ export const getActiveWindowCategoryQuota = (
 
   for (const window of activeWindows) {
     for (const limit of window.goodsLimits) {
-      const usedQuantity = sumNetPickupQuantity(
+      const usedQuantity = sumNetQuotaQuantity(
         inventory,
         (entry) => {
           const parts = getLocalDateParts(entry.happenedAt);

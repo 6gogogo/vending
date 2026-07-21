@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, nextTick, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
 import type { RegistrationApplication } from "@vm/shared-types";
@@ -9,17 +9,53 @@ import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { formatBeijingDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
+import { syncNativeInputAccessibility } from "../../utils/native-input-accessibility";
+import { showOperationSuccess } from "../../utils/operation-feedback";
 import { useSessionStore } from "../../stores/session";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
+const loadError = ref("");
 const applications = ref<RegistrationApplication[]>([]);
 const rejectReasons = reactive<Record<string, string>>({});
+const reviewingApplicationId = ref("");
 
 const pendingCount = computed(() => applications.value.filter((item) => item.status === "pending").length);
 const approvedCount = computed(() => applications.value.filter((item) => item.status === "approved").length);
 const rejectedCount = computed(() => applications.value.filter((item) => item.status === "rejected").length);
+const overviewUnavailable = computed(() => Boolean(loadError.value));
+const overviewHint = computed(() => {
+  if (overviewUnavailable.value) {
+    return "审核数据暂不可用，请重新加载";
+  }
+
+  if (loading.value && !applications.value.length) {
+    return "正在加载审核数据";
+  }
+
+  return pendingCount.value > 0
+    ? `有 ${pendingCount.value} 条申请需要处理`
+    : "当前没有待处理申请";
+});
+const overviewValue = (value: number) => overviewUnavailable.value ? "—" : value;
+const rejectReasonRootId = (applicationId: string) => `admin-review-reason-${applicationId}`;
+const rejectReasonLabelId = (applicationId: string) => `${rejectReasonRootId(applicationId)}-label`;
+
+const syncRejectReasonAccessibility = async () => {
+  await nextTick();
+  for (const application of applications.value) {
+    if (application.status !== "pending") {
+      continue;
+    }
+
+    syncNativeInputAccessibility(rejectReasonRootId(application.id), {
+      labelId: rejectReasonLabelId(application.id),
+      name: `reject-reason-${application.id}`
+    });
+  }
+};
 
 const roleLabel = (role: RegistrationApplication["requestedRole"]) => {
   if (role === "special") {
@@ -45,8 +81,6 @@ const roleIcon = (role: RegistrationApplication["requestedRole"]): "users" | "de
   return "users";
 };
 
-const formatDateTime = (value: string) => value.slice(0, 16).replace("T", " ");
-
 const load = async () => {
   await sessionStore.bootstrap();
 
@@ -56,30 +90,60 @@ const load = async () => {
   }
 
   loading.value = true;
+  loadError.value = "";
   try {
     applications.value = await mobileApi.registrationApplications();
+    await syncRejectReasonAccessibility();
   } catch (error) {
-    uni.showToast({
-      title: getErrorMessage(error),
-      icon: "none"
-    });
+    loadError.value = getErrorMessage(error);
   } finally {
     loading.value = false;
   }
 };
 
 const review = async (applicationId: string, decision: "approved" | "rejected") => {
+  if (reviewingApplicationId.value) {
+    return;
+  }
+
+  const application = applications.value.find((item) => item.id === applicationId);
+  const applicantName = application?.profile.merchantName || application?.profile.name || application?.phone || applicationId;
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: decision === "approved" ? "确认通过申请" : "确认驳回申请",
+      content: [
+        `申请人：${applicantName}`,
+        `申请角色：${application ? roleLabel(application.requestedRole) : "未知角色"}`,
+        decision === "rejected" ? `驳回原因：${rejectReasons[applicationId]?.trim() || "未填写"}` : "通过后将立即生效。"
+      ].join("\n"),
+      confirmText: decision === "approved" ? "确认通过" : "确认驳回",
+      cancelText: "取消",
+      success: ({ confirm }) => resolve(confirm),
+      fail: () => resolve(false)
+    });
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
+  reviewingApplicationId.value = applicationId;
   try {
-    await mobileApi.reviewRegistration(applicationId, {
+    const reviewed = await mobileApi.reviewRegistration(applicationId, {
       decision,
       reason: decision === "rejected" ? rejectReasons[applicationId] : undefined
     });
+    applications.value = applications.value.map((item) => item.id === reviewed.id ? reviewed : item);
+    delete rejectReasons[applicationId];
     await load();
+    showOperationSuccess(decision === "approved" ? "已通过申请" : "已驳回申请");
   } catch (error) {
     uni.showToast({
       title: getErrorMessage(error),
       icon: "none"
     });
+  } finally {
+    reviewingApplicationId.value = "";
   }
 };
 
@@ -96,29 +160,36 @@ onShow(() => {
           <MenuIcon name="review" size="lg" />
           <view>
             <text class="section-title">今日审核</text>
-            <text class="review-overview__hint">
-              {{ pendingCount > 0 ? `有 ${pendingCount} 条申请需要处理` : "当前没有待处理申请" }}
-            </text>
+            <text class="review-overview__hint">{{ overviewHint }}</text>
           </view>
         </view>
         <view class="review-metrics">
           <view class="review-metric review-metric--warning">
-            <text class="review-metric__value vm-number">{{ pendingCount }}</text>
+            <text class="review-metric__value vm-number">{{ overviewValue(pendingCount) }}</text>
             <text class="review-metric__label">待审核</text>
           </view>
           <view class="review-metric">
-            <text class="review-metric__value vm-number">{{ approvedCount }}</text>
+            <text class="review-metric__value vm-number">{{ overviewValue(approvedCount) }}</text>
             <text class="review-metric__label">已通过</text>
           </view>
           <view class="review-metric review-metric--muted">
-            <text class="review-metric__value vm-number">{{ rejectedCount }}</text>
+            <text class="review-metric__value vm-number">{{ overviewValue(rejectedCount) }}</text>
             <text class="review-metric__label">已驳回</text>
           </view>
         </view>
       </view>
     </GlassCard>
 
-    <GlassCard tone="quiet">
+    <GlassCard v-if="loadError" tone="warning">
+      <view class="vm-stack">
+        <EmptyState title="审核数据加载失败" :description="loadError" />
+        <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">
+          重新加载
+        </button>
+      </view>
+    </GlassCard>
+
+    <GlassCard v-else tone="quiet">
       <view class="vm-stack">
         <text class="section-title">申请列表</text>
         <view v-if="applications.length" class="application-list">
@@ -133,20 +204,37 @@ onShow(() => {
                   </text>
                 </view>
                 <text class="application-item__meta">{{ item.phone }} · {{ roleLabel(item.requestedRole) }}</text>
-                <text class="application-item__meta">提交于 {{ formatDateTime(item.updatedAt) }}</text>
+                <text class="application-item__meta">提交于 {{ formatBeijingDateTime(item.updatedAt) }}</text>
               </view>
             </view>
             <text v-if="item.profile.note" class="application-item__note">备注：{{ item.profile.note }}</text>
             <text v-if="item.reviewReason" class="application-item__reason">驳回原因：{{ item.reviewReason }}</text>
             <view v-if="item.status === 'pending'" class="vm-stack">
+              <text :id="rejectReasonLabelId(item.id)" class="vm-field__label">驳回原因（选填）</text>
               <input
+                :id="rejectReasonRootId(item.id)"
                 v-model="rejectReasons[item.id]"
+                :aria-labelledby="rejectReasonLabelId(item.id)"
                 class="vm-field__input"
                 placeholder="驳回时填写原因（选填）"
               />
               <view class="action-row">
-                <button class="vm-button" @tap="review(item.id, 'approved')">通过</button>
-                <button class="vm-button vm-button--ghost" @tap="review(item.id, 'rejected')">驳回</button>
+                <button
+                  class="vm-button"
+                  :disabled="Boolean(reviewingApplicationId)"
+                  :loading="reviewingApplicationId === item.id"
+                  @tap="review(item.id, 'approved')"
+                >
+                  通过
+                </button>
+                <button
+                  class="vm-button vm-button--ghost"
+                  :disabled="Boolean(reviewingApplicationId)"
+                  :loading="reviewingApplicationId === item.id"
+                  @tap="review(item.id, 'rejected')"
+                >
+                  驳回
+                </button>
               </view>
             </view>
           </view>

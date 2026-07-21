@@ -9,6 +9,7 @@ import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { formatBeijingDateTime } from "../../utils/datetime";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import { useSessionStore } from "../../stores/session";
 
@@ -16,6 +17,8 @@ const sessionStore = useSessionStore();
 const loading = ref(false);
 const deviceCode = ref("");
 const detail = ref<DeviceMonitoringDetail>();
+const resolvingTaskIds = ref<string[]>([]);
+const refreshing = ref(false);
 
 const servedCount = computed(() => detail.value?.businessDayServedUsers.length ?? 0);
 const stockChangeCount = computed(() => detail.value?.stockChanges.length ?? 0);
@@ -25,12 +28,31 @@ const faultTaskCount = computed(() =>
 );
 
 const lastOpenedText = computed(() =>
-  detail.value?.runtime.lastOpenedAt?.slice(0, 16).replace("T", " ") || "暂无"
+  formatBeijingDateTime(detail.value?.runtime.lastOpenedAt, "暂无")
 );
 
 const lastClosedText = computed(() =>
-  detail.value?.runtime.lastClosedAt?.slice(0, 16).replace("T", " ") || "暂无"
+  formatBeijingDateTime(detail.value?.runtime.lastClosedAt, "暂无")
 );
+const operationOpenBlockedHint = computed(() => {
+  if (!detail.value) {
+    return "柜机状态尚未加载。";
+  }
+
+  if (!(detail.value.device.readiness?.canOpen ?? detail.value.device.status === "online")) {
+    return "柜机当前离线、维护中或状态已过期，请先刷新并排查连接。";
+  }
+
+  if (detail.value.runtime.doorState === "open") {
+    return "柜门当前已开启，请等待关门。";
+  }
+
+  if (detail.value.runtime.doorState !== "closed") {
+    return "柜门物理状态尚未确认，请先手动刷新，确认平台返回门已关。";
+  }
+
+  return "";
+});
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -51,15 +73,31 @@ const load = async () => {
 };
 
 const refresh = async () => {
+  if (refreshing.value) {
+    return;
+  }
+
+  refreshing.value = true;
   try {
     detail.value = await mobileApi.refreshDevice(deviceCode.value);
-    showOperationSuccess();
+    showOperationSuccess("柜机状态已刷新");
   } catch (error) {
     showOperationFailure(error);
+  } finally {
+    refreshing.value = false;
   }
 };
 
 const openOperationFlow = () => {
+  if (operationOpenBlockedHint.value) {
+    uni.showModal({
+      title: "暂不能运营开门",
+      content: operationOpenBlockedHint.value,
+      showCancel: false
+    });
+    return;
+  }
+
   uni.navigateTo({
     url: `/pages/common/operation-open?deviceCode=${encodeURIComponent(deviceCode.value)}`
   });
@@ -74,20 +112,27 @@ const showTaskDetail = (title: string, detailText: string) => {
 };
 
 const resolveTask = async (id: string, isFault: boolean) => {
+  if (resolvingTaskIds.value.includes(id)) {
+    return;
+  }
+
   uni.showModal({
     title: "确认处理",
-    content: isFault ? "确认标记为已知晓？" : "确认手动完成这条待办？",
+    content: isFault ? "确认标记为已知晓？该任务仍会保留为需继续跟进的故障状态。" : "确认手动完成这条待办？完成后会移入已处理记录。",
     success: async ({ confirm }) => {
       if (!confirm) {
         return;
       }
 
+      resolvingTaskIds.value = [...resolvingTaskIds.value, id];
       try {
         await mobileApi.resolveAlert(id, isFault ? "管理员已知晓并接手处理。" : "管理员已手动完成。");
-        showOperationSuccess();
+        showOperationSuccess(isFault ? "已标记为知晓" : "待办已完成");
         await load();
       } catch (error) {
         showOperationFailure(error);
+      } finally {
+        resolvingTaskIds.value = resolvingTaskIds.value.filter((taskId) => taskId !== id);
       }
     }
   });
@@ -109,9 +154,12 @@ onLoad((query) => {
   <MobileShell eyebrow="柜机详情" :title="detail?.device.name ?? deviceCode" :subtitle="detail?.device.location ?? '正在加载柜机详情'">
     <template #hero-actions>
       <view class="hero-action-grid">
-        <button class="vm-button" @tap="refresh">手动刷新</button>
-        <button class="vm-button vm-button--ghost" @tap="openOperationFlow">运营开门</button>
+        <button class="vm-button" :loading="refreshing" :disabled="refreshing" @tap="refresh">手动刷新</button>
+        <button class="vm-button vm-button--ghost" :disabled="Boolean(operationOpenBlockedHint)" @tap="openOperationFlow">
+          运营开门
+        </button>
       </view>
+      <text v-if="operationOpenBlockedHint" class="vm-subtitle">{{ operationOpenBlockedHint }}</text>
     </template>
 
     <GlassCard tone="accent">
@@ -164,7 +212,7 @@ onLoad((query) => {
         <view v-if="detail?.businessDayServedUsers.length" class="list-block">
           <view v-for="item in detail?.businessDayServedUsers" :key="item.userId" class="list-item">
             <text class="list-item__title">{{ item.userName }}</text>
-            <text class="list-item__meta">{{ item.goodsSummary }} · {{ item.lastServedAt.slice(0, 16).replace("T", " ") }}</text>
+            <text class="list-item__meta">{{ item.goodsSummary }} · {{ formatBeijingDateTime(item.lastServedAt) }}</text>
           </view>
         </view>
         <EmptyState v-else :title="loading ? '正在加载数据' : '今日还没有服务记录'" description="用户、商家或管理员对该柜机有操作后，这里会实时更新。" />
@@ -211,8 +259,13 @@ onLoad((query) => {
             <text class="list-item__meta">{{ task.previewDetail || task.detail }}</text>
             <view class="task-actions">
               <button class="vm-button vm-button--ghost" @tap="showTaskDetail(task.title, task.detail)">查看详情</button>
-              <button class="vm-button vm-button--ghost" @tap="resolveTask(task.id, task.grade === 'fault')">
-                {{ task.grade === "fault" ? "标记已知晓" : "手动完成" }}
+              <button
+                class="vm-button vm-button--ghost"
+                :disabled="resolvingTaskIds.includes(task.id)"
+                :loading="resolvingTaskIds.includes(task.id)"
+                @tap="resolveTask(task.id, task.grade === 'fault')"
+              >
+                {{ resolvingTaskIds.includes(task.id) ? "处理中" : task.grade === "fault" ? "标记已知晓" : "手动完成" }}
               </button>
             </view>
           </view>
@@ -231,7 +284,7 @@ onLoad((query) => {
         <view v-if="detail?.recentLogs.length" class="list-block">
           <button v-for="log in detail?.recentLogs" :key="log.id" class="list-item list-item--button" @tap="openLog(log.id)">
             <text class="list-item__title">{{ log.description }}</text>
-            <text class="list-item__meta">{{ log.occurredAt.slice(0, 16).replace("T", " ") }}</text>
+            <text class="list-item__meta">{{ formatBeijingDateTime(log.occurredAt) }}</text>
           </button>
         </view>
         <EmptyState v-else :title="loading ? '正在加载日志' : '当前没有相关日志'" description="柜机产生新的业务动作后，这里会同步展示。" />

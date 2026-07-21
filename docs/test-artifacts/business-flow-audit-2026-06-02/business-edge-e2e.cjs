@@ -267,7 +267,8 @@ async function codeFor(phone, scene) {
     profile: { name: `驳回用户${runId}`, regionId: region.id, regionName: region.name }
   });
   await req("PATCH", `/registration-applications/${rejectedApplication.id}/review`, { decision: "rejected", reason: "资料不完整" }, superToken);
-  const rejectedLogin = await req("POST", "/auth/app-login", { phone: rejectedPhone, code: rejectedCode });
+  const rejectedLoginCode = await codeFor(rejectedPhone, "app-login");
+  const rejectedLogin = await req("POST", "/auth/app-login", { phone: rejectedPhone, code: rejectedLoginCode });
   assertStep("审核驳回后登录返回驳回状态", rejectedLogin.state === "rejected" && rejectedLogin.message.includes("资料不完整"));
 
   const merchantPhone = uniquePhone("138");

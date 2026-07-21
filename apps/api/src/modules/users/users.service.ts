@@ -298,9 +298,15 @@ export class UsersService {
     actorUserId?: string,
     actorBackofficeRole?: BackofficeRole
   ) {
+    this.assertUpdateUserPayload(payload);
     const user = this.findById(userId);
     this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertActorKeepsOwnAccess(
+      [{ user, nextRole: payload.role, nextStatus: payload.status }],
+      actorUserId
+    );
     const before = structuredClone(user);
+    const roleWillChange = payload.role !== undefined && payload.role !== user.role;
 
     if (payload.phone !== undefined) {
       user.phone = payload.phone;
@@ -344,6 +350,10 @@ export class UsersService {
 
     if (payload.quota && user.role === "special") {
       user.quota = payload.quota;
+    }
+
+    if (roleWillChange || (payload.status !== undefined && payload.status !== "active")) {
+      this.store.revokeSessionsForUser(user.id);
     }
 
     this.store.logOperation({
@@ -509,57 +519,104 @@ export class UsersService {
   }
 
   batchUpdate(payload: BatchUpdatePayload, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
-    const updated = payload.userIds.map((userId) => {
+    this.assertBatchUpdatePayload(payload);
+    if (new Set(payload.userIds).size !== payload.userIds.length) {
+      throw new BadRequestException("批量更新不能包含重复用户。");
+    }
+    const targetUsers = payload.userIds.map((userId) => {
       const user = this.findById(userId);
       this.assertCanViewUser(user, actorBackofficeRole);
-      const before = structuredClone(user);
-
-      if (payload.patch.status !== undefined) {
-        user.status = payload.patch.status;
-      }
-
-      if (payload.patch.tags) {
-        user.tags = payload.patch.tags;
-      }
-
-      if (
-        payload.patch.regionId !== undefined ||
-        payload.patch.regionName !== undefined ||
-        payload.patch.neighborhood !== undefined
-      ) {
-        const region = this.resolveRegion(
-          payload.patch.regionId,
-          payload.patch.regionName ?? payload.patch.neighborhood
-        );
-        user.regionId = region.regionId;
-        user.regionName = region.regionName;
-        user.neighborhood = region.regionName;
-      }
-
-      if (payload.patch.quota && user.role === "special") {
-        user.quota = payload.patch.quota;
-      }
-
-      this.store.logOperation({
-        category: "user",
-        type: "batch-update-user",
-        status: "success",
-        actor: this.getAdminActor(actorUserId),
-        primarySubject: {
-          type: "user",
-          id: user.id,
-          label: user.name
-        },
-        metadata: {
-          ...(payload.patch as Record<string, unknown>),
-          undoState: "undoable",
-          beforeSnapshot: before,
-          afterSnapshot: structuredClone(user)
-        }
-      });
-
       return user;
     });
+    this.assertActorKeepsOwnAccess(
+      targetUsers.map((user) => ({ user, nextStatus: payload.patch.status })),
+      actorUserId
+    );
+    const shouldUpdateRegion =
+      payload.patch.regionId !== undefined ||
+      payload.patch.regionName !== undefined ||
+      payload.patch.neighborhood !== undefined;
+    const resolvedRegion = shouldUpdateRegion
+      ? this.resolveRegion(
+          payload.patch.regionId,
+          payload.patch.regionName ?? payload.patch.neighborhood
+        )
+      : undefined;
+    const prepared = targetUsers.map((user) => {
+      const before = structuredClone(user);
+      const after = structuredClone(user);
+
+      if (payload.patch.status !== undefined) {
+        after.status = payload.patch.status;
+      }
+
+      if (payload.patch.tags !== undefined) {
+        after.tags = [...payload.patch.tags];
+      }
+
+      if (resolvedRegion) {
+        after.regionId = resolvedRegion.regionId;
+        after.regionName = resolvedRegion.regionName;
+        after.neighborhood = resolvedRegion.regionName;
+      }
+
+      if (payload.patch.quota && after.role === "special") {
+        after.quota = structuredClone(payload.patch.quota);
+      }
+
+      return { user, before, after };
+    });
+    const sessionsBefore = structuredClone(this.store.sessions);
+    const draftSessionsBefore = structuredClone(this.store.draftSessions);
+    const logsBefore = structuredClone(this.store.logs);
+
+    try {
+      for (const entry of prepared) {
+        Object.assign(entry.user, entry.after);
+
+        if (payload.patch.status !== undefined && payload.patch.status !== "active") {
+          this.store.revokeSessionsForUser(entry.user.id);
+        }
+
+        this.store.logOperation({
+          category: "user",
+          type: "batch-update-user",
+          status: "success",
+          actor: this.getAdminActor(actorUserId),
+          primarySubject: {
+            type: "user",
+            id: entry.user.id,
+            label: entry.user.name
+          },
+          metadata: {
+            ...(payload.patch as Record<string, unknown>),
+            undoState: "undoable",
+            beforeSnapshot: entry.before,
+            afterSnapshot: structuredClone(entry.after)
+          }
+        });
+      }
+    } catch (error) {
+      for (const entry of prepared) {
+        const mutableUser = entry.user as unknown as Record<string, unknown>;
+        for (const key of Object.keys(mutableUser)) {
+          delete mutableUser[key];
+        }
+        Object.assign(mutableUser, structuredClone(entry.before));
+      }
+      this.store.sessions.clear();
+      for (const [token, session] of sessionsBefore) {
+        this.store.sessions.set(token, session);
+      }
+      this.store.draftSessions.clear();
+      for (const [token, session] of draftSessionsBefore) {
+        this.store.draftSessions.set(token, session);
+      }
+      this.store.logs.splice(0, this.store.logs.length, ...logsBefore);
+      throw error;
+    }
+
+    const updated = prepared.map((entry) => entry.user);
 
     return {
       count: updated.length,
@@ -854,32 +911,53 @@ export class UsersService {
       }>;
     },
     actorUserId?: string,
-    actorBackofficeRole?: BackofficeRole
+    actorBackofficeRole?: BackofficeRole,
+    inputSource: "backoffice" | "mobile" = "backoffice"
   ) {
-    if (!payload.confirmed) {
+    this.assertManualAdjustmentPayload(payload);
+
+    if (payload.confirmed !== true) {
       throw new BadRequestException("补货或补扣前需要先确认操作。");
     }
 
-    if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
-      throw new BadRequestException("调整数量必须大于 0。");
+    if (payload.direction !== "restock" && payload.direction !== "deduct") {
+      throw new BadRequestException("请选择有效的库存调整方向。");
+    }
+
+    if (!Number.isFinite(payload.quantity) || !Number.isInteger(payload.quantity) || payload.quantity <= 0) {
+      throw new BadRequestException("调整数量必须是正整数。");
     }
 
     const user = this.findById(userId);
     this.assertCanViewUser(user, actorBackofficeRole);
     const localGoods = this.devicesService.findGoods(payload.deviceCode, payload.goodsId);
+    const catalogGoods = this.store.goodsCatalog.find((entry) => entry.goodsId === payload.goodsId);
+    const isMobileAdmin = inputSource === "mobile";
+    const relatedEventId = isMobileAdmin ? undefined : payload.relatedEventId;
+    const relatedOrderNo = isMobileAdmin ? undefined : payload.relatedOrderNo;
+    const requestedBatchConsumptions = isMobileAdmin ? undefined : payload.batchConsumptions;
+    const goodsName = isMobileAdmin
+      ? localGoods?.name ?? catalogGoods?.name ?? payload.goodsId
+      : payload.goodsName ?? localGoods?.name ?? catalogGoods?.name ?? payload.goodsId;
+    const category = isMobileAdmin
+      ? localGoods?.category ?? catalogGoods?.category ?? "daily"
+      : payload.category ?? localGoods?.category ?? catalogGoods?.category ?? "daily";
+    const unitPrice = isMobileAdmin
+      ? localGoods?.price ?? catalogGoods?.price ?? 0
+      : payload.unitPrice ?? localGoods?.price ?? catalogGoods?.price ?? 0;
     const movementId = this.store.createId("movement");
     const happenedAt = new Date().toISOString();
     const movement: InventoryMovement = {
       id: movementId,
-      sourceOrderNo: payload.relatedOrderNo,
-      eventId: payload.relatedEventId,
+      sourceOrderNo: relatedOrderNo,
+      eventId: relatedEventId,
       userId: user.id,
       deviceCode: payload.deviceCode,
       goodsId: payload.goodsId,
-      goodsName: payload.goodsName ?? localGoods?.name ?? payload.goodsId,
-      category: payload.category ?? localGoods?.category ?? "daily",
+      goodsName,
+      category,
       quantity: payload.quantity,
-      unitPrice: payload.unitPrice ?? 0,
+      unitPrice,
       type: payload.direction === "restock" ? "manual-restock" : "manual-deduction",
       happenedAt
     };
@@ -914,7 +992,8 @@ export class UsersService {
     } else {
       const change = this.inventoryBatchChanges.recordConsumptiveMovement({
         movement,
-        requestedBatches: payload.batchConsumptions,
+        requestedBatches: requestedBatchConsumptions,
+        allowExpiredBatches: true,
         trace: {
           enabled: false
         }
@@ -937,8 +1016,8 @@ export class UsersService {
         id: payload.deviceCode,
         label: payload.deviceCode
       },
-      relatedEventId: payload.relatedEventId,
-      relatedOrderNo: payload.relatedOrderNo,
+      relatedEventId,
+      relatedOrderNo,
       metadata: {
         direction: payload.direction,
         quantity: payload.quantity,
@@ -948,8 +1027,8 @@ export class UsersService {
         deviceCode: payload.deviceCode,
         platformSync: "local_only",
         platformSyncLabel: "仅本地，未同步平台",
-        relatedEventId: payload.relatedEventId,
-        relatedOrderNo: payload.relatedOrderNo,
+        relatedEventId,
+        relatedOrderNo,
         batchId: createdBatchId,
         consumedBatches,
         confirmation: {
@@ -958,7 +1037,7 @@ export class UsersService {
           confirmedByUserId: actorUserId,
           batchSelection:
             payload.direction === "deduct"
-              ? payload.batchConsumptions?.length
+              ? requestedBatchConsumptions?.length
                 ? "specified"
                 : "earliest_expiry"
               : "new_batch"
@@ -988,6 +1067,289 @@ export class UsersService {
   private assertCanViewUser(user: UserRecord, viewerBackofficeRole?: BackofficeRole) {
     if (!this.canViewUser(user, viewerBackofficeRole)) {
       throw new NotFoundException("未找到对应用户。");
+    }
+  }
+
+  private assertActorKeepsOwnAccess(
+    changes: Array<{
+      user: UserRecord;
+      nextRole?: UserRole;
+      nextStatus?: UserRecord["status"];
+    }>,
+    actorUserId?: string
+  ) {
+    const ownChange = actorUserId
+      ? changes.find((entry) => entry.user.id === actorUserId)
+      : undefined;
+
+    if (!ownChange) {
+      return;
+    }
+    if (ownChange.nextStatus !== undefined && ownChange.nextStatus !== "active") {
+      throw new BadRequestException("不能停用当前登录账号，请由其他管理员处理。");
+    }
+    if (ownChange.nextRole !== undefined && ownChange.nextRole !== ownChange.user.role) {
+      throw new BadRequestException("不能修改当前登录账号的角色，请由其他管理员处理。");
+    }
+  }
+
+  private assertUpdateUserPayload(payload: unknown) {
+    const body = this.requirePlainObject(payload, "用户更新请求体");
+    this.assertOnlyFields(
+      body,
+      ["role", "phone", "name", "status", "neighborhood", "regionId", "regionName", "tags", "quota"],
+      "用户更新"
+    );
+
+    if (!Object.keys(body).length) {
+      throw new BadRequestException("用户更新至少需要提交一个字段。");
+    }
+
+    if (
+      body.role !== undefined &&
+      body.role !== "admin" &&
+      body.role !== "merchant" &&
+      body.role !== "special"
+    ) {
+      throw new BadRequestException("请选择有效的用户角色。");
+    }
+    if (body.phone !== undefined) {
+      this.assertStringValue(body.phone, "手机号", 32);
+    }
+    if (body.name !== undefined) {
+      this.assertStringValue(body.name, "用户姓名", 100);
+    }
+    if (body.status !== undefined && body.status !== "active" && body.status !== "inactive") {
+      throw new BadRequestException("请选择有效的用户状态。");
+    }
+    for (const [field, label] of [
+      ["neighborhood", "所属区域"],
+      ["regionId", "区域编号"],
+      ["regionName", "区域名称"]
+    ] as const) {
+      if (body[field] !== undefined) {
+        this.assertStringValue(body[field], label, 100, true);
+      }
+    }
+    if (body.tags !== undefined) {
+      this.assertStringArray(body.tags, "用户标签", 50, 50);
+    }
+    if (body.quota !== undefined) {
+      this.assertAccessQuota(body.quota);
+    }
+  }
+
+  private assertBatchUpdatePayload(payload: unknown) {
+    const body = this.requirePlainObject(payload, "批量更新请求体");
+    this.assertOnlyFields(body, ["userIds", "patch"], "批量更新");
+
+    if (!Array.isArray(body.userIds) || body.userIds.length === 0 || body.userIds.length > 200) {
+      throw new BadRequestException("批量更新用户编号必须是 1 至 200 项的数组。");
+    }
+    for (const userId of body.userIds) {
+      this.assertStringValue(userId, "用户编号", 128);
+    }
+
+    const patch = this.requirePlainObject(body.patch, "批量更新字段");
+    this.assertOnlyFields(
+      patch,
+      ["status", "tags", "neighborhood", "regionId", "regionName", "quota"],
+      "批量更新字段"
+    );
+    if (!Object.keys(patch).length) {
+      throw new BadRequestException("批量更新至少需要提交一个修改字段。");
+    }
+    if (patch.status !== undefined && patch.status !== "active" && patch.status !== "inactive") {
+      throw new BadRequestException("请选择有效的用户状态。");
+    }
+    if (patch.tags !== undefined) {
+      this.assertStringArray(patch.tags, "用户标签", 50, 50);
+    }
+    for (const [field, label] of [
+      ["neighborhood", "所属区域"],
+      ["regionId", "区域编号"],
+      ["regionName", "区域名称"]
+    ] as const) {
+      if (patch[field] !== undefined) {
+        this.assertStringValue(patch[field], label, 100, true);
+      }
+    }
+    if (patch.quota !== undefined) {
+      this.assertAccessQuota(patch.quota);
+    }
+  }
+
+  private assertManualAdjustmentPayload(payload: unknown) {
+    const body = this.requirePlainObject(payload, "手工库存调整请求体");
+    this.assertOnlyFields(
+      body,
+      [
+        "deviceCode",
+        "goodsId",
+        "relatedEventId",
+        "relatedOrderNo",
+        "goodsName",
+        "category",
+        "quantity",
+        "unitPrice",
+        "direction",
+        "note",
+        "confirmed",
+        "batchConsumptions"
+      ],
+      "手工库存调整"
+    );
+
+    this.assertStringValue(body.deviceCode, "柜机编号", 128);
+    this.assertStringValue(body.goodsId, "货品编号", 128);
+
+    for (const [field, label] of [
+      ["relatedEventId", "关联事件编号"],
+      ["relatedOrderNo", "关联订单号"]
+    ] as const) {
+      if (body[field] !== undefined) {
+        this.assertStringValue(body[field], label, 128, true);
+      }
+    }
+
+    if (body.goodsName !== undefined) {
+      this.assertStringValue(body.goodsName, "货品名称", 100);
+    }
+    if (
+      body.category !== undefined &&
+      body.category !== "food" &&
+      body.category !== "drink" &&
+      body.category !== "daily"
+    ) {
+      throw new BadRequestException("请选择有效的货品分类。");
+    }
+    if (
+      typeof body.quantity !== "number" ||
+      !Number.isFinite(body.quantity) ||
+      !Number.isInteger(body.quantity) ||
+      body.quantity <= 0
+    ) {
+      throw new BadRequestException("调整数量必须是正整数。");
+    }
+    if (
+      body.unitPrice !== undefined &&
+      (typeof body.unitPrice !== "number" ||
+        !Number.isFinite(body.unitPrice) ||
+        body.unitPrice < 0)
+    ) {
+      throw new BadRequestException("货品单价必须是非负数。");
+    }
+    if (body.direction !== "restock" && body.direction !== "deduct") {
+      throw new BadRequestException("请选择有效的库存调整方向。");
+    }
+    if (body.note !== undefined) {
+      this.assertStringValue(body.note, "调整说明", 500, true);
+    }
+    if (body.confirmed !== true) {
+      throw new BadRequestException("补货或补扣前需要先确认操作。");
+    }
+
+    if (body.batchConsumptions !== undefined) {
+      if (!Array.isArray(body.batchConsumptions) || body.batchConsumptions.length > 100) {
+        throw new BadRequestException("指定批次必须是最多 100 项的数组。");
+      }
+
+      for (const item of body.batchConsumptions) {
+        const batch = this.requirePlainObject(item, "指定批次");
+        this.assertOnlyFields(batch, ["batchId", "quantity"], "指定批次");
+        this.assertStringValue(batch.batchId, "批次编号", 128);
+        if (
+          typeof batch.quantity !== "number" ||
+          !Number.isFinite(batch.quantity) ||
+          !Number.isInteger(batch.quantity) ||
+          batch.quantity <= 0
+        ) {
+          throw new BadRequestException("指定批次数量必须是正整数。");
+        }
+      }
+    }
+  }
+
+  private requirePlainObject(value: unknown, label: string): Record<string, unknown> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new BadRequestException(`${label}必须是对象。`);
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new BadRequestException(`${label}必须是普通对象。`);
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private assertOnlyFields(
+    value: Record<string, unknown>,
+    allowedFields: readonly string[],
+    label: string
+  ) {
+    const allowed = new Set(allowedFields);
+    const unexpectedFields = Object.keys(value).filter((field) => !allowed.has(field));
+
+    if (unexpectedFields.length) {
+      throw new BadRequestException(`${label}不能提交字段：${unexpectedFields.join("、")}。`);
+    }
+  }
+
+  private assertStringValue(
+    value: unknown,
+    label: string,
+    maxLength: number,
+    allowEmpty = false
+  ) {
+    if (typeof value !== "string") {
+      throw new BadRequestException(`${label}必须是字符串。`);
+    }
+
+    const normalized = value.trim();
+    if (!allowEmpty && !normalized) {
+      throw new BadRequestException(`${label}不能为空。`);
+    }
+    if ([...value].length > maxLength) {
+      throw new BadRequestException(`${label}不能超过 ${maxLength} 个字符。`);
+    }
+  }
+
+  private assertStringArray(value: unknown, label: string, maxItems: number, maxItemLength: number) {
+    if (!Array.isArray(value) || value.length > maxItems) {
+      throw new BadRequestException(`${label}必须是最多 ${maxItems} 项的字符串数组。`);
+    }
+
+    for (const item of value) {
+      this.assertStringValue(item, label, maxItemLength);
+    }
+  }
+
+  private assertAccessQuota(value: unknown) {
+    const quota = this.requirePlainObject(value, "用户额度");
+    this.assertOnlyFields(quota, ["dailyLimit", "categoryLimit"], "用户额度");
+
+    if (
+      typeof quota.dailyLimit !== "number" ||
+      !Number.isInteger(quota.dailyLimit) ||
+      quota.dailyLimit < 0
+    ) {
+      throw new BadRequestException("每日额度必须是非负整数。");
+    }
+
+    const categoryLimit = this.requirePlainObject(quota.categoryLimit, "分类额度");
+    if (Object.keys(categoryLimit).length > 100) {
+      throw new BadRequestException("分类额度不能超过 100 项。");
+    }
+    const allowedCategories = new Set(["food", "drink", "daily"]);
+    for (const [category, limit] of Object.entries(categoryLimit)) {
+      this.assertStringValue(category, "额度分类", 100);
+      if (!allowedCategories.has(category)) {
+        throw new BadRequestException(`不支持的额度分类：${category}。`);
+      }
+      if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 0) {
+        throw new BadRequestException("分类额度必须是非负整数。");
+      }
     }
   }
 

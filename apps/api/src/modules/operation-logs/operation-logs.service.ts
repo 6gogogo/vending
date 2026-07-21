@@ -14,6 +14,8 @@ import type {
 } from "@vm/shared-types";
 
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
+import { toSafeSpreadsheetCell } from "../../common/export/html-workbook";
+import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { resolveSystemLogFile } from "../../common/store/persistence";
 import { getBusinessDayKey } from "../../common/time/business-day";
@@ -115,15 +117,15 @@ export class OperationLogsService {
       .map(
         (log) => `
           <tr>
-            <td>${log.occurredAt}</td>
-            <td>${log.category}</td>
-            <td>${log.status}</td>
-            <td>${log.actor.name}</td>
-            <td>${log.actor.type}</td>
-            <td>${log.primarySubject?.label ?? ""}</td>
-            <td>${log.secondarySubject?.label ?? ""}</td>
-            <td>${log.description}</td>
-            <td>${log.detail}</td>
+            <td>${toSafeSpreadsheetCell(log.occurredAt)}</td>
+            <td>${toSafeSpreadsheetCell(log.category)}</td>
+            <td>${toSafeSpreadsheetCell(log.status)}</td>
+            <td>${toSafeSpreadsheetCell(log.actor.name)}</td>
+            <td>${toSafeSpreadsheetCell(log.actor.type)}</td>
+            <td>${toSafeSpreadsheetCell(log.primarySubject?.label)}</td>
+            <td>${toSafeSpreadsheetCell(log.secondarySubject?.label)}</td>
+            <td>${toSafeSpreadsheetCell(log.description)}</td>
+            <td>${toSafeSpreadsheetCell(log.detail)}</td>
           </tr>`
       )
       .join("");
@@ -156,7 +158,19 @@ export class OperationLogsService {
 
   buildSystemAuditExport() {
     const filePath = resolveSystemLogFile();
-    const body = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+    const body = existsSync(filePath)
+      ? readFileSync(filePath, "utf8")
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .flatMap((line) => {
+            try {
+              return [JSON.stringify(sanitizeAuditLogEntry(JSON.parse(line) as SystemAuditLogEntry))];
+            } catch {
+              return [];
+            }
+          })
+          .join("\n")
+      : "";
 
     return {
       filename: `system-audit-${new Date().toISOString().slice(0, 10)}.ndjson`,
@@ -197,7 +211,7 @@ export class OperationLogsService {
       let entry: SystemAuditLogEntry | undefined;
 
       try {
-        entry = JSON.parse(line) as SystemAuditLogEntry;
+        entry = sanitizeAuditLogEntry(JSON.parse(line) as SystemAuditLogEntry);
       } catch {
         entry = undefined;
       }

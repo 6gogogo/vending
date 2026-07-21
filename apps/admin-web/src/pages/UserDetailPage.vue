@@ -8,6 +8,7 @@ import StatTile from "../components/StatTile.vue";
 import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 const route = useRoute();
 const sessionStore = useAdminSessionStore();
@@ -49,6 +50,7 @@ const applyingNowPolicyId = ref("");
 const calendarMonth = ref("");
 const selectedDateKey = ref("");
 const editingAccessPolicyId = ref("");
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 
 const form = ref({
   deviceCode: "",
@@ -110,6 +112,9 @@ const isPlatformRefundRecord = (record: UserManagementDetail["recentRecords"][nu
   record.type === "refund" || Boolean(record.refundNo);
 const canManageUserRules = computed(() => sessionStore.can("users:rules:manage"));
 const canAdjustStock = computed(() => sessionStore.can("goods:stock-adjust"));
+const showActionMessage = (type: "success" | "error", text: string) => {
+  actionMessage.value = { type, text };
+};
 
 const directPersonalPolicies = computed(() =>
   (detail.value?.user.accessPolicies ?? [])
@@ -195,7 +200,7 @@ const load = async () => {
 const submitAdjustment = async () => {
   if (!detail.value || !selectedGoods.value) return;
   if (!canAdjustStock.value) {
-    window.alert("当前账号没有货品库存调整权限。");
+    showActionMessage("error", "当前账号没有货品库存调整权限，不能提交手工补货或补扣。");
     return;
   }
 
@@ -210,6 +215,9 @@ const submitAdjustment = async () => {
 
   saving.value = true;
   try {
+    const goodsName = selectedGoods.value.name;
+    const quantity = form.value.quantity;
+    const direction = form.value.direction;
     await adminApi.manualAdjustUser(detail.value.user.id, {
       deviceCode: form.value.deviceCode,
       goodsId: selectedGoods.value.goodsId,
@@ -223,6 +231,14 @@ const submitAdjustment = async () => {
     form.value.quantity = 1;
     form.value.note = "";
     await load();
+    showActionMessage(
+      "success",
+      direction === "restock"
+        ? `已为 ${detail.value.user.name} 手工补货 ${goodsName} x${quantity}，本地库存和人员记录已更新。`
+        : `已为 ${detail.value.user.name} 手工补扣 ${goodsName} x${quantity}，本地库存和人员记录已更新。`
+    );
+  } catch (error) {
+    showActionMessage("error", `手工调整失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -237,15 +253,19 @@ const removePolicyGoodsLimit = (index: number) => {
 const submitAccessPolicy = async () => {
   if (!detail.value || detail.value.user.role !== "special") return;
   if (!canManageUserRules.value) {
-    window.alert("当前账号没有取货规则管理权限。");
+    showActionMessage("error", "当前账号没有取货规则管理权限，不能保存每日可领取物资。");
     return;
   }
 
   const weekdays = Array.from(new Set(accessPolicyForm.value.weekdays)).sort((left, right) => left - right);
   const goodsLimits = accessPolicyForm.value.goodsLimits.filter((item) => item.goodsId && item.quantity > 0).map((item) => ({ goodsId: item.goodsId, quantity: item.quantity }));
-  if (!weekdays.length || !goodsLimits.length || accessPolicyForm.value.endHour <= accessPolicyForm.value.startHour) return;
+  if (!weekdays.length || !goodsLimits.length || accessPolicyForm.value.endHour <= accessPolicyForm.value.startHour) {
+    showActionMessage("error", "保存规则前请至少选择一个星期、一个物资，并保证结束时间晚于开始时间。");
+    return;
+  }
   saving.value = true;
   try {
+    const wasEditing = Boolean(editingAccessPolicyId.value);
     if (editingAccessPolicyId.value) {
       const target = goodsLimits[0];
       await adminApi.saveUserAccessPolicy(detail.value.user.id, { id: editingAccessPolicyId.value, name: buildPolicyName(target.goodsId, accessPolicyForm.value.startHour, accessPolicyForm.value.endHour, weekdays), weekdays, startHour: accessPolicyForm.value.startHour, endHour: accessPolicyForm.value.endHour, status: accessPolicyForm.value.status, goodsLimits: [target] });
@@ -256,6 +276,14 @@ const submitAccessPolicy = async () => {
     }
     resetAccessPolicyForm();
     await load();
+    showActionMessage(
+      "success",
+      wasEditing
+        ? `已保存 ${detail.value.user.name} 的每日可领取物资设定。`
+        : `已为 ${detail.value.user.name} 新增 ${goodsLimits.length} 条每日可领取物资设定。`
+    );
+  } catch (error) {
+    showActionMessage("error", `保存每日可领取物资失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -264,7 +292,7 @@ const submitAccessPolicy = async () => {
 const deleteAccessPolicy = async (row: PersonalPolicyRow) => {
   if (!detail.value || !window.confirm(`确认删除 ${row.goodsName} 的这条每日可领取物资设定吗？`)) return;
   if (!canManageUserRules.value) {
-    window.alert("当前账号没有取货规则管理权限。");
+    showActionMessage("error", "当前账号没有取货规则管理权限，不能删除每日可领取物资。");
     return;
   }
 
@@ -273,6 +301,9 @@ const deleteAccessPolicy = async (row: PersonalPolicyRow) => {
     await adminApi.deleteUserAccessPolicy(detail.value.user.id, row.policyId);
     if (editingAccessPolicyId.value === row.policyId) resetAccessPolicyForm();
     await load();
+    showActionMessage("success", `已删除 ${row.goodsName} 的每日可领取物资设定。`);
+  } catch (error) {
+    showActionMessage("error", `删除每日可领取物资失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -281,7 +312,7 @@ const deleteAccessPolicy = async (row: PersonalPolicyRow) => {
 const applyAccessPolicyNow = async (row: PersonalPolicyRow) => {
   if (!detail.value) return;
   if (!canManageUserRules.value) {
-    window.alert("当前账号没有取货规则管理权限。");
+    showActionMessage("error", "当前账号没有取货规则管理权限，不能立即生效。");
     return;
   }
 
@@ -289,6 +320,9 @@ const applyAccessPolicyNow = async (row: PersonalPolicyRow) => {
   try {
     await adminApi.applyUserAccessPolicyNow(detail.value.user.id, row.policyId);
     await load();
+    showActionMessage("success", `${row.goodsName} 的设定已调整为当前业务日生效。`);
+  } catch (error) {
+    showActionMessage("error", `立即生效失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     applyingNowPolicyId.value = "";
   }
@@ -301,16 +335,21 @@ const toggleTemplatePolicy = (policyId: string) => {
 const applyTemplatePolicies = async () => {
   if (!detail.value || detail.value.user.role !== "special" || !templateApplyForm.value.policyIds.length) return;
   if (!canManageUserRules.value) {
-    window.alert("当前账号没有取货规则管理权限。");
+    showActionMessage("error", "当前账号没有取货规则管理权限，不能套用模板。");
     return;
   }
 
   if (templateApplyForm.value.mode === "replace" && !window.confirm("覆盖会在下一个业务日替换当前每日可领取物资设定，确认继续吗？")) return;
   saving.value = true;
   try {
+    const mode = templateApplyForm.value.mode;
+    const count = templateApplyForm.value.policyIds.length;
     await adminApi.batchAssignPolicies({ userIds: [detail.value.user.id], policyIds: [...templateApplyForm.value.policyIds], mode: templateApplyForm.value.mode });
     templateApplyForm.value.policyIds = [];
     await load();
+    showActionMessage("success", `已${mode === "replace" ? "覆盖" : "新增"} ${count} 个规则模板到 ${detail.value.user.name}。`);
+  } catch (error) {
+    showActionMessage("error", `套用模板失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     saving.value = false;
   }
@@ -352,6 +391,9 @@ onMounted(async () => {
     <section class="admin-page__section">
       <div class="admin-page__section-head">
         <div><p class="admin-kicker">人员详情</p><h3 class="admin-page__section-title">{{ detail?.user.name ?? "加载中" }}</h3></div>
+      </div>
+      <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
+        {{ actionMessage.text }}
       </div>
     </section>
 
@@ -527,7 +569,7 @@ onMounted(async () => {
         </article>
 
         <article v-if="detail.user.role === 'special' && canAdjustStock" class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">手工补扣</span><h3 class="admin-panel__title">从货物库中选择商品</h3></div></div>
+          <div class="admin-panel__head"><div><span class="admin-kicker">手工补扣</span><h3 class="admin-panel__title">从货品库中选择商品</h3></div></div>
           <div class="user-detail-form">
             <label class="admin-field"><span class="admin-field__label">柜机</span><select v-model="form.deviceCode" class="admin-select"><option v-for="device in devices" :key="device.deviceCode" :value="device.deviceCode">{{ device.name }} / {{ device.deviceCode }}</option></select></label>
             <label class="admin-field"><span class="admin-field__label">货品</span><select v-model="form.goodsId" class="admin-select"><option v-for="goods in selectedDeviceGoods" :key="goods.goodsId" :value="goods.goodsId">{{ goods.name }} / {{ goods.goodsId }}</option></select></label>

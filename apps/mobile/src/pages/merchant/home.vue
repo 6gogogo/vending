@@ -9,6 +9,7 @@ import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
+import { formatBeijingDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
 
 const sessionStore = useSessionStore();
@@ -77,7 +78,7 @@ onShow(() => {
   <MobileShell eyebrow="商家" :title="sessionStore.user?.name ?? '商家工作台'" :subtitle="appCopy.merchantWelcome">
     <template #hero-actions>
       <view class="hero-action-grid">
-        <button class="vm-button vm-button--warning" @tap="goNearby">
+        <button class="vm-button" @tap="goNearby">
           <view class="action-button__content">
             <MenuIcon name="restock" size="sm" tone="contrast" />
             <text>选择柜机补货</text>
@@ -118,7 +119,7 @@ onShow(() => {
 
           <button class="merchant-overview__cta" @tap="goNearby">
             <MenuIcon name="device" size="sm" tone="contrast" />
-            <text>开柜取货 / 补货</text>
+            <text>选择柜机补货</text>
           </button>
         </view>
 
@@ -140,7 +141,7 @@ onShow(() => {
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">常用操作</text>
-          <text class="vm-subtitle">可从这里维护常用商品、登记补货和查看货物去向。</text>
+          <text class="vm-subtitle">可从这里维护常用商品、登记补货和查看货品去向。</text>
         </view>
 
         <view class="menu-grid menu-grid--tiles">
@@ -156,7 +157,7 @@ onShow(() => {
           </button>
           <button class="menu-card" @tap="navigate('/pages/merchant/traces')">
             <MenuIcon name="trace" size="lg" />
-            <text class="menu-card__title">货物去向</text>
+            <text class="menu-card__title">货品去向</text>
             <text class="menu-card__desc">批次追踪</text>
           </button>
           <button class="menu-card" @tap="navigate('/pages/common/feedback')">
@@ -171,17 +172,17 @@ onShow(() => {
     <GlassCard tone="warning">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">最近货物流动</text>
-          <text class="vm-subtitle">最近的补货与异常处理会同步写入日志，便于追踪去向和责任。</text>
+          <text class="section-heading__title">最近货品流转</text>
+          <text class="vm-subtitle">最近的补货与异常处理会同步写入日志，便于追踪去向和处理过程。</text>
         </view>
 
         <view v-if="recentLogs.length" class="log-list">
           <view v-for="entry in recentLogs" :key="entry.id" class="log-item">
             <text class="log-item__desc">{{ entry.description }}</text>
-            <text class="log-item__time">{{ entry.occurredAt.slice(0, 16).replace("T", " ") }}</text>
+            <text class="log-item__time">{{ formatBeijingDateTime(entry.occurredAt) }}</text>
           </view>
         </view>
-        <EmptyState v-else :title="loading ? '正在加载日志' : '还没有补货日志'" description="完成首次补货后，这里会展示最近的货物流动记录。" />
+        <EmptyState v-else :title="loading ? '正在加载日志' : '还没有补货日志'" description="完成首次补货后，这里会展示最近的货品流转记录。" />
       </view>
     </GlassCard>
   </MobileShell>
@@ -235,11 +236,11 @@ onShow(() => {
   position: relative;
   padding: 26rpx;
   border-radius: 30rpx;
-  border: 1rpx solid rgba(255, 138, 43, 0.28);
+  border: 1rpx solid rgba(46, 125, 70, 0.24);
   background:
     radial-gradient(circle at 88% 12%, rgba(255, 255, 255, 0.24), transparent 30%),
-    linear-gradient(135deg, #ff8a2b, #ffb764);
-  box-shadow: 0 20rpx 48rpx rgba(255, 138, 43, 0.2);
+    linear-gradient(135deg, #2e7d46, #75b86b);
+  box-shadow: 0 20rpx 48rpx rgba(46, 125, 70, 0.18);
   overflow: hidden;
 }
 
@@ -339,11 +340,10 @@ onShow(() => {
   justify-content: center;
   border-radius: 24rpx;
   background: #ffffff;
-  color: #ffffff;
   font-size: 30rpx;
   font-weight: 800;
-  color: var(--vm-warning);
-  box-shadow: 0 16rpx 32rpx rgba(102, 51, 0, 0.12);
+  color: var(--vm-accent-strong);
+  box-shadow: 0 16rpx 32rpx rgba(31, 106, 58, 0.12);
 }
 
 .merchant-warning-card {
@@ -371,6 +371,7 @@ onShow(() => {
 
 .menu-grid--tiles {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
 }
 
 .menu-card,
@@ -385,9 +386,15 @@ onShow(() => {
 }
 
 .menu-card {
-  min-height: 186rpx;
+  box-sizing: border-box;
+  width: 100%;
+  height: 220rpx;
+  min-height: 220rpx;
+  margin: 0;
+  align-content: center;
   justify-items: center;
   text-align: center;
+  line-height: 1.25;
 }
 
 .menu-card__tag {

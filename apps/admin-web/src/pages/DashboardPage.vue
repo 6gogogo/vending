@@ -32,6 +32,7 @@ const sessionStore = useAdminSessionStore();
 const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
 const loading = ref(false);
 const loadError = ref("");
+const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 const activeBucket = ref<BucketKey>();
 const resolvingTaskId = ref<string>();
 const activeTask = ref<NonNullable<typeof pendingTasks.value>[number]>();
@@ -244,7 +245,10 @@ const closeTaskDetail = () => {
 
 const resolveTask = async (id: string) => {
   if (!canManageAlerts.value) {
-    window.alert("当前账号没有预警处理权限。");
+    actionMessage.value = {
+      type: "error",
+      text: "当前账号没有预警处理权限，不能处理运营待办。"
+    };
     return;
   }
 
@@ -261,12 +265,22 @@ const resolveTask = async (id: string) => {
   }
 
   resolvingTaskId.value = id;
+  actionMessage.value = undefined;
   try {
     await adminApi.resolveAlert(
       id,
       task?.grade === "fault" ? "管理员已知晓并接手处理" : "管理员手动完成"
     );
     await load();
+    actionMessage.value = {
+      type: "success",
+      text: task.grade === "fault" ? "已标记为知晓，请继续跟进柜机状态或关联日志。" : "待办已完成，已从当前待办列表移除。"
+    };
+  } catch (error) {
+    actionMessage.value = {
+      type: "error",
+      text: error instanceof Error ? `处理待办失败：${error.message}` : "处理待办失败，请稍后重试。"
+    };
   } finally {
     resolvingTaskId.value = undefined;
   }
@@ -315,6 +329,10 @@ onUnmounted(() => {
       <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
         {{ loading ? "重试中" : "重试" }}
       </button>
+    </div>
+
+    <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
+      {{ actionMessage.text }}
     </div>
 
     <article v-if="loading && !dashboard" class="admin-panel admin-loading">
@@ -468,7 +486,7 @@ onUnmounted(() => {
         <article class="dashboard-mini-card admin-panel">
           <div class="admin-panel__head">
             <div>
-              <span class="admin-kicker">待办 TOPS</span>
+              <span class="admin-kicker">重点待办</span>
               <h3 class="admin-panel__title">高优先级任务</h3>
             </div>
           </div>
@@ -576,14 +594,14 @@ onUnmounted(() => {
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">快速入口</span>
-              <h3 class="admin-panel__title">货物、柜机与日志工作台</h3>
+              <h3 class="admin-panel__title">货品、柜机与日志工作台</h3>
             </div>
           </div>
 
           <div class="admin-list">
             <div class="admin-list__row">
               <div class="admin-list__main">
-                <span class="admin-list__title">货物总览</span>
+                <span class="admin-list__title">货品总览</span>
                 <span class="admin-table__subtext">查看各商品种类数量、柜机分布和货品预警模板。</span>
               </div>
               <RouterLink class="admin-link" to="/goods">打开</RouterLink>
@@ -618,7 +636,7 @@ onUnmounted(() => {
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">汇总日志</p>
-          <h3 class="admin-page__section-title">货物调动、告警与关键操作</h3>
+          <h3 class="admin-page__section-title">货品调拨、告警与关键操作</h3>
         </div>
         <RouterLink class="admin-link" to="/logs">进入日志总览</RouterLink>
       </div>

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   UnauthorizedException
@@ -49,9 +50,12 @@ interface AdminSessionResult {
 }
 
 type BackofficeSessionResult = BackofficeSessionSnapshot;
+const MIN_ADMIN_PASSWORD_LENGTH = 8;
 
 @Injectable()
 export class AuthService {
+  private readonly passwordLoginFailureHistory = new Map<string, number[]>();
+
   constructor(
     @Inject(UsersService) private readonly usersService: UsersService,
     @Inject(AccessRulesService) private readonly accessRulesService: AccessRulesService,
@@ -64,15 +68,11 @@ export class AuthService {
   ) {}
 
   async requestCode(phone: string, scene: "app-login" | "register" | "general" = "general") {
-    if (scene === "app-login") {
-      this.assertCanRequestAppLoginCode(phone);
-    }
-
-    return this.verificationCodeService.requestCode(phone);
+    return this.verificationCodeService.requestCode(phone, scene);
   }
 
   async appLogin(phone: string, code: string): Promise<AppLoginResult> {
-    if (!(await this.verificationCodeService.verifyCode(phone, code))) {
+    if (!(await this.verificationCodeService.verifyCode(phone, code, "app-login"))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
@@ -117,7 +117,7 @@ export class AuthService {
     code: string,
     requestedRole?: UserRole
   ): Promise<MobileLoginResult> {
-    if (!(await this.verificationCodeService.verifyCode(phone, code))) {
+    if (!(await this.verificationCodeService.verifyCode(phone, code, "general"))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
@@ -254,7 +254,7 @@ export class AuthService {
   async login(phone: string, code: string) {
     const user = this.usersService.findByPhone(phone);
 
-    if (!user || !(await this.verificationCodeService.verifyCode(phone, code))) {
+    if (!user || !(await this.verificationCodeService.verifyCode(phone, code, "general"))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
@@ -277,19 +277,31 @@ export class AuthService {
     const response = await this.login(phone, code);
 
     if (response.user.role !== "admin") {
+      this.store.revokeSession(response.token);
       throw new UnauthorizedException("当前账号不是管理员，无法登录后台。");
     }
 
-    return this.createAdminSessionSnapshot(
-      this.usersService.findById(response.user.id),
-      response.token
-    );
+    try {
+      return this.createAdminSessionSnapshot(
+        this.usersService.findById(response.user.id),
+        response.token
+      );
+    } catch (error) {
+      this.store.revokeSession(response.token);
+      throw error;
+    }
   }
 
-  async adminPasswordLogin(username: string, password: string): Promise<AdminSessionResult> {
+  async adminPasswordLogin(
+    username: string,
+    password: string,
+    sourceKey = "unknown"
+  ): Promise<AdminSessionResult> {
+    this.assertPasswordLoginAllowed(username, sourceKey);
     const credential = this.store.findAdminCredentialByUsername(username);
 
     if (!credential) {
+      this.recordPasswordLoginFailure(username, sourceKey);
       throw new UnauthorizedException("账号或密码不正确。");
     }
 
@@ -298,18 +310,26 @@ export class AuthService {
     );
 
     if (!user || !verifyAdminPassword(password, credential.passwordSalt, credential.passwordHash)) {
+      this.recordPasswordLoginFailure(username, sourceKey);
       throw new UnauthorizedException("账号或密码不正确。");
     }
 
     this.assertDefaultCredentialAllowed(credential.usesDefaultPassword);
+    this.clearPasswordLoginAccountFailures(username);
 
     return this.createAdminSessionSnapshot(user);
   }
 
-  async backofficeLogin(username: string, password: string): Promise<BackofficeSessionResult> {
+  async backofficeLogin(
+    username: string,
+    password: string,
+    sourceKey = "unknown"
+  ): Promise<BackofficeSessionResult> {
+    this.assertPasswordLoginAllowed(username, sourceKey);
     const credential = this.store.findBackofficeCredentialByUsername(username);
 
     if (!credential) {
+      this.recordPasswordLoginFailure(username, sourceKey);
       throw new UnauthorizedException("账号或密码不正确。");
     }
 
@@ -320,12 +340,59 @@ export class AuthService {
     );
 
     if (!user || !verifyAdminPassword(password, credential.passwordSalt, credential.passwordHash)) {
+      this.recordPasswordLoginFailure(username, sourceKey);
       throw new UnauthorizedException("账号或密码不正确。");
     }
 
     this.assertDefaultCredentialAllowed(credential.usesDefaultPassword);
+    this.clearPasswordLoginAccountFailures(username);
 
     return this.createBackofficeSessionSnapshot(user, credential.role, undefined, credential);
+  }
+
+  private assertPasswordLoginAllowed(username: string, sourceKey: string) {
+    const now = Date.now();
+    const windowMs = 15 * 60_000;
+    const limits = [
+      { key: this.passwordLoginIpKey(sourceKey), limit: 10 },
+      { key: this.passwordLoginAccountKey(username), limit: 5 }
+    ];
+
+    for (const entry of limits) {
+      const recent = (this.passwordLoginFailureHistory.get(entry.key) ?? []).filter(
+        (timestamp) => now - timestamp < windowMs
+      );
+      this.passwordLoginFailureHistory.set(entry.key, recent);
+
+      if (recent.length >= entry.limit) {
+        throw new HttpException("登录失败次数过多，请稍后再试。", 429);
+      }
+    }
+  }
+
+  private recordPasswordLoginFailure(username: string, sourceKey: string) {
+    const timestamp = Date.now();
+
+    for (const key of [
+      this.passwordLoginIpKey(sourceKey),
+      this.passwordLoginAccountKey(username)
+    ]) {
+      const history = this.passwordLoginFailureHistory.get(key) ?? [];
+      history.push(timestamp);
+      this.passwordLoginFailureHistory.set(key, history);
+    }
+  }
+
+  private clearPasswordLoginAccountFailures(username: string) {
+    this.passwordLoginFailureHistory.delete(this.passwordLoginAccountKey(username));
+  }
+
+  private passwordLoginIpKey(sourceKey: string) {
+    return `ip:${sourceKey.trim() || "unknown"}`;
+  }
+
+  private passwordLoginAccountKey(username: string) {
+    return `account:${username.trim().toLowerCase() || "unknown"}`;
   }
 
   private assertDefaultCredentialAllowed(usesDefaultPassword: boolean) {
@@ -355,6 +422,12 @@ export class AuthService {
     return this.getMobileSession(token);
   }
 
+  logout(token?: string) {
+    return {
+      revoked: this.store.revokeSession(token)
+    };
+  }
+
   getAdminSession(token?: string): AdminSessionResult {
     const user = this.store.getSessionUser(token);
 
@@ -382,18 +455,6 @@ export class AuthService {
       );
     }
 
-    const user = this.store.getSessionUser(token);
-
-    if (user?.role === "admin") {
-      const credential =
-        this.store.findBackofficeCredentialByUserId(user.id, "admin") ??
-        this.store.findBackofficeCredentialByUserId(user.id, "super_admin");
-
-      if (credential) {
-        return this.createBackofficeSessionSnapshot(user, credential.role, token);
-      }
-    }
-
     throw new UnauthorizedException("当前登录态已失效，请重新登录。");
   }
 
@@ -416,8 +477,8 @@ export class AuthService {
 
     const normalizedPassword = newPassword.trim();
 
-    if (normalizedPassword.length < 6) {
-      throw new BadRequestException("新密码至少需要 6 位。");
+    if (normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      throw new BadRequestException(`新密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
     }
 
     if (normalizedPassword === currentPassword.trim()) {
@@ -454,7 +515,8 @@ export class AuthService {
       }
     });
 
-    return this.createAdminSessionSnapshot(user, token, updatedCredential);
+    this.store.revokeSessionsForUser(user.id);
+    return this.createAdminSessionSnapshot(user, this.store.createSession(user), updatedCredential);
   }
 
   changeBackofficePassword(
@@ -489,8 +551,8 @@ export class AuthService {
 
     const normalizedPassword = newPassword.trim();
 
-    if (normalizedPassword.length < 6) {
-      throw new BadRequestException("新密码至少需要 6 位。");
+    if (normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      throw new BadRequestException(`新密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
     }
 
     if (normalizedPassword === currentPassword.trim()) {
@@ -528,10 +590,17 @@ export class AuthService {
       }
     });
 
+    this.store.revokeSessionsForUser(resolved.user.id);
+    const refreshedToken = this.store.createBackofficeSession(
+      resolved.user,
+      backofficeRole,
+      updatedCredential.tenantId
+    );
+
     return this.createBackofficeSessionSnapshot(
       resolved.user,
       backofficeRole,
-      token,
+      refreshedToken,
       updatedCredential
     );
   }
@@ -623,12 +692,16 @@ export class AuthService {
       throw new BadRequestException("后台账号不能为空。");
     }
 
-    if (!existingCredential && normalizedPassword.length < 6) {
-      throw new BadRequestException("后台密码至少需要 6 位。");
+    if (!existingCredential && normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      throw new BadRequestException(`后台密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
     }
 
-    if (existingCredential && normalizedPassword && normalizedPassword.length < 6) {
-      throw new BadRequestException("后台密码至少需要 6 位。");
+    if (
+      existingCredential &&
+      normalizedPassword &&
+      normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH
+    ) {
+      throw new BadRequestException(`后台密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
     }
 
     const sameUsername = this.store.findBackofficeCredentialByUsername(normalizedUsername);
@@ -678,6 +751,10 @@ export class AuthService {
         undoState: "not_undoable"
       }
     });
+
+    if (normalizedPassword) {
+      this.store.revokeSessionsForUser(targetUser.id);
+    }
 
     return this.createBackofficeCredentialSnapshot(credential);
   }
@@ -847,19 +924,4 @@ export class AuthService {
     return profile.name || "待完善资料用户";
   }
 
-  private assertCanRequestAppLoginCode(phone: string) {
-    const existingUser = this.store.users.find((entry) => entry.phone === phone && entry.status === "active");
-
-    if (existingUser?.mobileProfileCompleted) {
-      return;
-    }
-
-    const existingApplication = this.registrationApplicationsService.findLatestByPhone(phone);
-
-    if (existingApplication && ["pending", "rejected", "approved"].includes(existingApplication.status)) {
-      return;
-    }
-
-    throw new BadRequestException("请注册");
-  }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
-import type { DeviceRecord, DeviceStatus } from "@vm/shared-types";
+import type { DeviceRecord } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
@@ -10,18 +10,21 @@ import MobileShell from "../../layouts/MobileShell.vue";
 import { categoryLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
+import { formatBeijingDateTime, formatBeijingMonthDay } from "../../utils/datetime";
+import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { getErrorMessage } from "../../utils/error-message";
 import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils/receivable-goods";
 import { syncRoleTabBar } from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
 
-const DEFAULT_MARKER_ICON = "https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-default.png";
-const ACTIVE_MARKER_ICON = "https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-red.png";
+const DEFAULT_MARKER_ICON = "/static/tabs/device.png";
+const ACTIVE_MARKER_ICON = "/static/tabs/device-active.png";
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
 const devices = ref<DeviceRecord[]>([]);
 const loading = ref(false);
+const loadError = ref("");
 const distanceEnabled = ref(false);
 const mapExpanded = ref(false);
 const viewMode = ref<"map" | "list">("map");
@@ -32,25 +35,13 @@ const locationMessage = ref("正在读取当前位置");
 
 uiPreferencesStore.hydrate();
 
-const statusLabelMap: Record<DeviceStatus, string> = {
-  online: "在线",
-  offline: "离线",
-  maintenance: "维护中"
-};
-
-const statusToneMap: Record<DeviceStatus, "success" | "warning" | "danger"> = {
-  online: "success",
-  offline: "danger",
-  maintenance: "warning"
-};
-
 const accessibilityEnabled = computed(() => uiPreferencesStore.isAccessibilityEnabled(sessionStore.user?.role));
 const isAccessibleSpecial = computed(() => sessionStore.user?.role === "special" && accessibilityEnabled.value);
 const pageEyebrow = computed(() => (sessionStore.user?.role === "merchant" ? "补货" : "附近柜机"));
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return isAccessibleSpecial.value ? "显示柜机名称、地点和可选货物。" : "地图和列表都能查看，先确认可领取再开柜。";
+    return isAccessibleSpecial.value ? "显示柜机名称、地点、距离、柜内数量和今日免费数量。" : "地图和列表都能查看，先确认可领取再开柜。";
   }
 
   if (sessionStore.user?.role === "merchant") {
@@ -148,6 +139,10 @@ const heroSupport = computed(() => {
   };
 });
 const mapFocusStatusLabel = computed(() => {
+  if (highlightedDevice.value && !canOpenDevice(highlightedDevice.value)) {
+    return getDeviceStatusPresentation(highlightedDevice.value).label;
+  }
+
   if (sessionStore.user?.role === "merchant") {
     return "可补货";
   }
@@ -158,6 +153,11 @@ const mapFocusStatusLabel = computed(() => {
 
   return "可领取";
 });
+const mapFocusStatusTone = computed(() =>
+  highlightedDevice.value
+    ? getDeviceStatusPresentation(highlightedDevice.value).tone
+    : "success"
+);
 
 const markerEntries = computed(() =>
   mappableDevices.value.map((device, index) => ({
@@ -194,6 +194,9 @@ const mapCenter = computed(() => {
     latitude: 31.5528
   };
 });
+const hasRealLocation = computed(
+  () => distanceEnabled.value && currentLocation.value !== undefined
+);
 
 const mapMarkers = computed(() =>
   markerEntries.value.map(({ markerId, device }) => {
@@ -235,6 +238,7 @@ const load = async () => {
 
   syncRoleTabBar(sessionStore.user.role);
   loading.value = true;
+  loadError.value = "";
 
   try {
     let query: { longitude?: number; latitude?: number } | undefined;
@@ -293,10 +297,7 @@ const load = async () => {
       selectedGoodsId.value = goodsOptions.value[0]?.goodsId ?? "";
     }
   } catch (error) {
-    uni.showToast({
-      title: getErrorMessage(error),
-      icon: "none"
-    });
+    loadError.value = getErrorMessage(error);
   } finally {
     loading.value = false;
   }
@@ -305,8 +306,25 @@ const load = async () => {
 const openDevice = (deviceCode: string) => {
   highlightedDeviceCode.value = deviceCode;
   const targetDevice = visibleDevices.value.find((device) => device.deviceCode === deviceCode);
+
+  if (!targetDevice) {
+    uni.showToast({ title: "未找到对应柜机", icon: "none" });
+    return;
+  }
+
+  if (!canOpenDevice(targetDevice)) {
+    const presentation = getDeviceStatusPresentation(targetDevice);
+    uni.showModal({
+      title: presentation.label,
+      content: presentation.actionHint,
+      confirmText: "我知道了",
+      showCancel: false
+    });
+    return;
+  }
+
   const distanceQuery =
-    typeof targetDevice?.distanceMeters === "number" ? `&distanceMeters=${targetDevice.distanceMeters}` : "";
+    typeof targetDevice.distanceMeters === "number" ? `&distanceMeters=${targetDevice.distanceMeters}` : "";
 
   if (sessionStore.user?.role === "special") {
     uni.navigateTo({
@@ -357,14 +375,26 @@ const focusNearestGoods = () => {
     return;
   }
 
-  const matched = devices.value.find((device) =>
+  const containsGoods = (device: DeviceRecord) =>
     (sessionStore.user?.role === "special"
       ? getReceivableDeviceGoods(device, sessionStore.quota)
       : device.doors.flatMap((door) => door.goods)
-    ).some((goods) => goods.goodsId === goodsId)
-  );
+    ).some((goods) => goods.goodsId === goodsId);
+  const matched = devices.value.find((device) => canOpenDevice(device) && containsGoods(device));
 
   if (!matched) {
+    const unavailableMatch = devices.value.find(containsGoods);
+    if (unavailableMatch) {
+      const presentation = getDeviceStatusPresentation(unavailableMatch);
+      uni.showModal({
+        title: `${goodsName}所在柜机${presentation.label}`,
+        content: presentation.actionHint,
+        confirmText: "我知道了",
+        showCancel: false
+      });
+      return;
+    }
+
     uni.showToast({
       title: `当前列表没有找到${goodsName}`,
       icon: "none"
@@ -408,7 +438,19 @@ const scanAndOpen = async () => {
       return;
     }
 
-    await mobileApi.getDevice(deviceCode);
+    const device = await mobileApi.getDevice(deviceCode);
+
+    if (!canOpenDevice(device)) {
+      const presentation = getDeviceStatusPresentation(device);
+      uni.showModal({
+        title: presentation.label,
+        content: presentation.actionHint,
+        confirmText: "我知道了",
+        showCancel: false
+      });
+      return;
+    }
+
     uni.navigateTo({
       url: `/pages/special/device-detail?deviceCode=${encodeURIComponent(deviceCode)}&scan=1`
     });
@@ -449,7 +491,14 @@ onShow(() => {
   >
     <GlassCard tone="quiet">
       <view class="vm-stack">
-        <view v-if="mappableDevices.length && !isAccessibleSpecial" class="nearby-map-card">
+        <view v-if="loadError" class="vm-stack">
+          <EmptyState title="柜机数据加载失败" :description="loadError" />
+          <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">
+            重新加载
+          </button>
+        </view>
+
+        <view v-if="!loadError && mappableDevices.length && !isAccessibleSpecial" class="nearby-map-card">
           <view class="nearby-search-bar">
             <picker
               :range="goodsOptions"
@@ -495,7 +544,7 @@ onShow(() => {
                 :style="{ left: `${22 + (index * 23) % 55}%`, top: `${28 + (index * 19) % 40}%` }"
                 @tap.stop="focusDevice(device.deviceCode)"
               />
-              <view class="nearby-map-preview__user" />
+              <view v-if="hasRealLocation" class="nearby-map-preview__user" />
             </view>
             <!-- #endif -->
             <!-- #ifndef H5 -->
@@ -505,7 +554,7 @@ onShow(() => {
               :latitude="mapCenter.latitude"
               :markers="mapMarkers"
               :scale="13"
-              :show-location="true"
+              :show-location="hasRealLocation"
               @tap="mapExpanded = true"
               @markertap="handleMarkerTap"
             />
@@ -532,7 +581,7 @@ onShow(() => {
               </view>
             </view>
 
-            <button v-if="highlightedDevice" class="map-focus-card" @tap="openDevice(highlightedDevice.deviceCode)">
+            <button v-if="highlightedDevice" class="map-focus-card" :disabled="!canOpenDevice(highlightedDevice)" @tap="openDevice(highlightedDevice.deviceCode)">
               <view class="map-focus-card__media" aria-hidden="true">
                 <view class="map-focus-card__machine" />
               </view>
@@ -542,8 +591,11 @@ onShow(() => {
                 <text class="map-focus-card__meta">
                   {{ distanceEnabled ? `距离 ${formatDistance(highlightedDevice.distanceMeters)}` : "按推荐顺序展示" }}
                 </text>
+                <text v-if="!canOpenDevice(highlightedDevice)" class="map-focus-card__meta map-focus-card__warning">
+                  {{ getDeviceStatusPresentation(highlightedDevice).actionHint }}
+                </text>
               </view>
-              <text class="vm-status vm-status--success">{{ mapFocusStatusLabel }}</text>
+              <text class="vm-status" :class="`vm-status--${mapFocusStatusTone}`">{{ mapFocusStatusLabel }}</text>
             </button>
 
             <view class="nearby-map-card__tools">
@@ -555,7 +607,7 @@ onShow(() => {
         </view>
 
         <view
-          v-if="visibleDeviceEntries.length && (viewMode === 'list' || isAccessibleSpecial || !mappableDevices.length)"
+          v-if="!loadError && visibleDeviceEntries.length && (viewMode === 'list' || isAccessibleSpecial || !mappableDevices.length)"
           class="device-list"
         >
           <view
@@ -572,40 +624,44 @@ onShow(() => {
               <view class="device-card__main">
                 <text class="device-card__title">{{ entry.device.name }}</text>
                 <text class="device-card__meta">{{ entry.device.location }}</text>
-                <text v-if="!isAccessibleSpecial" class="device-card__meta">
-                  柜机编号 {{ entry.device.deviceCode }} · 最近在线 {{ entry.device.lastSeenAt.slice(0, 16).replace("T", " ") }}
+                <text class="device-card__meta">
+                  柜机编号 {{ entry.device.deviceCode }} · 最近在线 {{ formatBeijingDateTime(entry.device.lastSeenAt) }}
                 </text>
-                <text v-if="!isAccessibleSpecial" class="device-card__meta">
+                <text class="device-card__meta">
                   {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按推荐顺序显示" }}
                 </text>
                 <text v-if="sessionStore.user?.role === 'special' && !isAccessibleSpecial" class="device-card__highlight">
                   展示柜内有货的物资，超出免费额度会按价格计费
                 </text>
               </view>
-              <text v-if="!isAccessibleSpecial" class="vm-status" :class="`vm-status--${statusToneMap[entry.device.status]}`">
-                {{ statusLabelMap[entry.device.status] }}
+              <text class="vm-status" :class="`vm-status--${getDeviceStatusPresentation(entry.device).tone}`">
+                {{ getDeviceStatusPresentation(entry.device).label }}
               </text>
             </view>
+
+            <text v-if="!canOpenDevice(entry.device)" class="device-card__open-hint" role="alert">
+              {{ getDeviceStatusPresentation(entry.device).actionHint }}
+            </text>
 
             <view v-if="entry.visibleGoods.length" class="goods-list">
               <view v-for="goods in entry.visibleGoods" :key="goods.goodsId" class="goods-item">
                 <view class="goods-item__main">
                   <view class="goods-item__title-row">
                     <text>{{ goods.name }}</text>
-                    <text v-if="!isAccessibleSpecial && isLowStockGoods(goods)" class="vm-status vm-status--low-stock">低库存</text>
+                    <text v-if="isLowStockGoods(goods)" class="vm-status vm-status--low-stock">低库存</text>
                   </view>
                   <text class="goods-item__meta">
                     {{
                       sessionStore.user?.role === "special"
                         ? isAccessibleSpecial
-                          ? `今日免费 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
+                          ? `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 今日免费 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
                           : `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 免费 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
                         : `${categoryLabelMap[goods.category]} · 当前 ${goods.stock} 件`
                     }}
                   </text>
                 </view>
-                <text v-if="goods.expiresAt && !isAccessibleSpecial" class="goods-item__meta">
-                  至 {{ goods.expiresAt.slice(5, 10) }}
+                <text v-if="goods.expiresAt" class="goods-item__meta">
+                  至 {{ formatBeijingMonthDay(goods.expiresAt) }}
                 </text>
               </view>
             </view>
@@ -617,23 +673,25 @@ onShow(() => {
             </view>
 
             <view class="action-grid" :class="{ 'action-grid--single': isAccessibleSpecial }">
-              <button class="vm-button" @tap.stop="openDevice(entry.device.deviceCode)">
+              <button class="vm-button" :disabled="!canOpenDevice(entry.device)" @tap.stop="openDevice(entry.device.deviceCode)">
                 {{
-                  sessionStore.user?.role === "special"
+                  !canOpenDevice(entry.device)
+                    ? "暂不可开柜"
+                    : sessionStore.user?.role === "special"
                     ? "进入领取"
                     : sessionStore.user?.role === "merchant"
                       ? "补货 / 开门"
                   : "运营开门"
                 }}
               </button>
-              <button v-if="!isAccessibleSpecial" class="vm-button vm-button--ghost" @tap.stop="goFeedback(entry.device.deviceCode)">反馈</button>
+              <button class="vm-button vm-button--ghost" @tap.stop="goFeedback(entry.device.deviceCode)">反馈</button>
             </view>
           </view>
         </view>
 
         <EmptyState
-          v-if="!visibleDeviceEntries.length"
-          :title="loading ? '正在同步柜机' : isAccessibleSpecial ? '当前没有可选货物' : '当前没有可展示柜机'"
+          v-if="!loadError && !visibleDeviceEntries.length"
+          :title="loading ? '正在同步柜机' : isAccessibleSpecial ? '当前没有可选物资' : '当前没有可展示柜机'"
           :description="loading ? '请稍候，系统正在拉取设备信息。' : isAccessibleSpecial ? '系统会按库存自动刷新。' : '请确认后端是否已经接入柜机数据。'"
         />
       </view>
@@ -646,7 +704,7 @@ onShow(() => {
       </view>
     </GlassCard>
 
-    <view v-if="mapExpanded && !isAccessibleSpecial" class="nearby-map-overlay" @tap.self="mapExpanded = false">
+    <view v-if="!loadError && mapExpanded && !isAccessibleSpecial" class="nearby-map-overlay" @tap.self="mapExpanded = false">
       <view class="nearby-map-overlay__panel">
         <view class="nearby-map-overlay__head">
           <view>
@@ -669,7 +727,7 @@ onShow(() => {
             :style="{ left: `${22 + (index * 23) % 55}%`, top: `${28 + (index * 19) % 40}%` }"
             @tap.stop="focusDevice(device.deviceCode)"
           />
-          <view class="nearby-map-preview__user" />
+          <view v-if="hasRealLocation" class="nearby-map-preview__user" />
         </view>
         <!-- #endif -->
         <!-- #ifndef H5 -->
@@ -679,7 +737,7 @@ onShow(() => {
           :latitude="mapCenter.latitude"
           :markers="mapMarkers"
           :scale="15"
-          :show-location="true"
+          :show-location="hasRealLocation"
           @markertap="handleMarkerTap"
         />
         <!-- #endif -->
@@ -810,6 +868,14 @@ onShow(() => {
 .device-card__highlight {
   font-size: 22rpx;
   color: var(--vm-accent-strong);
+}
+
+.device-card__open-hint,
+.map-focus-card__warning {
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--vm-warning);
+  font-weight: 700;
 }
 
 .device-card__empty {
@@ -994,6 +1060,18 @@ onShow(() => {
   border: 1rpx solid var(--vm-success-line);
   background: #ffffff;
   text-align: left;
+}
+
+.map-focus-card[disabled] {
+  border-color: var(--vm-warning-line);
+  background: var(--vm-warning-bg);
+}
+
+.vm-page--accessible .device-card .vm-button[disabled] {
+  opacity: 1;
+  background: #e7eee8;
+  border-color: var(--vm-line-strong);
+  color: var(--vm-muted);
 }
 
 .map-focus-card__media,

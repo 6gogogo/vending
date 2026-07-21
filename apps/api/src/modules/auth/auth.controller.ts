@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Inject, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Inject, Patch, Post, Req } from "@nestjs/common";
 
 import type {
   BackofficePermission,
@@ -58,13 +58,39 @@ export class AuthController {
   }
 
   @Post("admin-password-login")
-  async adminPasswordLogin(@Body() body: { username: string; password: string }) {
-    return ok(await this.authService.adminPasswordLogin(body.username, body.password));
+  async adminPasswordLogin(
+    @Body() body: { username: string; password: string },
+    @Req() request: { ip?: string }
+  ) {
+    return ok(
+      await this.authService.adminPasswordLogin(
+        body.username,
+        body.password,
+        request.ip ?? "unknown"
+      )
+    );
   }
 
   @Post("backoffice-login")
-  async backofficeLogin(@Body() body: { username: string; password: string }) {
-    return ok(await this.authService.backofficeLogin(body.username, body.password));
+  async backofficeLogin(
+    @Body() body: { username: string; password: string },
+    @Req() request: { ip?: string }
+  ) {
+    return ok(
+      await this.authService.backofficeLogin(
+        body.username,
+        body.password,
+        request.ip ?? "unknown"
+      )
+    );
+  }
+
+  @Post("logout")
+  logout(@Headers("authorization") authorization?: string) {
+    return ok(
+      this.authService.logout(this.extractBearerToken(authorization)),
+      "已退出登录。"
+    );
   }
 
   @Patch("admin-password")
