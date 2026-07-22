@@ -195,7 +195,6 @@ const loadApiEnvFile = () => {
 };
 
 const resolveApiWorkspacePath = (configuredPath: string, fallbackRelativePath: string) => {
-  loadApiEnvFile();
   const rawPath = configuredPath || fallbackRelativePath;
   const normalizedPath = rawPath.replace(/\\/g, "/");
 
@@ -211,32 +210,38 @@ const resolveApiWorkspacePath = (configuredPath: string, fallbackRelativePath: s
 };
 
 export const resolveApiDataFile = () => {
+  loadApiEnvFile();
   const configuredPath = process.env.API_DATA_FILE ?? "runtime-data/store.json";
   return resolveApiWorkspacePath(configuredPath, "runtime-data/store.json");
 };
 
 export const resolveUploadDir = () => {
+  loadApiEnvFile();
   const configuredPath = process.env.UPLOAD_DIR ?? "runtime-uploads";
   return resolveApiWorkspacePath(configuredPath, "runtime-uploads");
 };
 
 export const resolveSystemLogFile = () => {
+  loadApiEnvFile();
   const configuredPath = process.env.SYSTEM_LOG_FILE ?? "runtime-data/system-audit.ndjson";
   return resolveApiWorkspacePath(configuredPath, "runtime-data/system-audit.ndjson");
 };
 
 export const resolveApiBackupDir = () => {
+  loadApiEnvFile();
   const configuredPath = process.env.API_BACKUP_DIR ?? "runtime-backups";
   return resolveApiWorkspacePath(configuredPath, "runtime-backups");
 };
 
-export const resolveFinancialSingleWriterLeaseFile = (configuredPath?: string) =>
-  resolveApiWorkspacePath(
+export const resolveFinancialSingleWriterLeaseFile = (configuredPath?: string) => {
+  loadApiEnvFile();
+  return resolveApiWorkspacePath(
     configuredPath?.trim() ||
       process.env.FINANCIAL_SINGLE_WRITER_LEASE_FILE ||
       "runtime-data/financial-writer.lock",
     "runtime-data/financial-writer.lock"
   );
+};
 
 export const resolveApiEnvFile = () => resolve(apiWorkspaceRoot, ".env");
 
