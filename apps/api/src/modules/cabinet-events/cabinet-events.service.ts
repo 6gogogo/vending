@@ -38,6 +38,7 @@ import {
   type FinancialOperationLease
 } from "../../common/coordination/financial-operation-coordinator";
 import { isProductionRuntime } from "../../common/config/production-safety";
+import { createCallbackReplayFingerprint } from "../../common/logging/callback-log-sanitizer";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AccessRulesService } from "../access-rules/access-rules.service";
 import { AlertsService } from "../alerts/alerts.service";
@@ -459,25 +460,14 @@ export class CabinetEventsService {
     const normalizedDeviceCode = deviceCode?.trim();
 
     if (!normalizedDeviceCode) {
-      return this.store.callbackLog.slice(0, resolvedLimit);
+      return this.store.callbackLog.slice(0, resolvedLimit).map((entry) => this.toCallbackLogView(entry));
     }
 
-    const matches: typeof this.store.callbackLog = [];
+    const matches: ReturnType<typeof this.toCallbackLogView>[] = [];
 
     for (const entry of this.store.callbackLog) {
-      const serialized =
-        typeof entry.payload === "string"
-          ? entry.payload
-          : (() => {
-              try {
-                return JSON.stringify(entry.payload ?? {});
-              } catch {
-                return "";
-              }
-            })();
-
-      if (serialized.includes(normalizedDeviceCode)) {
-        matches.push(entry);
+      if (entry.payload.deviceCode === normalizedDeviceCode) {
+        matches.push(this.toCallbackLogView(entry));
       }
 
       if (matches.length >= resolvedLimit) {
@@ -613,7 +603,7 @@ export class CabinetEventsService {
         deviceCode: payload.deviceCode,
         status: payload.status,
         callbackLogId: callbackLog.id,
-        callbackPayload: payload
+        callbackPayload: callbackLog.payload
       }
     });
 
@@ -785,7 +775,7 @@ export class CabinetEventsService {
           hasInboundGoods: event.hasInboundGoods,
           openReason: event.openReason,
           callbackLogId: callbackLog.id,
-          callbackPayload: payload,
+          callbackPayload: callbackLog.payload,
           undoState: "not_undoable"
         }
       });
@@ -896,7 +886,7 @@ export class CabinetEventsService {
           amount: payload.amount,
           orgOrderNo: payload.orgOrderNo,
           callbackLogId: callbackLog.id,
-          callbackPayload: payload,
+          callbackPayload: callbackLog.payload,
           undoState: "not_undoable"
         }
       });
@@ -1163,23 +1153,21 @@ export class CabinetEventsService {
   }
 
   private isSmartVmCallbackReplay(type: string, payload: Record<string, unknown>) {
-    const nonce = this.readPayloadString(payload.nonceStr);
-    const clientId = this.readPayloadString(payload.clientId);
+    const fingerprint = createCallbackReplayFingerprint(type, payload);
 
-    if (nonce) {
+    if (fingerprint.nonceFingerprint) {
       const nonceMatch = this.store.callbackLog.find((entry) => {
-        const previous = this.readCallbackPayload(entry.payload);
         return (
-          this.readPayloadString(previous?.nonceStr) === nonce &&
-          this.readPayloadString(previous?.clientId) === clientId
+          this.getStoredCallbackReplayFingerprint(entry).nonceFingerprint ===
+          fingerprint.nonceFingerprint
         );
       });
 
       if (nonceMatch) {
         if (
           nonceMatch.type !== type ||
-          this.serializeCallbackBusinessPayload(nonceMatch.payload) !==
-            this.serializeCallbackBusinessPayload(payload)
+          this.getStoredCallbackReplayFingerprint(nonceMatch).payloadFingerprint !==
+            fingerprint.payloadFingerprint
         ) {
           throw new BadRequestException("柜机回调 nonce 已被其他请求使用。");
         }
@@ -1188,18 +1176,15 @@ export class CabinetEventsService {
       }
     }
 
-    const businessKey = this.buildSmartVmCallbackBusinessKey(type, payload);
-
-    if (!businessKey) {
+    if (!fingerprint.businessKeyFingerprint) {
       return false;
     }
 
     const businessMatch = this.store.callbackLog.find((entry) => {
-      const previous = this.readCallbackPayload(entry.payload);
       return (
         entry.type === type &&
-        previous &&
-        this.buildSmartVmCallbackBusinessKey(type, previous) === businessKey
+        this.getStoredCallbackReplayFingerprint(entry).businessKeyFingerprint ===
+          fingerprint.businessKeyFingerprint
       );
     });
 
@@ -1208,8 +1193,8 @@ export class CabinetEventsService {
     }
 
     if (
-      this.serializeCallbackBusinessPayload(businessMatch.payload) !==
-      this.serializeCallbackBusinessPayload(payload)
+      this.getStoredCallbackReplayFingerprint(businessMatch).payloadFingerprint !==
+        fingerprint.payloadFingerprint
     ) {
       throw new BadRequestException("同一柜机业务回调携带了冲突内容。");
     }
@@ -1222,12 +1207,14 @@ export class CabinetEventsService {
     payload: Record<string, unknown>,
     replay: boolean
   ) {
+    const fingerprint = createCallbackReplayFingerprint(type, payload);
+
     if (replay) {
-      const serialized = this.serializeCallbackBusinessPayload(payload);
       const existing = this.store.callbackLog.find(
         (entry) =>
           entry.type === type &&
-          this.serializeCallbackBusinessPayload(entry.payload) === serialized
+          this.getStoredCallbackReplayFingerprint(entry).payloadFingerprint ===
+            fingerprint.payloadFingerprint
       );
 
       if (existing) {
@@ -1236,22 +1223,6 @@ export class CabinetEventsService {
     }
 
     return this.store.logCallback(type, payload);
-  }
-
-  private buildSmartVmCallbackBusinessKey(type: string, payload: Record<string, unknown>) {
-    if (type === "door-status") {
-      const eventId = this.readPayloadString(payload.eventId);
-      const status = this.readPayloadString(payload.status);
-      return eventId && status ? `${eventId}:${status}` : undefined;
-    }
-
-    if (type === "payment-success") {
-      const orderNo = this.readPayloadString(payload.orderNo);
-      const transactionId = this.readPayloadString(payload.transactionId);
-      return orderNo && transactionId ? `${orderNo}:${transactionId}` : undefined;
-    }
-
-    return this.readPayloadString(payload.orderNo);
   }
 
   private serializeCallbackBusinessPayload(payload: unknown) {
@@ -1282,12 +1253,6 @@ export class CabinetEventsService {
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([key, entry]) => [key, this.normalizeCallbackBusinessPayload(entry)])
     );
-  }
-
-  private readCallbackPayload(value: unknown) {
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : undefined;
   }
 
   private parseCallbackTimestamp(value: unknown) {
@@ -1348,13 +1313,25 @@ export class CabinetEventsService {
 
   private hasRecordedDoorClose(eventId: string) {
     return this.store.callbackLog.some((entry) => {
-      if (entry.type !== "door-status" || !entry.payload || typeof entry.payload !== "object") {
-        return false;
-      }
-
-      const callback = entry.payload as Record<string, unknown>;
-      return callback.eventId === eventId && callback.status === "CLOSED";
+      return (
+        entry.type === "door-status" &&
+        entry.payload.eventId === eventId &&
+        entry.payload.status === "CLOSED"
+      );
     });
+  }
+
+  private toCallbackLogView(entry: (typeof this.store.callbackLog)[number]) {
+    return {
+      id: entry.id,
+      type: entry.type,
+      receivedAt: entry.receivedAt,
+      payload: entry.payload
+    };
+  }
+
+  private getStoredCallbackReplayFingerprint(entry: (typeof this.store.callbackLog)[number]) {
+    return entry.replay ?? createCallbackReplayFingerprint(entry.type, entry.payload);
   }
 
   private assertSettlementTransition(

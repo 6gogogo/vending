@@ -18,6 +18,12 @@ import { cloneSeedState, type AlertTask, type BackofficePermission, type Backoff
 
 import { sanitizeAuditLogEntry } from "../logging/audit-log-sanitizer";
 import {
+  isCallbackLogRecordSanitized,
+  isOperationLogCallbackMetadataSanitized,
+  sanitizeCallbackLogRecord,
+  sanitizeOperationLogCallbackMetadata
+} from "../logging/callback-log-sanitizer";
+import {
   envFilesDeclareProductionRuntime,
   isProductionRuntime
 } from "../config/runtime-environment";
@@ -114,6 +120,11 @@ export interface PersistedStoreState {
   backofficeCredentials: BackofficeCredentialRecord[];
   callbackLog: CallbackLogRecord[];
   deviceRuntime: Array<[string, DeviceRuntimeState]>;
+}
+
+export interface PersistedStateReadResult {
+  state: PersistedStoreState;
+  requiresPrivacyRewrite: boolean;
 }
 
 const MAX_PERSISTED_CALLBACK_LOGS = 1000;
@@ -357,18 +368,24 @@ const normalizePersistedState = (raw: Partial<PersistedStoreState>): PersistedSt
       ...(raw.reservationSettings ?? seeded.reservationSettings)
     },
     alerts: raw.alerts ?? seeded.alerts,
-    logs: raw.logs ?? seeded.logs,
+    logs: (raw.logs ?? seeded.logs).map((entry) => ({
+      ...entry,
+      metadata: sanitizeOperationLogCallbackMetadata(entry.metadata)
+    })),
     verificationCodes: raw.verificationCodes ?? seeded.verificationCodes,
     sessions: raw.sessions ?? seeded.sessions,
     draftSessions: raw.draftSessions ?? seeded.draftSessions,
     adminCredentials: raw.adminCredentials ?? seeded.adminCredentials,
     backofficeCredentials: raw.backofficeCredentials ?? seeded.backofficeCredentials,
-    callbackLog: (raw.callbackLog ?? seeded.callbackLog).slice(0, MAX_PERSISTED_CALLBACK_LOGS),
+    callbackLog: (raw.callbackLog ?? seeded.callbackLog)
+      .slice(0, MAX_PERSISTED_CALLBACK_LOGS)
+      .map((entry) => sanitizeCallbackLogRecord(entry))
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
     deviceRuntime: raw.deviceRuntime ?? seeded.deviceRuntime
   };
 };
 
-export const readPersistedState = () => {
+export const readPersistedStateWithMetadata = (): PersistedStateReadResult | undefined => {
   const filePath = resolveApiDataFile();
 
   if (!existsSync(filePath)) {
@@ -376,8 +393,15 @@ export const readPersistedState = () => {
   }
 
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as Partial<PersistedStoreState>;
-  return normalizePersistedState(raw);
+  return {
+    state: normalizePersistedState(raw),
+    requiresPrivacyRewrite:
+      (raw.callbackLog?.some((entry) => !isCallbackLogRecordSanitized(entry)) ?? false) ||
+      (raw.logs?.some((entry) => !isOperationLogCallbackMetadataSanitized(entry.metadata)) ?? false)
+  };
 };
+
+export const readPersistedState = () => readPersistedStateWithMetadata()?.state;
 
 export const writePersistedState = (state: PersistedStoreState) => {
   return runWithFinancialWriterFence(() => {

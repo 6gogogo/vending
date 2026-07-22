@@ -1,9 +1,12 @@
 import { resolve } from "node:path";
 
 import { postJson, readFixture } from "./helpers.mjs";
+import { assertLocalCandidateApiBaseUrl } from "./local-api-guard.mjs";
 
 const fixtureArg = process.argv[2] ?? "sandbox/fixtures/settlement.sample.json";
 const baseUrl = process.env.LOCAL_API_BASE_URL ?? "http://localhost:4000/api";
+
+assertLocalCandidateApiBaseUrl(baseUrl);
 
 const payload = await readFixture(resolve(process.cwd(), fixtureArg));
 const response = await postJson(baseUrl, "/cabinet-events/callbacks/settlement", payload);

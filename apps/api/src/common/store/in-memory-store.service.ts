@@ -41,10 +41,14 @@ import {
 } from "@vm/shared-types";
 
 import { hashAdminPassword } from "../../modules/auth/admin-password.utils";
+import {
+  createCallbackReplayFingerprint,
+  summarizeCallbackPayload
+} from "../logging/callback-log-sanitizer";
 import { formatOperationLog } from "../logging/operation-log-template";
 import {
   createSeededPersistedState,
-  readPersistedState,
+  readPersistedStateWithMetadata,
   type AdminCredentialRecord,
   type BackofficeCredentialRecord,
   type DraftSessionRecord,
@@ -170,7 +174,8 @@ export class InMemoryStoreService {
   );
 
   constructor() {
-    const persisted = readPersistedState();
+    const persistedResult = readPersistedStateWithMetadata();
+    const persisted = persistedResult?.state;
     this.persistenceFlags = persisted?.flags;
     let shouldPersist = false;
 
@@ -178,6 +183,7 @@ export class InMemoryStoreService {
       this.hydrate(persisted);
       // 短期认证状态只应存在于当前进程内；升级后顺手清除旧版本可能落盘的明文 token。
       shouldPersist =
+        Boolean(persistedResult?.requiresPrivacyRewrite) ||
         persisted.verificationCodes.length > 0 ||
         persisted.sessions.length > 0 ||
         persisted.draftSessions.length > 0;
@@ -705,7 +711,8 @@ export class InMemoryStoreService {
       id: this.createId("callback"),
       type,
       receivedAt: new Date().toISOString(),
-      payload
+      payload: summarizeCallbackPayload(payload),
+      replay: createCallbackReplayFingerprint(type, payload)
     };
 
     this.callbackLog.unshift(record);

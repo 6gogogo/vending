@@ -173,11 +173,29 @@ export interface ApiEnvelope<T> {
   data: T;
 }
 
+export interface CallbackLogPayloadSummary {
+  deviceCode?: string;
+  eventId?: string;
+  status?: string;
+  amount?: number;
+  itemCount?: number;
+  totalQuantity?: number;
+  hasNotifyUrl?: boolean;
+  hasNoticeUrl?: boolean;
+}
+
+export interface CallbackReplayFingerprint {
+  nonceFingerprint?: string;
+  businessKeyFingerprint?: string;
+  payloadFingerprint: string;
+}
+
 export interface CallbackLogRecord {
   id: string;
   type: string;
   receivedAt: string;
-  payload: unknown;
+  payload: CallbackLogPayloadSummary;
+  replay?: CallbackReplayFingerprint;
 }
 
 export interface SystemAuditLogEntry {

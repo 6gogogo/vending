@@ -434,3 +434,20 @@ export const assertProductionSafety = (
     );
   }
 };
+
+// 受控网关只需要一个布尔结论；内部配置和运行数据的具体失败原因不能出现在公网响应中。
+export const isProductionReady = (
+  configService: ConfigService,
+  store: InMemoryStoreService
+) => {
+  if (!isProductionRuntime()) {
+    return false;
+  }
+
+  try {
+    assertProductionSafety(configService, store);
+    return true;
+  } catch {
+    return false;
+  }
+};

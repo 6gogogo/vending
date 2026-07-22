@@ -6,7 +6,7 @@ import { AppController } from "../src/app.controller";
 test("健康检查只返回最小 liveness 契约", () => {
   const controller = new AppController({
     get: () => undefined
-  } as never);
+  } as never, {} as never);
 
   const response = controller.health();
 

@@ -1,8 +1,11 @@
 import { getJson, hasRealSmartVmCredentials, postJson, withSignature } from "./helpers.mjs";
+import { assertLocalCandidateApiBaseUrl } from "./local-api-guard.mjs";
 
 const baseUrl = process.env.LOCAL_API_BASE_URL ?? "http://localhost:4000/api";
 const preferredGoodsId = process.env.SIM_GOODS_ID;
 const preferredQuantity = Number(process.env.SIM_QUANTITY ?? "1");
+
+assertLocalCandidateApiBaseUrl(baseUrl);
 
 const unwrapEnvelope = (response) => {
   if (response && typeof response === "object" && "data" in response) {

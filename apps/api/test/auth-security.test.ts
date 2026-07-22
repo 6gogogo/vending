@@ -200,7 +200,9 @@ test("健康探测不写入审计日志或业务状态，但其他读取请求�
 
   for (const request of [
     { method: "GET", path: "/api/health", headers: {} },
-    { method: "HEAD", url: "/api/health?probe=load-balancer", headers: {} }
+    { method: "HEAD", url: "/api/health?probe=load-balancer", headers: {} },
+    { method: "GET", path: "/api/health/production-readiness", headers: {} },
+    { method: "HEAD", url: "/api/health/production-readiness?probe=gateway", headers: {} }
   ]) {
     const context = {
       switchToHttp: () => ({
@@ -221,7 +223,7 @@ test("健康探测不写入审计日志或业务状态，但其他读取请求�
 
   const errorContext = {
     switchToHttp: () => ({
-      getRequest: () => ({ method: "GET", path: "/api/health", headers: {} }),
+      getRequest: () => ({ method: "GET", path: "/api/health/production-readiness", headers: {} }),
       getResponse: () => ({ statusCode: 503 })
     })
   } as ExecutionContext;

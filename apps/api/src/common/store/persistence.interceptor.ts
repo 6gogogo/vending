@@ -1,6 +1,7 @@
 import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor } from "@nestjs/common";
 import { tap } from "rxjs";
 
+import { summarizeCallbackPayload } from "../logging/callback-log-sanitizer";
 import { InMemoryStoreService } from "./in-memory-store.service";
 import { appendSystemAuditLog } from "./persistence";
 
@@ -50,6 +51,10 @@ const SENSITIVE_LOG_CODE_KEYS = new Set([
   "recoverycode",
   "smscode",
   "verificationcode"
+]);
+const HEALTH_PROBE_PATHS = new Set([
+  "/api/health",
+  "/api/health/production-readiness"
 ]);
 
 @Injectable()
@@ -106,10 +111,10 @@ export class PersistenceInterceptor implements NestInterceptor {
 
   private shouldWriteAuditLog(request: { method?: string; path?: string; url?: string }) {
     const method = request.method?.toUpperCase();
-    const path = (request.path ?? request.url ?? "").split("?", 1)[0]?.replace(/\/+$/, "");
+    const path = ((request.path ?? request.url ?? "").split("?", 1)[0] ?? "").replace(/\/+$/, "");
 
-    // 健康探测可被负载均衡高频调用，不能让它同步放大为审计文件写入。
-    return !(["GET", "HEAD"].includes(method ?? "") && path === "/api/health");
+    // 健康探测可被负载均衡或受控网关高频调用，不能让它同步放大为审计文件写入。
+    return !(["GET", "HEAD"].includes(method ?? "") && HEALTH_PROBE_PATHS.has(path));
   }
 
   private writeAuditLog(payload: {
@@ -134,21 +139,25 @@ export class PersistenceInterceptor implements NestInterceptor {
   }) {
     const contentDisposition = payload.response.getHeader?.("content-disposition");
     const isFileDownload = typeof contentDisposition === "string" && contentDisposition.length > 0;
-    const requestPath = payload.request.path ?? payload.request.url ?? "";
+    const rawRequestPath = payload.request.path ?? payload.request.url ?? "";
+    const callbackRoutePath = rawRequestPath.split("?", 1)[0] ?? rawRequestPath;
+    const isCallback = callbackRoutePath.includes("/callbacks/");
+    const requestPath = isCallback ? callbackRoutePath : rawRequestPath;
     const normalizedResponse = payload.error
       ? undefined
       : isFileDownload
         ? "[file download]"
         : this.normalizeForLog(payload.responseBody);
-    const isCallback = requestPath.includes("/callbacks/");
 
     appendSystemAuditLog({
       occurredAt: new Date().toISOString(),
       method: payload.request.method ?? "UNKNOWN",
       path: requestPath,
-      query: this.normalizeForLog(payload.request.query),
-      params: this.normalizeForLog(payload.request.params),
-      body: this.normalizeForLog(payload.request.body),
+      query: isCallback ? undefined : this.normalizeForLog(payload.request.query),
+      params: isCallback ? undefined : this.normalizeForLog(payload.request.params),
+      body: isCallback
+        ? summarizeCallbackPayload(payload.request.body)
+        : this.normalizeForLog(payload.request.body),
       statusCode: payload.error
         ? this.readErrorStatus(payload.error) ?? payload.response.statusCode ?? 500
         : payload.response.statusCode ?? 200,
