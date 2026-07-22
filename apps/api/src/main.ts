@@ -10,8 +10,19 @@ import { assertProductionSafety, isProductionRuntime } from "./common/config/pro
 import { FinancialSingleWriterService } from "./common/coordination/financial-single-writer.service";
 import { acquireFinancialSingleWriterForApiBootstrap } from "./common/coordination/financial-single-writer-runtime";
 import { resolveTrustProxySetting } from "./common/config/http-runtime";
-import { resolveUploadDir } from "./common/store/persistence";
+import {
+  resolveApiBackupDir,
+  resolveApiDataFile,
+  resolveFinancialSingleWriterLeaseFile,
+  resolveSystemLogFile,
+  resolveUploadDir
+} from "./common/store/persistence";
+import { assertRuntimePathsSafe } from "./common/store/runtime-path-safety";
 import { InMemoryStoreService } from "./common/store/in-memory-store.service";
+import {
+  SystemAuditLogService,
+  type CriticalAuditOperation
+} from "./common/store/system-audit-log.service";
 import { PaymentsService } from "./modules/payments/payments.service";
 
 const parseCorsOrigins = (raw?: string) =>
@@ -57,10 +68,22 @@ const setApiSecurityHeaders = (
 async function bootstrap() {
   // AppModule 的 ConfigModule.forRoot 会先加载 .env；租约随后必须早于 Nest DI/Store 构造取得。
   await ConfigModule.envVariablesLoaded;
+  if (isProductionRuntime()) {
+    assertRuntimePathsSafe({
+      dataFile: resolveApiDataFile(),
+      systemLogFile: resolveSystemLogFile(),
+      uploadDir: resolveUploadDir(),
+      backupDir: resolveApiBackupDir(),
+      financialLeaseFile: resolveFinancialSingleWriterLeaseFile()
+    });
+  }
   const preAcquiredFinancialWriter =
     acquireFinancialSingleWriterForApiBootstrap();
   let app: NestExpressApplication | undefined;
   let financialSingleWriter: FinancialSingleWriterService | undefined;
+  let systemAuditLog: SystemAuditLogService | undefined;
+  let startupAuditOperation: CriticalAuditOperation | undefined;
+  let startupAuditCompleted = false;
 
   try {
     app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -73,7 +96,15 @@ async function bootstrap() {
       preAcquiredFinancialWriter
     );
     const store = app.get(InMemoryStoreService);
-    assertProductionSafety(configService, store);
+    const resolvedSystemAuditLog = app.get(SystemAuditLogService);
+    systemAuditLog = resolvedSystemAuditLog;
+    if (isProductionRuntime()) {
+      startupAuditOperation = resolvedSystemAuditLog.initialize();
+      if (!startupAuditOperation) {
+        throw new Error("系统审计日志启动意图未建立。");
+      }
+    }
+    assertProductionSafety(configService, store, resolvedSystemAuditLog);
     store.flushBootstrapPersistence();
     app.enableShutdownHooks();
 
@@ -119,6 +150,12 @@ async function bootstrap() {
     const port = Number(process.env.PORT ?? 4000);
     const host = configService.get<string>("API_HOST")?.trim() || (isProductionRuntime() ? "0.0.0.0" : "127.0.0.1");
     await app.listen(port, host);
+    if (startupAuditOperation) {
+      if (!resolvedSystemAuditLog.completeStartup(startupAuditOperation)) {
+        throw new Error("系统审计日志启动完成记录失败。");
+      }
+      startupAuditCompleted = true;
+    }
 
     const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
     console.log(`接口服务已启动：http://${displayHost}:${port}/api（监听 ${host}）`);
@@ -126,6 +163,14 @@ async function bootstrap() {
       console.log(line);
     }
   } catch (error) {
+    if (startupAuditOperation && !startupAuditCompleted) {
+      try {
+        systemAuditLog?.failStartup(startupAuditOperation);
+      } catch {
+        systemAuditLog?.recordFailure();
+      }
+    }
+
     try {
       await app?.close();
     } finally {

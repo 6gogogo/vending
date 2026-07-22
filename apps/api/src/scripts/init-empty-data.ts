@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { lstatSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
@@ -103,8 +103,9 @@ const financialWriter = acquireFinancialSingleWriterForMaintenance();
 let dataFile: string;
 try {
   dataFile = writePersistedState(createEmptyPersistedState());
-  mkdirSync(dirname(systemLogFile), { recursive: true });
-  writeFileSync(systemLogFile, "", "utf8");
+  mkdirSync(dirname(systemLogFile), { recursive: true, mode: 0o700 });
+  writeFileSync(systemLogFile, "", { encoding: "utf8", mode: 0o600 });
+  chmodSync(systemLogFile, 0o600);
 
   if (!keepUploads && existsSync(uploadDir)) {
     rmSync(uploadDir, { recursive: true, force: true });

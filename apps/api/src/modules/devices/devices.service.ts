@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -845,13 +846,30 @@ export class DevicesService {
           }
         });
         this.store.persist();
-        throw new BadGatewayException(
-          commandRejected
-            ? `柜机平台开柜失败：${detail}`
-            : outcomeUnknown
-              ? `柜机平台响应异常，开门结果待确认，请勿重复操作：${detail}`
-              : `柜机平台响应异常，但设备回调已确认门状态为 ${commandEvent.status}。`
-        );
+        if (outcomeUnknown) {
+          throw new ConflictException({
+            message: "柜机平台响应异常，开门结果待确认，请勿重复操作。",
+            code: "operation_indeterminate",
+            operationId: eventId,
+            retryable: false
+          });
+        }
+
+        if (commandRejected) {
+          throw new ConflictException({
+            message: "柜机平台已拒绝开门请求。",
+            code: "operation_rejected",
+            operationId: eventId,
+            retryable: false
+          });
+        }
+
+        throw new ConflictException({
+          message: "柜机开门状态已由平台回调确认，请刷新状态后继续。",
+          code: "operation_confirmed",
+          operationId: eventId,
+          retryable: false
+        });
       }
 
       commandEvent.orderNo = openResult.orderNo;

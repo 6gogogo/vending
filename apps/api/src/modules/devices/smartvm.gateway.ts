@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   SmartVmClient,
@@ -16,7 +16,7 @@ import type {
 
 import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
 import { isProductionRuntime } from "../../common/config/runtime-environment";
-import { appendSystemAuditLog } from "../../common/store/persistence";
+import { SystemAuditLogService } from "../../common/store/system-audit-log.service";
 
 export interface SmartVmExchangeTrace {
   direction: "outbound";
@@ -32,9 +32,17 @@ export interface SmartVmExchangeTrace {
   simulated?: boolean;
 }
 
+// 仅收录已由 SmartVM 开门接口契约验证的“请求未受理”业务码；新增码前必须补充契约与回归测试。
+const DEFINITE_OPEN_DOOR_REJECTION_CODES = new Set<number>([400]);
+
 @Injectable()
 export class SmartVmGateway {
-  constructor(@Inject(ConfigService) private readonly configService: ConfigService) {}
+  constructor(
+    @Inject(ConfigService) private readonly configService: ConfigService,
+    @Optional()
+    @Inject(SystemAuditLogService)
+    private readonly auditLog: SystemAuditLogService = new SystemAuditLogService()
+  ) {}
 
   private formatResponseError(responseBody: unknown) {
     if (typeof responseBody === "string" && responseBody.trim()) {
@@ -156,7 +164,7 @@ export class SmartVmGateway {
           ok
         });
 
-        appendSystemAuditLog({
+        this.auditLog.appendSafely({
           occurredAt: exchange.occurredAt,
           method,
           path: exchange.path,
@@ -183,6 +191,66 @@ export class SmartVmGateway {
   private getRequestTimeoutMs() {
     const configured = Number(this.configService.get<string>("SMARTVM_TIMEOUT_MS") ?? 15_000);
     return Number.isSafeInteger(configured) && configured > 0 ? configured : 15_000;
+  }
+
+  /**
+   * 柜机命令一旦发出就无法由本服务回滚；生产环境必须先落盘最小化审计意图。
+   * 只记录固定动作类型，不记录载荷、目标地址、签名或支付标识。
+   */
+  private async runCriticalSmartVmOperation<T>(
+    action: "open-door" | "notify-payment-success" | "refund",
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const criticalAudit = isProductionRuntime()
+      ? this.auditLog.beginCriticalIntent({
+          method: "POST",
+          path: "/internal/smartvm/outbound-command",
+          metadata: {
+            action,
+            provider: "smartvm"
+          }
+        })
+      : undefined;
+
+    try {
+      const result = await operation();
+
+      if (criticalAudit) {
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "POST",
+          path: "/internal/smartvm/outbound-command",
+          statusCode: 200,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: "completed",
+          metadata: {
+            action,
+            provider: "smartvm"
+          }
+        });
+      }
+
+      return result;
+    } catch (error) {
+      if (criticalAudit) {
+        const upstreamStatus = error instanceof SmartVmRequestError ? error.statusCode : undefined;
+        const statusCode =
+          typeof upstreamStatus === "number" && upstreamStatus >= 100 && upstreamStatus <= 599
+            ? upstreamStatus
+            : 502;
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "POST",
+          path: "/internal/smartvm/outbound-command",
+          statusCode,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: this.isDefiniteSmartVmRejection(error) ? "rejected" : "indeterminate",
+          metadata: {
+            action,
+            provider: "smartvm"
+          }
+        });
+      }
+      throw error;
+    }
   }
 
   async getGoodsInfo(payload: { deviceCode: string; doorNum?: string }) {
@@ -227,7 +295,10 @@ export class SmartVmGateway {
     let result: Awaited<ReturnType<SmartVmClient["openDoor"]>>;
 
     try {
-      result = await client.openDoor(requestBody);
+      result = await this.runCriticalSmartVmOperation(
+        "open-door",
+        () => client.openDoor(requestBody)
+      );
     } catch (error) {
       this.attachExchangeTrace(error, exchanges.at(-1));
       throw error;
@@ -275,7 +346,15 @@ export class SmartVmGateway {
       this.assertAllowedNotifyTarget(preferredTarget);
       let result: undefined;
       try {
-        result = await client.postToUrl<undefined>(preferredTarget, { ...payload }, "/api/pay/container/paymentSuccess");
+        result = await this.runCriticalSmartVmOperation(
+          "notify-payment-success",
+          () =>
+            client.postToUrl<undefined>(
+              preferredTarget,
+              { ...payload },
+              "/api/pay/container/paymentSuccess"
+            )
+        );
       } catch (error) {
         this.attachExchangeTrace(error, exchanges.at(-1));
         throw error;
@@ -289,7 +368,10 @@ export class SmartVmGateway {
     if (preferredTarget?.startsWith("/")) {
       let result: undefined;
       try {
-        result = await client.postToPath<undefined>(preferredTarget, { ...payload });
+        result = await this.runCriticalSmartVmOperation(
+          "notify-payment-success",
+          () => client.postToPath<undefined>(preferredTarget, { ...payload })
+        );
       } catch (error) {
         this.attachExchangeTrace(error, exchanges.at(-1));
         throw error;
@@ -303,7 +385,10 @@ export class SmartVmGateway {
     if (overridePath) {
       let result: undefined;
       try {
-        result = await client.postToPath<undefined>(overridePath, { ...payload });
+        result = await this.runCriticalSmartVmOperation(
+          "notify-payment-success",
+          () => client.postToPath<undefined>(overridePath, { ...payload })
+        );
       } catch (error) {
         this.attachExchangeTrace(error, exchanges.at(-1));
         throw error;
@@ -316,7 +401,10 @@ export class SmartVmGateway {
 
     let result: undefined;
     try {
-      result = await client.notifyPaymentSuccess(payload);
+      result = await this.runCriticalSmartVmOperation(
+        "notify-payment-success",
+        () => client.notifyPaymentSuccess(payload)
+      );
     } catch (error) {
       this.attachExchangeTrace(error, exchanges.at(-1));
       throw error;
@@ -348,7 +436,10 @@ export class SmartVmGateway {
 
     let result: undefined;
     try {
-      result = await client.refund(payload);
+      result = await this.runCriticalSmartVmOperation(
+        "refund",
+        () => client.refund(payload)
+      );
     } catch (error) {
       this.attachExchangeTrace(error, exchanges.at(-1));
       throw error;
@@ -414,25 +505,32 @@ export class SmartVmGateway {
   }
 
   isDefiniteOpenDoorRejection(error: unknown) {
+    return this.isDefiniteSmartVmRejection(error);
+  }
+
+  private isDefiniteSmartVmRejection(error: unknown) {
     if (!(error instanceof SmartVmRequestError)) {
       return false;
     }
 
-    const responseReason =
-      error.responseBody && typeof error.responseBody === "object"
-        ? (error.responseBody as { reason?: unknown }).reason
-        : undefined;
+    const responseBody = error.responseBody;
 
-    // 本地超时和断网都无法判断平台是否已经执行；必须保留命令租约，避免重复开门。
-    if (responseReason === "timeout" || responseReason === "network_error") {
+    // 2xx 也可能携带空体、非 JSON 或代理替换响应；没有经过验证的业务码时一律视为结果未知。
+    if (!responseBody || typeof responseBody !== "object" || Array.isArray(responseBody)) {
       return false;
     }
 
-    // 2xx 下的业务错误和普通 4xx 请求拒绝都有平台明确响应，可以安全释放租约供修正后重试。
-    // 408 仍表示结果不确定：超时响应可能来自中间代理，远端业务端可能已经收到请求。
+    const responseCode = (responseBody as { code?: unknown }).code;
+
+    if (typeof responseCode !== "number" || !Number.isSafeInteger(responseCode)) {
+      return false;
+    }
+
+    // 仅在 HTTP 层也明确返回业务响应时才释放租约。408 仍可能是代理超时，不能判断远端是否已执行。
     return (
-      (error.statusCode >= 200 && error.statusCode < 300) ||
-      (error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 408)
+      ((error.statusCode >= 200 && error.statusCode < 300) ||
+        (error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 408)) &&
+      DEFINITE_OPEN_DOOR_REJECTION_CODES.has(responseCode)
     );
   }
 

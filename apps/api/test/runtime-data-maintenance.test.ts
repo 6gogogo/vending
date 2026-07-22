@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { FinancialSingleWriterLease } from "../src/common/coordination/financial-single-writer-lease.js";
 import { createSeededPersistedState } from "../src/common/store/persistence.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -140,6 +143,114 @@ const latestBackup = (runtime: IsolatedRuntime) =>
       .at(-1)!
   );
 
+test("修复命令默认只读，且仅在摘要匹配时原子应用已证明安全的修复", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  const state = JSON.parse(readFileSync(runtime.dataFile, "utf8")) as Record<string, unknown>;
+  const users = state.users as Array<Record<string, unknown>>;
+  const goodsCatalog = state.goodsCatalog as Array<Record<string, unknown>>;
+  const validGoods = goodsCatalog[0]!;
+  const privateMarker = "repair-cli-private-marker";
+  goodsCatalog.push({
+    goodsId: privateMarker,
+    goodsCode: `${privateMarker}-code`,
+    name: "",
+    category: "daily"
+  });
+  (state.inventory as Array<Record<string, unknown>>).push({
+    id: `${privateMarker}-movement`,
+    userId: users[0]!.id,
+    deviceCode: "repair-cli-device",
+    goodsId: validGoods.goodsId,
+    type: "manual-deduction",
+    quantity: 0,
+    unitPrice: 0
+  });
+  (state.merchantGoodsTemplates as Array<Record<string, unknown>>).push({
+    id: `${privateMarker}-template`,
+    goodsId: `${privateMarker}-missing-goods`
+  });
+  writeFileSync(runtime.dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  const beforeRepair = readFileSync(runtime.dataFile, "utf8");
+
+  const dryRun = runMaintenance(runtime, "repair");
+  assertSucceeded(dryRun);
+  const dryOutput = `${dryRun.stdout}\n${dryRun.stderr}`;
+  const sourceSha256 = dryOutput.match(/sourceSha256: ([a-f0-9]{64})/)?.[1];
+  assert.ok(sourceSha256);
+  assert.doesNotMatch(dryOutput, new RegExp(privateMarker));
+  assert.equal(readFileSync(runtime.dataFile, "utf8"), beforeRepair);
+
+  const mismatched = runMaintenance(
+    runtime,
+    "repair",
+    "--apply",
+    "--source-sha256",
+    "0".repeat(64)
+  );
+  assert.equal(mismatched.status, 1);
+  assert.match(`${mismatched.stdout}\n${mismatched.stderr}`, /源数据摘要与修复计划不一致/);
+  assert.equal(readFileSync(runtime.dataFile, "utf8"), beforeRepair);
+
+  const applied = runMaintenance(
+    runtime,
+    "repair",
+    "--apply",
+    "--source-sha256",
+    sourceSha256
+  );
+  assertSucceeded(applied);
+  assert.match(`${applied.stdout}\n${applied.stderr}`, /运行数据修复完成/);
+  const repaired = readFileSync(runtime.dataFile, "utf8");
+  assert.doesNotMatch(repaired, new RegExp(privateMarker));
+  assertSucceeded(runMaintenance(runtime, "verify"));
+});
+
+test("POSIX 新建备份目录和敏感文件使用私有权限", (t) => {
+  if (process.platform === "win32") {
+    t.skip("Windows 由 NTFS ACL 管理，不断言 POSIX mode。");
+    return;
+  }
+
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "private-mode"));
+  const backup = latestBackup(runtime);
+
+  for (const targetPath of [
+    backup,
+    join(backup, "store.json"),
+    join(backup, "system-audit.ndjson"),
+    join(backup, "runtime-backup-manifest.json"),
+    join(backup, "uploads", "sample.txt")
+  ]) {
+    assert.equal(statSync(targetPath).mode & 0o077, 0, targetPath);
+  }
+});
+
+test("备份要求独占金融单写者租约，避免在线混合快照", (t) => {
+  const runtime = createIsolatedRuntime();
+  const lease = new FinancialSingleWriterLease({
+    lockFile: runtime.env.FINANCIAL_SINGLE_WRITER_LEASE_FILE!,
+    ownerId: "active-api",
+    autoHeartbeat: false
+  });
+  lease.acquire();
+  t.after(() => {
+    lease.release();
+    rmSync(runtime.root, { recursive: true, force: true });
+  });
+
+  const backup = runMaintenance(runtime, "backup", "--label", "must-be-stopped");
+
+  assert.equal(backup.status, 1);
+  assert.match(
+    `${backup.stdout}\n${backup.stderr}`,
+    /已有其他实例持有金融单写者租约/
+  );
+  assert.equal(existsSync(runtime.backupDir), false);
+});
+
 test("备份校验会拒绝清单中缺失的上传文件", (t) => {
   const runtime = createIsolatedRuntime();
   t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
@@ -252,7 +363,42 @@ test("当前数据校验会拒绝越界预约设置、非法库存数量和损�
   const output = `${verification.stdout}\n${verification.stderr}`;
   assert.match(output, /reservationSettings\.holdMinutes 必须是 5 至 1440 的整数/);
   assert.match(output, /goodsBatches\[0\]\.quantity 必须是整数且不小于 0/);
-  assert.match(output, /系统审计日志第 1 行不是合法 JSON/);
+  assert.match(output, /系统审计日志第 1 行不是合法 JSON。/);
+});
+
+test("已有运行数据缺失系统审计日志时，校验和备份都必须失败", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  rmSync(runtime.systemLogFile);
+
+  const verification = runMaintenance(runtime, "verify");
+  assert.equal(verification.status, 1);
+  assert.match(`${verification.stdout}\n${verification.stderr}`, /未找到系统审计日志/);
+
+  const backup = runMaintenance(runtime, "backup", "--label", "missing-audit-log");
+  assert.equal(backup.status, 1);
+  assert.match(`${backup.stdout}\n${backup.stderr}`, /未找到系统审计日志/);
+  assert.equal(existsSync(runtime.backupDir), false);
+});
+
+test("备份校验拒绝未纳入系统审计日志的不完整清单", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "incomplete-audit-log"));
+  const backup = latestBackup(runtime);
+  const manifestPath = join(backup, "runtime-backup-manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    included: { systemLog: boolean };
+    items: Array<{ key: string }>;
+  };
+  manifest.included.systemLog = false;
+  manifest.items = manifest.items.filter((item) => item.key !== "systemLog");
+  rmSync(join(backup, "system-audit.ndjson"));
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  const verification = runMaintenance(runtime, "verify", "--backup", backup);
+  assert.equal(verification.status, 1);
+  assert.match(`${verification.stdout}\n${verification.stderr}`, /系统审计日志/);
 });
 
 test("--keep 1 只保留当前最新的一份备份", (t) => {
@@ -293,6 +439,26 @@ test("恢复先校验确认，再逐项替换业务数据、日志和上传目�
     readdirSync(dirname(runtime.dataFile)).some((name) => /\.(?:staging|rollback)-.*\.tmp$/.test(name)),
     false
   );
+});
+
+test("POSIX 恢复上传文件时收紧为私有权限", (t) => {
+  if (process.platform === "win32") {
+    t.skip("Windows 由 NTFS ACL 管理，不断言 POSIX mode。");
+    return;
+  }
+
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "restore-private-upload"));
+  const backup = latestBackup(runtime);
+  const backupUpload = join(backup, "uploads", "sample.txt");
+  chmodSync(backupUpload, 0o644);
+  chmodSync(join(runtime.uploadDir, "sample.txt"), 0o644);
+
+  assertSucceeded(
+    runMaintenance(runtime, "restore", "--backup", backup, "--yes", "--no-safety-backup")
+  );
+  assert.equal(statSync(join(runtime.uploadDir, "sample.txt")).mode & 0o077, 0);
 });
 
 test("恢复拒绝使用位于 UPLOAD_DIR 内的备份，且不会改写现有数据", (t) => {

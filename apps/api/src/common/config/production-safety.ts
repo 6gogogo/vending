@@ -3,6 +3,7 @@ import type { ConfigService } from "@nestjs/config";
 import { isIP } from "node:net";
 
 import type { InMemoryStoreService } from "../store/in-memory-store.service";
+import type { SystemAuditLogService } from "../store/system-audit-log.service";
 import { isProductionRuntime } from "./runtime-environment";
 
 export { isProductionRuntime } from "./runtime-environment";
@@ -213,9 +214,11 @@ export const assertProductionPaymentSafety = (configService: ConfigService) => {
     );
   }
 
-  for (const key of ["WEB_CONCURRENCY", "API_INSTANCE_COUNT"] as const) {
+  const apiWorkerCounts = ["WEB_CONCURRENCY", "API_INSTANCE_COUNT"] as const;
+
+  for (const key of apiWorkerCounts) {
     const rawValue = readConfig(configService, key);
-    if (rawValue && rawValue !== "1") {
+    if (rawValue !== "1") {
       throw new BadRequestException(
         `JSON 账本阶段只支持一个 API 工作者，生产环境必须设置 ${key}=1。`
       );
@@ -393,7 +396,8 @@ export const assertProductionConfigurationSafety = (
 
 export const assertProductionSafety = (
   configService: ConfigService,
-  store: InMemoryStoreService
+  store: InMemoryStoreService,
+  auditLog: SystemAuditLogService
 ) => {
   if (!isProductionRuntime()) {
     return;
@@ -419,33 +423,36 @@ export const assertProductionSafety = (
 
   assertProductionConfigurationSafety(configService);
 
-  const defaultCredentials = [
-    ...store.adminCredentials
-      .filter((credential) => credential.usesDefaultPassword)
-      .map((credential) => credential.username),
-    ...store.backofficeCredentials
-      .filter((credential) => credential.usesDefaultPassword)
-      .map((credential) => credential.username)
-  ];
+  if (!auditLog.isReady()) {
+    throw new BadRequestException("系统审计日志未就绪。");
+  }
 
-  if (defaultCredentials.length > 0) {
-    throw new BadRequestException(
-      `生产环境仍存在默认后台密码账号：${defaultCredentials.join("、")}`
-    );
+  if (!store.isPersistedStateIntegrityReady()) {
+    throw new BadRequestException("生产运行数据完整性检查未通过。");
+  }
+
+  const defaultCredentialCount = [
+    ...store.adminCredentials,
+    ...store.backofficeCredentials
+  ].filter((credential) => credential.usesDefaultPassword !== false).length;
+
+  if (defaultCredentialCount > 0) {
+    throw new BadRequestException("生产环境仍存在默认后台密码账号。");
   }
 };
 
 // 受控网关只需要一个布尔结论；内部配置和运行数据的具体失败原因不能出现在公网响应中。
 export const isProductionReady = (
   configService: ConfigService,
-  store: InMemoryStoreService
+  store: InMemoryStoreService,
+  auditLog: SystemAuditLogService
 ) => {
   if (!isProductionRuntime()) {
     return false;
   }
 
   try {
-    assertProductionSafety(configService, store);
+    assertProductionSafety(configService, store, auditLog);
     return true;
   } catch {
     return false;

@@ -1,14 +1,27 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { dirname } from "node:path";
-import { BadGatewayException, BadRequestException, Inject, Injectable } from "@nestjs/common";
+import {
+  BadGatewayException,
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Optional,
+  ServiceUnavailableException
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type { AiProviderConfigPayload, AiProviderStatus, AiProviderTestResult } from "@vm/shared-types";
 
 import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
-import { appendSystemAuditLog, resolveApiEnvFile } from "../../common/store/persistence";
+import { isProductionRuntime } from "../../common/config/runtime-environment";
+import { resolveApiEnvFile } from "../../common/store/persistence";
+import {
+  PrivateConfigWriteError,
+  writePrivateConfigFileAtomically
+} from "../../common/store/private-config-file";
+import { SystemAuditLogService } from "../../common/store/system-audit-log.service";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -39,6 +52,14 @@ const MAX_AI_API_KEY_LENGTH = 20_000;
 const MAX_AI_MODEL_LENGTH = 200;
 const AI_UPSTREAM_ERROR_MESSAGE = "AI 服务暂时不可用，请稍后重试。";
 const OPENAI_EXACT_HOST_ALLOWLIST = "OPENAI_BASE_URL_EXACT_HOST_ALLOWLIST";
+
+interface OpenAiCompatibleRuntimeAdapter {
+  envFilePath?: string;
+}
+
+export const OPENAI_COMPATIBLE_RUNTIME_ADAPTER = Symbol(
+  "OPENAI_COMPATIBLE_RUNTIME_ADAPTER"
+);
 
 const IPV4_NON_PUBLIC_RANGES: Array<[string, number]> = [
   ["0.0.0.0", 8],
@@ -159,7 +180,19 @@ const isPublicDnsHostname = (hostname: string) =>
 
 @Injectable()
 export class OpenAiCompatibleService {
-  constructor(@Inject(ConfigService) private readonly configService: ConfigService) {}
+  private readonly envFilePath: string;
+
+  constructor(
+    @Inject(ConfigService) private readonly configService: ConfigService,
+    @Optional()
+    @Inject(SystemAuditLogService)
+    private readonly auditLog: SystemAuditLogService = new SystemAuditLogService(),
+    @Optional()
+    @Inject(OPENAI_COMPATIBLE_RUNTIME_ADAPTER)
+    runtimeAdapter?: OpenAiCompatibleRuntimeAdapter
+  ) {
+    this.envFilePath = runtimeAdapter?.envFilePath ?? resolveApiEnvFile();
+  }
 
   getStatus(): AiProviderStatus {
     const missingConfig: string[] = [];
@@ -195,32 +228,97 @@ export class OpenAiCompatibleService {
       throw new BadRequestException("AI API Key 长度不正确。");
     }
 
+    if (nextApiKey !== undefined && /[\r\n\0]/.test(nextApiKey)) {
+      throw new BadRequestException("AI API Key 格式不正确。");
+    }
+
     if (nextModel.length > MAX_AI_MODEL_LENGTH || /[\r\n\0]/.test(nextModel)) {
       throw new BadRequestException("AI 模型名称不正确。");
     }
 
-    this.persistEnvValue("OPENAI_BASE_URL", nextBaseUrl);
-    this.persistEnvValue("OPENAI_MODEL", nextModel);
+    const auditMetadata = {
+      action: "save-ai-provider-config",
+      provider: "openai-compatible",
+      apiKeyUpdated: nextApiKey !== undefined,
+      baseUrlCustomized: Boolean(nextBaseUrl),
+      modelCustomized: Boolean(nextModel)
+    };
+    const criticalAudit = isProductionRuntime()
+      ? this.auditLog.beginCriticalIntent({
+          method: "PATCH",
+          path: "/api/ai-insights/config",
+          metadata: auditMetadata
+        })
+      : undefined;
 
-    if (nextApiKey !== undefined) {
-      this.persistEnvValue("OPENAI_API_KEY", nextApiKey);
-    }
+    let configFileCommitted = false;
 
-    appendSystemAuditLog({
-      occurredAt: new Date().toISOString(),
-      method: "PATCH",
-      path: "/api/ai-insights/config",
-      statusCode: 200,
-      durationMs: 0,
-      metadata: {
-        provider: "openai-compatible",
-        hasApiKey: nextApiKey !== undefined ? Boolean(nextApiKey) : Boolean(this.apiKey),
-        baseUrlCustomized: Boolean(nextBaseUrl),
-        modelCustomized: Boolean(nextModel)
+    try {
+      const nextValues = {
+        OPENAI_BASE_URL: nextBaseUrl,
+        OPENAI_MODEL: nextModel,
+        ...(nextApiKey === undefined ? {} : { OPENAI_API_KEY: nextApiKey })
+      };
+      this.persistEnvValues(nextValues);
+      configFileCommitted = true;
+      this.applyEnvironmentValues(nextValues);
+      const status = this.getStatus();
+
+      if (criticalAudit) {
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "PATCH",
+          path: "/api/ai-insights/config",
+          statusCode: 200,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: "completed",
+          metadata: auditMetadata
+        });
+      } else {
+        this.auditLog.appendSafely({
+          occurredAt: new Date().toISOString(),
+          method: "PATCH",
+          path: "/api/ai-insights/config",
+          statusCode: 200,
+          durationMs: 0,
+          metadata: {
+            provider: "openai-compatible",
+            hasApiKey: nextApiKey !== undefined ? Boolean(nextApiKey) : Boolean(this.apiKey),
+            baseUrlCustomized: Boolean(nextBaseUrl),
+            modelCustomized: Boolean(nextModel)
+          }
+        });
       }
-    });
 
-    return this.getStatus();
+      return status;
+    } catch (error) {
+      const operationIndeterminate =
+        configFileCommitted ||
+        (error instanceof PrivateConfigWriteError && error.committed);
+
+      if (criticalAudit) {
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "PATCH",
+          path: "/api/ai-insights/config",
+          statusCode: operationIndeterminate ? 409 : 500,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: operationIndeterminate ? "indeterminate" : "failed",
+          metadata: {
+            ...auditMetadata,
+            retryable: !operationIndeterminate
+          }
+        });
+      }
+
+      if (operationIndeterminate && criticalAudit) {
+        throw new ConflictException({
+          message: "AI 配置更新状态暂不可确认，请勿重复提交；请联系管理员核对。",
+          code: "operation_indeterminate",
+          operationId: criticalAudit.operationId,
+          retryable: false
+        });
+      }
+      throw error;
+    }
   }
 
   async testConnection(): Promise<AiProviderTestResult> {
@@ -262,7 +360,7 @@ export class OpenAiCompatibleService {
     let parsedResponse: ChatCompletionResponse | string | undefined;
 
     try {
-      const response = await fetch(requestUrl, {
+      const response = await this.fetchWithCriticalAudit(requestUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -333,7 +431,7 @@ export class OpenAiCompatibleService {
         });
       }
 
-      if (error instanceof BadGatewayException) {
+      if (error instanceof BadGatewayException || error instanceof ServiceUnavailableException) {
         throw error;
       }
 
@@ -344,6 +442,57 @@ export class OpenAiCompatibleService {
       throw new BadGatewayException(AI_UPSTREAM_ERROR_MESSAGE);
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * 真实 AI 调用会外发业务上下文并可能计费；即使绕过 HTTP 入口，生产环境也必须先写审计意图。
+   */
+  private async fetchWithCriticalAudit(requestUrl: string, request: RequestInit) {
+    const criticalAudit = isProductionRuntime()
+      ? this.auditLog.beginCriticalIntent({
+          method: "POST",
+          path: "/internal/ai/outbound-completion",
+          metadata: {
+            action: "ai-completion",
+            provider: "openai-compatible"
+          }
+        })
+      : undefined;
+
+    try {
+      const response = await fetch(requestUrl, request);
+
+      if (criticalAudit) {
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "POST",
+          path: "/internal/ai/outbound-completion",
+          statusCode: response.status,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: response.ok ? "completed" : "rejected",
+          metadata: {
+            action: "ai-completion",
+            provider: "openai-compatible"
+          }
+        });
+      }
+
+      return response;
+    } catch (error) {
+      if (criticalAudit) {
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "POST",
+          path: "/internal/ai/outbound-completion",
+          statusCode: error instanceof Error && error.name === "AbortError" ? 504 : 502,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: "indeterminate",
+          metadata: {
+            action: "ai-completion",
+            provider: "openai-compatible"
+          }
+        });
+      }
+      throw error;
     }
   }
 
@@ -597,7 +746,7 @@ export class OpenAiCompatibleService {
       message: string;
     };
   }) {
-    appendSystemAuditLog({
+    this.auditLog.appendSafely({
       occurredAt: new Date().toISOString(),
       method: "POST",
       path: "/external/openai/chat/completions",
@@ -674,19 +823,25 @@ export class OpenAiCompatibleService {
     };
   }
 
-  private persistEnvValue(name: string, value: string) {
-    process.env[name] = value;
+  private persistEnvValues(values: Record<string, string>) {
+    const envFilePath = this.envFilePath;
+    let nextContent = existsSync(envFilePath) ? readFileSync(envFilePath, "utf8") : "";
 
-    const envFilePath = resolveApiEnvFile();
-    const nextEntry = `${name}=${this.encodeEnvValue(value)}`;
-    const currentContent = existsSync(envFilePath) ? readFileSync(envFilePath, "utf8") : "";
-    const linePattern = new RegExp(`^${name}=.*$`, "m");
-    const nextContent = linePattern.test(currentContent)
-      ? currentContent.replace(linePattern, nextEntry)
-      : `${currentContent.replace(/\s*$/, "")}${currentContent.trim() ? "\n" : ""}${nextEntry}\n`;
+    for (const [name, value] of Object.entries(values)) {
+      const nextEntry = `${name}=${this.encodeEnvValue(value)}`;
+      const linePattern = new RegExp(`^${name}=.*$`, "m");
+      nextContent = linePattern.test(nextContent)
+        ? nextContent.replace(linePattern, nextEntry)
+        : `${nextContent.replace(/\s*$/, "")}${nextContent.trim() ? "\n" : ""}${nextEntry}\n`;
+    }
 
-    mkdirSync(dirname(envFilePath), { recursive: true });
-    writeFileSync(envFilePath, nextContent, "utf8");
+    writePrivateConfigFileAtomically(envFilePath, nextContent);
+  }
+
+  private applyEnvironmentValues(values: Record<string, string>) {
+    for (const [name, value] of Object.entries(values)) {
+      process.env[name] = value;
+    }
   }
 
   private encodeEnvValue(value: string) {

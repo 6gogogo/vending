@@ -10,6 +10,29 @@ const createConfigService = (values: Record<string, string> = {}) =>
     get: (key: string) => values[key]
   }) as unknown as ConfigService;
 
+const withProductionRuntime = async (action: () => Promise<void>) => {
+  const previousAppEnvironment = process.env.APP_ENV;
+  const previousNodeEnvironment = process.env.NODE_ENV;
+  process.env.APP_ENV = "production";
+  delete process.env.NODE_ENV;
+
+  try {
+    await action();
+  } finally {
+    if (previousAppEnvironment === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnvironment;
+    }
+
+    if (previousNodeEnvironment === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnvironment;
+    }
+  }
+};
+
 test("启用且持有金融单写者租约时，后台对账调度器才执行一个对账周期", async () => {
   let calls = 0;
   const scheduler = new PaymentReconciliationScheduler(
@@ -56,6 +79,168 @@ test("启用且持有金融单写者租约时，后台对账调度器才执行�
   );
   assert.equal(await disabled.runCycle(), false);
   assert.equal(calls, 1);
+});
+
+test("生产自动对账在审计或运行数据未就绪时不查询支付渠道也不写入", async () => {
+  await withProductionRuntime(async () => {
+    let calls = 0;
+    const scheduler = new PaymentReconciliationScheduler(
+      {
+        runAutomaticReconciliationCycle: async () => {
+          calls += 1;
+        }
+      } as never,
+      createConfigService({ PAYMENT_RECONCILIATION_ENABLED: "true" }),
+      {
+        getStatus: () => ({ enabled: true, held: true }),
+        release: () => undefined
+      } as never,
+      {
+        isPersistedStateIntegrityReady: () => true
+      } as never,
+      {
+        isReady: () => false
+      } as never
+    );
+
+    assert.equal(await scheduler.runCycle(), false);
+    assert.equal(calls, 0);
+  });
+});
+
+test("生产自动对账在外呼前写入最小审计意图，并在成功后补充终态", async () => {
+  await withProductionRuntime(async () => {
+    const events: string[] = [];
+    const operation = {
+      operationId: "reconciliation-cycle",
+      startedAt: Date.now()
+    };
+    const scheduler = new PaymentReconciliationScheduler(
+      {
+        async runAutomaticReconciliationCycle() {
+          events.push("payment-cycle");
+          return { attempted: 1, completed: 1, failed: 0, pending: 0, scanned: 1 };
+        }
+      } as never,
+      createConfigService({ PAYMENT_RECONCILIATION_ENABLED: "true" }),
+      {
+        getStatus: () => ({ enabled: true, held: true }),
+        release: () => undefined
+      } as never,
+      {
+        isPersistedStateIntegrityReady: () => true
+      } as never,
+      {
+        isReady: () => true,
+        beginCriticalIntent(input: { method: string; path: string; metadata?: Record<string, unknown> }) {
+          events.push("audit-intent");
+          assert.equal(input.method, "SYSTEM");
+          assert.equal(input.path, "/internal/payments/automatic-reconciliation");
+          assert.deepEqual(input.metadata, {
+            component: "payments",
+            operationClass: "automatic-reconciliation"
+          });
+          return operation;
+        },
+        completeCriticalOperation(
+          receivedOperation: unknown,
+          input: { outcome: string; statusCode: number; metadata?: Record<string, unknown> }
+        ) {
+          events.push(`audit-${input.outcome}`);
+          assert.equal(receivedOperation, operation);
+          assert.equal(input.statusCode, 200);
+          assert.deepEqual(input.metadata, {
+            component: "payments",
+            operationClass: "automatic-reconciliation"
+          });
+          return true;
+        }
+      } as never
+    );
+
+    assert.equal(await scheduler.runCycle(), true);
+    assert.deepEqual(events, ["audit-intent", "payment-cycle", "audit-completed"]);
+  });
+});
+
+test("生产自动对账审计意图写入失败时不启动支付周期", async () => {
+  await withProductionRuntime(async () => {
+    let calls = 0;
+    const scheduler = new PaymentReconciliationScheduler(
+      {
+        async runAutomaticReconciliationCycle() {
+          calls += 1;
+        }
+      } as never,
+      createConfigService({ PAYMENT_RECONCILIATION_ENABLED: "true" }),
+      {
+        getStatus: () => ({ enabled: true, held: true }),
+        release: () => undefined
+      } as never,
+      {
+        isPersistedStateIntegrityReady: () => true
+      } as never,
+      {
+        isReady: () => true,
+        beginCriticalIntent() {
+          throw new Error("audit-storage-unavailable");
+        }
+      } as never
+    );
+
+    assert.equal(await scheduler.runCycle(), false);
+    assert.equal(calls, 0);
+  });
+});
+
+test("生产自动对账异常时补充失败审计终态且不泄露支付异常", async () => {
+  await withProductionRuntime(async () => {
+    const events: string[] = [];
+    const operation = {
+      operationId: "reconciliation-cycle-failure",
+      startedAt: Date.now()
+    };
+    const scheduler = new PaymentReconciliationScheduler(
+      {
+        async runAutomaticReconciliationCycle() {
+          events.push("payment-cycle");
+          throw new Error("provider-private-detail");
+        }
+      } as never,
+      createConfigService({ PAYMENT_RECONCILIATION_ENABLED: "true" }),
+      {
+        getStatus: () => ({ enabled: true, held: true }),
+        release: () => undefined
+      } as never,
+      {
+        isPersistedStateIntegrityReady: () => true
+      } as never,
+      {
+        isReady: () => true,
+        beginCriticalIntent() {
+          events.push("audit-intent");
+          return operation;
+        },
+        completeCriticalOperation(
+          receivedOperation: unknown,
+          input: { outcome: string; statusCode: number; metadata?: Record<string, unknown> }
+        ) {
+          events.push(`audit-${input.outcome}`);
+          assert.equal(receivedOperation, operation);
+          assert.equal(input.statusCode, 500);
+          assert.deepEqual(input.metadata, {
+            component: "payments",
+            operationClass: "automatic-reconciliation"
+          });
+          assert.equal(JSON.stringify(input).includes("provider-private-detail"), false);
+          return true;
+        }
+      } as never
+    );
+
+    assert.equal(await scheduler.runCycle(), false);
+    assert.deepEqual(events, ["audit-intent", "payment-cycle", "audit-failed"]);
+  });
 });
 
 test("一个周期未结束时，调度器拒绝重入且关闭后不再保留定时器", async () => {

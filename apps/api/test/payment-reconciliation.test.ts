@@ -1387,6 +1387,60 @@ describe("支付与退款后台自动对账", () => {
     assert.equal(queryCalls, 1);
   });
 
+  test("自动对账在支付渠道响应后发现运行时安全门禁失效时不修改或持久化账本", async () => {
+    const harness = createHarness({
+      PAYMENT_RECONCILIATION_INITIAL_DELAY_MS: "1000",
+      PAYMENT_RECONCILIATION_MAX_DELAY_MS: "8000"
+    });
+    const dueAt = "2026-07-19T01:00:00.000Z";
+    const order = appendOrder(harness, {
+      metadata: {
+        simulated: false,
+        reconciliation: {
+          state: "scheduled",
+          attemptCount: 0,
+          nextAttemptAt: dueAt
+        }
+      }
+    });
+    let runtimeSafe = true;
+    (
+      harness.service as unknown as {
+        queryProviderPayment(order: PaymentOrderRecord): Promise<unknown>;
+      }
+    ).queryProviderPayment = async () => {
+      runtimeSafe = false;
+      return {
+        state: "pending",
+        closable: false,
+        summary: { source: "automatic-query", state: "USERPAYING" }
+      };
+    };
+    const automatic = harness.service as unknown as {
+      runAutomaticReconciliationCycle(options: {
+        now: Date;
+        assertRuntimeSafety?: () => void;
+      }): Promise<unknown>;
+    };
+    const persistCallsBefore = harness.persistCalls;
+    const orderBefore = structuredClone(order);
+
+    await assert.rejects(
+      automatic.runAutomaticReconciliationCycle({
+        now: new Date(dueAt),
+        assertRuntimeSafety: () => {
+          if (!runtimeSafe) {
+            throw new Error("automatic-reconciliation-safety-unavailable");
+          }
+        }
+      }),
+      /automatic-reconciliation-safety-unavailable/
+    );
+
+    assert.deepEqual(order, orderBefore);
+    assert.equal(harness.persistCalls, persistCallsBefore);
+  });
+
   test("待确认退款也会复用原退款单自动查单并持久化退避状态", async () => {
     const harness = createHarness({
       PAYMENT_RECONCILIATION_INITIAL_DELAY_MS: "1000",
@@ -1461,6 +1515,77 @@ describe("支付与退款后台自动对账", () => {
         nextAttemptAt: "2026-07-19T02:00:02.000Z"
       }
     );
+  });
+
+  test("自动对账在退款渠道响应后发现运行时安全门禁失效时不修改或持久化账本", async () => {
+    const harness = createHarness({
+      PAYMENT_RECONCILIATION_INITIAL_DELAY_MS: "1000",
+      PAYMENT_RECONCILIATION_MAX_DELAY_MS: "8000"
+    });
+    const dueAt = "2026-07-19T02:00:00.000Z";
+    const order = appendOrder(harness, {
+      status: "paid",
+      providerTransactionId: "wx-runtime-safety-refund",
+      paidAt: "2026-07-19T01:30:00.000Z"
+    });
+    const refund = appendRefund(harness, order);
+    (
+      refund as PaymentRefundRecord & {
+        reconciliation?: Record<string, unknown>;
+      }
+    ).reconciliation = {
+      state: "scheduled",
+      attemptCount: 0,
+      nextAttemptAt: dueAt
+    };
+    let runtimeSafe = true;
+    (
+      harness.service as unknown as {
+        callWechatApi(
+          method: string,
+          path: string
+        ): Promise<Record<string, unknown>>;
+      }
+    ).callWechatApi = async () => {
+      runtimeSafe = false;
+      return {
+        refund_id: "wx-runtime-safety-refund",
+        out_refund_no: refund.refundNo,
+        transaction_id: order.providerTransactionId,
+        out_trade_no: order.paymentNo,
+        status: "PROCESSING",
+        amount: {
+          total: order.amount,
+          refund: refund.amount,
+          currency: "CNY"
+        }
+      };
+    };
+    const automatic = harness.service as unknown as {
+      runAutomaticReconciliationCycle(options: {
+        now: Date;
+        assertRuntimeSafety?: () => void;
+      }): Promise<unknown>;
+    };
+    const persistCallsBefore = harness.persistCalls;
+    const orderBefore = structuredClone(order);
+    const refundBefore = structuredClone(refund);
+
+    await assert.rejects(
+      automatic.runAutomaticReconciliationCycle({
+        now: new Date(dueAt),
+        assertRuntimeSafety: () => {
+          if (!runtimeSafe) {
+            throw new Error("automatic-reconciliation-safety-unavailable");
+          }
+        }
+      }),
+      /automatic-reconciliation-safety-unavailable/
+    );
+
+    assert.deepEqual(order, orderBefore);
+    assert.deepEqual(refund, refundBefore);
+    assert.equal(harness.persistCalls, persistCallsBefore);
   });
 
   test("自动查单连续失败会指数退避并只生成一次人工核对告警，不会擅自把资金判为失败", async () => {
@@ -1631,6 +1756,77 @@ describe("支付与退款后台自动对账", () => {
       lastCompletedAt: "2026-07-19T05:00:00.000Z",
       lastResult: "paid"
     });
+  });
+
+  test("自动对账在柜机付款回写返回后发现运行时安全门禁失效时不完成后续账本写入", async () => {
+    const harness = createHarness();
+    const dueAt = "2026-07-19T05:30:00.000Z";
+    const order = appendOrder(harness, {
+      eventId: "event-runtime-safety-smartvm",
+      orderNo: "order-runtime-safety-smartvm",
+      deviceCode: "VM-RUNTIME-SAFETY-SMARTVM",
+      metadata: {
+        simulated: false,
+        reconciliation: {
+          state: "scheduled",
+          attemptCount: 0,
+          nextAttemptAt: dueAt
+        }
+      }
+    });
+    let runtimeSafe = true;
+    (
+      harness.service as unknown as {
+        queryProviderPayment(order: PaymentOrderRecord): Promise<unknown>;
+        cabinetEventsService: {
+          notifyConfirmedPaymentSuccess(): Promise<unknown>;
+        };
+      }
+    ).queryProviderPayment = async () => ({
+      state: "paid",
+      providerTransactionId: "wx-runtime-safety-smartvm",
+      closable: false,
+      summary: { source: "automatic-runtime-safety-smartvm" }
+    });
+    (
+      harness.service as unknown as {
+        cabinetEventsService: {
+          notifyConfirmedPaymentSuccess(): Promise<unknown>;
+        };
+      }
+    ).cabinetEventsService = {
+      async notifyConfirmedPaymentSuccess() {
+        runtimeSafe = false;
+        return {};
+      }
+    };
+    const automatic = harness.service as unknown as {
+      runAutomaticReconciliationCycle(options: {
+        now: Date;
+        assertRuntimeSafety?: () => void;
+      }): Promise<unknown>;
+    };
+
+    await assert.rejects(
+      automatic.runAutomaticReconciliationCycle({
+        now: new Date(dueAt),
+        assertRuntimeSafety: () => {
+          if (!runtimeSafe) {
+            throw new Error("automatic-reconciliation-safety-unavailable");
+          }
+        }
+      }),
+      /automatic-reconciliation-safety-unavailable/
+    );
+
+    assert.equal(order.status, "paid");
+    assert.equal(order.metadata?.smartVmForwardState, "submitting");
+    assert.deepEqual(order.metadata?.reconciliation, {
+      state: "scheduled",
+      attemptCount: 0,
+      nextAttemptAt: dueAt
+    });
+    assert.equal(harness.persistCalls, 2);
   });
 
   test("支付已入账但柜机回写失败时，服务重启后会复用原交易号自动补回写", async () => {

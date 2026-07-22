@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ConfigService } from "@nestjs/config";
 
 import { assertProductionSafety } from "../src/common/config/production-safety.js";
+import { createEmptyPersistedState } from "../src/common/store/persistence.js";
 
 const validProductionConfig: Record<string, string> = {
   PUBLIC_BASE_URL: "https://api.example.com",
@@ -30,6 +31,7 @@ const validProductionConfig: Record<string, string> = {
   PAYMENT_RECONCILIATION_BATCH_SIZE: "20",
   PAYMENT_RECONCILIATION_ALERT_AFTER_ATTEMPTS: "5",
   WEB_CONCURRENCY: "1",
+  API_INSTANCE_COUNT: "1",
   WECHAT_PAY_APP_ID: "wechat-app-id",
   WECHAT_MINI_APP_SECRET: "wechat-app-secret",
   WECHAT_PAY_MCH_ID: "wechat-mch-id",
@@ -57,10 +59,13 @@ const createConfigService = (overrides: Record<string, string | undefined> = {})
 };
 
 const emptyCredentialStore = {
-  adminCredentials: [],
-  backofficeCredentials: [],
-  devices: [],
-  paymentOrders: []
+  ...createEmptyPersistedState(),
+  snapshot: () => createEmptyPersistedState(),
+  isPersistedStateIntegrityReady: () => true
+};
+
+const readyAuditLog = {
+  isReady: () => true
 };
 
 test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁", () => {
@@ -71,7 +76,15 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
 
   try {
     assert.doesNotThrow(() =>
-      assertProductionSafety(createConfigService(), emptyCredentialStore as never)
+      assertProductionSafety(createConfigService(), emptyCredentialStore as never, readyAuditLog as never)
+    );
+
+    assert.doesNotThrow(() =>
+      assertProductionSafety(
+        createConfigService({ API_INSTANCE_COUNT: "1" }),
+        emptyCredentialStore as never,
+        readyAuditLog as never
+      )
     );
 
     assert.throws(
@@ -84,7 +97,7 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
               isMock: true
             }
           ]
-        } as never),
+        } as never, readyAuditLog as never),
       /生产环境不能加载模拟设备.*1 台 isMock=true.*清理持久化运行数据/
     );
 
@@ -99,7 +112,7 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
               status: "paid"
             }
           ]
-        } as never),
+        } as never, readyAuditLog as never),
       /生产环境不能加载模拟支付单.*1 笔.*清理持久化运行数据/
     );
 
@@ -137,6 +150,23 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
         name: "JSON 账本阶段不能启动多个 API 工作者",
         overrides: { WEB_CONCURRENCY: "2" },
         message: /WEB_CONCURRENCY=1/
+      },
+      {
+        name: "JSON 账本阶段不能将 API 实例数设为多个",
+        overrides: { API_INSTANCE_COUNT: "2" },
+        message: /API_INSTANCE_COUNT=1/
+      },
+      {
+        name: "JSON 账本阶段必须显式声明 Web 工作者数",
+        overrides: { WEB_CONCURRENCY: undefined },
+        message: /WEB_CONCURRENCY=1/
+      },
+      {
+        name: "JSON 账本阶段必须显式声明 API 实例数",
+        overrides: {
+          API_INSTANCE_COUNT: undefined
+        },
+        message: /API_INSTANCE_COUNT=1/
       },
       {
         name: "真实支付必须启用后台自动对账",
@@ -187,7 +217,7 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
 
     for (const invalidCase of invalidCases) {
       assert.throws(
-        () => assertProductionSafety(createConfigService(invalidCase.overrides), emptyCredentialStore as never),
+        () => assertProductionSafety(createConfigService(invalidCase.overrides), emptyCredentialStore as never, readyAuditLog as never),
         invalidCase.message,
         invalidCase.name
       );

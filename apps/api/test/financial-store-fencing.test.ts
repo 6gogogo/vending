@@ -87,6 +87,48 @@ test("仓储构造阶段保持只读，只有安装 fencing token 后才能落�
   }
 });
 
+test("完整性失败时不替换已验证账本，并把运行状态降为不可就绪", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-store-integrity-fence-"));
+  const dataFile = join(directory, "store.json");
+  const lockFile = join(directory, "financial-writer.lock");
+
+  try {
+    withEnvironment(
+      {
+        API_DATA_FILE: dataFile,
+        FINANCIAL_SINGLE_WRITER_ENABLED: "true",
+        NODE_ENV: "test",
+        APP_ENV: undefined
+      },
+      () => {
+        const lease = new FinancialSingleWriterLease({
+          lockFile,
+          ownerId: "integrity-owner",
+          autoHeartbeat: false
+        });
+        lease.acquire();
+        const uninstall = installFinancialWriterFence(lease);
+
+        try {
+          const store = new InMemoryStoreService();
+          assert.equal(store.flushBootstrapPersistence(), true);
+          const before = readFileSync(dataFile, "utf8");
+          store.goodsCatalog[0]!.name = "";
+
+          assert.throws(() => store.persist(), /运行数据完整性检查未通过/);
+          assert.equal(readFileSync(dataFile, "utf8"), before);
+          assert.equal(store.isPersistedStateIntegrityReady(), false);
+        } finally {
+          uninstall();
+          lease.release();
+        }
+      }
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("旧代进程在新 token 接管后不能覆盖账本，旧进程 release 也不会删除继任租约", () => {
   const directory = mkdtempSync(join(tmpdir(), "vm-store-stale-fence-"));
   const dataFile = join(directory, "store.json");

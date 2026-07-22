@@ -3,11 +3,18 @@ import {
   Injectable,
   Logger,
   OnApplicationBootstrap,
-  OnApplicationShutdown
+  OnApplicationShutdown,
+  Optional
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
+import { isProductionRuntime } from "../../common/config/runtime-environment";
 import { FinancialSingleWriterService } from "../../common/coordination/financial-single-writer.service";
+import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import {
+  SystemAuditLogService,
+  type CriticalAuditOperation
+} from "../../common/store/system-audit-log.service";
 import { PaymentsService } from "./payments.service";
 
 const truthyValues = new Set(["1", "true", "yes", "on"]);
@@ -29,7 +36,13 @@ export class PaymentReconciliationScheduler
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
     @Inject(ConfigService) private readonly configService: ConfigService,
     @Inject(FinancialSingleWriterService)
-    private readonly financialSingleWriter: FinancialSingleWriterService
+    private readonly financialSingleWriter: FinancialSingleWriterService,
+    @Optional()
+    @Inject(InMemoryStoreService)
+    private readonly store?: InMemoryStoreService,
+    @Optional()
+    @Inject(SystemAuditLogService)
+    private readonly auditLog?: SystemAuditLogService
   ) {}
 
   onApplicationBootstrap() {
@@ -82,7 +95,8 @@ export class PaymentReconciliationScheduler
       this.stopped ||
       !this.isEnabled() ||
       this.currentCycle ||
-      !this.financialSingleWriter.getStatus().held
+      !this.financialSingleWriter.getStatus().held ||
+      !this.isProductionSafetyReady()
     ) {
       return false;
     }
@@ -99,16 +113,28 @@ export class PaymentReconciliationScheduler
   }
 
   private async executeCycle() {
+    let criticalAudit: CriticalAuditOperation | undefined;
+
+    try {
+      criticalAudit = this.beginProductionCycleAuditIntent();
+    } catch {
+      this.logger.error("支付自动对账周期未建立审计意图。");
+      return false;
+    }
+
     this.paymentsService.recordAutomaticReconciliationStarted?.();
     try {
       const summary =
-        await this.paymentsService.runAutomaticReconciliationCycle();
+        await this.paymentsService.runAutomaticReconciliationCycle({
+          assertRuntimeSafety: () => this.assertProductionCycleSafety()
+        });
       this.paymentsService.recordAutomaticReconciliationSuccess?.(summary);
+      this.completeProductionCycleAudit(criticalAudit, "completed", 200);
       return true;
     } catch (error) {
       this.paymentsService.recordAutomaticReconciliationFailure?.(error);
-      const message = error instanceof Error ? error.message : "未知错误";
-      this.logger.error(`支付自动对账周期失败：${message}`);
+      this.completeProductionCycleAudit(criticalAudit, "failed", 500);
+      this.logger.error("支付自动对账周期失败。");
       return false;
     }
   }
@@ -120,6 +146,61 @@ export class PaymentReconciliationScheduler
         ?.trim()
         .toLowerCase() ?? ""
     );
+  }
+
+  private isProductionSafetyReady() {
+    return (
+      !isProductionRuntime() ||
+      (this.store?.isPersistedStateIntegrityReady() === true &&
+        this.auditLog?.isReady() === true)
+    );
+  }
+
+  private assertProductionCycleSafety() {
+    if (!this.isProductionSafetyReady()) {
+      throw new Error("自动对账运行时安全门禁不可用。");
+    }
+  }
+
+  /**
+   * 自动对账会外查支付渠道并可能落盘金融状态；生产中必须先建立最小审计意图。
+   * 细节仅写入固定动作，不携带订单、退款号、渠道响应或异常原文。
+   */
+  private beginProductionCycleAuditIntent() {
+    if (!isProductionRuntime()) {
+      return undefined;
+    }
+
+    return this.auditLog?.beginCriticalIntent({
+      method: "SYSTEM",
+      path: "/internal/payments/automatic-reconciliation",
+      metadata: {
+        component: "payments",
+        operationClass: "automatic-reconciliation"
+      }
+    });
+  }
+
+  private completeProductionCycleAudit(
+    criticalAudit: CriticalAuditOperation | undefined,
+    outcome: "completed" | "failed",
+    statusCode: 200 | 500
+  ) {
+    if (!criticalAudit) {
+      return;
+    }
+
+    this.auditLog?.completeCriticalOperation(criticalAudit, {
+      method: "SYSTEM",
+      path: "/internal/payments/automatic-reconciliation",
+      statusCode,
+      durationMs: Math.max(0, Date.now() - criticalAudit.startedAt),
+      outcome,
+      metadata: {
+        component: "payments",
+        operationClass: "automatic-reconciliation"
+      }
+    });
   }
 
   private readIntervalMs() {

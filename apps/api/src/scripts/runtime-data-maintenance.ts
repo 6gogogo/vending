@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   copyFileSync,
   createReadStream,
@@ -24,45 +25,30 @@ import {
   resolveApiBackupDir,
   resolveApiDataFile,
   resolveApiWorkspaceRoot,
+  resolveFinancialSingleWriterLeaseFile,
   resolveSystemLogFile,
-  resolveUploadDir
+  resolveUploadDir,
+  writePersistedState
 } from "../common/store/persistence.js";
+import { createDurablePathSynchronizer } from "../common/store/durable-path-sync.js";
+import { assertRuntimePathsSafe } from "../common/store/runtime-path-safety.js";
+import {
+  type PersistedStateValidationResult,
+  validatePersistedStateFile
+} from "../common/store/persisted-state-integrity.js";
+import {
+  analyseRuntimeDataRepair,
+  applyApprovedRuntimeDataRepair,
+  type RuntimeDataRepairAnalysis
+} from "../common/store/runtime-data-repair.js";
 import { acquireFinancialSingleWriterForMaintenance } from "../common/coordination/financial-single-writer-runtime.js";
 import type { FinancialSingleWriterLease } from "../common/coordination/financial-single-writer-lease.js";
 
 const MANIFEST_FILE_NAME = "runtime-backup-manifest.json";
 const BACKUP_SCHEMA_VERSION = 1;
-
-const REQUIRED_ARRAY_KEYS = [
-  "users",
-  "rules",
-  "devices",
-  "goodsCatalog",
-  "goodsCategories",
-  "regions",
-  "warehouses",
-  "specialAccessPolicies",
-  "goodsAlertPolicies",
-  "registrationApplications",
-  "merchantGoodsTemplates",
-  "deviceGoodsSettings",
-  "goodsBatches",
-  "batchConsumptionTraces",
-  "inventoryTransfers",
-  "stocktakes",
-  "events",
-  "inventory",
-  "paymentOrders",
-  "paymentRefunds",
-  "reservations",
-  "alerts",
-  "logs",
-  "adminCredentials",
-  "backofficeCredentials",
-  "callbackLog"
-] as const;
-
-const REQUIRED_PAIR_ARRAY_KEYS = ["verificationCodes", "sessions", "draftSessions", "deviceRuntime"] as const;
+const PRIVATE_BACKUP_DIRECTORY_MODE = 0o700;
+const PRIVATE_BACKUP_FILE_MODE = 0o600;
+const backupPathSynchronizer = createDurablePathSynchronizer();
 
 interface RuntimeSources {
   dataFile: string;
@@ -92,7 +78,7 @@ interface RuntimeBackupManifest {
   };
   included: {
     store: true;
-    systemLog: boolean;
+    systemLog: true;
     uploads: boolean;
   };
   validation: {
@@ -102,11 +88,7 @@ interface RuntimeBackupManifest {
   items: BackupItem[];
 }
 
-interface ValidationResult {
-  summary: Record<string, number>;
-  warnings: string[];
-  errors: string[];
-}
+type ValidationResult = PersistedStateValidationResult;
 
 interface ParsedArgs {
   flags: Set<string>;
@@ -239,14 +221,25 @@ const resolveCliPath = (path: string) => {
   return resolve(process.cwd(), path);
 };
 
-const getRuntimeSources = (args: ParsedArgs): RuntimeSources => ({
-  dataFile: resolveApiDataFile(),
-  systemLogFile: resolveSystemLogFile(),
-  uploadDir: resolveUploadDir(),
-  backupRoot: args.values.has("backup-dir")
-    ? resolveCliPath(args.values.get("backup-dir") ?? "")
-    : resolveApiBackupDir()
-});
+const getRuntimeSources = (args: ParsedArgs): RuntimeSources => {
+  const sources: RuntimeSources = {
+    dataFile: resolveApiDataFile(),
+    systemLogFile: resolveSystemLogFile(),
+    uploadDir: resolveUploadDir(),
+    backupRoot: args.values.has("backup-dir")
+      ? resolveCliPath(args.values.get("backup-dir") ?? "")
+      : resolveApiBackupDir()
+  };
+  assertRuntimePathsSafe({
+    dataFile: sources.dataFile,
+    systemLogFile: sources.systemLogFile,
+    uploadDir: sources.uploadDir,
+    backupDir: sources.backupRoot,
+    financialLeaseFile: resolveFinancialSingleWriterLeaseFile()
+  });
+
+  return sources;
+};
 
 const sanitizeLabel = (label?: string) => {
   const normalized = (label ?? "").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -255,402 +248,110 @@ const sanitizeLabel = (label?: string) => {
 
 const createTimestamp = () => new Date().toISOString().replace(/[:.]/g, "-");
 
-const countArray = (state: Record<string, unknown>, key: string) => {
-  const value = state[key];
-  return Array.isArray(value) ? value.length : 0;
-};
+const validateStoreFile = (filePath: string): ValidationResult =>
+  validatePersistedStateFile(filePath);
 
-const validateUniqueField = (
-  state: Record<string, unknown>,
-  key: string,
-  field: string,
-  result: ValidationResult,
-  severity: "error" | "warning" = "error"
-) => {
-  const value = state[key];
+const sha256Content = (content: string | Buffer) =>
+  createHash("sha256").update(content).digest("hex");
 
-  if (!Array.isArray(value)) {
-    return;
-  }
-
-  const seen = new Set<string>();
-  const findings: string[] = [];
-
-  for (const [index, item] of value.entries()) {
-    if (!isRecord(item)) {
-      findings.push(`${key}[${index}] 必须是对象。`);
-      continue;
-    }
-
-    const id = item[field];
-
-    if (typeof id !== "string" || !id.trim()) {
-      findings.push(`${key}[${index}].${field} 缺失或不是字符串。`);
-      continue;
-    }
-
-    if (seen.has(id)) {
-      findings.push(`${key} 存在重复 ${field}：${id}`);
-    }
-
-    seen.add(id);
-  }
-
-  if (severity === "warning") {
-    result.warnings.push(...findings);
-  } else {
-    result.errors.push(...findings);
-  }
-};
-
-const validateRequiredStringFields = (
-  state: Record<string, unknown>,
-  key: string,
-  fields: string[],
-  result: ValidationResult
-) => {
-  const value = state[key];
-
-  if (!Array.isArray(value)) {
-    return;
-  }
-
-  for (const [index, item] of value.entries()) {
-    if (!isRecord(item)) {
-      result.errors.push(`${key}[${index}] 必须是对象。`);
-      continue;
-    }
-
-    for (const field of fields) {
-      if (typeof item[field] !== "string" || !item[field].trim()) {
-        result.errors.push(`${key}[${index}].${field} 缺失或为空字符串。`);
-      }
-    }
-  }
-};
-
-const validatePairArray = (state: Record<string, unknown>, key: string, result: ValidationResult) => {
-  const value = state[key];
-
-  if (!Array.isArray(value)) {
-    result.errors.push(`${key} 必须是数组。`);
-    return;
-  }
-
-  const seenKeys = new Set<string>();
-
-  for (const [index, item] of value.entries()) {
-    if (!Array.isArray(item) || item.length !== 2 || typeof item[0] !== "string" || !isRecord(item[1])) {
-      result.errors.push(`${key}[${index}] 必须是 [string, object] 形式。`);
-      continue;
-    }
-
-    if (!item[0].trim()) {
-      result.errors.push(`${key}[${index}] 的键不能为空。`);
-    } else if (seenKeys.has(item[0])) {
-      result.errors.push(`${key} 存在重复键：${item[0]}`);
-    }
-
-    seenKeys.add(item[0]);
-  }
-};
-
-const validateNumericField = (
-  state: Record<string, unknown>,
-  key: string,
-  field: string,
-  result: ValidationResult,
-  options: {
-    integer?: boolean;
-    min?: number;
-    max?: number;
-  } = {}
-) => {
-  const value = state[key];
-
-  if (!Array.isArray(value)) {
-    return;
-  }
-
-  for (const [index, item] of value.entries()) {
-    if (!isRecord(item)) {
-      continue;
-    }
-
-    const numericValue = item[field];
-
-    if (
-      typeof numericValue !== "number" ||
-      !Number.isFinite(numericValue) ||
-      (options.integer && !Number.isInteger(numericValue)) ||
-      (options.min !== undefined && numericValue < options.min) ||
-      (options.max !== undefined && numericValue > options.max)
-    ) {
-      const range = [
-        options.integer ? "整数" : "有限数字",
-        options.min !== undefined ? `不小于 ${options.min}` : undefined,
-        options.max !== undefined ? `不大于 ${options.max}` : undefined
-      ].filter(Boolean).join("且");
-      result.errors.push(`${key}[${index}].${field} 必须是${range}。`);
-    }
-  }
-};
-
-const validateReferenceField = (
-  state: Record<string, unknown>,
-  key: string,
-  field: string,
-  targetIds: ReadonlySet<string>,
-  targetLabel: string,
-  result: ValidationResult,
-  optional = false
-) => {
-  const value = state[key];
-
-  if (!Array.isArray(value)) {
-    return;
-  }
-
-  for (const [index, item] of value.entries()) {
-    if (!isRecord(item)) {
-      continue;
-    }
-
-    const reference = item[field];
-
-    if (optional && (reference === undefined || reference === null || reference === "")) {
-      continue;
-    }
-
-    if (typeof reference !== "string" || !reference.trim() || !targetIds.has(reference)) {
-      result.errors.push(`${key}[${index}].${field} 引用了不存在的${targetLabel}：${String(reference)}`);
-    }
-  }
-};
-
-const validateStoreFile = (filePath: string): ValidationResult => {
-  const result: ValidationResult = {
-    summary: {},
-    warnings: [],
-    errors: []
-  };
-
+const readRepairSource = (filePath: string) => {
   if (!existsSync(filePath)) {
-    result.errors.push(`未找到业务数据文件：${filePath}`);
-    return result;
+    throw new Error("未找到业务数据文件。");
   }
 
-  let parsed: unknown;
+  const raw = readFileSync(filePath);
+  const serialized = raw.toString("utf8");
 
   try {
-    parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
-  } catch (error) {
-    result.errors.push(`业务数据 JSON 解析失败：${error instanceof Error ? error.message : String(error)}`);
-    return result;
+    return {
+      serialized,
+      sha256: sha256Content(raw),
+      state: JSON.parse(serialized) as unknown
+    };
+  } catch {
+    throw new Error("业务数据 JSON 解析失败。");
   }
-
-  if (!isRecord(parsed)) {
-    result.errors.push("业务数据根节点必须是对象。");
-    return result;
-  }
-
-  for (const key of REQUIRED_ARRAY_KEYS) {
-    if (!Array.isArray(parsed[key])) {
-      result.errors.push(`${key} 必须是数组。`);
-    }
-  }
-
-  for (const key of REQUIRED_PAIR_ARRAY_KEYS) {
-    validatePairArray(parsed, key, result);
-  }
-
-  if (!isRecord(parsed.reservationSettings)) {
-    result.errors.push("reservationSettings 必须是对象。");
-  } else {
-    const { enabled, holdMinutes, maxTimeouts } = parsed.reservationSettings;
-
-    if (typeof enabled !== "boolean") {
-      result.errors.push("reservationSettings.enabled 必须是布尔值。");
-    }
-
-    if (
-      typeof holdMinutes !== "number" ||
-      !Number.isInteger(holdMinutes) ||
-      holdMinutes < 5 ||
-      holdMinutes > 24 * 60
-    ) {
-      result.errors.push("reservationSettings.holdMinutes 必须是 5 至 1440 的整数。");
-    }
-
-    if (
-      typeof maxTimeouts !== "number" ||
-      !Number.isInteger(maxTimeouts) ||
-      maxTimeouts < 1 ||
-      maxTimeouts > 20
-    ) {
-      result.errors.push("reservationSettings.maxTimeouts 必须是 1 至 20 的整数。");
-    }
-  }
-
-  validateUniqueField(parsed, "users", "id", result);
-  validateUniqueField(parsed, "users", "phone", result);
-  validateUniqueField(parsed, "devices", "deviceCode", result);
-  validateUniqueField(parsed, "goodsCatalog", "goodsId", result);
-  validateUniqueField(parsed, "goodsCategories", "id", result);
-  validateUniqueField(parsed, "warehouses", "code", result);
-  validateUniqueField(parsed, "goodsBatches", "batchId", result);
-  validateUniqueField(parsed, "registrationApplications", "id", result);
-  validateUniqueField(parsed, "merchantGoodsTemplates", "id", result);
-  validateUniqueField(parsed, "batchConsumptionTraces", "id", result);
-  validateUniqueField(parsed, "inventoryTransfers", "id", result);
-  validateUniqueField(parsed, "stocktakes", "id", result);
-  validateUniqueField(parsed, "events", "eventId", result);
-  validateUniqueField(parsed, "events", "orderNo", result);
-  validateUniqueField(parsed, "inventory", "id", result);
-  validateUniqueField(parsed, "paymentOrders", "id", result);
-  validateUniqueField(parsed, "paymentOrders", "paymentNo", result);
-  validateUniqueField(parsed, "paymentRefunds", "id", result);
-  validateUniqueField(parsed, "paymentRefunds", "refundNo", result);
-  validateUniqueField(parsed, "reservations", "id", result);
-  validateUniqueField(parsed, "alerts", "id", result);
-  validateUniqueField(parsed, "logs", "id", result);
-  validateUniqueField(parsed, "callbackLog", "id", result);
-  validateUniqueField(parsed, "adminCredentials", "username", result);
-  validateUniqueField(parsed, "backofficeCredentials", "username", result);
-  validateRequiredStringFields(parsed, "users", ["id", "phone", "name", "role", "status"], result);
-  validateRequiredStringFields(parsed, "devices", ["deviceCode", "name", "status"], result);
-  validateRequiredStringFields(parsed, "goodsCatalog", ["goodsId", "goodsCode", "name", "category"], result);
-  validateRequiredStringFields(parsed, "goodsBatches", ["batchId", "goodsId", "deviceCode", "sourceType"], result);
-  validateRequiredStringFields(parsed, "events", ["eventId", "orderNo", "userId", "deviceCode", "status"], result);
-  validateRequiredStringFields(parsed, "inventory", ["id", "userId", "deviceCode", "goodsId", "type"], result);
-  validateRequiredStringFields(parsed, "paymentOrders", ["id", "paymentNo", "provider", "phase", "status"], result);
-  validateRequiredStringFields(parsed, "paymentRefunds", ["id", "paymentOrderId", "paymentNo", "refundNo", "provider", "status"], result);
-  validateRequiredStringFields(parsed, "reservations", ["id", "userId", "deviceCode", "status"], result);
-  validateNumericField(parsed, "goodsBatches", "quantity", result, { integer: true, min: 0 });
-  validateNumericField(parsed, "goodsBatches", "remainingQuantity", result, { integer: true });
-  validateNumericField(parsed, "inventory", "quantity", result, { integer: true, min: 1 });
-  validateNumericField(parsed, "inventory", "unitPrice", result, { min: 0 });
-  validateNumericField(parsed, "events", "amount", result, { min: 0 });
-  validateNumericField(parsed, "paymentOrders", "amount", result, { min: 0 });
-  validateNumericField(parsed, "paymentRefunds", "amount", result, { min: 0 });
-
-  const catalogGoodsIds = new Set(
-    Array.isArray(parsed.goodsCatalog)
-      ? parsed.goodsCatalog
-          .filter(isRecord)
-          .map((entry) => entry.goodsId)
-          .filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-      : []
-  );
-  const userIds = new Set(
-    Array.isArray(parsed.users)
-      ? parsed.users
-          .filter(isRecord)
-          .map((entry) => entry.id)
-          .filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-      : []
-  );
-  const paymentOrderIds = new Set(
-    Array.isArray(parsed.paymentOrders)
-      ? parsed.paymentOrders
-          .filter(isRecord)
-          .map((entry) => entry.id)
-          .filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-      : []
-  );
-  const eventIds = new Set(
-    Array.isArray(parsed.events)
-      ? parsed.events
-          .filter(isRecord)
-          .map((entry) => entry.eventId)
-          .filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-      : []
-  );
-
-  validateReferenceField(parsed, "inventory", "goodsId", catalogGoodsIds, "货品", result);
-  validateReferenceField(parsed, "merchantGoodsTemplates", "goodsId", catalogGoodsIds, "货品", result, true);
-  validateReferenceField(parsed, "registrationApplications", "linkedUserId", userIds, "用户", result, true);
-  validateReferenceField(parsed, "adminCredentials", "userId", userIds, "用户", result);
-  validateReferenceField(parsed, "backofficeCredentials", "userId", userIds, "用户", result);
-  validateReferenceField(parsed, "paymentRefunds", "paymentOrderId", paymentOrderIds, "支付单", result);
-  validateReferenceField(parsed, "paymentOrders", "eventId", eventIds, "开柜事件", result, true);
-
-  for (const key of ["goodsBatches"] as const) {
-    const entries = parsed[key];
-
-    if (!Array.isArray(entries)) {
-      continue;
-    }
-
-    for (const [index, entry] of entries.entries()) {
-      if (!isRecord(entry) || typeof entry.goodsId !== "string" || !entry.goodsId.trim()) {
-        continue;
-      }
-
-      if (!catalogGoodsIds.has(entry.goodsId)) {
-        result.errors.push(`${key}[${index}].goodsId 引用了不存在的货品：${entry.goodsId}`);
-      }
-    }
-  }
-
-  const batches = parsed.goodsBatches;
-
-  if (Array.isArray(batches)) {
-    let negativeBalanceBatchCount = 0;
-
-    for (const [index, batch] of batches.entries()) {
-      if (!isRecord(batch)) {
-        continue;
-      }
-
-      const remainingQuantity = batch.remainingQuantity;
-
-      if (typeof remainingQuantity === "number" && remainingQuantity < 0) {
-        negativeBalanceBatchCount += 1;
-      }
-    }
-
-    if (negativeBalanceBatchCount > 0) {
-      result.warnings.push(`存在 ${negativeBalanceBatchCount} 条负库存平衡批次，校验允许但恢复后需继续关注库存修正。`);
-    }
-  }
-
-  const defaultCredentialCount = ["adminCredentials", "backofficeCredentials"].reduce((count, key) => {
-    const credentials = parsed[key];
-
-    if (!Array.isArray(credentials)) {
-      return count;
-    }
-
-    return (
-      count +
-      credentials.filter((entry) => isRecord(entry) && entry.usesDefaultPassword === true).length
-    );
-  }, 0);
-
-  if (defaultCredentialCount > 0) {
-    result.warnings.push(`仍有 ${defaultCredentialCount} 个默认密码凭据，公网投放前应改密或移除。`);
-  }
-
-  result.summary = {
-    users: countArray(parsed, "users"),
-    devices: countArray(parsed, "devices"),
-    goodsCatalog: countArray(parsed, "goodsCatalog"),
-    goodsBatches: countArray(parsed, "goodsBatches"),
-    inventory: countArray(parsed, "inventory"),
-    events: countArray(parsed, "events"),
-    alerts: countArray(parsed, "alerts"),
-    logs: countArray(parsed, "logs"),
-    paymentOrders: countArray(parsed, "paymentOrders"),
-    paymentRefunds: countArray(parsed, "paymentRefunds"),
-    reservations: countArray(parsed, "reservations"),
-    sessions: countArray(parsed, "sessions"),
-    callbackLog: countArray(parsed, "callbackLog")
-  };
-
-  return result;
 };
 
+const printRepairAnalysis = (sha256: string, analysis: RuntimeDataRepairAnalysis) => {
+  console.log("运行数据修复计划：");
+  console.log(`- sourceSha256: ${sha256}`);
+  console.log(
+    `- malformedGoods: detected=${analysis.malformedGoods.detected}, eligible=${analysis.malformedGoods.eligible}, blocked=${analysis.malformedGoods.blocked}`
+  );
+  console.log(
+    `- zeroQuantityInventory: detected=${analysis.zeroQuantityInventory.detected}, eligible=${analysis.zeroQuantityInventory.eligible}, blocked=${analysis.zeroQuantityInventory.blocked}`
+  );
+  console.log(
+    `- orphanMerchantTemplates: detected=${analysis.orphanMerchantTemplates.detected}, eligible=${analysis.orphanMerchantTemplates.eligible}, blocked=${analysis.orphanMerchantTemplates.blocked}`
+  );
+  console.log(
+    `- manualRequiredCredentialDuplicateGroups: ${analysis.manualRequiredCredentialDuplicateGroups}`
+  );
+  console.log(`- initialValidationErrorCount: ${analysis.initialValidationErrorCount}`);
+  console.log(`- remainingValidationErrorCount: ${analysis.remainingValidationErrorCount}`);
+  console.log(`- canApply: ${analysis.canApply ? "yes" : "no"}`);
+};
+
+const runRepair = async (args: ParsedArgs) => {
+  if (args.positional.length > 0) {
+    throw new Error("repair 不接受位置参数。");
+  }
+
+  const apply = args.flags.has("apply");
+  const expectedSha256 = args.values.get("source-sha256")?.trim().toLowerCase();
+
+  if (!apply && expectedSha256 !== undefined) {
+    throw new Error("--source-sha256 只能与 --apply 一起使用。");
+  }
+
+  if (apply && !expectedSha256) {
+    throw new Error("执行修复必须同时提供 --apply 和 --source-sha256。");
+  }
+
+  if (expectedSha256 && !/^[a-f0-9]{64}$/.test(expectedSha256)) {
+    throw new Error("--source-sha256 必须是 64 位十六进制摘要。");
+  }
+
+  const sources = getRuntimeSources(args);
+
+  if (!apply) {
+    const source = readRepairSource(sources.dataFile);
+    printRepairAnalysis(source.sha256, analyseRuntimeDataRepair(source.state));
+    return;
+  }
+
+  const financialWriter = acquireFinancialSingleWriterForMaintenance();
+  try {
+    const source = readRepairSource(sources.dataFile);
+
+    if (source.sha256 !== expectedSha256) {
+      throw new Error("源数据摘要与修复计划不一致，请重新执行 dry-run。");
+    }
+
+    const analysis = analyseRuntimeDataRepair(source.state);
+    printRepairAnalysis(source.sha256, analysis);
+
+    if (!analysis.canApply) {
+      throw new Error("运行数据修复计划仍含需人工处理或无法证明安全的问题，已拒绝写入。");
+    }
+
+    const repaired = applyApprovedRuntimeDataRepair(source.state);
+
+    if (!repaired.changed) {
+      console.log("运行数据无需自动修复。");
+      return;
+    }
+
+    writePersistedState(repaired.state);
+    const verification = validateStoreFile(sources.dataFile);
+    assertNoValidationErrors(verification, "修复后的运行数据");
+    console.log("运行数据修复完成。");
+    printValidationResult("修复后摘要：", verification);
+  } finally {
+    financialWriter.release();
+  }
+};
 const validateSystemLogFile = async (filePath: string): Promise<ValidationResult> => {
   const result: ValidationResult = {
     summary: {
@@ -661,7 +362,7 @@ const validateSystemLogFile = async (filePath: string): Promise<ValidationResult
   };
 
   if (!existsSync(filePath)) {
-    result.warnings.push(`未找到系统审计日志：${filePath}`);
+    result.errors.push(`未找到系统审计日志：${filePath}`);
     return result;
   }
 
@@ -682,9 +383,8 @@ const validateSystemLogFile = async (filePath: string): Promise<ValidationResult
     try {
       JSON.parse(line);
       parsedLines += 1;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      result.errors.push(`系统审计日志第 ${lineNumber} 行不是合法 JSON：${message}`);
+    } catch {
+      result.errors.push(`系统审计日志第 ${lineNumber} 行不是合法 JSON。`);
 
       if (result.errors.length >= 5) {
         result.errors.push("系统审计日志存在更多解析问题，已停止逐行校验。");
@@ -730,20 +430,31 @@ const copyFileForBackup = async (
   sourcePath: string,
   backupPath: string,
   key: BackupItem["key"],
-  required: boolean
+  required: boolean,
+  assertLeaseHeld: () => void
 ): Promise<BackupItem> => {
+  assertLeaseHeld();
   const targetPath = safeBackupPath(backupDir, backupPath);
-  mkdirSync(dirname(targetPath), { recursive: true });
+  mkdirSync(dirname(targetPath), {
+    recursive: true,
+    mode: PRIVATE_BACKUP_DIRECTORY_MODE
+  });
   copyFileSync(sourcePath, targetPath);
+  chmodSync(targetPath, PRIVATE_BACKUP_FILE_MODE);
+  backupPathSynchronizer.syncFile(targetPath);
+  backupPathSynchronizer.syncDirectoryAndAncestors(dirname(targetPath), backupDir);
+  assertLeaseHeld();
 
   const stat = statSync(targetPath);
+  const sha256 = await sha256File(targetPath);
+  assertLeaseHeld();
 
   return {
     key,
     backupPath,
     sourcePath,
     bytes: stat.size,
-    sha256: await sha256File(targetPath),
+    sha256,
     modifiedAt: stat.mtime.toISOString(),
     required
   };
@@ -785,13 +496,20 @@ const listFilesRecursive = (rootDir: string) => {
 };
 
 const copyDirectoryContents = (sourceDir: string, targetDir: string) => {
-  mkdirSync(targetDir, { recursive: true });
+  mkdirSync(targetDir, {
+    recursive: true,
+    mode: PRIVATE_BACKUP_DIRECTORY_MODE
+  });
 
   for (const relativePath of listFilesRecursive(sourceDir)) {
     const sourcePath = resolve(sourceDir, ...relativePath.split("/"));
     const targetPath = resolve(targetDir, ...relativePath.split("/"));
-    mkdirSync(dirname(targetPath), { recursive: true });
+    mkdirSync(dirname(targetPath), {
+      recursive: true,
+      mode: PRIVATE_BACKUP_DIRECTORY_MODE
+    });
     copyFileSync(sourcePath, targetPath);
+    chmodSync(targetPath, PRIVATE_BACKUP_FILE_MODE);
   }
 };
 
@@ -850,6 +568,10 @@ const readManifest = (backupDir: string): RuntimeBackupManifest => {
     throw new Error(`备份清单格式不受支持：${manifestPath}`);
   }
 
+  if (parsed.included.systemLog !== true) {
+    throw new Error("备份清单必须包含系统审计日志，不能用于恢复或发布校验。");
+  }
+
   const allowedKeys = new Set<BackupItem["key"]>(["store", "systemLog", "upload"]);
   const backupPaths = new Set<string>();
 
@@ -888,8 +610,8 @@ const readManifest = (backupDir: string): RuntimeBackupManifest => {
     throw new Error("备份清单必须且只能包含一份业务数据文件。");
   }
 
-  if (systemLogItems.length !== (parsed.included.systemLog ? 1 : 0)) {
-    throw new Error("备份清单的系统审计日志声明与文件项不一致。");
+  if (systemLogItems.length !== 1) {
+    throw new Error("备份清单必须且只能包含一份系统审计日志文件。");
   }
 
   if (!parsed.included.uploads && uploadItems.length > 0) {
@@ -960,13 +682,14 @@ const verifyBackupDirectory = async (backupDir: string): Promise<ValidationResul
         errors: []
       };
   const systemLogItem = manifest.items.find((item) => item.key === "systemLog");
-  const systemLogValidation = systemLogItem && existsSync(safeBackupPath(backupDir, systemLogItem.backupPath))
-    ? await validateSystemLogFile(assertRegularBackupFile(backupDir, systemLogItem.backupPath))
-    : {
-        summary: {},
-        warnings: [],
-        errors: []
-      };
+
+  if (!systemLogItem) {
+    throw new Error("备份缺少系统审计日志文件。");
+  }
+
+  const systemLogValidation = await validateSystemLogFile(
+    assertRegularBackupFile(backupDir, systemLogItem.backupPath)
+  );
 
   if (manifest.included.uploads) {
     const uploadsPath = join(backupDir, "uploads");
@@ -1072,15 +795,20 @@ const createBackup = async (
   options: {
     label?: string;
     skipPrune?: boolean;
-  } = {}
+  } = {},
+  financialWriterLease: FinancialSingleWriterLease
 ) => {
+  const assertLeaseHeld = () => financialWriterLease.assertHeld();
+  assertLeaseHeld();
   const sources = getRuntimeSources(args);
   assertBackupRootIsSafe(sources);
   const liveStoreValidation = validateStoreFile(sources.dataFile);
   assertNoValidationErrors(liveStoreValidation, "当前业务数据");
 
   const liveSystemLogValidation = await validateSystemLogFile(sources.systemLogFile);
+  assertLeaseHeld();
   const liveValidation = mergeValidationResults(liveStoreValidation, liveSystemLogValidation);
+  assertNoValidationErrors(liveValidation, "当前运行数据");
   const label = sanitizeLabel(options.label ?? args.values.get("label"));
   const backupDirName = [createTimestamp(), label].filter(Boolean).join("-");
   const backupDir = join(sources.backupRoot, backupDirName);
@@ -1089,19 +817,38 @@ const createBackup = async (
     throw new Error(`备份目录已存在：${backupDir}`);
   }
 
-  mkdirSync(backupDir, { recursive: true });
+  mkdirSync(backupDir, {
+    recursive: true,
+    mode: PRIVATE_BACKUP_DIRECTORY_MODE
+  });
+  backupPathSynchronizer.syncDirectory(dirname(sources.backupRoot));
+  backupPathSynchronizer.syncDirectoryAndAncestors(backupDir, sources.backupRoot);
 
   try {
     const items: BackupItem[] = [];
-    items.push(await copyFileForBackup(backupDir, sources.dataFile, "store.json", "store", true));
+    items.push(
+      await copyFileForBackup(
+        backupDir,
+        sources.dataFile,
+        "store.json",
+        "store",
+        true,
+        assertLeaseHeld
+      )
+    );
+    assertLeaseHeld();
 
-    const hasSystemLog = existsSync(sources.systemLogFile);
-
-    if (hasSystemLog) {
-      items.push(
-        await copyFileForBackup(backupDir, sources.systemLogFile, "system-audit.ndjson", "systemLog", true)
-      );
-    }
+    items.push(
+      await copyFileForBackup(
+        backupDir,
+        sources.systemLogFile,
+        "system-audit.ndjson",
+        "systemLog",
+        true,
+        assertLeaseHeld
+      )
+    );
+    assertLeaseHeld();
 
     const uploadsBackupDir = join(backupDir, "uploads");
     const hasUploads = existsSync(sources.uploadDir);
@@ -1111,16 +858,32 @@ const createBackup = async (
         throw new Error(`UPLOAD_DIR 不是目录：${sources.uploadDir}`);
       }
 
-      mkdirSync(uploadsBackupDir, { recursive: true });
+      mkdirSync(uploadsBackupDir, {
+        recursive: true,
+        mode: PRIVATE_BACKUP_DIRECTORY_MODE
+      });
+      backupPathSynchronizer.syncDirectoryAndAncestors(uploadsBackupDir, backupDir);
 
       for (const relativePath of listFilesRecursive(sources.uploadDir)) {
+        assertLeaseHeld();
         const sourcePath = resolve(sources.uploadDir, ...relativePath.split("/"));
         const backupPath = `uploads/${relativePath}`;
-        items.push(await copyFileForBackup(backupDir, sourcePath, backupPath, "upload", true));
+        items.push(
+          await copyFileForBackup(
+            backupDir,
+            sourcePath,
+            backupPath,
+            "upload",
+            true,
+            assertLeaseHeld
+          )
+        );
+        assertLeaseHeld();
       }
     }
 
     const copiedStoreValidation = validateStoreFile(join(backupDir, "store.json"));
+    assertLeaseHeld();
     assertNoValidationErrors(copiedStoreValidation, "备份业务数据");
 
     const manifest: RuntimeBackupManifest = {
@@ -1134,7 +897,7 @@ const createBackup = async (
       },
       included: {
         store: true,
-        systemLog: hasSystemLog,
+        systemLog: true,
         uploads: hasUploads
       },
       validation: {
@@ -1144,19 +907,30 @@ const createBackup = async (
       items
     };
 
-    writeFileSync(join(backupDir, MANIFEST_FILE_NAME), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    const manifestPath = join(backupDir, MANIFEST_FILE_NAME);
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: PRIVATE_BACKUP_FILE_MODE
+    });
+    backupPathSynchronizer.syncFile(manifestPath);
+    backupPathSynchronizer.syncDirectoryAndAncestors(dirname(manifestPath), backupDir);
+    assertLeaseHeld();
 
     const backupValidation = await verifyBackupDirectory(backupDir);
+    assertLeaseHeld();
     assertNoValidationErrors(backupValidation, "备份文件");
 
     if (!options.skipPrune) {
       const keep = readPositiveIntegerOption(args, "keep");
 
       if (keep !== undefined) {
+        assertLeaseHeld();
         pruneBackups(sources.backupRoot, keep, backupDir);
+        assertLeaseHeld();
       }
     }
 
+    assertLeaseHeld();
     console.log(`运行数据备份完成：${formatPath(backupDir)}`);
     console.log("备份包含业务数据、系统审计日志和上传文件；请按生产数据保护该目录。");
     printValidationResult("备份校验摘要：", backupValidation);
@@ -1164,6 +938,16 @@ const createBackup = async (
   } catch (error) {
     rmSync(backupDir, { recursive: true, force: true });
     throw error;
+  }
+};
+
+const runBackup = async (args: ParsedArgs) => {
+  // 备份必须与 API 写入竞争同一租约；在线复制无法证明 store、审计和上传文件属于同一时点。
+  const financialWriter = acquireFinancialSingleWriterForMaintenance();
+  try {
+    await createBackup(args, {}, financialWriter.lease);
+  } finally {
+    financialWriter.release();
   }
 };
 
@@ -1244,12 +1028,16 @@ const stageRestoreFile = async (
 ): Promise<StagedReplacement> => {
   const sourcePath = assertRegularBackupFile(backupDir, item.backupPath);
   assertRestoreTargetType(targetPath, "file");
-  mkdirSync(dirname(targetPath), { recursive: true });
+  mkdirSync(dirname(targetPath), {
+    recursive: true,
+    mode: PRIVATE_BACKUP_DIRECTORY_MODE
+  });
   const stagingPath = createSiblingTemporaryPath(targetPath, "staging");
   let fileDescriptor: number | undefined;
 
   try {
     copyFileSync(sourcePath, stagingPath);
+    chmodSync(stagingPath, PRIVATE_BACKUP_FILE_MODE);
     fileDescriptor = openSync(stagingPath, "r+");
     fsyncSync(fileDescriptor);
     closeSync(fileDescriptor);
@@ -1278,7 +1066,10 @@ const stageRestoreDirectory = async (
   uploadItems: BackupItem[]
 ): Promise<StagedReplacement> => {
   assertRestoreTargetType(targetDir, "directory");
-  mkdirSync(dirname(targetDir), { recursive: true });
+  mkdirSync(dirname(targetDir), {
+    recursive: true,
+    mode: PRIVATE_BACKUP_DIRECTORY_MODE
+  });
   const stagingPath = createSiblingTemporaryPath(targetDir, "staging");
 
   try {
@@ -1419,10 +1210,14 @@ const runRestoreWithLease = async (
       args.values.has("backup-dir") ? ["--backup-dir", args.values.get("backup-dir") ?? ""] : []
     );
     const label = `pre-restore-${createTimestamp()}`;
-    const safetyBackup = await createBackup(safetyArgs, {
-      label,
-      skipPrune: true
-    });
+    const safetyBackup = await createBackup(
+      safetyArgs,
+      {
+        label,
+        skipPrune: true
+      },
+      financialWriterLease
+    );
     console.log(`恢复前安全备份已创建：${formatPath(safetyBackup)}`);
   }
 
@@ -1508,6 +1303,10 @@ const printHelp = () => {
   npm run data:restore --workspace @vm/api -- --backup <备份目录> --yes
   npm run data:restore --workspace @vm/api -- --latest --yes
 
+修复计划（默认只读）：
+  npm run data:repair --workspace @vm/api
+  npm run data:repair --workspace @vm/api -- --apply --source-sha256 <64位摘要>
+
 常用选项：
   --backup-dir <目录>       覆盖 API_BACKUP_DIR
   --label <标签>            备份目录名后缀
@@ -1526,13 +1325,16 @@ const main = async () => {
 
   switch (command) {
     case "backup":
-      await createBackup(args);
+      await runBackup(args);
       return;
     case "verify":
       await runVerify(args);
       return;
     case "restore":
       await runRestore(args);
+      return;
+    case "repair":
+      await runRepair(args);
       return;
     case "help":
     case "--help":

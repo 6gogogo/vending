@@ -122,6 +122,8 @@ interface WechatRefundCallbackPayload {
   failReason?: string;
 }
 
+type AutomaticReconciliationRuntimeSafetyAssertion = () => void;
+
 const providerLabels: Record<PaymentProvider, string> = {
   wechat: "微信支付",
   alipay: "支付宝"
@@ -490,13 +492,14 @@ export class PaymentsService {
   async reconcileOrder(
     id: string,
     actor?: Actor,
-    financialOperationLease?: FinancialOperationLease
+    financialOperationLease?: FinancialOperationLease,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
   ): Promise<PaymentOrderRecord> {
     const order = this.findOrder(id);
     this.assertCanManagePayment(order, actor);
     if (!financialOperationLease) {
       return this.withBusinessPaymentLock(order, (lease) =>
-        this.reconcileOrder(id, actor, lease)
+        this.reconcileOrder(id, actor, lease, assertRuntimeSafety)
       );
     }
     this.assertBusinessPaymentLease(order, financialOperationLease);
@@ -523,7 +526,8 @@ export class PaymentsService {
             amount: order.amount,
             callbackPayload: order.callbackPayload
           },
-          financialOperationLease
+          financialOperationLease,
+          assertRuntimeSafety
         );
       }
       return order;
@@ -539,14 +543,16 @@ export class PaymentsService {
     let queried: ProviderPaymentQueryResult;
     try {
       queried = await this.queryProviderPayment(order);
-      this.assertFinancialWriter();
     } catch (error) {
       this.assertFinancialWriter();
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       if (terminalStatusBeforeQuery) {
         throw error;
       }
       return this.handlePaymentQueryError(order, error);
     }
+    this.assertFinancialWriter();
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     this.clearProviderNotFoundEvidence(order);
     if (queried.state === "pending") {
       if (terminalStatusBeforeQuery) {
@@ -584,14 +590,16 @@ export class PaymentsService {
         amount: order.amount,
         callbackPayload: queried.summary
       },
-      financialOperationLease
+      financialOperationLease,
+      assertRuntimeSafety
     );
   }
 
   async reconcileRefund(
     id: string,
     actor?: Actor,
-    financialOperationLease?: FinancialOperationLease
+    financialOperationLease?: FinancialOperationLease,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
   ): Promise<PaymentRefundRecord> {
     const refund = this.findRefund(id);
     const order = this.findOrder(refund.paymentOrderId);
@@ -599,7 +607,7 @@ export class PaymentsService {
     if (!financialOperationLease) {
       return this.withBusinessPaymentLock(order, (lease) =>
         this.withRefundLock(order.id, () =>
-          this.reconcileRefund(id, actor, lease)
+          this.reconcileRefund(id, actor, lease, assertRuntimeSafety)
         )
       );
     }
@@ -613,18 +621,26 @@ export class PaymentsService {
       return refund;
     }
     if (refund.providerOutcome === "success") {
-      this.applyRefundSuccess(order, refund);
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
+      this.applyRefundSuccess(order, refund, assertRuntimeSafety);
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       this.store.persist();
       return refund;
     }
 
     if (refund.provider === "alipay") {
       try {
-        const reconciled = await this.reconcileAlipayRefund(order, refund);
+        const reconciled = await this.reconcileAlipayRefund(
+          order,
+          refund,
+          assertRuntimeSafety
+        );
         this.assertFinancialWriter();
+        this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
         return reconciled;
       } catch (error) {
         this.assertFinancialWriter();
+        this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
         return this.handleRefundQueryError(order, refund, error);
       }
     }
@@ -635,11 +651,13 @@ export class PaymentsService {
         "GET",
         `/v3/refund/domestic/refunds/${encodeURIComponent(refund.refundNo)}`
       );
-      this.assertFinancialWriter();
     } catch (error) {
       this.assertFinancialWriter();
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       return this.handleRefundQueryError(order, refund, error);
     }
+    this.assertFinancialWriter();
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     const amount =
       response.amount && typeof response.amount === "object"
         ? (response.amount as Record<string, unknown>)
@@ -684,34 +702,38 @@ export class PaymentsService {
       throw new BadGatewayException("微信退款查询返回了无法识别的退款状态。");
     }
 
-    const result = this.markRefundFromProvider({
-      paymentNo: order.paymentNo,
-      refundNo: refund.refundNo,
-      providerRefundId,
-      providerTransactionId,
-      status: refundStatus,
-      amount: refund.amount,
-      totalAmount: order.amount,
-      callbackPayload: {
-        source: "active-query",
-        refund_id: providerRefundId,
-        out_refund_no: refund.refundNo,
-        transaction_id: providerTransactionId,
-        out_trade_no: order.paymentNo,
-        status,
-        amount: {
-          total: order.amount,
-          refund: refund.amount,
-          currency: order.currency
-        }
+    const result = this.markRefundFromProvider(
+      {
+        paymentNo: order.paymentNo,
+        refundNo: refund.refundNo,
+        providerRefundId,
+        providerTransactionId,
+        status: refundStatus,
+        amount: refund.amount,
+        totalAmount: order.amount,
+        callbackPayload: {
+          source: "active-query",
+          refund_id: providerRefundId,
+          out_refund_no: refund.refundNo,
+          transaction_id: providerTransactionId,
+          out_trade_no: order.paymentNo,
+          status,
+          amount: {
+            total: order.amount,
+            refund: refund.amount,
+            currency: order.currency
+          }
+        },
+        failReason:
+          status === "ABNORMAL"
+            ? "微信退款查询确认退款异常，保持待人工处理。"
+            : status === "CLOSED"
+              ? "微信退款查询确认退款已关闭。"
+              : undefined
       },
-      failReason:
-        status === "ABNORMAL"
-          ? "微信退款查询确认退款异常，保持待人工处理。"
-          : status === "CLOSED"
-            ? "微信退款查询确认退款已关闭。"
-            : undefined
-    });
+      assertRuntimeSafety
+    );
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     this.store.persist();
     return result;
   }
@@ -1507,8 +1529,10 @@ export class PaymentsService {
   async runAutomaticReconciliationCycle(options: {
     now?: Date;
     limit?: number;
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion;
   } = {}) {
     this.assertFinancialWriter();
+    this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
     const now = options.now ?? new Date();
     const limit = Math.max(
       1,
@@ -1626,9 +1650,16 @@ export class PaymentsService {
     };
 
     for (const order of dueOrders) {
+      this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
       summary.attempted += 1;
       try {
-        const reconciled = await this.reconcileOrder(order.id, systemActor);
+        const reconciled = await this.reconcileOrder(
+          order.id,
+          systemActor,
+          undefined,
+          options.assertRuntimeSafety
+        );
+        this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
         if (
           reconciled.status === "paid" ||
           reconciled.status === "refunded" ||
@@ -1649,6 +1680,7 @@ export class PaymentsService {
           summary.pending += 1;
         }
       } catch (error) {
+        this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
         this.scheduleNextOrderReconciliation(
           order,
           now,
@@ -1657,13 +1689,21 @@ export class PaymentsService {
         );
         summary.failed += 1;
       }
+      this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
       this.store.persist();
     }
 
     for (const refund of dueRefunds) {
+      this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
       summary.attempted += 1;
       try {
-        const reconciled = await this.reconcileRefund(refund.id, systemActor);
+        const reconciled = await this.reconcileRefund(
+          refund.id,
+          systemActor,
+          undefined,
+          options.assertRuntimeSafety
+        );
+        this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
         if (reconciled.status === "success" || reconciled.status === "failed") {
           this.writeRefundReconciliationState(refund, {
             state: "completed",
@@ -1679,6 +1719,7 @@ export class PaymentsService {
           summary.pending += 1;
         }
       } catch (error) {
+        this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
         this.scheduleNextRefundReconciliation(
           refund,
           now,
@@ -1687,6 +1728,7 @@ export class PaymentsService {
         );
         summary.failed += 1;
       }
+      this.assertAutomaticReconciliationRuntimeSafety(options.assertRuntimeSafety);
       this.store.persist();
     }
 
@@ -1895,6 +1937,12 @@ export class PaymentsService {
     this.financialSingleWriter?.assertHeld();
   }
 
+  private assertAutomaticReconciliationRuntimeSafety(
+    assertion: AutomaticReconciliationRuntimeSafetyAssertion | undefined
+  ) {
+    assertion?.();
+  }
+
   private assertBusinessPaymentLease(
     order: PaymentOrderRecord,
     lease: FinancialOperationLease | undefined
@@ -1913,14 +1961,23 @@ export class PaymentsService {
     };
   }
 
-  private getRefundTotals(paymentOrderId: string) {
+  private getRefundTotals(paymentOrderId: string, excludedRefundId?: string) {
     return this.store.paymentRefunds
-      .filter((entry) => entry.paymentOrderId === paymentOrderId)
+      .filter(
+        (entry) =>
+          entry.paymentOrderId === paymentOrderId && entry.id !== excludedRefundId
+      )
       .reduce(
         (totals, entry) => {
-          if (entry.status === "success") {
+          if (this.isRefundRecordedAsSuccessful(entry)) {
             totals.success += entry.amount;
-          } else if (entry.status === "pending") {
+          } else if (
+            entry.status !== "failed" ||
+            entry.providerOutcome !== "failed"
+          ) {
+            // 只有“本地失败 + 渠道明确失败”才能释放余额。未识别状态、
+            // 缺失渠道结论或待确认结论均按在途退款占用额度；生产加载会拒绝
+            // 这些矛盾快照，这里仍为运行中被篡改的内存状态保留防御层。
             totals.pending += entry.amount;
           }
 
@@ -1928,6 +1985,15 @@ export class PaymentsService {
         },
         { success: 0, pending: 0 }
       );
+  }
+
+  private isRefundRecordedAsSuccessful(refund: PaymentRefundRecord) {
+    return (
+      refund.status === "success" ||
+      refund.providerOutcome === "success" ||
+      refund.refundedAt !== undefined ||
+      refund.businessApplyState === "completed"
+    );
   }
 
   private applyProviderRefundResponse(
@@ -2516,7 +2582,8 @@ export class PaymentsService {
 
   private async reconcileAlipayRefund(
     order: PaymentOrderRecord,
-    refund: PaymentRefundRecord
+    refund: PaymentRefundRecord,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
   ) {
     const sellerId = this.requireConfig("ALIPAY_SELLER_ID");
     const response = await this.callAlipayGateway(
@@ -2529,6 +2596,7 @@ export class PaymentsService {
       }
     );
     this.assertFinancialWriter();
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     const tradeNo = this.readString(response.trade_no);
     const paymentNo = this.readString(response.out_trade_no);
     const requestNo = this.readString(response.out_request_no);
@@ -2585,26 +2653,30 @@ export class PaymentsService {
 
     const providerRefundId =
       this.readString(refund.providerRefundId) ?? refund.refundNo;
-    const result = this.markRefundFromProvider({
-      provider: "alipay",
-      paymentNo: order.paymentNo,
-      refundNo: refund.refundNo,
-      providerRefundId,
-      providerTransactionId: tradeNo,
-      status: "success",
-      amount: refund.amount,
-      totalAmount: order.amount,
-      callbackPayload: {
-        source: "active-query",
-        seller_id: responseSellerId ?? sellerId,
-        trade_no: tradeNo,
-        out_trade_no: paymentNo,
-        out_request_no: requestNo,
-        total_amount: this.formatYuan(order.amount),
-        refund_amount: this.formatYuan(refund.amount),
-        currency: order.currency
-      }
-    });
+    const result = this.markRefundFromProvider(
+      {
+        provider: "alipay",
+        paymentNo: order.paymentNo,
+        refundNo: refund.refundNo,
+        providerRefundId,
+        providerTransactionId: tradeNo,
+        status: "success",
+        amount: refund.amount,
+        totalAmount: order.amount,
+        callbackPayload: {
+          source: "active-query",
+          seller_id: responseSellerId ?? sellerId,
+          trade_no: tradeNo,
+          out_trade_no: paymentNo,
+          out_request_no: requestNo,
+          total_amount: this.formatYuan(order.amount),
+          refund_amount: this.formatYuan(refund.amount),
+          currency: order.currency
+        }
+      },
+      assertRuntimeSafety
+    );
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     this.store.persist();
     return result;
   }
@@ -2853,13 +2925,7 @@ export class PaymentsService {
       throw new BadGatewayException("支付宝退款响应的可选退款请求号不匹配，结果保持待确认。");
     }
 
-    const successfulBefore = this.store.paymentRefunds
-      .filter(
-        (entry) =>
-          entry.paymentOrderId === order.id &&
-          entry.status === "success"
-      )
-      .reduce((sum, entry) => sum + entry.amount, 0);
+    const successfulBefore = this.getRefundTotals(order.id).success;
     const expectedCumulativeRefund = successfulBefore + amount;
     const responseRefundFee = this.readYuanAmount(response.refund_fee);
     if (responseRefundFee !== expectedCumulativeRefund) {
@@ -3005,7 +3071,8 @@ export class PaymentsService {
 
   private async markPaid(
     payload: ProviderPaidPayload,
-    financialOperationLease?: FinancialOperationLease
+    financialOperationLease?: FinancialOperationLease,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
   ): Promise<PaymentOrderRecord> {
     const order = this.store.paymentOrders.find(
       (entry) => entry.provider === payload.provider && entry.paymentNo === payload.paymentNo
@@ -3017,10 +3084,11 @@ export class PaymentsService {
 
     if (!financialOperationLease) {
       return this.withBusinessPaymentLock(order, (lease) =>
-        this.markPaid(payload, lease)
+        this.markPaid(payload, lease, assertRuntimeSafety)
       );
     }
     this.assertBusinessPaymentLease(order, financialOperationLease);
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
 
     if (payload.amount !== undefined && payload.amount !== order.amount) {
       throw new BadRequestException("支付回调金额与本地支付单不一致。");
@@ -3036,6 +3104,7 @@ export class PaymentsService {
       this.readString(order.providerOrderId) &&
       providerTransactionId !== this.readString(order.providerOrderId)
     ) {
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       const now = new Date().toISOString();
       order.metadata = {
         ...(order.metadata ?? {}),
@@ -3082,7 +3151,8 @@ export class PaymentsService {
       if (order.status === "paid" && order.metadata?.smartVmForwardState !== "completed") {
         const forwarded = await this.forwardPaymentSuccessToSmartVm(
           order,
-          financialOperationLease
+          financialOperationLease,
+          assertRuntimeSafety
         );
         if (!forwarded) {
           throw new BadGatewayException(
@@ -3106,6 +3176,7 @@ export class PaymentsService {
     }
 
     if (isLatePaymentAfterNotFoundRelease) {
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       order.metadata = {
         ...(order.metadata ?? {}),
         latePaymentAfterNotFoundReleaseAt: new Date().toISOString()
@@ -3124,10 +3195,12 @@ export class PaymentsService {
         order,
         payload,
         providerTransactionId,
-        existingBusinessTransactionId
+        existingBusinessTransactionId,
+        assertRuntimeSafety
       );
     }
 
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     const now = new Date().toISOString();
     order.status = "paid";
     order.providerTransactionId = providerTransactionId;
@@ -3160,11 +3233,13 @@ export class PaymentsService {
         undoState: "not_undoable"
       }
     });
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     this.store.persist();
 
     const forwarded = await this.forwardPaymentSuccessToSmartVm(
       order,
-      financialOperationLease
+      financialOperationLease,
+      assertRuntimeSafety
     );
     if (!forwarded) {
       throw new BadGatewayException(
@@ -3175,7 +3250,10 @@ export class PaymentsService {
     return order;
   }
 
-  private markRefundFromProvider(payload: WechatRefundCallbackPayload) {
+  private markRefundFromProvider(
+    payload: WechatRefundCallbackPayload,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
+  ) {
     const provider = payload.provider ?? "wechat";
     const refund = this.store.paymentRefunds.find(
       (entry) => entry.provider === provider && entry.refundNo === payload.refundNo
@@ -3205,6 +3283,7 @@ export class PaymentsService {
     }
 
     this.assertProviderRefundIdAvailable(refund, payload.providerRefundId);
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
 
     if (refund.status === "success" && payload.status === "success") {
       refund.providerRefundId = payload.providerRefundId ?? refund.providerRefundId;
@@ -3219,7 +3298,7 @@ export class PaymentsService {
     }
 
     if (refund.providerOutcome === "success" && payload.status !== "success") {
-      this.applyRefundSuccess(order, refund);
+      this.applyRefundSuccess(order, refund, assertRuntimeSafety);
       return refund;
     }
 
@@ -3236,11 +3315,13 @@ export class PaymentsService {
     if (payload.status === "success") {
       refund.providerOutcome = "success";
       refund.businessApplyState = "pending";
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       this.store.persist();
-      this.applyRefundSuccess(order, refund);
+      this.applyRefundSuccess(order, refund, assertRuntimeSafety);
     } else {
       refund.providerOutcome = payload.status;
       refund.status = payload.status;
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       this.store.persist();
     }
 
@@ -3273,7 +3354,12 @@ export class PaymentsService {
     }
   }
 
-  private applyRefundSuccess(order: PaymentOrderRecord, refund: PaymentRefundRecord) {
+  private applyRefundSuccess(
+    order: PaymentOrderRecord,
+    refund: PaymentRefundRecord,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
+  ) {
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     const alreadyApplied = Boolean(refund.refundedAt);
 
     if (alreadyApplied) {
@@ -3283,14 +3369,7 @@ export class PaymentsService {
       return;
     }
 
-    const successfulBefore = this.store.paymentRefunds
-      .filter(
-        (entry) =>
-          entry.paymentOrderId === order.id &&
-          entry.id !== refund.id &&
-          entry.status === "success"
-      )
-      .reduce((sum, entry) => sum + entry.amount, 0);
+    const successfulBefore = this.getRefundTotals(order.id, refund.id).success;
     const successfulAfter = successfulBefore + refund.amount;
 
     if (successfulAfter > order.amount) {
@@ -3340,14 +3419,7 @@ export class PaymentsService {
   }
 
   private assertRefundSuccessWithinOrder(order: PaymentOrderRecord, refund: PaymentRefundRecord) {
-    const successfulBefore = this.store.paymentRefunds
-      .filter(
-        (entry) =>
-          entry.paymentOrderId === order.id &&
-          entry.id !== refund.id &&
-          entry.status === "success"
-      )
-      .reduce((sum, entry) => sum + entry.amount, 0);
+    const successfulBefore = this.getRefundTotals(order.id, refund.id).success;
 
     if (successfulBefore + refund.amount > order.amount) {
       throw new BadRequestException("累计成功退款金额超过支付单金额，拒绝应用退款结果。");
@@ -3395,8 +3467,10 @@ export class PaymentsService {
     order: PaymentOrderRecord,
     payload: ProviderPaidPayload,
     providerTransactionId: string,
-    existingBusinessTransactionId: string
+    existingBusinessTransactionId: string,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
   ) {
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     const now = new Date().toISOString();
     order.status = "paid";
     order.providerTransactionId = providerTransactionId;
@@ -3449,6 +3523,7 @@ export class PaymentsService {
       relatedEventId: order.eventId,
       sourceLogId: conflictLog.id
     });
+    this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
     this.store.persist();
     return order;
   }
@@ -3480,7 +3555,8 @@ export class PaymentsService {
 
   private async forwardPaymentSuccessToSmartVm(
     order: PaymentOrderRecord,
-    financialOperationLease: FinancialOperationLease
+    financialOperationLease: FinancialOperationLease,
+    assertRuntimeSafety?: AutomaticReconciliationRuntimeSafetyAssertion
   ) {
     if (!order.orderNo || !order.eventId || !order.deviceCode) {
       return true;
@@ -3491,15 +3567,19 @@ export class PaymentsService {
 
     const existing = this.paymentForwardInFlight.get(order.id);
     if (existing) {
-      return existing;
+      const result = await existing;
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
+      return result;
     }
 
     const action = (async () => {
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       order.metadata = {
         ...(order.metadata ?? {}),
         smartVmForwardState: "submitting",
         smartVmForwardError: undefined
       };
+      this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
       this.store.persist();
 
       try {
@@ -3513,23 +3593,28 @@ export class PaymentsService {
             amount: order.amount
           },
           order.id,
-          financialOperationLease
+          financialOperationLease,
+          assertRuntimeSafety
         );
         this.assertFinancialWriter();
+        this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
         order.metadata = {
           ...(order.metadata ?? {}),
           smartVmForwardState: "completed",
           smartVmForwardError: undefined
         };
+        this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
         this.store.persist();
         return true;
       } catch (error) {
         this.assertFinancialWriter();
+        this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
         order.metadata = {
           ...(order.metadata ?? {}),
           smartVmForwardState: "pending",
           smartVmForwardError: error instanceof Error ? error.message : "回写柜机平台失败"
         };
+        this.assertAutomaticReconciliationRuntimeSafety(assertRuntimeSafety);
         this.store.persist();
         return false;
       }

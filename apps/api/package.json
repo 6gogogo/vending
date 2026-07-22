@@ -12,6 +12,7 @@
     "data:backup": "tsx src/scripts/runtime-data-maintenance.ts backup",
     "data:verify": "tsx src/scripts/runtime-data-maintenance.ts verify",
     "data:restore": "tsx src/scripts/runtime-data-maintenance.ts restore",
+    "data:repair": "tsx src/scripts/runtime-data-maintenance.ts repair",
     "db:generate": "prisma generate --config prisma.config.ts",
     "db:push": "prisma db push --config prisma.config.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",

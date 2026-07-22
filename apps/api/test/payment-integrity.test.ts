@@ -488,6 +488,58 @@ describe("累计退款与单向状态", () => {
     assert.equal(harness.inventoryRefunds[0]?.amount, 1_000);
   });
 
+  test("成功或已退款标记与失败状态矛盾时不会释放可退余额", async () => {
+    const cases: Array<{
+      label: string;
+      overrides: Partial<PaymentRefundRecord>;
+    }> = [
+      {
+        label: "渠道已确认成功",
+        overrides: { providerOutcome: "success" }
+      },
+      {
+        label: "已写入退款完成时间",
+        overrides: { refundedAt: new Date().toISOString() }
+      },
+      {
+        label: "失败状态却仍待渠道确认",
+        overrides: { providerOutcome: "unknown" }
+      },
+      {
+        label: "失败状态却已完成业务应用",
+        overrides: { providerOutcome: "failed", businessApplyState: "completed" }
+      }
+    ];
+
+    for (const testCase of cases) {
+      const harness = createPaymentHarness();
+      const order = appendPaidOrder(harness);
+      const now = new Date().toISOString();
+      harness.store.paymentRefunds.push({
+        id: `payment-refund-inconsistent-${testCase.label}`,
+        paymentOrderId: order.id,
+        paymentNo: order.paymentNo,
+        refundNo: `refund-no-inconsistent-${testCase.label}`,
+        provider: order.provider,
+        status: "failed",
+        amount: order.amount,
+        createdAt: now,
+        updatedAt: now,
+        ...testCase.overrides
+      });
+
+      await assert.rejects(
+        harness.refund(
+          { paymentOrderId: order.id, amount: 1 },
+          { id: "admin-1", role: "admin" }
+        ),
+        /没有可继续退款的余额/,
+        testCase.label
+      );
+      assert.equal(harness.store.paymentRefunds.length, 1, testCase.label);
+    }
+  });
+
   test("重复扣款纠错退款不撤销原业务，主交易在重复款未处理前保持关闭", async () => {
     const event = createEvent({
       paymentNotifyStatus: "success",
@@ -4348,6 +4400,57 @@ describe("SmartVM 回调完整性", () => {
       /金融操作租约无效/
     );
     assert.equal(harness.paymentNotifyCalls, 0);
+  });
+
+  test("支付服务回写在柜机外呼返回后安全门禁失效时不修改事件或操作日志", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "settled",
+        amount: 500,
+        paymentNotifyUrl: "http://127.0.0.1/mock-payment-notify",
+        role: "special"
+      })
+    });
+    const transactionId = "runtime-safety-after-smartvm";
+    const paymentOrder = harness.bindPaidPayment(transactionId);
+    const payload = {
+      orderNo: harness.event.orderNo,
+      eventId: harness.event.eventId,
+      transactionId,
+      deviceCode: harness.event.deviceCode,
+      amount: harness.event.amount
+    };
+    let runtimeSafe = true;
+    let notifyCalls = 0;
+    Object.assign(harness.service as object, {
+      smartVmGateway: {
+        async notifyPaymentSuccess() {
+          notifyCalls += 1;
+          runtimeSafe = false;
+          return { smartVmExchange: undefined };
+        }
+      }
+    });
+    const eventBefore = structuredClone(harness.event);
+    const operationsBefore = structuredClone(harness.operations);
+
+    await assert.rejects(
+      harness.service.notifyConfirmedPaymentSuccess(
+        payload,
+        paymentOrder.id,
+        undefined,
+        () => {
+          if (!runtimeSafe) {
+            throw new Error("automatic-reconciliation-safety-unavailable");
+          }
+        }
+      ),
+      /automatic-reconciliation-safety-unavailable/
+    );
+
+    assert.equal(notifyCalls, 1);
+    assert.deepEqual(harness.event, eventBefore);
+    assert.deepEqual(harness.operations, operationsBefore);
   });
 
   test("伪入站付款成功回调已停用，不能凭 SmartVM 签名创建支付事实", async () => {

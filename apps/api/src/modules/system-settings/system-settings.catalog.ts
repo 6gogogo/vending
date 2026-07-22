@@ -66,9 +66,10 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   SYSTEM_LOG_FILE: {
     label: "系统审计日志",
-    description: "系统级请求、外部接口调用和配置变更审计日志文件。",
+    description: "系统级请求、外部接口调用和配置变更审计日志文件；只能在停服维护窗口通过受控部署配置修改。",
     inputType: "path",
-    required: true
+    required: true,
+    restartRequired: true
   },
   DATABASE_URL: {
     label: "数据库连接",
@@ -244,6 +245,28 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     label: "金融单写者租约",
     description: "JSON 账本仅允许一个 API 实例写入支付与退款；生产环境必须启用。",
     inputType: "boolean",
+    restartRequired: true
+  },
+  WEB_CONCURRENCY: {
+    label: "Web 工作者数量",
+    description: "JSON 账本阶段必须固定为 1，禁止 cluster 或多工作者。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      max: 1,
+      integerOnly: true
+    },
+    restartRequired: true
+  },
+  API_INSTANCE_COUNT: {
+    label: "API 实例数量",
+    description: "JSON 账本阶段必须固定为 1，禁止并行 API 实例写入同一账本。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      max: 1,
+      integerOnly: true
+    },
     restartRequired: true
   },
   FINANCIAL_INSTANCE_ID: {

@@ -4,6 +4,7 @@ import test from "node:test";
 import { ServiceUnavailableException } from "@nestjs/common";
 
 import { AppController } from "../src/app.controller";
+import { createEmptyPersistedState } from "../src/common/store/persistence";
 
 const validProductionConfig: Record<string, string> = {
   PUBLIC_BASE_URL: "https://api.example.com",
@@ -22,6 +23,7 @@ const validProductionConfig: Record<string, string> = {
   FINANCIAL_SINGLE_WRITER_ENABLED: "true",
   PAYMENT_RECONCILIATION_ENABLED: "true",
   WEB_CONCURRENCY: "1",
+  API_INSTANCE_COUNT: "1",
   WECHAT_PAY_APP_ID: "wechat-app-id",
   WECHAT_MINI_APP_SECRET: "wechat-mini-secret",
   WECHAT_PAY_MCH_ID: "wechat-mch-id",
@@ -39,13 +41,35 @@ const validProductionConfig: Record<string, string> = {
 
 const createController = (
   config: Record<string, string | undefined> = validProductionConfig,
-  store: Record<string, unknown> = {
-    adminCredentials: [],
-    backofficeCredentials: [],
-    devices: [],
-    paymentOrders: []
-  }
-) => new AppController({ get: (key: string) => config[key] } as never, store as never);
+  overrides: Record<string, unknown> = {}
+) => {
+  const {
+    __integrityReady = true,
+    __auditReady = true,
+    __snapshotThrows = false,
+    ...stateOverrides
+  } = overrides;
+  const snapshot = {
+    ...createEmptyPersistedState(),
+    ...stateOverrides
+  };
+  const store = {
+    ...snapshot,
+    snapshot: () => {
+      if (__snapshotThrows === true) {
+        throw new Error("readiness must not create a store snapshot");
+      }
+      return structuredClone(snapshot);
+    },
+    isPersistedStateIntegrityReady: () => __integrityReady === true
+  };
+
+  return new AppController(
+    { get: (key: string) => config[key] } as never,
+    store as never,
+    { isReady: () => __auditReady === true } as never
+  );
+};
 
 const assertReadinessUnavailable = (controller: AppController) => {
   assert.throws(
@@ -120,7 +144,23 @@ test("生产就绪健康契约仅在完整生产门禁通过时返回最小成�
   );
 });
 
-test("生产就绪健康契约对模拟数据、默认后台凭据和配置门禁失败均拒绝且不泄露原因", () => {
+test("生产就绪健康契约只读取持久化完整性结论，不重复创建完整快照", () => {
+  withRuntimeEnvironment(
+    {
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      assert.equal(
+        createController(validProductionConfig, { __snapshotThrows: true })
+          .productionReadiness().data.status,
+        "就绪"
+      );
+    }
+  );
+});
+
+test("生产就绪健康契约对模拟数据、默认后台凭据、运行数据和配置门禁失败均拒绝且不泄露原因", () => {
   const blockedCandidates = [
     createController(validProductionConfig, {
       adminCredentials: [],
@@ -140,12 +180,22 @@ test("生产就绪健康契约对模拟数据、默认后台凭据和配置门�
       devices: [],
       paymentOrders: []
     }),
+    createController(validProductionConfig, {
+      __integrityReady: false,
+      goodsCatalog: [{ goodsId: "private-invalid-goods" }]
+    }),
+    createController(validProductionConfig, {
+      __auditReady: false
+    }),
     createController({
       ...validProductionConfig,
       PAYMENT_MODE: "mock",
       SMARTVM_KEY: "private-smartvm-key"
     }),
-    createController(validProductionConfig, {})
+    createController(validProductionConfig, {
+      __integrityReady: false,
+      expiredBatchDispositions: undefined
+    })
   ];
 
   withRuntimeEnvironment(

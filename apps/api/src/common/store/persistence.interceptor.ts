@@ -1,9 +1,22 @@
-import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor } from "@nestjs/common";
-import { tap } from "rxjs";
+import {
+  CallHandler,
+  ConflictException,
+  ExecutionContext,
+  Inject,
+  Injectable,
+  NestInterceptor,
+  Optional,
+  ServiceUnavailableException
+} from "@nestjs/common";
+import { tap, throwError } from "rxjs";
 
+import { isProductionRuntime } from "../config/runtime-environment";
 import { summarizeCallbackPayload } from "../logging/callback-log-sanitizer";
 import { InMemoryStoreService } from "./in-memory-store.service";
-import { appendSystemAuditLog } from "./persistence";
+import {
+  SystemAuditLogService,
+  type CriticalAuditOutcome
+} from "./system-audit-log.service";
 
 const MAX_LOG_DEPTH = 4;
 const MAX_LOG_STRING_LENGTH = 4_000;
@@ -61,7 +74,10 @@ const HEALTH_PROBE_PATHS = new Set([
 export class PersistenceInterceptor implements NestInterceptor {
   constructor(
     @Inject(InMemoryStoreService)
-    private readonly store: InMemoryStoreService
+    private readonly store: InMemoryStoreService,
+    @Optional()
+    @Inject(SystemAuditLogService)
+    private readonly auditLog: SystemAuditLogService = new SystemAuditLogService()
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler) {
@@ -80,24 +96,123 @@ export class PersistenceInterceptor implements NestInterceptor {
     const startedAt = Date.now();
     const shouldWriteAuditLog = this.shouldWriteAuditLog(request);
 
+    if (
+      isProductionRuntime() &&
+      !this.isHealthProbe(request) &&
+      (!this.store.isPersistedStateIntegrityReady() || !this.auditLog.isReady())
+    ) {
+      return throwError(
+        () => new ServiceUnavailableException("运行数据暂不可用。")
+      );
+    }
+
+    let criticalOperation: ReturnType<SystemAuditLogService["beginCriticalIntent"]> | undefined;
+    let criticalAuditCompleted = false;
+
+    if (isProductionRuntime() && this.shouldWriteCriticalAuditIntent(request)) {
+      try {
+        criticalOperation = this.auditLog.beginCriticalIntent({
+          method: request.method ?? "UNKNOWN",
+          path: this.getAuditIntentPath(request),
+          actorUserId: request.authUser?.id,
+          actorRole: request.authUser?.role as "admin" | "merchant" | "special" | undefined,
+          metadata: {
+            source: "http",
+            operationClass: "mutating-request"
+          }
+        });
+      } catch {
+        return throwError(
+          () => new ServiceUnavailableException("系统审计暂不可用。")
+        );
+      }
+    }
+
+    const completeCriticalAudit = (
+      outcome: CriticalAuditOutcome,
+      statusCode: number,
+      metadata?: Record<string, unknown>
+    ) => {
+      if (!criticalOperation || criticalAuditCompleted) {
+        return;
+      }
+
+      criticalAuditCompleted = true;
+
+      try {
+        this.auditLog.completeCriticalOperation(criticalOperation, {
+          method: request.method ?? "UNKNOWN",
+          path: this.getAuditIntentPath(request),
+          statusCode,
+          durationMs: Date.now() - startedAt,
+          outcome,
+          actorUserId: request.authUser?.id,
+          actorRole: request.authUser?.role as "admin" | "merchant" | "special" | undefined,
+          metadata: {
+            source: "http",
+            operationClass: "mutating-request",
+            ...metadata
+          }
+        });
+      } catch {
+        // 完成记录失败不能改写已发生的业务结果；服务状态会在下一次入口检查中保持关闭。
+        this.auditLog.recordFailure();
+      }
+    };
+
     return next.handle().pipe(
       tap({
         next: (data) => {
+          if (this.shouldPersistRequest(request.method, response.statusCode)) {
+            try {
+              this.store.persist();
+            } catch (error) {
+              completeCriticalAudit(
+                "indeterminate",
+                409,
+                {
+                  failureClass: "persistence",
+                  retryable: false
+                }
+              );
+              if (shouldWriteAuditLog) {
+                this.writeAuditLogSafely({
+                  request,
+                  response,
+                  startedAt,
+                  error
+                });
+              }
+
+              if (isProductionRuntime() && criticalOperation) {
+                throw new ConflictException({
+                  message: "请求状态暂不可确认，请勿重复提交；请联系管理员核对。",
+                  code: "operation_indeterminate",
+                  operationId: criticalOperation.operationId,
+                  retryable: false
+                });
+              }
+              throw error;
+            }
+          }
+          completeCriticalAudit("completed", response.statusCode ?? 200);
           if (shouldWriteAuditLog) {
-            this.writeAuditLog({
+            this.writeAuditLogSafely({
               request,
               response,
               startedAt,
               responseBody: data
             });
           }
-          if (this.shouldPersistRequest(request.method, response.statusCode)) {
-            this.store.persist();
-          }
         },
         error: (error) => {
+          const errorStatus = this.readErrorStatus(error) ?? response.statusCode ?? 500;
+          completeCriticalAudit(
+            errorStatus >= 400 && errorStatus < 500 ? "rejected" : "indeterminate",
+            errorStatus
+          );
           if (shouldWriteAuditLog) {
-            this.writeAuditLog({
+            this.writeAuditLogSafely({
               request,
               response,
               startedAt,
@@ -110,11 +225,36 @@ export class PersistenceInterceptor implements NestInterceptor {
   }
 
   private shouldWriteAuditLog(request: { method?: string; path?: string; url?: string }) {
+    return !this.isHealthProbe(request);
+  }
+
+  private shouldWriteCriticalAuditIntent(request: { method?: string; path?: string; url?: string }) {
+    return (
+      !this.isHealthProbe(request) &&
+      !["GET", "HEAD", "OPTIONS"].includes((request.method ?? "").toUpperCase())
+    );
+  }
+
+  private getAuditIntentPath(request: { path?: string; url?: string }) {
+    const rawPath = request.path ?? request.url ?? "";
+    return rawPath.split("?", 1)[0] ?? rawPath;
+  }
+
+  private isHealthProbe(request: { method?: string; path?: string; url?: string }) {
     const method = request.method?.toUpperCase();
     const path = ((request.path ?? request.url ?? "").split("?", 1)[0] ?? "").replace(/\/+$/, "");
 
     // 健康探测可被负载均衡或受控网关高频调用，不能让它同步放大为审计文件写入。
-    return !(["GET", "HEAD"].includes(method ?? "") && HEALTH_PROBE_PATHS.has(path));
+    return ["GET", "HEAD"].includes(method ?? "") && HEALTH_PROBE_PATHS.has(path);
+  }
+
+  private writeAuditLogSafely(payload: Parameters<PersistenceInterceptor["writeAuditLog"]>[0]) {
+    try {
+      this.writeAuditLog(payload);
+    } catch {
+      // 日志序列化、摘要或响应对象访问失败同样意味着审计不可用；不得覆盖原业务结果。
+      this.auditLog.recordFailure();
+    }
   }
 
   private writeAuditLog(payload: {
@@ -149,7 +289,7 @@ export class PersistenceInterceptor implements NestInterceptor {
         ? "[file download]"
         : this.normalizeForLog(payload.responseBody);
 
-    appendSystemAuditLog({
+    return this.auditLog.appendSafely({
       occurredAt: new Date().toISOString(),
       method: payload.request.method ?? "UNKNOWN",
       path: requestPath,

@@ -1,5 +1,4 @@
 import {
-  BadGatewayException,
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -289,13 +288,30 @@ export class CabinetEventsService {
           });
           // 异常响应不会经过成功持久化拦截器，必须在抛错前保存租约或释放结果。
           this.store.persist();
-          throw new BadGatewayException(
-            commandRejected
-              ? `柜机平台开柜失败：${detail}`
-              : outcomeUnknown
-                ? `柜机平台响应异常，开门结果待确认，请勿重复操作：${detail}`
-                : `柜机平台响应异常，但设备回调已确认门状态为 ${commandEvent.status}。`
-          );
+          if (outcomeUnknown) {
+            throw new ConflictException({
+              message: "柜机平台响应异常，开门结果待确认，请勿重复操作。",
+              code: "operation_indeterminate",
+              operationId: eventId,
+              retryable: false
+            });
+          }
+
+          if (commandRejected) {
+            throw new ConflictException({
+              message: "柜机平台已拒绝开门请求。",
+              code: "operation_rejected",
+              operationId: eventId,
+              retryable: false
+            });
+          }
+
+          throw new ConflictException({
+            message: "柜机开门状态已由平台回调确认，请刷新状态后继续。",
+            code: "operation_confirmed",
+            operationId: eventId,
+            retryable: false
+          });
         }
 
         commandEvent.orderNo = openResult.orderNo;
@@ -969,7 +985,8 @@ export class CabinetEventsService {
   async notifyConfirmedPaymentSuccess(
     payload: SmartVmPaymentPayload,
     paymentOrderId: string,
-    financialOperationLease?: FinancialOperationLease
+    financialOperationLease?: FinancialOperationLease,
+    assertRuntimeSafety?: () => void
   ) {
     if (!paymentOrderId?.trim()) {
       throw new ConflictException("支付服务回写缺少支付单标识，已阻止外呼。");
@@ -989,7 +1006,8 @@ export class CabinetEventsService {
         name: "支付服务"
       },
       logType: "payment-service-payment-success",
-      requiredPaymentOrderId: paymentOrderId.trim()
+      requiredPaymentOrderId: paymentOrderId.trim(),
+      assertRuntimeSafety
     }, Boolean(financialOperationLease));
   }
 
@@ -1507,6 +1525,7 @@ export class CabinetEventsService {
       callbackPayload?: unknown;
       requireConfirmedPaymentOrder?: boolean;
       requiredPaymentOrderId?: string;
+      assertRuntimeSafety?: () => void;
     },
     coordinationLockAcquired = false
   ): Promise<{
@@ -1523,6 +1542,7 @@ export class CabinetEventsService {
         this.forwardPaymentSuccessToPlatform(payload, options, true)
       );
     }
+    options.assertRuntimeSafety?.();
     const adjustment = this.getAdjustment(event, payload.orderNo);
     const isAdjustmentOrder = Boolean(adjustment);
     const expectedAmount = Math.round(adjustment?.amount ?? event.amount);
@@ -1695,9 +1715,11 @@ export class CabinetEventsService {
       throw new BadRequestException("付款交易号已绑定到其他业务订单。");
     }
 
+    options.assertRuntimeSafety?.();
     const smartVmResult = await this.smartVmGateway.notifyPaymentSuccess(payload, {
       targetUrl: resolvedTargetUrl
     });
+    options.assertRuntimeSafety?.();
     event.updatedAt = new Date().toISOString();
 
     if (adjustment) {

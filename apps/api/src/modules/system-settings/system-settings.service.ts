@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { BadRequestException, Inject, Injectable, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type {
@@ -17,6 +17,11 @@ import {
   productionConfigurationSafetyCriticalKeys
 } from "../../common/config/production-safety";
 import { appendSystemAuditLog, resolveApiEnvFile } from "../../common/store/persistence";
+import {
+  PrivateConfigWriteError,
+  writePrivateConfigFileAtomically
+} from "../../common/store/private-config-file";
+import { SystemAuditLogService } from "../../common/store/system-audit-log.service";
 import { systemSettingCatalog } from "./system-settings.catalog";
 
 interface EnvAssignment {
@@ -49,25 +54,34 @@ const productionConfigurationSafetyCriticalKeySet = new Set<string>(
   productionConfigurationSafetyCriticalKeys
 );
 const runtimeEnvironmentKeys = new Set(["NODE_ENV", "APP_ENV"]);
-// 其他运行数据路径仍受当前租约路径保护；唯独在线切换租约文件会让新维护进程
-// 竞争另一把锁，从而与仍持有旧锁的 API 同时写同一账本。
-const liveCoordinationBoundaryKeys = new Set([
+// 这些路径共同定义一份运行态快照。在线切换任一项都会让审计、账本、上传或维护命令
+// 落到不同位置，必须在停服维护窗口通过受控部署配置统一修改。
+const liveRuntimeStorageBoundaryKeys = new Set([
+  "API_DATA_FILE",
+  "SYSTEM_LOG_FILE",
+  "UPLOAD_DIR",
+  "API_BACKUP_DIR",
   "FINANCIAL_SINGLE_WRITER_LEASE_FILE"
 ]);
 
 @Injectable()
 export class SystemSettingsService {
   private readonly envFilePath: string;
-  private readonly appendAuditLog: typeof appendSystemAuditLog;
+  private readonly auditLog: SystemAuditLogService;
 
   constructor(
     @Inject(ConfigService) private readonly configService: ConfigService,
     @Optional()
     @Inject(SYSTEM_SETTINGS_RUNTIME_ADAPTER)
-    runtimeAdapter?: SystemSettingsRuntimeAdapter
+    runtimeAdapter?: SystemSettingsRuntimeAdapter,
+    @Optional()
+    @Inject(SystemAuditLogService)
+    auditLog?: SystemAuditLogService
   ) {
     this.envFilePath = runtimeAdapter?.envFilePath ?? resolveApiEnvFile();
-    this.appendAuditLog = runtimeAdapter?.appendAuditLog ?? appendSystemAuditLog;
+    this.auditLog = auditLog ?? new SystemAuditLogService({
+      appendAuditLog: runtimeAdapter?.appendAuditLog ?? appendSystemAuditLog
+    });
   }
 
   getSettings(options?: { includeSensitiveValues?: boolean }): SystemSettingsSnapshot {
@@ -125,10 +139,10 @@ export class SystemSettingsService {
       .map((entry) => entry.key);
 
     if (
-      changedKeys.some((key) => liveCoordinationBoundaryKeys.has(key))
+      changedKeys.some((key) => liveRuntimeStorageBoundaryKeys.has(key))
     ) {
       throw new BadRequestException(
-        "运行中不能切换金融单写者租约文件；必须先停止 API 和运行数据维护命令，再通过受控配置变更统一修改并重启。"
+        "运行中不能切换运行数据、审计、上传、备份或金融租约路径；必须先停止 API 和运行数据维护命令，再通过受控配置变更统一修改并重启。"
       );
     }
 
@@ -161,35 +175,97 @@ export class SystemSettingsService {
     const runtimeAppliedKeys = changedKeys.filter(
       (key) => !entriesByKey.get(key)?.restartRequired
     );
+    const criticalAudit = isProductionRuntime()
+      ? this.auditLog.beginCriticalIntent({
+          method: "PATCH",
+          path: "/api/system-settings",
+          metadata: {
+            action: "update-system-settings",
+            changedKeys,
+            runtimeAppliedKeys,
+            restartRequiredKeys
+          }
+        })
+      : undefined;
 
-    this.writeEnvFile(nextValues);
+    let configFileCommitted = false;
 
-    for (const key of runtimeAppliedKeys) {
-      this.configService.set(key, nextValues.get(key));
-    }
+    try {
+      this.writeEnvFile(nextValues);
+      configFileCommitted = true;
 
-    const updatedAt = new Date().toISOString();
+      for (const key of runtimeAppliedKeys) {
+        this.configService.set(key, nextValues.get(key));
+      }
 
-    this.appendAuditLog({
-      occurredAt: updatedAt,
-      method: "PATCH",
-      path: "/api/system-settings",
-      statusCode: 200,
-      durationMs: 0,
-      metadata: {
+      const updatedAt = new Date().toISOString();
+      const result = {
+        ...this.getSettings(options),
+        updatedAt,
         changedKeys,
         runtimeAppliedKeys,
         restartRequiredKeys
-      }
-    });
+      };
 
-    return {
-      ...this.getSettings(options),
-      updatedAt,
-      changedKeys,
-      runtimeAppliedKeys,
-      restartRequiredKeys
-    };
+      if (criticalAudit) {
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "PATCH",
+          path: "/api/system-settings",
+          statusCode: 200,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: "completed",
+          metadata: {
+            action: "update-system-settings",
+            changedKeys,
+            runtimeAppliedKeys,
+            restartRequiredKeys
+          }
+        });
+      } else {
+        this.auditLog.appendSafely({
+          occurredAt: updatedAt,
+          method: "PATCH",
+          path: "/api/system-settings",
+          statusCode: 200,
+          durationMs: 0,
+          metadata: {
+            changedKeys,
+            runtimeAppliedKeys,
+            restartRequiredKeys
+          }
+        });
+      }
+
+      return result;
+    } catch (error) {
+      const operationIndeterminate =
+        configFileCommitted ||
+        (error instanceof PrivateConfigWriteError && error.committed);
+
+      if (criticalAudit) {
+        this.auditLog.completeCriticalOperation(criticalAudit, {
+          method: "PATCH",
+          path: "/api/system-settings",
+          statusCode: operationIndeterminate ? 409 : 500,
+          durationMs: Date.now() - criticalAudit.startedAt,
+          outcome: operationIndeterminate ? "indeterminate" : "failed",
+          metadata: {
+            action: "update-system-settings",
+            retryable: !operationIndeterminate
+          }
+        });
+      }
+
+      if (operationIndeterminate && criticalAudit) {
+        throw new ConflictException({
+          message: "配置更新状态暂不可确认，请勿重复提交；请联系管理员核对。",
+          code: "operation_indeterminate",
+          operationId: criticalAudit.operationId,
+          retryable: false
+        });
+      }
+      throw error;
+    }
   }
 
   private createSettingEntry(
@@ -271,8 +347,7 @@ export class SystemSettingsService {
     }
 
     const nextContent = `${nextLines.join("\n").replace(/\s*$/, "")}\n`;
-    mkdirSync(dirname(envFilePath), { recursive: true });
-    writeFileSync(envFilePath, nextContent, "utf8");
+    writePrivateConfigFileAtomically(envFilePath, nextContent);
   }
 
   private normalizeSettingValue(entry: SystemSettingEntry, value: string) {

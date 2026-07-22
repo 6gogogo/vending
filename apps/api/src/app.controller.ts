@@ -1,15 +1,19 @@
-import { Controller, Get, Inject, ServiceUnavailableException } from "@nestjs/common";
+import { Controller, Get, Inject, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import { isProductionReady } from "./common/config/production-safety";
 import { ok } from "./common/dto/api-response";
 import { InMemoryStoreService } from "./common/store/in-memory-store.service";
+import { SystemAuditLogService } from "./common/store/system-audit-log.service";
 
 @Controller()
 export class AppController {
   constructor(
     @Inject(ConfigService) private readonly configService: ConfigService,
-    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService
+    @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Optional()
+    @Inject(SystemAuditLogService)
+    private readonly auditLog: SystemAuditLogService = new SystemAuditLogService()
   ) {}
 
   @Get("health")
@@ -22,7 +26,7 @@ export class AppController {
 
   @Get("health/production-readiness")
   productionReadiness() {
-    if (!isProductionReady(this.configService, this.store)) {
+    if (!isProductionReady(this.configService, this.store, this.auditLog)) {
       throw new ServiceUnavailableException("生产就绪检查未通过。");
     }
 

@@ -4,14 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { ServiceUnavailableException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 
+import { SystemAuditLogService } from "../src/common/store/system-audit-log.service.js";
 import { SystemSettingsService } from "../src/modules/system-settings/system-settings.service.js";
 
 const validPaymentSettings: Record<string, string> = {
   APP_ENV: "production",
   PUBLIC_BASE_URL: "https://api.example.com",
   CORS_ORIGINS: "https://admin.example.com,https://mobile.example.com",
+  API_DATA_FILE: "runtime-data/store.json",
+  SYSTEM_LOG_FILE: "runtime-data/system-audit.ndjson",
+  UPLOAD_DIR: "runtime-uploads",
+  API_BACKUP_DIR: "runtime-backups",
   VERIFICATION_CODE_PROVIDER: "aliyun",
   VERIFICATION_CODE_PREVIEW_ENABLED: "false",
   ALIYUN_SMS_ACCESS_KEY_ID: "configured-access-key-id",
@@ -28,6 +34,8 @@ const validPaymentSettings: Record<string, string> = {
   PAYMENT_MOCK_ENABLED: "false",
   PAYMENT_PROVIDER_TIMEOUT_MS: "15000",
   FINANCIAL_SINGLE_WRITER_ENABLED: "true",
+  WEB_CONCURRENCY: "1",
+  API_INSTANCE_COUNT: "1",
   FINANCIAL_SINGLE_WRITER_LEASE_FILE: "runtime-data/financial-single-writer.lock",
   FINANCIAL_SINGLE_WRITER_LEASE_MS: "30000",
   FINANCIAL_SINGLE_WRITER_HEARTBEAT_MS: "10000",
@@ -63,6 +71,52 @@ const encodeEnv = (values: Record<string, string>) =>
   `${Object.entries(values)
     .map(([key, value]) => `${key}=${value}`)
     .join("\n")}\n`;
+
+test("生产配置审计意图不可用时，不改写文件或热应用运行时配置", () => {
+  const runtimeValues = new Map(Object.entries(validPaymentSettings));
+  const setCalls: Array<[string, string]> = [];
+  const configService = {
+    get: (key: string) => runtimeValues.get(key),
+    set: (key: string, value: string) => {
+      setCalls.push([key, value]);
+      runtimeValues.set(key, value);
+    }
+  } as unknown as ConfigService;
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-audit-intent-"));
+  const envFilePath = join(directory, ".env");
+  const originalContent = encodeEnv(validPaymentSettings);
+  writeFileSync(envFilePath, originalContent, "utf8");
+  const auditLog = new SystemAuditLogService({
+    appendAuditLog: () => {
+      throw new Error("private-audit-write-failed");
+    },
+    reportFailure: () => undefined
+  });
+  const service = new SystemSettingsService(configService, { envFilePath }, auditLog);
+  const previousAppEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "production";
+
+  try {
+    assert.throws(
+      () =>
+        service.updateSettings({
+          values: { PAYMENT_PROVIDER_TIMEOUT_MS: "20000" }
+        }),
+      (error: unknown) =>
+        error instanceof ServiceUnavailableException && error.getStatus() === 503
+    );
+    assert.equal(readFileSync(envFilePath, "utf8"), originalContent);
+    assert.deepEqual(setCalls, []);
+    assert.equal(runtimeValues.get("PAYMENT_PROVIDER_TIMEOUT_MS"), "15000");
+  } finally {
+    if (previousAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnv;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("生产环境拒绝模拟支付候选配置且不改写文件或运行时配置", () => {
   const runtimeValues = new Map(Object.entries(validPaymentSettings));
@@ -149,6 +203,51 @@ test("运行中拒绝切换金融租约路径，避免维护命令绕到另一�
       runtimeValues.get("FINANCIAL_SINGLE_WRITER_LEASE_FILE"),
       "runtime-data/financial-single-writer.lock"
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("运行中拒绝切换数据、审计、上传和备份路径，避免状态分叉", () => {
+  const runtimeValues = new Map(Object.entries(validPaymentSettings));
+  const setCalls: Array<[string, string]> = [];
+  let auditCalls = 0;
+  const configService = {
+    get: (key: string) => runtimeValues.get(key),
+    set: (key: string, value: string) => {
+      setCalls.push([key, value]);
+      runtimeValues.set(key, value);
+    }
+  } as unknown as ConfigService;
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-runtime-paths-"));
+  const envFilePath = join(directory, ".env");
+  const originalContent = encodeEnv(validPaymentSettings);
+  writeFileSync(envFilePath, originalContent, "utf8");
+  const service = new SystemSettingsService(configService, {
+    envFilePath,
+    appendAuditLog: () => {
+      auditCalls += 1;
+      return "";
+    }
+  });
+  const blockedChanges: Record<string, string> = {
+    API_DATA_FILE: "runtime-data/store-next.json",
+    SYSTEM_LOG_FILE: "runtime-data/system-audit-next.ndjson",
+    UPLOAD_DIR: "runtime-uploads-next",
+    API_BACKUP_DIR: "runtime-backups-next",
+    FINANCIAL_SINGLE_WRITER_LEASE_FILE: "runtime-data/financial-writer-next.lock"
+  };
+
+  try {
+    for (const [key, value] of Object.entries(blockedChanges)) {
+      assert.throws(
+        () => service.updateSettings({ values: { [key]: value } }),
+        /运行中不能切换运行数据、审计、上传、备份或金融租约路径/
+      );
+      assert.equal(readFileSync(envFilePath, "utf8"), originalContent);
+      assert.deepEqual(setCalls, []);
+      assert.equal(auditCalls, 0);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

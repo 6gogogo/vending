@@ -149,9 +149,9 @@ test("设备就绪度把打开、未知和缺失的物理门状态前置为不�
   assert.equal(closedDoor.blocker, undefined);
 });
 
-test("SmartVM 只把明确业务拒绝视为可释放租约，超时、断连和服务端异常都保持未知", () => {
+test("SmartVM 只把白名单业务拒绝视为可释放租约，畸形 2xx 响应保持未知", () => {
   const gateway = new SmartVmGateway(new ConfigService({}));
-  const createError = (statusCode: number, responseBody: Record<string, unknown>) =>
+  const createError = (statusCode: number, responseBody: unknown) =>
     new SmartVmRequestError(
       "模拟 SmartVM 错误",
       statusCode,
@@ -161,7 +161,12 @@ test("SmartVM 只把明确业务拒绝视为可释放租约，超时、断连和
     );
 
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, { code: 400 })), true);
-  assert.equal(gateway.isDefiniteOpenDoorRejection(createError(400, { message: "参数错误" })), true);
+  assert.equal(gateway.isDefiniteOpenDoorRejection(createError(400, { code: 400 })), true);
+  assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, "")), false);
+  assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, "<html>proxy response</html>")), false);
+  assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, { message: "缺少业务 code" })), false);
+  assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, { code: 500 })), false);
+  assert.equal(gateway.isDefiniteOpenDoorRejection(createError(400, { message: "参数错误" })), false);
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(408, { message: "请求超时" })), false);
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(504, { reason: "timeout" })), false);
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(502, { reason: "network_error" })), false);
@@ -449,7 +454,7 @@ test("用户开柜与后台远程开门共用同一柜门互斥", async () => {
   assert.equal(gatewayCalls, 1);
 });
 
-test("用户开柜在网关超时后保留已落盘命令租约，第二次请求不会重复下发", async () => {
+test("用户开柜在 SmartVM 2xx 空响应后保留已落盘命令租约，第二次请求不会重复下发", async () => {
   process.env.SMARTVM_STATUS_STALE_AFTER_MS = "60000";
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
@@ -464,6 +469,7 @@ test("用户开柜在网关超时后保留已落盘命令租约，第二次请�
   store.events.splice(0, store.events.length);
   store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
 
+  const smartVmGateway = new SmartVmGateway(new ConfigService({}));
   let gatewayCalls = 0;
   const gateway = {
     async openDoor(payload: { eventId: string }) {
@@ -481,11 +487,18 @@ test("用户开柜在网关超时后保留已落盘命令租约，第二次请�
         ),
         "调用柜机网关前必须先持久化命令意图事件"
       );
-      throw new Error("远端可能已处理，但本地等待响应超时");
+      throw new SmartVmRequestError(
+        "SmartVM 2xx 空响应，开门结果未知。",
+        200,
+        "/api/pay/container/opendoor",
+        {},
+        ""
+      );
     },
     extractErrorMessage: (error: unknown) => error instanceof Error ? error.message : "未知错误",
     extractExchangeTrace: () => undefined,
-    isDefiniteOpenDoorRejection: () => false
+    isDefiniteOpenDoorRejection: (error: unknown) =>
+      smartVmGateway.isDefiniteOpenDoorRejection(error)
   };
   const accessRules = {} as AccessRulesService;
   const cabinetEvents = new CabinetEventsService(
@@ -508,7 +521,18 @@ test("用户开柜在网关超时后保留已落盘命令租约，第二次请�
 
   await assert.rejects(
     cabinetEvents.openCabinet(request, { id: merchant.id, role: "merchant" }),
-    /远端可能已处理/
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(error.getStatus(), 409);
+      const response = error.getResponse() as Record<string, unknown>;
+      assert.deepEqual(response, {
+        message: "柜机平台响应异常，开门结果待确认，请勿重复操作。",
+        code: "operation_indeterminate",
+        operationId: store.events[0]?.eventId,
+        retryable: false
+      });
+      return true;
+    }
   );
   assert.equal(store.events.length, 1);
   assert.equal(store.events[0]?.status, "created");
@@ -518,6 +542,149 @@ test("用户开柜在网关超时后保留已落盘命令租约，第二次请�
     ConflictException
   );
   assert.equal(gatewayCalls, 1);
+});
+
+test("用户开柜被平台明确拒绝时返回不可重试的已拒绝结果", async () => {
+  process.env.SMARTVM_STATUS_STALE_AFTER_MS = "60000";
+  const store = createIsolatedStore();
+  const coordinator = new DeviceOperationCoordinator(store);
+  const device = store.devices[0];
+  const door = device?.doors[0];
+  const merchant = store.users.find((entry) => entry.role === "merchant" && entry.status === "active");
+  assert.ok(device);
+  assert.ok(door);
+  assert.ok(merchant);
+  device.status = "online";
+  device.lastSeenAt = new Date().toISOString();
+  store.events.splice(0, store.events.length);
+  store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
+
+  const upstreamDetail = "provider-detail-must-not-reach-client";
+  let gatewayCalls = 0;
+  const gateway = {
+    async openDoor(payload: { eventId: string }) {
+      gatewayCalls += 1;
+      assert.ok(store.events.some((event) => event.eventId === payload.eventId));
+      throw new Error(upstreamDetail);
+    },
+    extractErrorMessage: (error: unknown) => error instanceof Error ? error.message : "未知错误",
+    extractExchangeTrace: () => undefined,
+    isDefiniteOpenDoorRejection: () => true
+  };
+  const accessRules = {} as AccessRulesService;
+  const cabinetEvents = new CabinetEventsService(
+    store,
+    accessRules,
+    gateway as never,
+    {} as InventoryOrdersService,
+    new AlertsService(store),
+    new ReservationsService(store, accessRules),
+    new ConfigService({}),
+    coordinator
+  );
+  const request = {
+    phone: merchant.phone,
+    deviceCode: device.deviceCode,
+    doorNum: door.doorNum,
+    hasInboundGoods: false,
+    openReason: "现场例行巡检"
+  };
+
+  await assert.rejects(
+    cabinetEvents.openCabinet(request, { id: merchant.id, role: "merchant" }),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(error.getStatus(), 409);
+      const response = error.getResponse() as Record<string, unknown>;
+      assert.deepEqual(response, {
+        message: "柜机平台已拒绝开门请求。",
+        code: "operation_rejected",
+        operationId: store.events[0]?.eventId,
+        retryable: false
+      });
+      assert.equal(JSON.stringify(response).includes(upstreamDetail), false);
+      return true;
+    }
+  );
+  assert.equal(gatewayCalls, 1);
+  assert.equal(store.events[0]?.status, "failed");
+  assert.equal(store.events[0]?.physicalDoorState, "closed");
+});
+
+test("用户开柜在回调已确认后网关报错时返回不可重试的确认结果", async () => {
+  process.env.SMARTVM_STATUS_STALE_AFTER_MS = "60000";
+  const store = createIsolatedStore();
+  const coordinator = new DeviceOperationCoordinator(store);
+  const device = store.devices[0];
+  const door = device?.doors[0];
+  const merchant = store.users.find((entry) => entry.role === "merchant" && entry.status === "active");
+  assert.ok(device);
+  assert.ok(door);
+  assert.ok(merchant);
+  device.status = "online";
+  device.lastSeenAt = new Date().toISOString();
+  store.events.splice(0, store.events.length);
+  store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
+
+  const upstreamDetail = "provider-detail-must-not-reach-client";
+  let gatewayCalls = 0;
+  let cabinetEvents!: CabinetEventsService;
+  const gateway = {
+    async openDoor(payload: { eventId: string }) {
+      gatewayCalls += 1;
+      cabinetEvents.handleDoorStatus({
+        eventId: payload.eventId,
+        deviceCode: device.deviceCode,
+        status: "SUCCESS"
+      });
+      throw new Error(upstreamDetail);
+    },
+    extractErrorMessage: (error: unknown) => error instanceof Error ? error.message : "未知错误",
+    extractExchangeTrace: () => undefined,
+    isDefiniteOpenDoorRejection: () => false,
+    isUsingMockTransport: () => false,
+    verifySignedPayload: () => true
+  };
+  const accessRules = {} as AccessRulesService;
+  cabinetEvents = new CabinetEventsService(
+    store,
+    accessRules,
+    gateway as never,
+    {} as InventoryOrdersService,
+    new AlertsService(store),
+    new ReservationsService(store, accessRules),
+    new ConfigService({}),
+    coordinator
+  );
+  const request = {
+    phone: merchant.phone,
+    deviceCode: device.deviceCode,
+    doorNum: door.doorNum,
+    hasInboundGoods: false,
+    openReason: "现场例行巡检"
+  };
+
+  await assert.rejects(
+    cabinetEvents.openCabinet(request, { id: merchant.id, role: "merchant" }),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(error.getStatus(), 409);
+      const response = error.getResponse() as Record<string, unknown>;
+      assert.deepEqual(response, {
+        message: "柜机开门状态已由平台回调确认，请刷新状态后继续。",
+        code: "operation_confirmed",
+        operationId: store.events[0]?.eventId,
+        retryable: false
+      });
+      assert.equal(JSON.stringify(response).includes(upstreamDetail), false);
+      return true;
+    }
+  );
+  assert.equal(gatewayCalls, 1);
+  assert.equal(store.events[0]?.status, "opened");
+  assert.equal(store.events[0]?.physicalDoorState, "open");
+  assert.equal(store.getDeviceRuntime(device.deviceCode).doorState, "open");
+  assert.equal(coordinator.getReadiness(device.deviceCode).blocker, "door_open");
 });
 
 test("后台远程开门在响应超时后不会重复下发，明确拒绝则释放命令租约", async () => {
@@ -568,7 +735,18 @@ test("后台远程开门在响应超时后不会重复下发，明确拒绝则�
 
   await assert.rejects(
     devices.remoteOpen(device.deviceCode, request, admin.id),
-    /响应超时/
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(error.getStatus(), 409);
+      const response = error.getResponse() as Record<string, unknown>;
+      assert.deepEqual(response, {
+        message: "柜机平台响应异常，开门结果待确认，请勿重复操作。",
+        code: "operation_indeterminate",
+        operationId: store.events[0]?.eventId,
+        retryable: false
+      });
+      return true;
+    }
   );
   await assert.rejects(
     devices.remoteOpen(device.deviceCode, request, admin.id),
@@ -581,7 +759,18 @@ test("后台远程开门在响应超时后不会重复下发，明确拒绝则�
   definitelyRejected = true;
   await assert.rejects(
     devices.remoteOpen(device.deviceCode, request, admin.id),
-    /平台明确拒绝命令/
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(error.getStatus(), 409);
+      const response = error.getResponse() as Record<string, unknown>;
+      assert.deepEqual(response, {
+        message: "柜机平台已拒绝开门请求。",
+        code: "operation_rejected",
+        operationId: store.events[0]?.eventId,
+        retryable: false
+      });
+      return true;
+    }
   );
   assert.equal(store.events[0]?.status, "failed");
 

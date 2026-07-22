@@ -58,6 +58,7 @@ import {
   type VerificationRecord,
   writePersistedState
 } from "./persistence";
+import { validatePersistedState } from "./persisted-state-integrity";
 import { isProductionRuntime } from "../config/runtime-environment";
 
 interface BatchConsumptionEntry {
@@ -97,11 +98,14 @@ const DEFAULT_TENANT_NAME = "公益智助柜当前实例";
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
 
+type PersistedStateIntegrityStatus = "unverified" | "checking" | "ready" | "failed";
+
 @Injectable()
 export class InMemoryStoreService {
   private readonly seed = cloneSeedState();
   private persistenceFlags: PersistedStoreState["flags"];
   private bootstrapPersistencePending = false;
+  private persistedStateIntegrityStatus: PersistedStateIntegrityStatus = "unverified";
 
   readonly users: UserRecord[] = this.seed.users;
   readonly rules: CabinetAccessRule[] = this.seed.rules;
@@ -205,6 +209,7 @@ export class InMemoryStoreService {
     }
     this.syncDeviceStocksFromBatches();
     this.refreshAlertPresentation();
+    this.refreshPersistedStateIntegrityStatus();
 
     // Nest 构造依赖图时保持只读；由 main 在取得进程级金融租约后统一落盘。
     this.bootstrapPersistencePending = shouldPersist;
@@ -1737,8 +1742,21 @@ export class InMemoryStoreService {
     };
   }
 
+  isPersistedStateIntegrityReady() {
+    return this.persistedStateIntegrityStatus === "ready";
+  }
+
   persist() {
-    writePersistedState(this.snapshot());
+    this.persistedStateIntegrityStatus = "checking";
+
+    try {
+      const state = this.snapshot();
+      writePersistedState(state);
+      this.persistedStateIntegrityStatus = "ready";
+    } catch (error) {
+      this.persistedStateIntegrityStatus = "failed";
+      throw error;
+    }
   }
 
   resetToSeed() {
@@ -1746,6 +1764,17 @@ export class InMemoryStoreService {
     this.hydrate(createSeededPersistedState());
     this.ensureBootstrapAdmin();
     this.persist();
+  }
+
+  private refreshPersistedStateIntegrityStatus() {
+    this.persistedStateIntegrityStatus = "checking";
+
+    try {
+      this.persistedStateIntegrityStatus =
+        validatePersistedState(this.snapshot()).errors.length === 0 ? "ready" : "failed";
+    } catch {
+      this.persistedStateIntegrityStatus = "failed";
+    }
   }
 
   private hydrate(state: PersistedStoreState) {
