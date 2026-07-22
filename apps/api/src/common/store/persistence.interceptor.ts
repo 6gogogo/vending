@@ -73,30 +73,43 @@ export class PersistenceInterceptor implements NestInterceptor {
     }>();
     const response = context.switchToHttp().getResponse<{ statusCode?: number; getHeader?: (name: string) => unknown }>();
     const startedAt = Date.now();
+    const shouldWriteAuditLog = this.shouldWriteAuditLog(request);
 
     return next.handle().pipe(
       tap({
         next: (data) => {
-          this.writeAuditLog({
-            request,
-            response,
-            startedAt,
-            responseBody: data
-          });
+          if (shouldWriteAuditLog) {
+            this.writeAuditLog({
+              request,
+              response,
+              startedAt,
+              responseBody: data
+            });
+          }
           if (this.shouldPersistRequest(request.method, response.statusCode)) {
             this.store.persist();
           }
         },
         error: (error) => {
-          this.writeAuditLog({
-            request,
-            response,
-            startedAt,
-            error
-          });
+          if (shouldWriteAuditLog) {
+            this.writeAuditLog({
+              request,
+              response,
+              startedAt,
+              error
+            });
+          }
         }
       })
     );
+  }
+
+  private shouldWriteAuditLog(request: { method?: string; path?: string; url?: string }) {
+    const method = request.method?.toUpperCase();
+    const path = (request.path ?? request.url ?? "").split("?", 1)[0]?.replace(/\/+$/, "");
+
+    // 健康探测可被负载均衡高频调用，不能让它同步放大为审计文件写入。
+    return !(["GET", "HEAD"].includes(method ?? "") && path === "/api/health");
   }
 
   private writeAuditLog(payload: {

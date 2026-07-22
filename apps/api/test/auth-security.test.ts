@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 
 import type { CallHandler, ExecutionContext } from "@nestjs/common";
-import { firstValueFrom, of } from "rxjs";
+import { firstValueFrom, of, throwError } from "rxjs";
 
 import { PersistenceInterceptor } from "../src/common/store/persistence.interceptor";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
@@ -185,6 +185,54 @@ test("读取请求保留审计记录，但不触发全量业务状态写盘", as
 
   assert.equal(persistedCount, 0);
   assert.match(readFileSync(systemLogFile, "utf8"), /mobile-session/);
+});
+
+test("健康探测不写入审计日志或业务状态，但其他读取请求仍保留审计", async () => {
+  const directory = createTemporaryDirectory("vm-health-audit-");
+  const systemLogFile = join(directory, "system-audit.ndjson");
+  process.env.SYSTEM_LOG_FILE = systemLogFile;
+  let persistedCount = 0;
+  const interceptor = new PersistenceInterceptor({
+    persist() {
+      persistedCount += 1;
+    }
+  } as InMemoryStoreService);
+
+  for (const request of [
+    { method: "GET", path: "/api/health", headers: {} },
+    { method: "HEAD", url: "/api/health?probe=load-balancer", headers: {} }
+  ]) {
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => request,
+        getResponse: () => ({ statusCode: 200 })
+      })
+    } as ExecutionContext;
+
+    await firstValueFrom(
+      interceptor.intercept(context, {
+        handle: () => of({ data: { status: "正常" } })
+      } as CallHandler)
+    );
+  }
+
+  assert.equal(persistedCount, 0);
+  assert.equal(existsSync(systemLogFile), false);
+
+  const errorContext = {
+    switchToHttp: () => ({
+      getRequest: () => ({ method: "GET", path: "/api/health", headers: {} }),
+      getResponse: () => ({ statusCode: 503 })
+    })
+  } as ExecutionContext;
+  await assert.rejects(
+    firstValueFrom(
+      interceptor.intercept(errorContext, {
+        handle: () => throwError(() => new Error("health probe unavailable"))
+      } as CallHandler)
+    )
+  );
+  assert.equal(existsSync(systemLogFile), false);
 });
 
 test("失败状态的写请求保留审计记录，但不触发业务状态写盘", async () => {
