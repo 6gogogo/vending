@@ -96,7 +96,7 @@ export const adminApi = {
     return adminClient.post<{
       phone: string;
       expiresInSeconds: number;
-      provider: "mock" | "aliyun";
+      provider: "mock" | "aliyun_pnvs" | "manual";
       previewCode?: string;
     }>(
       "/auth/request-code",
