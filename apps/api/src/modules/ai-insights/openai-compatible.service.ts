@@ -15,7 +15,9 @@ import { ConfigService } from "@nestjs/config";
 import type { AiProviderConfigPayload, AiProviderStatus, AiProviderTestResult } from "@vm/shared-types";
 
 import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
+import { resolveFullSimulationExternalMode } from "../../common/config/full-simulation-mode";
 import { isProductionRuntime } from "../../common/config/runtime-environment";
+import { assertConfiguredRuntimeDataPlaneAiPolicy } from "../../common/config/runtime-data-plane-policy";
 import { resolveApiEnvFile } from "../../common/store/persistence";
 import {
   PrivateConfigWriteError,
@@ -196,16 +198,17 @@ export class OpenAiCompatibleService {
 
   getStatus(): AiProviderStatus {
     const missingConfig: string[] = [];
+    const usingFullSimulationMock = this.isUsingFullSimulationMockTransport();
 
-    if (!this.apiKey) {
+    if (!usingFullSimulationMock && !this.apiKey) {
       missingConfig.push("OPENAI_API_KEY");
     }
 
     return {
       enabled: missingConfig.length === 0,
       provider: "openai-compatible",
-      baseUrl: this.baseUrl,
-      model: this.model,
+      baseUrl: usingFullSimulationMock ? "mock://full-simulation-ai" : this.baseUrl,
+      model: usingFullSimulationMock ? "full-simulation-mock" : this.model,
       missingConfig,
       apiKeyConfigured: Boolean(this.apiKey),
       usingDefaultBaseUrl: !this.readConfiguredBaseUrl(),
@@ -235,6 +238,8 @@ export class OpenAiCompatibleService {
     if (nextModel.length > MAX_AI_MODEL_LENGTH || /[\r\n\0]/.test(nextModel)) {
       throw new BadRequestException("AI 模型名称不正确。");
     }
+
+    this.assertRuntimeDataPlaneAiPolicy(nextApiKey ?? this.apiKey);
 
     const auditMetadata = {
       action: "save-ai-provider-config",
@@ -324,6 +329,20 @@ export class OpenAiCompatibleService {
   async testConnection(): Promise<AiProviderTestResult> {
     const startedAt = Date.now();
     const testedAt = new Date().toISOString();
+
+    if (this.isUsingFullSimulationMockTransport()) {
+      this.assertRuntimeDataPlaneAiPolicy(this.apiKey);
+      return {
+        success: true,
+        provider: "openai-compatible",
+        model: "full-simulation-mock",
+        baseUrl: "mock://full-simulation-ai",
+        testedAt,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        message: "模拟 AI 自检通过；未调用外部模型。"
+      };
+    }
+
     const response = await this.completeJson<{ ok: boolean }>({
       task: "provider-health-check",
       systemPrompt: "你是 AI 接口连通性检查助手。只返回 JSON。",
@@ -350,6 +369,15 @@ export class OpenAiCompatibleService {
     temperature?: number;
     maxTokens?: number;
   }) {
+    this.assertRuntimeDataPlaneAiPolicy(this.apiKey);
+
+    if (this.isUsingFullSimulationMockTransport()) {
+      return {
+        model: "full-simulation-mock",
+        data: {} as T
+      };
+    }
+
     this.assertEnabled();
     const requestUrl = `${this.baseUrl}/chat/completions`;
     const startedAt = Date.now();
@@ -528,6 +556,37 @@ export class OpenAiCompatibleService {
     if (!this.apiKey) {
       throw new BadRequestException("尚未配置 OPENAI_API_KEY，无法启用 AI 能力。");
     }
+  }
+
+  private assertRuntimeDataPlaneAiPolicy(apiKey: string | undefined) {
+    try {
+      assertConfiguredRuntimeDataPlaneAiPolicy({
+        VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE"),
+        VM_DATA_ROOT: this.configService.get<string>("VM_DATA_ROOT"),
+        VM_DATA_PLANE_ID: this.configService.get<string>("VM_DATA_PLANE_ID"),
+        VM_SIMULATION_PROFILE: this.configService.get<string>("VM_SIMULATION_PROFILE"),
+        VM_FULL_SIMULATION_ENABLED: this.configService.get<string>("VM_FULL_SIMULATION_ENABLED"),
+        VM_FULL_SIMULATION_AI_MODE: this.configService.get<string>(
+          "VM_FULL_SIMULATION_AI_MODE"
+        ),
+        OPENAI_API_KEY: apiKey
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : "AI 数据平面配置无效。"
+      );
+    }
+  }
+
+  private isUsingFullSimulationMockTransport() {
+    return resolveFullSimulationExternalMode("ai", {
+      VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE"),
+      VM_SIMULATION_PROFILE: this.configService.get<string>("VM_SIMULATION_PROFILE"),
+      VM_FULL_SIMULATION_ENABLED: this.configService.get<string>("VM_FULL_SIMULATION_ENABLED"),
+      VM_FULL_SIMULATION_AI_MODE: this.configService.get<string>(
+        "VM_FULL_SIMULATION_AI_MODE"
+      )
+    }) === "mock";
   }
 
   private normalizeBaseUrl(value: string) {

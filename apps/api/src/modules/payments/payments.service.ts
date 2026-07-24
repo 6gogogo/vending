@@ -37,6 +37,9 @@ import {
   type FinancialOperationLease
 } from "../../common/coordination/financial-operation-coordinator";
 import { FinancialSingleWriterService } from "../../common/coordination/financial-single-writer.service";
+import { resolveFullSimulationExternalMode } from "../../common/config/full-simulation-mode";
+import { isReservationOnlyPickup } from "../../common/config/reservation-only-pickup";
+import { assertConfiguredRuntimeDataPlanePaymentPolicy } from "../../common/config/runtime-data-plane-policy";
 import { isProductionRuntime } from "../../common/config/runtime-environment";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AlertsService } from "../alerts/alerts.service";
@@ -45,7 +48,11 @@ import { InventoryOrdersService } from "../inventory-orders/inventory-orders.ser
 import { PaymentPayerIdentityHandleService } from "./payment-payer-identity-handle.service";
 
 type Actor = { id: string; role: UserRole } | undefined;
-type PaymentModeSettingSource = "PAYMENT_MODE" | "PAYMENT_MOCK_ENABLED" | "default";
+type PaymentModeSettingSource =
+  | "PAYMENT_MODE"
+  | "PAYMENT_MOCK_ENABLED"
+  | "VM_FULL_SIMULATION_PAYMENT_MODE"
+  | "default";
 
 interface PaymentModeSetting {
   mode: PaymentRuntimeMode;
@@ -224,6 +231,7 @@ export class PaymentsService {
     payload: PaymentOrderCreatePayload,
     actor?: Actor
   ): Promise<PaymentOrderCreateResult> {
+    this.assertPaymentCreationEnabled();
     this.assertFinancialWriter();
     this.assertRequestObject(payload, "支付请求体");
     this.validatePaymentOrderCreatePayload(payload);
@@ -403,6 +411,7 @@ export class PaymentsService {
     payload: PaymentPayerIdentityPayload,
     actor?: Actor
   ): Promise<PaymentPayerIdentityResult> {
+    this.assertPaymentCreationEnabled();
     this.assertFinancialWriter();
     this.assertRequestObject(payload, "付款人身份请求体");
     this.assertOnlyRequestKeys(
@@ -1011,8 +1020,10 @@ export class PaymentsService {
     const order = this.findOrder(id);
     this.assertCanReadOrder(order, actor);
 
-    if (isProductionRuntime()) {
-      throw new ForbiddenException("生产环境禁止模拟支付，不能通过模拟接口完成支付单。");
+    if (isProductionRuntime() || this.isLiveDataPlane()) {
+      throw new ForbiddenException(
+        "生产环境禁止模拟支付；真实数据平面禁止通过模拟接口完成支付单。"
+      );
     }
 
     if (!this.isSimulatedPaymentOrder(order)) {
@@ -1224,8 +1235,10 @@ export class PaymentsService {
     const normalizedReason = this.readString(payload.reason);
     this.assertProviderRefundReason(order.provider, normalizedReason);
 
-    if (isProductionRuntime() && this.isSimulatedPaymentOrder(order)) {
-      throw new ForbiddenException("生产环境禁止处理模拟支付单退款，请先隔离并清理测试数据。");
+    if ((isProductionRuntime() || this.isLiveDataPlane()) && this.isSimulatedPaymentOrder(order)) {
+      throw new ForbiddenException(
+        "生产环境禁止处理模拟支付单退款；真实数据平面同样禁止，请先隔离并清理测试数据。"
+      );
     }
 
     const sourceReplay = this.findSourceRequestRefundReplay(
@@ -3943,8 +3956,8 @@ export class PaymentsService {
   ) {
     const resource = body.resource;
     if (!resource) {
-      if (isProductionRuntime()) {
-        throw new BadRequestException("生产环境微信支付回调必须使用官方加密资源信封。");
+      if (isProductionRuntime() || this.isLiveDataPlane()) {
+        throw new BadRequestException("真实数据平面微信支付回调必须使用官方加密资源信封。");
       }
       return false;
     }
@@ -4785,6 +4798,21 @@ export class PaymentsService {
   }
 
   private resolvePaymentModeSetting(): PaymentModeSetting {
+    this.assertRuntimeDataPlanePaymentPolicy();
+    const fullSimulationMode = resolveFullSimulationExternalMode("payment", {
+      VM_DATA_PLANE: this.getConfigValue("VM_DATA_PLANE"),
+      VM_SIMULATION_PROFILE: this.getConfigValue("VM_SIMULATION_PROFILE"),
+      VM_FULL_SIMULATION_ENABLED: this.getConfigValue("VM_FULL_SIMULATION_ENABLED"),
+      VM_FULL_SIMULATION_PAYMENT_MODE: this.getConfigValue("VM_FULL_SIMULATION_PAYMENT_MODE")
+    });
+
+    if (fullSimulationMode) {
+      return {
+        mode: fullSimulationMode,
+        source: "VM_FULL_SIMULATION_PAYMENT_MODE"
+      };
+    }
+
     const paymentModeRaw = this.getConfigValue("PAYMENT_MODE")?.toLowerCase();
 
     if (paymentModeRaw) {
@@ -4825,6 +4853,19 @@ export class PaymentsService {
       mode: "auto",
       source: "default"
     };
+  }
+
+  /**
+   * 预约取货模式保留历史订单的查询、核对和退款能力，但不允许产生新的用户付款。
+   */
+  private assertPaymentCreationEnabled() {
+    if (
+      isReservationOnlyPickup({
+        VM_RESERVATION_ONLY_PICKUP: this.getConfigValue("VM_RESERVATION_ONLY_PICKUP")
+      })
+    ) {
+      throw new BadRequestException("当前为预约取货模式，不创建新的支付单或付款人身份授权。");
+    }
   }
 
   private isSimulatedPaymentOrder(order: PaymentOrderRecord) {
@@ -4939,6 +4980,36 @@ export class PaymentsService {
   private getConfigValue(key: string) {
     const value = this.configService.get<string>(key);
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private assertRuntimeDataPlanePaymentPolicy() {
+    try {
+      assertConfiguredRuntimeDataPlanePaymentPolicy({
+        VM_DATA_PLANE: this.getConfigValue("VM_DATA_PLANE"),
+        VM_DATA_ROOT: this.getConfigValue("VM_DATA_ROOT"),
+        VM_DATA_PLANE_ID: this.getConfigValue("VM_DATA_PLANE_ID"),
+        VM_SIMULATION_PROFILE: this.getConfigValue("VM_SIMULATION_PROFILE"),
+        VM_FULL_SIMULATION_ENABLED: this.getConfigValue("VM_FULL_SIMULATION_ENABLED"),
+        VM_FULL_SIMULATION_PAYMENT_MODE: this.getConfigValue("VM_FULL_SIMULATION_PAYMENT_MODE"),
+        PAYMENT_MODE: this.getConfigValue("PAYMENT_MODE")
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : "支付数据平面配置无效。"
+      );
+    }
+  }
+
+  private isLiveDataPlane() {
+    const store = this.store as unknown as {
+      isLiveDataPlane?: () => boolean;
+    };
+
+    if (typeof store.isLiveDataPlane === "function") {
+      return store.isLiveDataPlane();
+    }
+
+    return this.getConfigValue("VM_DATA_PLANE")?.toLowerCase() === "live";
   }
 
   private normalizePem(value: string): string;

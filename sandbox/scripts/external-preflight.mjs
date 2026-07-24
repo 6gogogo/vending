@@ -40,6 +40,17 @@ const alipayRequiredPaymentKeys = [
   "ALIPAY_PUBLIC_KEY"
 ];
 
+const aliyunPnvsRequiredVerificationKeys = [
+  "ALIYUN_PNVS_ACCESS_KEY_ID",
+  "ALIYUN_PNVS_ACCESS_KEY_SECRET",
+  "ALIYUN_PNVS_SIGN_NAME",
+  "ALIYUN_PNVS_TEMPLATE_CODE",
+  "ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN",
+  "ALIYUN_PNVS_SCHEME_NAME_REGISTER",
+  "ALIYUN_PNVS_SCHEME_NAME_GENERAL",
+  "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET"
+];
+
 const paymentProviders = [
   {
     provider: "wechat",
@@ -693,8 +704,8 @@ const checkProductionSafety = (config, options) => {
 
   const verificationProvider = readConfig(config, "VERIFICATION_CODE_PROVIDER");
   checks.push(
-    verificationProvider === "aliyun"
-      ? pass("验证码供应商", "VERIFICATION_CODE_PROVIDER=aliyun。")
+    verificationProvider === "aliyun_pnvs"
+      ? pass("验证码供应商", "VERIFICATION_CODE_PROVIDER=aliyun_pnvs。")
       : fail("验证码供应商", "公网或预发布外部服务必须使用真实短信验证码服务。", [
           `当前 VERIFICATION_CODE_PROVIDER=${verificationProvider ?? "(未设置)"}`
         ])
@@ -937,15 +948,13 @@ const checkSms = async (config, options) => {
   const checks = [];
   const provider = readConfig(config, "VERIFICATION_CODE_PROVIDER");
   const previewEnabled = isTruthy(readConfig(config, "VERIFICATION_CODE_PREVIEW_ENABLED"));
-  const accessKeyId = readConfig(config, "ALIYUN_SMS_ACCESS_KEY_ID");
-  const accessKeySecret = readConfig(config, "ALIYUN_SMS_ACCESS_KEY_SECRET");
-  const regionId = readConfig(config, "ALIYUN_SMS_REGION_ID") ?? "cn-hangzhou";
-  const endpoint = readConfig(config, "ALIYUN_SMS_ENDPOINT") ?? "dysmsapi.aliyuncs.com";
+  const regionId = readConfig(config, "ALIYUN_PNVS_REGION_ID") ?? "cn-hangzhou";
+  const endpoint = readConfig(config, "ALIYUN_PNVS_ENDPOINT") ?? "dypnsapi.aliyuncs.com";
 
   checks.push(
-    provider === "aliyun"
-      ? pass("短信验证码供应商", "验证码供应商已切到阿里云。")
-      : fail("短信验证码供应商", "外部服务预检要求 VERIFICATION_CODE_PROVIDER=aliyun。", [
+    provider === "aliyun_pnvs"
+      ? pass("短信验证码供应商", "验证码供应商已切到阿里云 PNVS。")
+      : fail("短信验证码供应商", "外部服务预检要求 VERIFICATION_CODE_PROVIDER=aliyun_pnvs。", [
           `当前=${provider ?? "(未设置)"}`
         ])
   );
@@ -956,45 +965,59 @@ const checkSms = async (config, options) => {
       : pass("短信验证码预览", "验证码预览已关闭。")
   );
 
-  const missing = [];
-  if (!accessKeyId) {
-    missing.push("ALIYUN_SMS_ACCESS_KEY_ID");
-  }
-  if (!accessKeySecret) {
-    missing.push("ALIYUN_SMS_ACCESS_KEY_SECRET");
-  }
+  const missing = validateKeyPresence(config, aliyunPnvsRequiredVerificationKeys);
 
   checks.push(
     missing.length
-      ? fail("阿里云短信密钥", "缺少阿里云短信访问密钥。", missing)
-      : pass("阿里云短信密钥", "阿里云短信密钥已配置，报告不会输出密钥。", [`region=${regionId}`, `endpoint=${endpoint}`])
+      ? fail("阿里云 PNVS 配置", "缺少阿里云 PNVS 验证码配置。", missing)
+      : pass("阿里云 PNVS 配置", "阿里云 PNVS 验证码配置已填写，报告不会输出密钥。", [
+          `region=${regionId}`,
+          `endpoint=${endpoint}`
+        ])
   );
 
   if (!options.sendSms) {
-    checks.push(skip("真实短信发送", "默认不发送真实短信；需要端到端验证时追加 --send-sms --sms-phone <手机号>。"));
-    return createSection("短信验证码", "检查真实短信验证码配置，可选执行一次真实发送。", checks);
+    checks.push(
+      skip(
+        "真实短信发送",
+        "默认不发送真实短信；需要端到端验证时追加 --send-sms --sms-phone <手机号>。"
+      )
+    );
+    return createSection("短信验证码", "检查阿里云 PNVS 配置，可选执行一次真实发送。", checks);
   }
 
   if (!options.smsPhone) {
     checks.push(fail("真实短信发送", "已启用 --send-sms，但缺少 --sms-phone。"));
-  } else if (missing.length || provider !== "aliyun") {
+  } else if (missing.length || provider !== "aliyun_pnvs") {
     checks.push(skip("真实短信发送", "短信基础配置未通过，跳过真实发送。"));
   } else {
+    const sandboxSchemeName = readConfig(config, "SANDBOX_PNVS_SCHEME_NAME");
+
+    if (!sandboxSchemeName) {
+      checks.push(
+        fail(
+          "真实短信发送",
+          "缺少 SANDBOX_PNVS_SCHEME_NAME；sandbox 真实发送必须显式指定独立 PNVS Scheme。"
+        )
+      );
+      return createSection("短信验证码", "检查阿里云 PNVS 配置，可选执行一次真实发送。", checks);
+    }
+
     try {
       const { requestPhoneCode } = await import("./aliyun-phone-code.mjs");
       const result = await requestPhoneCode(options.smsPhone);
 
       checks.push(
         result.success
-          ? pass("真实短信发送", "阿里云短信验证码发送成功。", [], result)
-          : fail("真实短信发送", "阿里云短信验证码发送返回失败。", [], result)
+          ? pass("真实短信发送", "阿里云 PNVS 短信验证码发送成功。", [], result)
+          : fail("真实短信发送", "阿里云 PNVS 短信验证码发送返回失败。", [], result)
       );
     } catch (error) {
-      checks.push(fail("真实短信发送", "阿里云短信验证码发送失败。", [extractErrorMessage(error)]));
+      checks.push(fail("真实短信发送", "阿里云 PNVS 短信验证码发送失败。", [extractErrorMessage(error)]));
     }
   }
 
-  return createSection("短信验证码", "检查真实短信验证码配置，可选执行一次真实发送。", checks);
+  return createSection("短信验证码", "检查阿里云 PNVS 配置，可选执行一次真实发送。", checks);
 };
 
 const checkPayment = async (config) => {

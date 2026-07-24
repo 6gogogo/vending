@@ -1,6 +1,7 @@
 import { Controller, Get, Inject, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
+import { resolveFullSimulationExternalMode } from "./common/config/full-simulation-mode";
 import { isProductionReady } from "./common/config/production-safety";
 import { ok } from "./common/dto/api-response";
 import { InMemoryStoreService } from "./common/store/in-memory-store.service";
@@ -35,9 +36,22 @@ export class AppController {
 
   @Get("public-config")
   publicConfig() {
+    const fullSimulationMapMode = resolveFullSimulationExternalMode("map", {
+      VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE"),
+      VM_SIMULATION_PROFILE: this.configService.get<string>("VM_SIMULATION_PROFILE"),
+      VM_FULL_SIMULATION_ENABLED: this.configService.get<string>("VM_FULL_SIMULATION_ENABLED"),
+      VM_FULL_SIMULATION_MAP_MODE: this.configService.get<string>(
+        "VM_FULL_SIMULATION_MAP_MODE"
+      )
+    });
+    const useMockMap = fullSimulationMapMode === "mock";
+
     return ok({
-      amapWebKey: this.configService.get<string>("AMAP_WEB_KEY") ?? "",
-      amapSecurityJsCode: this.configService.get<string>("AMAP_SECURITY_JS_CODE") ?? ""
+      amapRuntimeMode: useMockMap ? "mock" : "real",
+      amapWebKey: useMockMap ? "" : this.configService.get<string>("AMAP_WEB_KEY") ?? "",
+      amapSecurityJsCode: useMockMap
+        ? ""
+        : this.configService.get<string>("AMAP_SECURITY_JS_CODE") ?? ""
     });
   }
 }

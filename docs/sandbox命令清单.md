@@ -532,21 +532,24 @@ node sandbox/scripts/send-sms-code.mjs 13800138000
 
 作用：
 
-- 通过阿里云短信验证码服务向指定手机号发送真实验证码
+- 通过阿里云 PNVS `SendSmsVerifyCode` 向指定手机号发送真实验证码
 - 适合先在 `sandbox` 单独验证短信能力，再决定是否接入正式登录/注册流程
 
 依赖环境变量：
 
-- `ALIYUN_SMS_ACCESS_KEY_ID`
-- `ALIYUN_SMS_ACCESS_KEY_SECRET`
-- `ALIYUN_SMS_REGION_ID`
-- `ALIYUN_SMS_ENDPOINT`
+- `ALIYUN_PNVS_ACCESS_KEY_ID`
+- `ALIYUN_PNVS_ACCESS_KEY_SECRET`
+- `ALIYUN_PNVS_REGION_ID`（可选，默认 `cn-hangzhou`）
+- `ALIYUN_PNVS_ENDPOINT`（可选，默认 `dypnsapi.aliyuncs.com`）
+- `ALIYUN_PNVS_SIGN_NAME`
+- `ALIYUN_PNVS_TEMPLATE_CODE`
+- `SANDBOX_PNVS_SCHEME_NAME`（必须显式配置，建议使用隔离的测试 Scheme）
 
 补充说明：
 
-- 当前脚本调用的是阿里云官方 SDK 提供的手机验证码接口，不需要你再手动拼接短信模板参数
-- 如果没有配置阿里云密钥，脚本会直接报明确提示，不会继续请求外部服务
-- 当前脚本只放在 `sandbox`，还没有接进正式业务后端
+- 当前脚本调用 PNVS `SendSmsVerifyCode`，固定 `returnVerifyCode=false`，不会取得或打印验证码
+- 这是显式真实发送命令；仅可向已获授权的测试手机号发送，普通本地回归不要执行
+- 缺少任一必填 PNVS 配置时，命令会在外部请求前终止
 
 ---
 
@@ -566,20 +569,22 @@ node sandbox/scripts/verify-sms-code.mjs 13800138000 123456
 
 作用：
 
-- 通过阿里云短信验证码服务校验手机号和验证码是否匹配
+- 通过阿里云 PNVS `CheckSmsVerifyCode` 校验手机号和验证码是否匹配
 - 适合验证真实短信验证码闭环是否可用
 
 依赖环境变量：
 
-- `ALIYUN_SMS_ACCESS_KEY_ID`
-- `ALIYUN_SMS_ACCESS_KEY_SECRET`
-- `ALIYUN_SMS_REGION_ID`
-- `ALIYUN_SMS_ENDPOINT`
+- `ALIYUN_PNVS_ACCESS_KEY_ID`
+- `ALIYUN_PNVS_ACCESS_KEY_SECRET`
+- `ALIYUN_PNVS_REGION_ID`（可选，默认 `cn-hangzhou`）
+- `ALIYUN_PNVS_ENDPOINT`（可选，默认 `dypnsapi.aliyuncs.com`）
+- `SANDBOX_PNVS_SCHEME_NAME`（必须与发送时一致）
 
 补充说明：
 
 - 如果验证码不正确，命令会输出结果并以非 0 退出码结束
 - 目前脚本只验证中国大陆手机号格式，即 11 位手机号
+- 真实验证码只经由命令参数提交给 PNVS；脚本不会把验证码写入报告或示例文件
 
 ---
 
@@ -610,7 +615,7 @@ node sandbox/scripts/external-preflight.mjs --profile=production --api-base-url 
 - `--api-base-url`：公网 API 地址，可传 `https://域名/api` 或 `https://域名`
 - `SANDBOX_ADMIN_TOKEN`：仅从环境配置或受限的 `sandbox/.env.local` 读取后台管理员 Bearer Token，禁止通过命令行参数传入；未配置时会跳过公网支付自检接口读取，但仍会做离线支付配置自检
 - `--device-code` / `--door-num`：SmartVM 只读探测使用的测试柜机和门号
-- `--send-sms --sms-phone <手机号>`：显式发送一条真实短信验证码
+- `--send-sms --sms-phone <手机号>`：显式发送一条真实 PNVS 短信验证码；不传这两个参数绝不发送
 - `--skip-smartvm-probe`：只做 SmartVM 静态配置检查，不请求平台；发布验收不建议使用
 - `--output-dir <目录>`：指定报告输出目录
 - `--no-fail`：即使存在失败项也以 0 退出码结束，适合本地查看报告，不适合作为发布门禁
@@ -625,14 +630,24 @@ node sandbox/scripts/external-preflight.mjs --profile=production --api-base-url 
 - `SMARTVM_KEY`
 - `VERIFICATION_CODE_PROVIDER`
 - `VERIFICATION_CODE_PREVIEW_ENABLED`
-- `ALIYUN_SMS_ACCESS_KEY_ID`
-- `ALIYUN_SMS_ACCESS_KEY_SECRET`
+- `ALIYUN_PNVS_ACCESS_KEY_ID`
+- `ALIYUN_PNVS_ACCESS_KEY_SECRET`
+- `ALIYUN_PNVS_REGION_ID`（可选）
+- `ALIYUN_PNVS_ENDPOINT`（可选）
+- `ALIYUN_PNVS_SIGN_NAME`
+- `ALIYUN_PNVS_TEMPLATE_CODE`
+- `ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN`
+- `ALIYUN_PNVS_SCHEME_NAME_REGISTER`
+- `ALIYUN_PNVS_SCHEME_NAME_GENERAL`
+- `ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET`
+- `SANDBOX_PNVS_SCHEME_NAME`（仅在显式 `--send-sms` 时必需）
 - `PAYMENT_MODE`
 - 微信支付和支付宝支付相关真实配置
 
 补充说明：
 
 - 报告只展示配置项名称、URL、检查结果和脱敏后的 SmartVM 请求，不输出任何密钥、token 或私钥内容
+- 预检要求 `VERIFICATION_CODE_PROVIDER=aliyun_pnvs`；它会校验 PNVS 凭据、签名、模板及登录/注册/通用/密码重置四个 Scheme 均已配置
 - 如果要读取公网 `/payments/diagnostics`，管理员 token 需要具备 `system-settings:view` 权限
 - 发布流程见 `docs/发布与公网部署验证流程.md`，正式发布要求整体结果不得为“失败”，警告项必须在发布记录中说明
 

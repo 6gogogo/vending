@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   chmodSync,
@@ -26,6 +27,7 @@ const tsxCli = resolve(apiRoot, "../../node_modules/tsx/dist/cli.mjs");
 const maintenanceScript = resolve(apiRoot, "src/scripts/runtime-data-maintenance.ts");
 const initDataScript = resolve(apiRoot, "src/scripts/init-data.ts");
 const initEmptyDataScript = resolve(apiRoot, "src/scripts/init-empty-data.ts");
+const initializeLiveDataScript = resolve(apiRoot, "src/scripts/initialize-live-data.ts");
 
 interface IsolatedRuntime {
   root: string;
@@ -44,7 +46,11 @@ const createIsolatedRuntime = (): IsolatedRuntime => {
   const backupDir = join(root, "backups");
   mkdirSync(dirname(dataFile), { recursive: true });
   mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(dataFile, `${JSON.stringify(createSeededPersistedState(), null, 2)}\n`, "utf8");
+  writeFileSync(
+    dataFile,
+    `${JSON.stringify(createSeededPersistedState("simulation-maintenance-test"), null, 2)}\n`,
+    "utf8"
+  );
   writeFileSync(systemLogFile, '{"event":"baseline"}\n', "utf8");
   writeFileSync(join(uploadDir, "sample.txt"), "upload-baseline", "utf8");
 
@@ -53,6 +59,9 @@ const createIsolatedRuntime = (): IsolatedRuntime => {
     env: {
       ...process.env,
       NODE_ENV: "test",
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "simulation-maintenance-test",
       API_DATA_FILE: dataFile,
       SYSTEM_LOG_FILE: systemLogFile,
       UPLOAD_DIR: uploadDir,
@@ -186,10 +195,22 @@ test("修复命令默认只读，且仅在摘要匹配时原子应用已证明�
     "repair",
     "--apply",
     "--source-sha256",
-    "0".repeat(64)
+    "0".repeat(64),
+    "--yes"
   );
   assert.equal(mismatched.status, 1);
   assert.match(`${mismatched.stdout}\n${mismatched.stderr}`, /源数据摘要与修复计划不一致/);
+  assert.equal(readFileSync(runtime.dataFile, "utf8"), beforeRepair);
+
+  const missingConfirmation = runMaintenance(
+    runtime,
+    "repair",
+    "--apply",
+    "--source-sha256",
+    sourceSha256
+  );
+  assert.equal(missingConfirmation.status, 1);
+  assert.match(`${missingConfirmation.stdout}\n${missingConfirmation.stderr}`, /追加 --yes/);
   assert.equal(readFileSync(runtime.dataFile, "utf8"), beforeRepair);
 
   const applied = runMaintenance(
@@ -197,13 +218,173 @@ test("修复命令默认只读，且仅在摘要匹配时原子应用已证明�
     "repair",
     "--apply",
     "--source-sha256",
-    sourceSha256
+    sourceSha256,
+    "--yes"
   );
   assertSucceeded(applied);
   assert.match(`${applied.stdout}\n${applied.stderr}`, /运行数据修复完成/);
+  assert.match(`${applied.stdout}\n${applied.stderr}`, /修复前证据已封存/);
   const repaired = readFileSync(runtime.dataFile, "utf8");
   assert.doesNotMatch(repaired, new RegExp(privateMarker));
+  const evidenceRoot = join(runtime.backupDir, "repair-evidence");
+  const evidenceDirectories = readdirSync(evidenceRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  assert.equal(evidenceDirectories.length, 1);
+  const evidenceDir = join(evidenceRoot, evidenceDirectories[0]!);
+  assert.equal(readFileSync(join(evidenceDir, "store.json"), "utf8"), beforeRepair);
+  assert.equal(
+    readFileSync(join(evidenceDir, "system-audit.ndjson"), "utf8"),
+    '{"event":"baseline"}\n'
+  );
+  assert.equal(readFileSync(join(evidenceDir, "uploads", "sample.txt"), "utf8"), "upload-baseline");
+  const evidenceManifest = JSON.parse(
+    readFileSync(join(evidenceDir, "repair-evidence-manifest.json"), "utf8")
+  ) as {
+    restorable: boolean;
+    sourceSha256: string;
+    dataPlane: { kind: string; planeId: string };
+  };
+  assert.equal(evidenceManifest.restorable, false);
+  assert.equal(evidenceManifest.sourceSha256, sourceSha256);
+  assert.deepEqual(evidenceManifest.dataPlane, {
+    kind: "simulation",
+    planeId: "simulation-maintenance-test"
+  });
+  const repairAuditEntries = readFileSync(runtime.systemLogFile, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { metadata?: Record<string, unknown> })
+    .filter((entry) => entry.metadata?.operationClass === "runtime-data-repair");
+  assert.equal(repairAuditEntries.length, 2);
+  assert.equal(repairAuditEntries[0]?.metadata?.auditPhase, "intent");
+  assert.equal(repairAuditEntries[1]?.metadata?.auditPhase, "completed");
+  assert.equal(
+    repairAuditEntries[0]?.metadata?.repairEvidenceManifestSha256,
+    repairAuditEntries[1]?.metadata?.repairEvidenceManifestSha256
+  );
   assertSucceeded(runMaintenance(runtime, "verify"));
+});
+
+test("测试种子和空库初始化命令拒绝覆盖任意已有审计证据", (t) => {
+  const evidenceCases: Array<{
+    name: string;
+    prepare: (runtime: IsolatedRuntime) => string;
+  }> = [
+    {
+      name: "业务数据文件",
+      prepare: (runtime) => {
+        mkdirSync(dirname(runtime.dataFile), { recursive: true });
+        writeFileSync(runtime.dataFile, "{\"historical\":true}\n", "utf8");
+        return runtime.dataFile;
+      }
+    },
+    {
+      name: "系统审计日志",
+      prepare: (runtime) => {
+        mkdirSync(dirname(runtime.systemLogFile), { recursive: true });
+        writeFileSync(runtime.systemLogFile, '{"event":"historical-evidence"}\n', "utf8");
+        return runtime.systemLogFile;
+      }
+    },
+    {
+      name: "上传目录",
+      prepare: (runtime) => {
+        mkdirSync(runtime.uploadDir, { recursive: true });
+        const markerPath = join(runtime.uploadDir, "historical-evidence.txt");
+        writeFileSync(markerPath, "upload-evidence", "utf8");
+        return markerPath;
+      }
+    },
+    {
+      name: "备份目录",
+      prepare: (runtime) => {
+        mkdirSync(runtime.backupDir, { recursive: true });
+        const markerPath = join(runtime.backupDir, "historical-evidence.txt");
+        writeFileSync(markerPath, "backup-evidence", "utf8");
+        return markerPath;
+      }
+    }
+  ];
+
+  for (const evidenceCase of evidenceCases) {
+    const runtime = createIsolatedRuntime();
+    t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+    rmSync(dirname(runtime.dataFile), { recursive: true, force: true });
+    rmSync(runtime.backupDir, { recursive: true, force: true });
+    mkdirSync(dirname(runtime.dataFile), { recursive: true });
+    const protectedPath = evidenceCase.prepare(runtime);
+    const protectedBefore = readFileSync(protectedPath, "utf8");
+    const dataExistedBefore = existsSync(runtime.dataFile);
+    const dataBefore = dataExistedBefore ? readFileSync(runtime.dataFile, "utf8") : undefined;
+
+    for (const script of [initDataScript, initEmptyDataScript]) {
+      const result = runScript(script, ["--confirm-reset"], runtime.env);
+      assert.equal(result.status, 1, `${evidenceCase.name}: ${result.stdout}\n${result.stderr}`);
+      assert.match(`${result.stdout}\n${result.stderr}`, /已拒绝覆盖审计证据/);
+      assert.equal(readFileSync(protectedPath, "utf8"), protectedBefore);
+      assert.equal(existsSync(runtime.dataFile), dataExistedBefore);
+
+      if (dataBefore !== undefined) {
+        assert.equal(readFileSync(runtime.dataFile, "utf8"), dataBefore);
+      }
+    }
+  }
+});
+
+test("自动 repair 拒绝缺失原始数据平面标记，且不创建证据归档或改写数据", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  const state = JSON.parse(readFileSync(runtime.dataFile, "utf8")) as Record<string, unknown>;
+  delete state.dataPlane;
+  delete state.instanceId;
+  delete state.initializationSource;
+  writeFileSync(runtime.dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  const before = readFileSync(runtime.dataFile, "utf8");
+
+  const dryRun = runMaintenance(runtime, "repair");
+  assertSucceeded(dryRun);
+  const sourceSha256 = `${dryRun.stdout}\n${dryRun.stderr}`.match(/sourceSha256: ([a-f0-9]{64})/)?.[1];
+  assert.ok(sourceSha256);
+
+  const applied = runMaintenance(
+    runtime,
+    "repair",
+    "--apply",
+    "--source-sha256",
+    sourceSha256,
+    "--yes"
+  );
+  assert.equal(applied.status, 1);
+  assert.match(`${applied.stdout}\n${applied.stderr}`, /数据平面标记与受控部署配置不一致/);
+  assert.equal(readFileSync(runtime.dataFile, "utf8"), before);
+  assert.equal(existsSync(join(runtime.backupDir, "repair-evidence")), false);
+});
+
+test("真实数据平面禁止自动 repair --apply", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vm-live-repair-blocked-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const result = runScript(
+    maintenanceScript,
+    ["repair", "--apply", "--source-sha256", "0".repeat(64), "--yes"],
+    {
+      ...process.env,
+      NODE_ENV: "test",
+      APP_ENV: "",
+      VM_DATA_PLANE: "live",
+      VM_DATA_ROOT: root,
+      VM_DATA_PLANE_ID: "live-repair-blocked-test",
+      API_DATA_FILE: "",
+      SYSTEM_LOG_FILE: "",
+      UPLOAD_DIR: "",
+      API_BACKUP_DIR: "",
+      FINANCIAL_SINGLE_WRITER_LEASE_FILE: ""
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(`${result.stdout}\n${result.stderr}`, /真实数据平面禁止自动 repair/);
+  assert.deepEqual(readdirSync(root), []);
 });
 
 test("POSIX 新建备份目录和敏感文件使用私有权限", (t) => {
@@ -413,6 +594,84 @@ test("--keep 1 只保留当前最新的一份备份", (t) => {
   assert.match(backups[0]!.name, /-two$/);
 });
 
+test("--latest 和 --keep 绝不选择或删除同一备份根中的其他数据平面证据", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "simulation-one"));
+  const simulationOne = latestBackup(runtime);
+  const foreignEvidence = join(runtime.backupDir, "9999-foreign-live-evidence");
+  cpSync(simulationOne, foreignEvidence, { recursive: true });
+  const foreignManifestPath = join(foreignEvidence, "runtime-backup-manifest.json");
+  const foreignManifest = JSON.parse(readFileSync(foreignManifestPath, "utf8")) as {
+    dataPlane: { kind: string; planeId: string };
+  };
+  foreignManifest.dataPlane = {
+    kind: "live",
+    planeId: "foreign-live-instance"
+  };
+  writeFileSync(foreignManifestPath, `${JSON.stringify(foreignManifest, null, 2)}\n`, "utf8");
+
+  const latestVerification = runMaintenance(runtime, "verify", "--latest");
+  assertSucceeded(latestVerification);
+  assert.match(`${latestVerification.stdout}\n${latestVerification.stderr}`, /simulation-one/);
+  assert.equal(existsSync(foreignEvidence), true);
+
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "simulation-two", "--keep", "1"));
+  const backupNames = readdirSync(runtime.backupDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  assert.equal(backupNames.includes("9999-foreign-live-evidence"), true);
+  assert.equal(backupNames.filter((name) => name.includes("simulation-")).length, 1);
+  assert.equal(backupNames.some((name) => name.endsWith("-simulation-two")), true);
+});
+
+test("备份清单与内部业务数据平面标记不一致时，verify、latest 和 restore 均拒绝使用", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "trusted-source"));
+  const trustedBackup = latestBackup(runtime);
+  const poisonedBackup = join(runtime.backupDir, "9999-poisoned-data-plane");
+  cpSync(trustedBackup, poisonedBackup, { recursive: true });
+  const poisonedStore = join(poisonedBackup, "store.json");
+  const poisonedState = JSON.parse(readFileSync(poisonedStore, "utf8")) as Record<string, unknown>;
+  poisonedState.instanceId = "simulation-poisoned-instance";
+  writeFileSync(poisonedStore, `${JSON.stringify(poisonedState, null, 2)}\n`, "utf8");
+  const manifestPath = join(poisonedBackup, "runtime-backup-manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    items: Array<{ key: string; bytes: number; sha256: string }>;
+  };
+  const storeItem = manifest.items.find((item) => item.key === "store");
+  assert.ok(storeItem);
+  const poisonedBytes = readFileSync(poisonedStore);
+  storeItem.bytes = poisonedBytes.length;
+  storeItem.sha256 = createHash("sha256").update(poisonedBytes).digest("hex");
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  const directVerify = runMaintenance(runtime, "verify", "--backup", poisonedBackup);
+  assert.equal(directVerify.status, 1);
+  assert.match(
+    `${directVerify.stdout}\n${directVerify.stderr}`,
+    /数据平面标记与受控部署配置不一致/
+  );
+
+  const latestVerify = runMaintenance(runtime, "verify", "--latest");
+  assertSucceeded(latestVerify);
+  assert.match(`${latestVerify.stdout}\n${latestVerify.stderr}`, /trusted-source/);
+
+  const originalStore = readFileSync(runtime.dataFile, "utf8");
+  const restore = runMaintenance(runtime, "restore", "--backup", poisonedBackup, "--yes");
+  assert.equal(restore.status, 1);
+  assert.match(`${restore.stdout}\n${restore.stderr}`, /数据平面标记与受控部署配置不一致/);
+  assert.equal(readFileSync(runtime.dataFile, "utf8"), originalStore);
+  assert.equal(
+    readdirSync(runtime.backupDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .some((entry) => entry.name.includes("pre-restore-")),
+    false
+  );
+});
+
 test("恢复先校验确认，再逐项替换业务数据、日志和上传目录", (t) => {
   const runtime = createIsolatedRuntime();
   t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
@@ -437,6 +696,71 @@ test("恢复先校验确认，再逐项替换业务数据、日志和上传目�
   assert.equal(readFileSync(join(runtime.uploadDir, "sample.txt"), "utf8"), "upload-baseline");
   assert.equal(
     readdirSync(dirname(runtime.dataFile)).some((name) => /\.(?:staging|rollback)-.*\.tmp$/.test(name)),
+    false
+  );
+});
+
+test("恢复拒绝跳过系统审计日志，保持当前数据不变", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "audit-bound-restore"));
+  const backup = latestBackup(runtime);
+
+  writeFileSync(runtime.dataFile, '{"corrupted":true}\n', "utf8");
+  writeFileSync(runtime.systemLogFile, '{"event":"newer"}\n', "utf8");
+
+  const result = runMaintenance(
+    runtime,
+    "restore",
+    "--backup",
+    backup,
+    "--yes",
+    "--skip-system-log",
+    "--no-safety-backup"
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(
+    `${result.stdout}\n${result.stderr}`,
+    /恢复不能跳过系统审计日志/
+  );
+  assert.equal(readFileSync(runtime.dataFile, "utf8"), '{"corrupted":true}\n');
+  assert.equal(readFileSync(runtime.systemLogFile, "utf8"), '{"event":"newer"}\n');
+});
+
+test("备份平面实例标识不一致时，恢复在创建安全备份前失败且不改写数据", (t) => {
+  const runtime = createIsolatedRuntime();
+  t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
+  assertSucceeded(runMaintenance(runtime, "backup", "--label", "plane-source"));
+  const backup = latestBackup(runtime);
+  const storeBefore = readFileSync(runtime.dataFile, "utf8");
+  const logBefore = readFileSync(runtime.systemLogFile, "utf8");
+  const uploadsBefore = readFileSync(join(runtime.uploadDir, "sample.txt"), "utf8");
+  const otherPlaneRuntime: IsolatedRuntime = {
+    ...runtime,
+    env: {
+      ...runtime.env,
+      VM_DATA_PLANE_ID: "simulation-other-instance"
+    }
+  };
+
+  const result = runMaintenance(
+    otherPlaneRuntime,
+    "restore",
+    "--backup",
+    backup,
+    "--yes"
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(`${result.stdout}\n${result.stderr}`, /数据平面与当前运行平面不一致/);
+  assert.equal(readFileSync(runtime.dataFile, "utf8"), storeBefore);
+  assert.equal(readFileSync(runtime.systemLogFile, "utf8"), logBefore);
+  assert.equal(readFileSync(join(runtime.uploadDir, "sample.txt"), "utf8"), uploadsBefore);
+  assert.equal(
+    readdirSync(runtime.backupDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .some((entry) => entry.name.includes("pre-restore-")),
     false
   );
 });
@@ -499,6 +823,41 @@ test("生产环境初始化除通用确认外还要求逐字确认数据文件",
   assert.equal(readFileSync(runtime.dataFile, "utf8"), originalStore);
 });
 
+test("真实初始化在取得租约或写入前拒绝混有历史审计证据的数据根", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "vm-live-init-evidence-"));
+  const auditFile = join(root, "system-audit.ndjson");
+  const dataFile = join(root, "store.json");
+  writeFileSync(auditFile, '{"event":"historical-evidence"}\n', "utf8");
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const result = runScript(
+    initializeLiveDataScript,
+    ["--confirm-live-initialization"],
+    {
+      ...process.env,
+      NODE_ENV: "test",
+      APP_ENV: "",
+      VM_DATA_PLANE: "live",
+      VM_DATA_ROOT: root,
+      VM_DATA_PLANE_ID: "live-init-evidence-test",
+      API_DATA_FILE: "",
+      SYSTEM_LOG_FILE: "",
+      UPLOAD_DIR: "",
+      API_BACKUP_DIR: "",
+      FINANCIAL_SINGLE_WRITER_LEASE_FILE: "",
+      VM_INITIAL_SUPER_ADMIN_USERNAME: "live-bootstrap-admin",
+      VM_INITIAL_SUPER_ADMIN_PASSWORD: "test-only-initial-password",
+      VM_INITIAL_SUPER_ADMIN_PHONE: "13900000000",
+      VM_INITIAL_SUPER_ADMIN_NAME: "测试初始化管理员"
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(`${result.stdout}\n${result.stderr}`, /真实数据根目录含有遗留文件/);
+  assert.equal(existsSync(dataFile), false);
+  assert.equal(readFileSync(auditFile, "utf8"), '{"event":"historical-evidence"}\n');
+});
+
 test("清空脚本在写入前拒绝 UPLOAD_DIR 与运行数据路径重叠", (t) => {
   const runtime = createIsolatedRuntime();
   t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
@@ -510,6 +869,9 @@ test("清空脚本在写入前拒绝 UPLOAD_DIR 与运行数据路径重叠", (t
 
   const reset = runScript(initEmptyDataScript, ["--confirm-reset"], overlappingEnv);
   assert.equal(reset.status, 1);
-  assert.match(`${reset.stdout}\n${reset.stderr}`, /UPLOAD_DIR 不能与运行数据文件重叠/);
+  assert.match(
+    `${reset.stdout}\n${reset.stderr}`,
+    /(?:UPLOAD_DIR 不能与运行数据文件重叠|API_DATA_FILE 不能与 UPLOAD_DIR 重叠)/
+  );
   assert.equal(readFileSync(runtime.dataFile, "utf8"), originalStore);
 });

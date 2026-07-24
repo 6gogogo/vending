@@ -15,6 +15,7 @@ import EmptyState from "../../components/ui/EmptyState.vue";
 import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
 import { formatBeijingDate } from "../../utils/datetime";
 import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
@@ -86,6 +87,12 @@ const isInboundOperation = computed(
 const isNoInboundOperation = computed(
   () => isOperationalEvent.value && event.value?.hasInboundGoods === false
 );
+const isReservationOnlyPickupResult = computed(
+  () =>
+    event.value?.reservationOnlyPickup === true &&
+    (event.value?.amount ?? 0) <= 0 &&
+    (event.value?.billingStatus === "free" || event.value?.billingStatus === "mismatch")
+);
 const intendedSummary = computed(() =>
   isInboundOperation.value
     ? "有商品入柜，需提交常用商品登记"
@@ -104,7 +111,9 @@ const settledSummary = computed(() =>
       ? event.value.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
       : "等待平台结算"
 );
-const preSettlementItems = computed(() => event.value?.preSettlement?.items ?? []);
+const preSettlementItems = computed(() =>
+  isReservationOnlyPickupResult.value ? [] : event.value?.preSettlement?.items ?? []
+);
 const settlementMatched = computed(() =>
   !event.value?.settlementComparison || event.value.settlementComparison.matched
 );
@@ -112,6 +121,7 @@ const needsPayment = computed(
   () =>
     Boolean(event.value) &&
     !isOperationalEvent.value &&
+    !isReservationOnlyPickupResult.value &&
     (event.value?.status === "settled" || event.value?.status === "closed") &&
     (event.value?.amount ?? 0) > 0 &&
     event.value?.paymentNotifyStatus !== "success" &&
@@ -126,7 +136,9 @@ const pendingAdjustment = computed<CabinetAdjustmentRecord | undefined>(() =>
       !adjustment.refundedAt
   )
 );
-const needsAdjustmentPayment = computed(() => Boolean(pendingAdjustment.value));
+const needsAdjustmentPayment = computed(
+  () => !isReservationOnlyPickupResult.value && Boolean(pendingAdjustment.value)
+);
 const paymentConfirmationActive = computed(
   () => paymentUiState.value === "confirming" || paymentUiState.value === "confirmation_timeout"
 );
@@ -255,7 +267,11 @@ const flowSteps = computed(() => {
       state: "done" as const
     },
     {
-      label: isInboundOperation.value ? "登记批次" : "完成结算",
+      label: isInboundOperation.value
+        ? "登记批次"
+        : isReservationOnlyPickupResult.value
+          ? "领取核对"
+          : "完成结算",
       description: settlementDone ? "已完成" : settlementWarning ? "请按提示处理" : "正在核对结果",
       state: settlementDone ? ("done" as const) : settlementWarning ? ("warning" as const) : ("current" as const)
     }
@@ -530,6 +546,10 @@ const confirmSettlementIfNeeded = (nextEvent: CabinetEventRecord) => {
   const settledItems = nextEvent.goods?.length
     ? nextEvent.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
     : "无商品扣减";
+  const isReservationPickup =
+    nextEvent.reservationOnlyPickup === true &&
+    nextEvent.amount <= 0 &&
+    nextEvent.billingStatus === "free";
   const amountText = nextEvent.amount > 0 ? formatCurrency(nextEvent.amount) : "无需支付";
   const comparisonText =
     nextEvent.settlementComparison && !nextEvent.settlementComparison.matched
@@ -537,9 +557,11 @@ const confirmSettlementIfNeeded = (nextEvent: CabinetEventRecord) => {
       : "";
 
   uni.showModal({
-    title: "确认本次结算",
-    content: `平台结算：${settledItems}\n结算金额：${amountText}${comparisonText}\n确认后将返回首页。`,
-    confirmText: "确认结算",
+    title: isReservationPickup ? appCopy.reservationPickup.completionTitle : "确认本次结算",
+    content: isReservationPickup
+      ? appCopy.reservationPickup.completionContent(settledItems, comparisonText)
+      : `平台结算：${settledItems}\n结算金额：${amountText}${comparisonText}\n确认后将返回首页。`,
+    confirmText: isReservationPickup ? appCopy.reservationPickup.completionAction : "确认结算",
     showCancel: false,
     success: () => startCountdown()
   });
@@ -682,6 +704,26 @@ const applyEvent = (nextEvent: CabinetEventRecord) => {
   }
 
   if (nextEvent.status === "settled" || nextEvent.status === "refunded") {
+    if (isReservationOnlyPickupResult.value) {
+      statusText.value =
+        nextEvent.billingStatus === "mismatch"
+          ? appCopy.reservationPickup.mismatchStatus
+          : appCopy.reservationPickup.completedStatus;
+      hintText.value =
+        nextEvent.billingStatus === "mismatch"
+          ? appCopy.reservationPickup.mismatchHint
+          : appCopy.reservationPickup.completedHint;
+      stopPolling();
+
+      if (nextEvent.billingStatus === "mismatch") {
+        notifyMismatchIfNeeded();
+        startCountdown();
+      } else {
+        confirmSettlementIfNeeded(nextEvent);
+      }
+      return;
+    }
+
     if (
       (needsPayment.value || needsAdjustmentPayment.value) &&
       (paymentUiState.value === "confirming" || paymentUiState.value === "confirmation_timeout")
@@ -1238,6 +1280,12 @@ onUnload(() => {
             <text class="summary-panel__title">登记已完成</text>
             <text class="summary-panel__body">本次入柜批次已写入库存，可返回首页继续处理。</text>
           </view>
+        </view>
+        <view v-if="isReservationOnlyPickupResult" class="free-box">
+          <text class="free-box__title">{{ appCopy.reservationPickup.resultTitle }}</text>
+          <text class="free-box__body">
+            {{ event?.billingStatus === "mismatch" ? appCopy.reservationPickup.mismatchHint : appCopy.reservationPickup.completedHint }}
+          </text>
         </view>
         <view v-if="preSettlementItems.length" class="billing-box">
           <view class="billing-box__head">

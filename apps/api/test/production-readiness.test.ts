@@ -7,12 +7,22 @@ import { AppController } from "../src/app.controller";
 import { createEmptyPersistedState } from "../src/common/store/persistence";
 
 const validProductionConfig: Record<string, string> = {
+  VM_DATA_PLANE: "live",
+  VM_DATA_ROOT: "/srv/vending/live",
+  VM_DATA_PLANE_ID: "live-production-test",
+  VM_PLATFORM_TENANT_NAME: "真实入口测试实例",
   PUBLIC_BASE_URL: "https://api.example.com",
   CORS_ORIGINS: "https://admin.example.com,https://mobile.example.com",
-  VERIFICATION_CODE_PROVIDER: "aliyun",
+  VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
   VERIFICATION_CODE_PREVIEW_ENABLED: "false",
-  ALIYUN_SMS_ACCESS_KEY_ID: "configured-access-key-id",
-  ALIYUN_SMS_ACCESS_KEY_SECRET: "configured-access-key-secret",
+  ALIYUN_PNVS_ACCESS_KEY_ID: "configured-access-key-id",
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: "configured-access-key-secret",
+  ALIYUN_PNVS_SIGN_NAME: "configured-sign-name",
+  ALIYUN_PNVS_TEMPLATE_CODE: "configured-template-code",
+  ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: "configured-app-login",
+  ALIYUN_PNVS_SCHEME_NAME_REGISTER: "configured-register",
+  ALIYUN_PNVS_SCHEME_NAME_GENERAL: "configured-general",
+  ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: "configured-password-reset",
   SMARTVM_BASE_URL: "https://smartvm.example.com",
   SMARTVM_CLIENT_ID: "configured-client-id",
   SMARTVM_KEY: "configured-smartvm-key",
@@ -50,7 +60,30 @@ const createController = (
     ...stateOverrides
   } = overrides;
   const snapshot = {
-    ...createEmptyPersistedState(),
+    ...createEmptyPersistedState("live"),
+    initializationSource: "live-bootstrap" as const,
+    users: [
+      {
+        id: "live-super-admin",
+        role: "admin" as const,
+        phone: "13900000000",
+        name: "真实超级管理员",
+        status: "active" as const,
+        tags: ["hidden-backoffice", "super-admin"],
+        mobileProfileCompleted: false
+      }
+    ],
+    backofficeCredentials: [
+      {
+        userId: "live-super-admin",
+        username: "live-super",
+        role: "super_admin" as const,
+        passwordSalt: "test-salt",
+        passwordHash: "test-hash",
+        usesDefaultPassword: false,
+        passwordUpdatedAt: "2026-01-01T00:00:00.000Z"
+      }
+    ],
     ...stateOverrides
   };
   const store = {
@@ -61,7 +94,13 @@ const createController = (
       }
       return structuredClone(snapshot);
     },
-    isPersistedStateIntegrityReady: () => __integrityReady === true
+    isPersistedStateIntegrityReady: () => __integrityReady === true,
+    isLiveDataPlane: () => true,
+    getRuntimeDataPlaneIdentity: () => ({
+      dataPlane: "live" as const,
+      instanceId: validProductionConfig.VM_DATA_PLANE_ID,
+      initializationSource: snapshot.initializationSource
+    })
   };
 
   return new AppController(

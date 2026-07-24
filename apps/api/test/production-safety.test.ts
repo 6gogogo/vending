@@ -7,12 +7,22 @@ import { assertProductionSafety } from "../src/common/config/production-safety.j
 import { createEmptyPersistedState } from "../src/common/store/persistence.js";
 
 const validProductionConfig: Record<string, string> = {
+  VM_DATA_PLANE: "live",
+  VM_DATA_ROOT: "/srv/vending/live",
+  VM_DATA_PLANE_ID: "live-production-test",
+  VM_PLATFORM_TENANT_NAME: "真实入口测试实例",
   PUBLIC_BASE_URL: "https://api.example.com",
   CORS_ORIGINS: "https://admin.example.com,https://mobile.example.com",
-  VERIFICATION_CODE_PROVIDER: "aliyun",
+  VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
   VERIFICATION_CODE_PREVIEW_ENABLED: "false",
-  ALIYUN_SMS_ACCESS_KEY_ID: "configured-access-key-id",
-  ALIYUN_SMS_ACCESS_KEY_SECRET: "configured-access-key-secret",
+  ALIYUN_PNVS_ACCESS_KEY_ID: "configured-access-key-id",
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: "configured-access-key-secret",
+  ALIYUN_PNVS_SIGN_NAME: "configured-sign-name",
+  ALIYUN_PNVS_TEMPLATE_CODE: "configured-template-code",
+  ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: "configured-app-login",
+  ALIYUN_PNVS_SCHEME_NAME_REGISTER: "configured-register",
+  ALIYUN_PNVS_SCHEME_NAME_GENERAL: "configured-general",
+  ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: "configured-password-reset",
   SMARTVM_BASE_URL: "https://smartvm.example.com",
   SMARTVM_CLIENT_ID: "configured-client-id",
   SMARTVM_KEY: "configured-smartvm-key",
@@ -59,9 +69,38 @@ const createConfigService = (overrides: Record<string, string | undefined> = {})
 };
 
 const emptyCredentialStore = {
-  ...createEmptyPersistedState(),
-  snapshot: () => createEmptyPersistedState(),
-  isPersistedStateIntegrityReady: () => true
+  ...createEmptyPersistedState("live"),
+  initializationSource: "live-bootstrap" as const,
+  users: [
+    {
+      id: "live-super-admin",
+      role: "admin" as const,
+      phone: "13900000000",
+      name: "真实超级管理员",
+      status: "active" as const,
+      tags: ["hidden-backoffice", "super-admin"],
+      mobileProfileCompleted: false
+    }
+  ],
+  backofficeCredentials: [
+    {
+      userId: "live-super-admin",
+      username: "live-super",
+      role: "super_admin" as const,
+      passwordSalt: "test-salt",
+      passwordHash: "test-hash",
+      usesDefaultPassword: false,
+      passwordUpdatedAt: "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  snapshot: () => createEmptyPersistedState("live"),
+  isPersistedStateIntegrityReady: () => true,
+  isLiveDataPlane: () => true,
+  getRuntimeDataPlaneIdentity: () => ({
+    dataPlane: "live" as const,
+    instanceId: validProductionConfig.VM_DATA_PLANE_ID,
+    initializationSource: "live-bootstrap" as const
+  })
 };
 
 const readyAuditLog = {
@@ -116,6 +155,40 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
       /生产环境不能加载模拟支付单.*1 笔.*清理持久化运行数据/
     );
 
+    assert.throws(
+      () =>
+        assertProductionSafety(
+          createConfigService(),
+          {
+            ...emptyCredentialStore,
+            getRuntimeDataPlaneIdentity: () => ({
+              dataPlane: "live" as const,
+              instanceId: validProductionConfig.VM_DATA_PLANE_ID,
+              initializationSource: "live-bootstrap-pending" as const
+            })
+          } as never,
+          readyAuditLog as never
+        ),
+      /真实数据平面尚未完成受控初始化/
+    );
+
+    assert.throws(
+      () =>
+        assertProductionSafety(
+          createConfigService(),
+          {
+            ...emptyCredentialStore,
+            getRuntimeDataPlaneIdentity: () => ({
+              dataPlane: "live" as const,
+              instanceId: "other-live-instance",
+              initializationSource: "live-bootstrap" as const
+            })
+          } as never,
+          readyAuditLog as never
+        ),
+      /真实运行数据与受控部署标识不一致/
+    );
+
     const invalidCases: Array<{
       name: string;
       overrides: Record<string, string | undefined>;
@@ -125,6 +198,11 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
         name: "公网基础地址不能使用 IP",
         overrides: { PUBLIC_BASE_URL: "https://127.0.0.2" },
         message: /必须使用公网域名/
+      },
+      {
+        name: "真实当前租户名称必须由部署配置提供",
+        overrides: { VM_PLATFORM_TENANT_NAME: undefined },
+        message: /VM_PLATFORM_TENANT_NAME/
       },
       {
         name: "CORS 来源不能带路径",
@@ -175,8 +253,8 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
       },
       {
         name: "真实短信密钥不能为空",
-        overrides: { ALIYUN_SMS_ACCESS_KEY_SECRET: undefined },
-        message: /ALIYUN_SMS_ACCESS_KEY_SECRET/
+        overrides: { ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined },
+        message: /ALIYUN_PNVS_ACCESS_KEY_SECRET/
       },
       {
         name: "严格真实支付配置不能为空",

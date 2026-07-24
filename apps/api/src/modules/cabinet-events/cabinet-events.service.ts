@@ -37,6 +37,7 @@ import {
   type FinancialOperationLease
 } from "../../common/coordination/financial-operation-coordinator";
 import { isProductionRuntime } from "../../common/config/production-safety";
+import { isReservationOnlyPickup } from "../../common/config/reservation-only-pickup";
 import { createCallbackReplayFingerprint } from "../../common/logging/callback-log-sanitizer";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AccessRulesService } from "../access-rules/access-rules.service";
@@ -200,6 +201,8 @@ export class CabinetEventsService {
             hasInboundGoods
           }) ? "pending" : undefined,
           reservationId: reservation?.id,
+          reservationOnlyPickup:
+            this.isReservationOnlyPickup() && user.role === "special" && Boolean(reservation),
           intentItems,
           preSettlement,
           goods: []
@@ -802,6 +805,7 @@ export class CabinetEventsService {
       event.amount <= 0 &&
       settlementComparison.matched &&
       event.billingDeltaType !== "supplement";
+    const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
     const shouldAutoForwardNoChargeOperationalSettlement =
       this.isNoChargeOperationalOpen(event) &&
       event.amount <= 0;
@@ -817,7 +821,9 @@ export class CabinetEventsService {
         shouldAutoForwardNoChargeOperationalSettlement
       )
     ) {
-      event.paymentNotifyMessage = shouldAutoForwardNoChargeOperationalSettlement
+      event.paymentNotifyMessage = reservationOnlyPickup
+        ? "预约取货已完成核对，系统将回写平台领取完成状态。"
+        : shouldAutoForwardNoChargeOperationalSettlement
         ? "运营开门不向用户收费，系统将自动回写平台付款成功。"
         : shouldAutoForwardFreeSettlement
         ? "本次预结算金额为 0，系统将自动回写平台付款成功。"
@@ -836,7 +842,9 @@ export class CabinetEventsService {
     } else if (event.paymentNotifyStatus !== "success") {
       event.paymentNotifyStatus = "pending";
       event.paymentNotifyMessage =
-        event.amount > 0
+        reservationOnlyPickup
+          ? "实际领取与预约不一致，等待管理员核对后回写平台领取完成状态。"
+          : event.amount > 0
           ? "已收到结算回调，等待用户支付成功后回写平台。"
           : "已收到结算回调，本次无需用户支付。";
     }
@@ -870,16 +878,29 @@ export class CabinetEventsService {
 
     this.inventoryOrdersService.validateAdjustmentPayload(event, payload);
     event.updatedAt = new Date().toISOString();
+    const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
     const adjustment = this.upsertAdjustment(event, payload);
 
-    const adjustmentRecorded = this.inventoryOrdersService.recordAdjustment(event, payload);
+    const adjustmentRecorded = this.inventoryOrdersService.recordAdjustment(
+      event,
+      payload,
+      reservationOnlyPickup
+        ? {
+            quotaItems: (payload.detail ?? []).map((item) => ({
+              goodsId: item.goodsId,
+              freeQuantity: item.quantity
+            })),
+            suppressPaymentFollowup: true
+          }
+        : undefined
+    );
     const callbackLog = this.getOrCreateSmartVmCallbackLog("adjustment", payload, callbackReplay);
 
     if (!adjustmentRecorded.duplicated) {
       this.store.logOperation({
         category: "inventory",
         type: "adjustment-callback",
-        status: payload.amount > 0 ? "warning" : "success",
+        status: reservationOnlyPickup || payload.amount > 0 ? "warning" : "success",
         actor: {
           type: "system",
           name: "补扣回调"
@@ -895,7 +916,11 @@ export class CabinetEventsService {
           label: event.orderNo
         },
         description: `订单 ${payload.orderNo} 收到补扣回调。`,
-        detail: payload.amount > 0 ? "补扣订单仍需等待用户支付。" : "补扣订单已完成。",
+        detail: reservationOnlyPickup
+          ? "预约取货模式不产生补扣；实际物资变化已入账，等待管理员核对。"
+          : payload.amount > 0
+            ? "补扣订单仍需等待用户支付。"
+            : "补扣订单已完成。",
         relatedEventId: event.eventId,
         relatedOrderNo: payload.orderNo,
         metadata: {
@@ -906,6 +931,48 @@ export class CabinetEventsService {
           undoState: "not_undoable"
         }
       });
+    }
+
+    if (reservationOnlyPickup) {
+      event.amount = 0;
+      event.billingBaseAmount = 0;
+      event.billingActualAmount = 0;
+      event.billingDeltaAmount = 0;
+      event.billingDeltaType = "none";
+      event.billingStatus = "mismatch";
+      event.billingResolvedAt = undefined;
+      event.billingConfirmedByUserId = undefined;
+      event.billingResolutionNote = undefined;
+
+      if (adjustment.paymentNotifyStatus !== "success") {
+        adjustment.paymentNotifyStatus = "pending";
+        adjustment.paymentNotifyMessage =
+          "预约取货模式不产生补扣，等待管理员核对后回写平台领取完成状态。";
+        adjustment.updatedAt = new Date().toISOString();
+      }
+
+      this.syncLatestAdjustmentFields(event);
+      if (!adjustmentRecorded.duplicated) {
+        this.alertsService.create({
+          type: "callback",
+          grade: "feedback",
+          title: "预约取货存在实际领取差异",
+          deviceCode: payload.deviceCode,
+          targetUserId: event.userId,
+          dueAt: event.updatedAt,
+          detail: `预约事件 ${event.eventId} 收到补扣回调 ${payload.orderNo}；系统未创建支付或补扣单，等待管理员核对。`,
+          relatedEventId: event.eventId
+        });
+      }
+
+      return {
+        code: 200,
+        message:
+          adjustment.paymentNotifyStatus === "success"
+            ? "预约取货补充回调已接收，平台完成状态已回写"
+            : "预约取货补充回调已接收，等待管理员核对",
+        duplicated: adjustmentRecorded.duplicated
+      };
     }
 
     if (adjustment.paymentNotifyStatus === "success") {
@@ -973,6 +1040,13 @@ export class CabinetEventsService {
   ) {
     if (!actorUserId) {
       throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
+    const event = this.getEventByPlatformOrderNo(payload.orderNo);
+    if (this.isReservationOnlyPickupEvent(event)) {
+      throw new BadRequestException(
+        "预约取货模式不能手工回写付款成功；请在差异核对完成后由系统回写领取完成状态。"
+      );
     }
 
     return this.forwardPaymentSuccessToPlatform(payload, {
@@ -1052,6 +1126,36 @@ export class CabinetEventsService {
       event.paymentNotifyMessage = payload?.note
         ? `管理员已确认本次结算：${payload.note}`
         : "管理员已确认本次结算。";
+    }
+
+    if (this.isReservationOnlyPickupEvent(event)) {
+      const pendingAdjustment = event.adjustments?.find(
+        (entry) => entry.paymentNotifyStatus !== "success"
+      );
+      const completionOrderNo = pendingAdjustment?.orderNo ?? event.orderNo;
+      const completionTargetUrl = pendingAdjustment?.noticeUrl ?? event.paymentNotifyUrl;
+
+      if (pendingAdjustment) {
+        pendingAdjustment.paymentNotifyStatus = "pending";
+        pendingAdjustment.paymentNotifyMessage = "管理员已完成领取差异核对，准备回写平台领取完成状态。";
+        pendingAdjustment.updatedAt = now;
+        this.syncLatestAdjustmentFields(event);
+      } else {
+        event.paymentNotifyStatus = "pending";
+        event.paymentNotifyMessage = "管理员已完成领取差异核对，准备回写平台领取完成状态。";
+      }
+
+      void this.tryAutoForwardPaymentSuccess(
+        event,
+        {
+          orderNo: completionOrderNo,
+          eventId: event.eventId,
+          transactionId: this.store.createReference("pickup-completion"),
+          deviceCode: event.deviceCode,
+          amount: 0
+        },
+        completionTargetUrl
+      );
     }
 
     this.store.logOperation({
@@ -1447,15 +1551,18 @@ export class CabinetEventsService {
     targetUrl?: string
   ) {
     try {
+      const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
       await this.forwardPaymentSuccessToPlatform(payload, {
         actor: {
           type: "system",
-          name: "系统回写"
+          name: reservationOnlyPickup ? "预约取货系统回写" : "系统回写"
         },
-        logType: "auto-payment-success",
+        logType: reservationOnlyPickup ? "auto-reservation-pickup-completion" : "auto-payment-success",
         targetUrl
       });
     } catch (error) {
+      const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
+      const completionLabel = reservationOnlyPickup ? "预约取货完成状态" : "付款成功";
       const message = this.smartVmGateway.extractErrorMessage(error);
       const smartVmExchange = this.smartVmGateway.extractExchangeTrace(error);
       const adjustment = this.getAdjustment(event, payload.orderNo);
@@ -1471,20 +1578,20 @@ export class CabinetEventsService {
       event.updatedAt = new Date().toISOString();
       this.alertsService.create({
         type: "callback",
-        title: "付款成功回写平台失败",
+        title: `${completionLabel}回写平台失败`,
         deviceCode: event.deviceCode,
         targetUserId: event.userId,
         dueAt: event.updatedAt,
-        detail: `订单 ${event.orderNo} 回写平台失败：${message}`,
+        detail: `订单 ${event.orderNo} 回写平台${completionLabel}失败：${message}`,
         relatedEventId: event.eventId
       });
       this.store.logOperation({
         category: "inventory",
-        type: "auto-payment-success",
+        type: reservationOnlyPickup ? "auto-reservation-pickup-completion" : "auto-payment-success",
         status: "failed",
         actor: {
           type: "system",
-          name: "系统回写"
+          name: reservationOnlyPickup ? "预约取货系统回写" : "系统回写"
         },
         primarySubject: {
           type: "device",
@@ -1496,7 +1603,7 @@ export class CabinetEventsService {
           id: event.eventId,
           label: event.orderNo
         },
-        description: `订单 ${event.orderNo} 回写平台付款成功失败。`,
+        description: `订单 ${event.orderNo} 回写平台${completionLabel}失败。`,
         detail: `平台返回：${message}`,
         relatedEventId: event.eventId,
         relatedOrderNo: event.orderNo,
@@ -1545,7 +1652,8 @@ export class CabinetEventsService {
     options.assertRuntimeSafety?.();
     const adjustment = this.getAdjustment(event, payload.orderNo);
     const isAdjustmentOrder = Boolean(adjustment);
-    const expectedAmount = Math.round(adjustment?.amount ?? event.amount);
+    const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
+    const expectedAmount = reservationOnlyPickup ? 0 : Math.round(adjustment?.amount ?? event.amount);
 
     if (!Number.isSafeInteger(payload.amount) || payload.amount < 0) {
       throw new BadRequestException("付款成功金额必须是非负整数分值。");
@@ -1724,25 +1832,36 @@ export class CabinetEventsService {
 
     if (adjustment) {
       adjustment.paymentNotifyStatus = "success";
-      adjustment.paymentNotifyMessage = resolvedTargetUrl
-        ? `已回写平台付款成功，补扣订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
-        : `已回写平台付款成功，补扣订单 ${payload.orderNo}。`;
+      adjustment.paymentNotifyMessage = reservationOnlyPickup
+        ? resolvedTargetUrl
+          ? `已回写平台预约取货完成状态，补充订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
+          : `已回写平台预约取货完成状态，补充订单 ${payload.orderNo}。`
+        : resolvedTargetUrl
+          ? `已回写平台付款成功，补扣订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
+          : `已回写平台付款成功，补扣订单 ${payload.orderNo}。`;
       adjustment.paymentNotifiedAt = event.updatedAt;
       adjustment.paymentTransactionId = payload.transactionId;
       adjustment.updatedAt = event.updatedAt;
-      if (event.billingStatus === "supplement_pending" || event.billingStatus === "mismatch") {
+      if (
+        !reservationOnlyPickup &&
+        (event.billingStatus === "supplement_pending" || event.billingStatus === "mismatch")
+      ) {
         event.billingStatus = "paid";
         event.billingResolvedAt = event.updatedAt;
       }
       this.syncLatestAdjustmentFields(event);
     } else {
       event.paymentNotifyStatus = "success";
-      event.paymentNotifyMessage = resolvedTargetUrl
-        ? `已回写平台付款成功，订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
-        : `已回写平台付款成功，订单 ${payload.orderNo}。`;
+      event.paymentNotifyMessage = reservationOnlyPickup
+        ? resolvedTargetUrl
+          ? `已回写平台预约取货完成状态，订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
+          : `已回写平台预约取货完成状态，订单 ${payload.orderNo}。`
+        : resolvedTargetUrl
+          ? `已回写平台付款成功，订单 ${payload.orderNo}，目标地址 ${resolvedTargetUrl}`
+          : `已回写平台付款成功，订单 ${payload.orderNo}。`;
       event.paymentNotifiedAt = event.updatedAt;
       event.paymentTransactionId = payload.transactionId;
-      if (event.role === "special" && event.amount > 0) {
+      if (!reservationOnlyPickup && event.role === "special" && event.amount > 0) {
         event.billingStatus = "paid";
         event.billingResolvedAt = event.updatedAt;
       }
@@ -1763,7 +1882,9 @@ export class CabinetEventsService {
         id: event.eventId,
         label: event.orderNo
       },
-      description: `订单 ${payload.orderNo}${isAdjustmentOrder ? "（补扣单）" : ""} 已回写平台付款成功。`,
+      description: reservationOnlyPickup
+        ? `订单 ${payload.orderNo}${isAdjustmentOrder ? "（补充订单）" : ""} 已回写平台预约取货完成状态。`
+        : `订单 ${payload.orderNo}${isAdjustmentOrder ? "（补扣单）" : ""} 已回写平台付款成功。`,
       detail: `交易号 ${payload.transactionId}，金额 ${payload.amount}${resolvedTargetUrl ? `，目标 ${resolvedTargetUrl}` : ""}。`,
       relatedEventId: event.eventId,
       relatedOrderNo: payload.orderNo,
@@ -1929,6 +2050,11 @@ export class CabinetEventsService {
 
     this.reservationsService.assertUserCanUseRelatedFeatures(user.id);
     this.reservationsService.expireOverdueReservations();
+
+    if (this.isReservationOnlyPickup() && user.role === "special" && !payload.reservationId?.trim()) {
+      throw new BadRequestException("当前仅支持预约取货，请先预约后再开柜。");
+    }
+
     const reservation = payload.reservationId
       ? this.reservationsService.getReservationForOpen(
           user.id,
@@ -1958,6 +2084,10 @@ export class CabinetEventsService {
       user.role === "special" && quotaSummary
         ? this.buildPreSettlement(payload.deviceCode, doorNum, intentItems, quotaSummary)
         : undefined;
+
+    if (this.isReservationOnlyPickup() && user.role === "special" && preSettlement?.chargeRequired) {
+      throw new BadRequestException("预约物资已超出当前可领取额度，不能进入支付流程。");
+    }
 
     return {
       user,
@@ -2048,6 +2178,16 @@ export class CabinetEventsService {
     }
   ) {
     return event.role !== "special" && typeof event.hasInboundGoods === "boolean";
+  }
+
+  private isReservationOnlyPickup() {
+    return isReservationOnlyPickup({
+      VM_RESERVATION_ONLY_PICKUP: this.configService.get<string>("VM_RESERVATION_ONLY_PICKUP")
+    });
+  }
+
+  private isReservationOnlyPickupEvent(event: Pick<CabinetEventRecord, "reservationOnlyPickup">) {
+    return event.reservationOnlyPickup === true;
   }
 
   private getOpenLogCategory(
@@ -2256,6 +2396,33 @@ export class CabinetEventsService {
         };
       }) ?? [];
 
+    if (this.isReservationOnlyPickupEvent(event)) {
+      const totalQuantity = lines.reduce((sum, item) => sum + item.quantity, 0);
+      const originalAmount = lines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+
+      return {
+        platformAmount,
+        totalQuantity,
+        freeQuantity: totalQuantity,
+        paidQuantity: 0,
+        originalAmount: originalAmount || platformAmount,
+        freeAmount: originalAmount || platformAmount,
+        payableAmount: 0,
+        items: lines.map((item) => ({
+          goodsId: item.goodsId,
+          goodsName: item.goodsName,
+          category: item.category,
+          quantity: item.quantity,
+          freeQuantity: item.quantity,
+          paidQuantity: 0,
+          unitPrice: item.unitPrice,
+          originalAmount: item.quantity * item.unitPrice,
+          freeAmount: item.quantity * item.unitPrice,
+          paidAmount: 0
+        }))
+      };
+    }
+
     if (this.isNoChargeOperationalOpen(event)) {
       const totalQuantity = lines.reduce((sum, item) => sum + item.quantity, 0);
       const originalAmount = lines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -2378,6 +2545,16 @@ export class CabinetEventsService {
     event.billingDeltaAmount = deltaAmount;
     event.billingDeltaType =
       deltaAmount > 0 ? "supplement" : deltaAmount < 0 ? "refund" : "none";
+
+    if (this.isReservationOnlyPickupEvent(event)) {
+      event.amount = 0;
+      event.billingBaseAmount = 0;
+      event.billingActualAmount = 0;
+      event.billingDeltaAmount = 0;
+      event.billingDeltaType = "none";
+      event.billingStatus = settlementComparison.matched ? "free" : "mismatch";
+      return;
+    }
 
     if (this.isNoChargeOperationalOpen(event)) {
       event.billingStatus = "free";

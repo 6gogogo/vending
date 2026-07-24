@@ -48,6 +48,8 @@ const searchFeedbackTone = ref<SearchFeedbackTone>("neutral");
 const searching = ref(false);
 const selectedLongitude = ref<number | undefined>(props.initialLongitude);
 const selectedLatitude = ref<number | undefined>(props.initialLatitude);
+const manualLongitude = ref(props.initialLongitude?.toString() ?? "");
+const manualLatitude = ref(props.initialLatitude?.toString() ?? "");
 
 let amap: any;
 let mapInstance: any;
@@ -74,6 +76,10 @@ const updateCurrentPositionText = (longitude: number, latitude: number, label?: 
 const setMarker = (longitude: number, latitude: number) => {
   selectedLongitude.value = longitude;
   selectedLatitude.value = latitude;
+
+  if (!amap || !mapInstance) {
+    return;
+  }
 
   if (!markerInstance) {
     markerInstance = new amap.Marker({
@@ -110,6 +116,8 @@ const applySelection = (
   }
 ) => {
   setMarker(longitude, latitude);
+  manualLongitude.value = longitude.toString();
+  manualLatitude.value = latitude.toString();
   const address = payload.address?.trim() || buildFallbackAddress(longitude, latitude);
   const location = payload.location?.trim() || address;
   locationLabel.value = location;
@@ -165,6 +173,29 @@ const setSelectedLocation = (
       location: fallback?.location?.trim() || fallbackAddress,
       address: fallbackAddress
     });
+  });
+};
+
+const applyManualCoordinates = () => {
+  const longitude = Number(manualLongitude.value);
+  const latitude = Number(manualLatitude.value);
+
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    searchFeedbackTone.value = "danger";
+    searchFeedbackMessage.value = "经度必须是 -180 到 180 之间的数字。";
+    return;
+  }
+
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    searchFeedbackTone.value = "danger";
+    searchFeedbackMessage.value = "纬度必须是 -90 到 90 之间的数字。";
+    return;
+  }
+
+  searchFeedbackMessage.value = "";
+  applySelection(longitude, latitude, {
+    location: locationLabel.value,
+    address: resolvedAddress.value || locationLabel.value
   });
 };
 
@@ -432,6 +463,17 @@ watch(
       <span class="admin-field__label">位置说明</span>
       <input v-model="locationLabel" class="admin-input" :placeholder="resolvedLocationPlaceholder" />
     </label>
+    <div class="amap-picker__manual-coordinates">
+      <label class="admin-field">
+        <span class="admin-field__label">经度</span>
+        <input v-model="manualLongitude" class="admin-input" inputmode="decimal" placeholder="例如 120.291500" />
+      </label>
+      <label class="admin-field">
+        <span class="admin-field__label">纬度</span>
+        <input v-model="manualLatitude" class="admin-input" inputmode="decimal" placeholder="例如 31.552800" />
+      </label>
+      <button class="admin-button admin-button--ghost" @click="applyManualCoordinates">使用坐标</button>
+    </div>
     <div class="admin-note">
       当前坐标：{{ currentPositionText || "尚未选择" }}
     </div>
@@ -468,6 +510,13 @@ watch(
 .amap-picker__results {
   display: grid;
   gap: 10px;
+}
+
+.amap-picker__manual-coordinates {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
 }
 
 .amap-picker__toolbar,
@@ -538,7 +587,8 @@ watch(
 
 @media (max-width: 860px) {
   .amap-picker__toolbar,
-  .amap-picker__footer {
+  .amap-picker__footer,
+  .amap-picker__manual-coordinates {
     display: grid;
   }
 }

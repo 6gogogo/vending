@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -273,6 +273,7 @@ test("AI 上游错误对客户端固定化，内部审计只保留脱敏错误�
   }) as typeof fetch;
 
   const service = new OpenAiCompatibleService(new ConfigService({
+    VM_DATA_PLANE: "live",
     OPENAI_API_KEY: "local-only-key",
     OPENAI_BASE_URL: "https://api.example.com/v1",
     OPENAI_BASE_URL_EXACT_HOST_ALLOWLIST: "",
@@ -321,8 +322,67 @@ test("AI 上游错误对客户端固定化，内部审计只保留脱敏错误�
   }
 });
 
+test("模拟数据平面拒绝 AI 外发，且不会调用 fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+
+  const service = new OpenAiCompatibleService(new ConfigService({
+    VM_DATA_PLANE: "simulation",
+    OPENAI_API_KEY: "simulation-only-test-key",
+    OPENAI_BASE_URL: "https://api.example.com/v1",
+    OPENAI_MODEL: "local-model"
+  }));
+
+  try {
+    await assert.rejects(
+      service.completeJson({
+        task: "simulation-ai-boundary",
+        systemPrompt: "只返回 JSON",
+        userPrompt: "本地测试"
+      }),
+      /模拟数据平面不能配置 OPENAI_API_KEY/
+    );
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("模拟数据平面拒绝保存 AI 密钥，且不写入配置文件", () => {
+  const temporaryDir = mkdtempSync(join(tmpdir(), "vm-ai-simulation-config-"));
+  const envFilePath = join(temporaryDir, "api.env");
+  const service = new OpenAiCompatibleService(
+    new ConfigService({
+      VM_DATA_PLANE: "simulation",
+      OPENAI_API_KEY: ""
+    }),
+    undefined,
+    { envFilePath }
+  );
+
+  try {
+    assert.throws(
+      () =>
+        service.saveConfig({
+          apiKey: "simulation-only-test-key",
+          baseUrl: "https://api.example.com/v1",
+          model: "local-model"
+        }),
+      /模拟数据平面不能配置 OPENAI_API_KEY/
+    );
+    assert.equal(existsSync(envFilePath), false);
+  } finally {
+    rmSync(temporaryDir, { recursive: true, force: true });
+  }
+});
+
 test("AI 上游采用分块响应时仍限制最大响应体", async () => {
   const service = new OpenAiCompatibleService(new ConfigService({
+    VM_DATA_PLANE: "live",
     OPENAI_API_KEY: "local-only-key",
     OPENAI_BASE_URL: "https://api.example.com/v1",
     OPENAI_BASE_URL_EXACT_HOST_ALLOWLIST: "",

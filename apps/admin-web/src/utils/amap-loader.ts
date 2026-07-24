@@ -17,6 +17,7 @@ const loadPublicConfig = async () => {
     code: number;
     message: string;
     data?: {
+      amapRuntimeMode?: "mock" | "real";
       amapWebKey?: string;
       amapSecurityJsCode?: string;
     };
@@ -44,8 +45,13 @@ export const loadAmap = () => {
 
   window.__vmAmapLoaderPromise__ = loadPublicConfig()
     .then(
-      ({ amapWebKey, amapSecurityJsCode }) =>
+      ({ amapRuntimeMode, amapWebKey, amapSecurityJsCode }) =>
         new Promise((resolve, reject) => {
+          if (amapRuntimeMode === "mock") {
+            reject(new Error("当前为全真模拟地图：未加载高德脚本，请手工录入坐标。"));
+            return;
+          }
+
           if (!amapWebKey) {
             reject(new Error("后端未配置 AMAP_WEB_KEY"));
             return;

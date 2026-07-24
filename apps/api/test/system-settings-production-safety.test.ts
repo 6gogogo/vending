@@ -12,16 +12,26 @@ import { SystemSettingsService } from "../src/modules/system-settings/system-set
 
 const validPaymentSettings: Record<string, string> = {
   APP_ENV: "production",
+  VM_DATA_PLANE: "live",
+  VM_DATA_ROOT: "/srv/vending/live",
+  VM_DATA_PLANE_ID: "live-production-test",
+  VM_PLATFORM_TENANT_NAME: "真实入口测试实例",
   PUBLIC_BASE_URL: "https://api.example.com",
   CORS_ORIGINS: "https://admin.example.com,https://mobile.example.com",
   API_DATA_FILE: "runtime-data/store.json",
   SYSTEM_LOG_FILE: "runtime-data/system-audit.ndjson",
   UPLOAD_DIR: "runtime-uploads",
   API_BACKUP_DIR: "runtime-backups",
-  VERIFICATION_CODE_PROVIDER: "aliyun",
+  VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
   VERIFICATION_CODE_PREVIEW_ENABLED: "false",
-  ALIYUN_SMS_ACCESS_KEY_ID: "configured-access-key-id",
-  ALIYUN_SMS_ACCESS_KEY_SECRET: "configured-access-key-secret",
+  ALIYUN_PNVS_ACCESS_KEY_ID: "configured-access-key-id",
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: "configured-access-key-secret",
+  ALIYUN_PNVS_SIGN_NAME: "configured-sign-name",
+  ALIYUN_PNVS_TEMPLATE_CODE: "configured-template-code",
+  ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: "configured-app-login",
+  ALIYUN_PNVS_SCHEME_NAME_REGISTER: "configured-register",
+  ALIYUN_PNVS_SCHEME_NAME_GENERAL: "configured-general",
+  ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: "configured-password-reset",
   ALLOW_DEFAULT_BACKOFFICE_LOGIN: "false",
   SMARTVM_BASE_URL: "https://smartvm.example.com",
   SMARTVM_ALLOWED_NOTIFY_ORIGINS: "",
@@ -71,6 +81,22 @@ const encodeEnv = (values: Record<string, string>) =>
   `${Object.entries(values)
     .map(([key, value]) => `${key}=${value}`)
     .join("\n")}\n`;
+
+test("真实数据平面没有受控配置写入适配器时拒绝后台改写默认 .env", () => {
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => validPaymentSettings[key],
+      set: () => undefined
+    } as unknown as ConfigService,
+    undefined,
+    { appendSafely: () => undefined } as never
+  );
+
+  assert.throws(
+    () => service.updateSettings({ values: {} }),
+    /真实数据平面禁止通过后台写入默认 .env/
+  );
+});
 
 test("生产配置审计意图不可用时，不改写文件或热应用运行时配置", () => {
   const runtimeValues = new Map(Object.entries(validPaymentSettings));
@@ -147,7 +173,7 @@ test("生产环境拒绝模拟支付候选配置且不改写文件或运行时�
             PAYMENT_MODE: "mock"
           }
         }),
-      /生产环境必须显式设置 PAYMENT_MODE=real/
+      /(?:生产环境必须显式设置|真实数据平面只能设置) PAYMENT_MODE=real/
     );
     assert.equal(readFileSync(envFilePath, "utf8"), originalContent);
     assert.deepEqual(setCalls, []);
@@ -330,11 +356,11 @@ test("生产环境拒绝削弱 SmartVM 签名与付款事实边界且保持文�
     }> = [
       {
         values: { SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS: "true" },
-        message: /不能开启结算后自动转发付款成功/
+        message: /(?:不能开启结算后自动转发付款成功|禁止自动将柜机结算转发为付款成功)/
       },
       {
         values: { SMARTVM_ALLOW_UNSIGNED_CALLBACKS: "true" },
-        message: /不能允许未签名 SmartVM 回调/
+        message: /(?:不能允许|禁止允许)未签名 SmartVM 回调/
       },
       {
         values: { SMARTVM_KEY: "" },

@@ -1,4 +1,12 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 
 import type {
   CabinetIntentItem,
@@ -12,6 +20,7 @@ import type {
 } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import { isReservationOnlyPickup } from "../../common/config/reservation-only-pickup";
 import { AccessRulesService } from "../access-rules/access-rules.service";
 
 type Actor = { id: string; role: UserRole };
@@ -20,7 +29,8 @@ type Actor = { id: string; role: UserRole };
 export class ReservationsService {
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
-    @Inject(AccessRulesService) private readonly accessRulesService: AccessRulesService
+    @Inject(AccessRulesService) private readonly accessRulesService: AccessRulesService,
+    @Optional() @Inject(ConfigService) private readonly configService?: ConfigService
   ) {}
 
   getSettings() {
@@ -156,7 +166,11 @@ export class ReservationsService {
       throw new BadRequestException("预约前请先选择要保留的货品。");
     }
 
-    this.accessRulesService.assertCanOpenSpecialCabinet(user);
+    const quotaSummary = this.accessRulesService.assertCanOpenSpecialCabinet(user);
+
+    if (this.isReservationOnlyPickup()) {
+      this.assertReservationFitsFreeQuota(user, intentItems, quotaSummary);
+    }
 
     const now = new Date();
     const record: CabinetReservationRecord = {
@@ -335,6 +349,12 @@ export class ReservationsService {
       return;
     }
 
+    if (this.isReservationOnlyPickup()) {
+      throw new BadRequestException(
+        `订单 ${blockingEvent.orderNo} 仍有待完成的取货核对，请由管理员处理后再继续预约或开柜。`
+      );
+    }
+
     throw new BadRequestException(
       `订单 ${blockingEvent.orderNo} 仍有待完成结算或待管理员确认的费用，请处理后再继续使用。`
     );
@@ -471,6 +491,68 @@ export class ReservationsService {
 
     if (user.reservationDisabledAt || timeoutCount >= maxTimeouts) {
       throw new BadRequestException(`预约超时已达到 ${maxTimeouts} 次，预约功能已被禁用。`);
+    }
+  }
+
+  private isReservationOnlyPickup() {
+    return isReservationOnlyPickup({
+      VM_RESERVATION_ONLY_PICKUP: this.configService?.get<string>("VM_RESERVATION_ONLY_PICKUP")
+    });
+  }
+
+  /**
+   * 预约尚未形成库存流水，因此需要将同一用户未履约预约一起计入额度，
+   * 否则可以借多次预约把原本应付的物资留到之后领取。
+   */
+  private assertReservationFitsFreeQuota(
+    user: UserRecord,
+    intentItems: CabinetIntentItem[],
+    quotaSummary: ReturnType<AccessRulesService["getQuotaSummaryForUser"]>
+  ) {
+    const reservedItems = this.store.reservations
+      .filter((reservation) => reservation.userId === user.id && reservation.status === "active")
+      .flatMap((reservation) => reservation.items);
+    const plannedItems = [...reservedItems, ...intentItems];
+    const plannedQuantity = plannedItems.reduce((sum, item) => sum + item.quantity, 0);
+    const remainingDaily = Math.max(0, quotaSummary.remainingDaily ?? 0);
+
+    if (plannedQuantity > remainingDaily) {
+      throw new BadRequestException(
+        `预约数量超过当前可领取额度，今日最多还可预约 ${remainingDaily} 件。`
+      );
+    }
+
+    const remainingByGoods = (quotaSummary.remainingByGoods ?? {}) as Record<string, number>;
+    const remainingByCategory = (quotaSummary.remainingToday ?? {}) as Partial<
+      Record<GoodsCategory, number>
+    >;
+    const useGoodsQuota = Object.keys(remainingByGoods).length > 0;
+    const plannedByScope = new Map<string, { quantity: number; label: string }>();
+
+    for (const item of plannedItems) {
+      const scope = useGoodsQuota ? item.goodsId : item.category;
+      const current = plannedByScope.get(scope);
+      plannedByScope.set(scope, {
+        quantity: (current?.quantity ?? 0) + item.quantity,
+        label: current?.label ?? item.goodsName
+      });
+    }
+
+    for (const [scope, planned] of plannedByScope) {
+      const allowed = Math.max(
+        0,
+        Number(
+          useGoodsQuota
+            ? remainingByGoods[scope]
+            : remainingByCategory[scope as GoodsCategory]
+        ) || 0
+      );
+
+      if (planned.quantity > allowed) {
+        throw new BadRequestException(
+          `${planned.label} 超过当前可领取额度，最多可预约 ${allowed} 件。`
+        );
+      }
     }
   }
 

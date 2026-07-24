@@ -4,19 +4,30 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import {
   createEmptyPersistedState,
-  resolveApiDataFile,
   resolveApiWorkspaceRoot,
-  resolveSystemLogFile,
-  resolveUploadDir,
+  resolveRuntimeStoragePaths,
   writePersistedState
 } from "../common/store/persistence.js";
 import { isProductionRuntime } from "../common/config/runtime-environment.js";
+import { resolveRuntimeDataPlane } from "../common/config/runtime-data-plane.js";
 import { acquireFinancialSingleWriterForMaintenance } from "../common/coordination/financial-single-writer-runtime.js";
+import { assertRuntimePathsSafe } from "../common/store/runtime-path-safety.js";
+import { assertSimulationDataPlaneIsEmptyForInitialization } from "../common/store/runtime-evidence-guard.js";
 
-const dataFileTarget = resolveApiDataFile();
-const systemLogFile = resolveSystemLogFile();
-const uploadDir = resolveUploadDir();
+const runtimePaths = resolveRuntimeStoragePaths();
+const dataFileTarget = runtimePaths.dataFile;
+const systemLogFile = runtimePaths.systemLogFile;
+const uploadDir = runtimePaths.uploadDir;
 const apiWorkspaceRoot = resolveApiWorkspaceRoot();
+const dataPlane = resolveRuntimeDataPlane();
+
+assertRuntimePathsSafe({
+  dataFile: runtimePaths.dataFile,
+  systemLogFile: runtimePaths.systemLogFile,
+  uploadDir: runtimePaths.uploadDir,
+  backupDir: runtimePaths.backupDir,
+  financialLeaseFile: runtimePaths.financialLeaseFile
+});
 
 const normalizePath = (path: string) => {
   const normalized = resolve(path);
@@ -52,6 +63,11 @@ if (!process.argv.includes("--confirm-reset")) {
   console.error(`目标数据文件：${dataFileTarget}`);
   console.error(`目标系统日志：${systemLogFile}`);
   console.error(`目标上传目录：${uploadDir}`);
+  process.exit(2);
+}
+
+if (dataPlane === "live") {
+  console.error("真实数据平面不能使用通用清空命令；请使用受控的真实初始化/恢复流程。 ");
   process.exit(2);
 }
 
@@ -99,10 +115,12 @@ for (const filePath of [dataFileTarget, systemLogFile]) {
   }
 }
 
+assertSimulationDataPlaneIsEmptyForInitialization(runtimePaths);
+
 const financialWriter = acquireFinancialSingleWriterForMaintenance();
 let dataFile: string;
 try {
-  dataFile = writePersistedState(createEmptyPersistedState());
+  dataFile = writePersistedState(createEmptyPersistedState(dataPlane));
   mkdirSync(dirname(systemLogFile), { recursive: true, mode: 0o700 });
   writeFileSync(systemLogFile, "", { encoding: "utf8", mode: 0o600 });
   chmodSync(systemLogFile, 0o600);

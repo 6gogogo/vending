@@ -40,22 +40,26 @@ assert.doesNotMatch(
 assert.match(deviceDetailSource, /:aria-label="`为\$\{goods\.name\}减少一件`"/, "减少商品数量按钮必须有具体可访问名称");
 assert.match(deviceDetailSource, /:aria-label="`为\$\{goods\.name\}增加一件`"/, "增加商品数量按钮必须有具体可访问名称");
 assert.match(deviceDetailSource, /class="stepper__value" aria-live="polite" aria-atomic="true"/, "商品数量变化必须向辅助技术播报");
-for (const requiredContext of ["柜机编号", "柜门", "距离验证", "预计需支付"]) {
+for (const requiredContext of ["柜机编号", "柜门", "距离验证"]) {
   assert.ok(deviceDetailSource.includes(requiredContext), `开柜最终确认必须展示${requiredContext}`);
 }
+assert.match(
+  deviceDetailSource,
+  /appCopy\.reservationPickup\.openConfirmSummary/,
+  "开柜最终确认必须展示预约物资摘要"
+);
 assert.match(
   deviceDetailSource,
   /class="open-confirmation-dialog"[\s\S]+role="dialog"[\s\S]+aria-modal="true"/,
   "开柜最终确认必须使用有明确模态语义的结构化核对单"
 );
-assert.match(deviceDetailSource, /class="open-confirmation-settlement__amount"/, "开柜最终确认必须单独突出费用金额");
-assert.match(deviceDetailSource, /class="open-confirmation-risk"/, "开柜最终确认必须把距离风险独立展示");
-assert.match(deviceDetailSource, /quoteExpiresAt/, "开柜最终确认必须使用服务端报价有效期");
-assert.match(deviceDetailSource, /decision === "expired"[\s\S]+previewOpenSettlement\(payload\)/, "报价过期后必须保留当前选择并原地重新预览");
+assert.doesNotMatch(deviceDetailSource, /class="open-confirmation-settlement__amount"/, "预约取货确认不得展示支付金额");
+assert.match(deviceDetailSource, /class="open-confirmation-risk"/, "预约取货确认必须继续独立展示距离风险");
+assert.doesNotMatch(deviceDetailSource, /quoteExpiresAt/, "预约取货确认不得依赖服务端支付报价有效期");
 assert.match(
   deviceDetailSource,
-  /:disabled="!openConfirmation\.settlement \|\| !openConfirmation\.quoteId"/,
-  "预结算或服务端报价缺失时不得确认开柜"
+  /:disabled="submitting"/,
+  "预约取货确认提交中必须禁止重复开柜"
 );
 assert.match(deviceDetailSource, /@keydown\.tab\.stop="trapOpenConfirmationFocus"/, "开柜确认必须限制键盘焦点在弹窗内");
 assert.match(deviceDetailSource, /@keydown\.esc\.stop\.prevent="finishOpenConfirmation\('cancelled'\)"/, "开柜确认必须支持 Escape 安全取消");
@@ -66,14 +70,14 @@ const performOpenSource = deviceDetailSource.slice(
 );
 assert.match(performOpenSource, /findLikelyOpenEvent/, "开柜结果不确定时必须优先查询当前用户事件");
 assert.match(performOpenSource, /resultType=open-pending/, "查不到开柜事件时必须进入待确认结果页");
-assert.match(performOpenSource, /isOpenQuoteRefreshRequired[\s\S]+return "requote"/, "开柜前报价发生竞态变化时必须返回重新预览");
+assert.doesNotMatch(performOpenSource, /isOpenQuoteRefreshRequired|requote/, "预约取货开柜不得走支付报价重新预览链路");
 assert.doesNotMatch(performOpenSource, /actionText=\$\{encodeURIComponent\("重新尝试"\)\}/, "开柜结果不确定时不得诱导立即重试");
 const previewConfirmationSource = deviceDetailSource.slice(
   deviceDetailSource.indexOf("const previewAndConfirmOpen"),
-  deviceDetailSource.indexOf("const submit = async")
+  deviceDetailSource.indexOf("const createReservation")
 );
 assert.doesNotMatch(previewConfirmationSource, /uni\.showModal/, "预结算不得再压缩到居中的原生文本弹窗");
-assert.match(previewConfirmationSource, /openResult === "requote"[\s\S]+previewOpenSettlement\(payload\)/, "服务端拒绝过期或漂移报价后必须原地重新预览");
+assert.doesNotMatch(previewConfirmationSource, /previewOpenSettlement|openResult === "requote"/, "预约取货确认不得请求支付报价或重报价");
 assert.match(deviceDetailSource, /警告：未确认（手动模式/, "手动模式距离未知时必须明确告警但允许继续");
 
 const openingSource = readSource("apps/mobile/src/pages/common/opening.vue");
@@ -377,7 +381,7 @@ assert.match(primarySource, /catch \(error\) \{[\s\S]{0,120}if \(!ownsLatestLoad
 assert.match(primarySource, /remainingFreeTotal/, "首页总剩余额度必须优先使用服务端同时受每日上限约束的聚合值");
 assert.match(primarySource, /Math\.min\(sessionStore\.quota\?\.remainingDaily/, "旧会话数据也必须用每日总上限约束商品额度求和");
 assert.match(primarySource, /已用免费额度/, "首页不得把仅消耗免费额度的统计误写成全部领取数量");
-assert.match(deviceDetailSource, /quoteId:\s*preview\.quoteId/, "确认预结算后必须把服务端一次性报价标识带入真实开柜");
+assert.doesNotMatch(deviceDetailSource, /quoteId:\s*preview\.quoteId/, "预约取货开柜不得携带支付报价标识");
 assert.match(mobileReviewsSource, /const loadError = ref\(""\)/, "移动审核工作台必须保留可见加载错误态");
 assert.match(mobileReviewsSource, /审核数据加载失败/, "移动审核工作台必须提供失败说明和重试入口");
 const mobileReviewsLoadSource = mobileReviewsSource.slice(

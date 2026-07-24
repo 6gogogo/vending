@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
+  createEmptyPersistedState,
   createSeededPersistedState,
   readPersistedStateWithMetadata
 } from "../src/common/store/persistence.js";
@@ -69,6 +70,179 @@ test("生产环境拒绝缺失核心集合的持久化状态，而测试环境�
       const loaded = readPersistedStateWithMetadata();
       assert.ok(loaded);
       assert.deepEqual(loaded.state.expiredBatchDispositions, []);
+    }
+  );
+});
+
+test("非生产 live 平面也拒绝不完整状态，绝不以模拟种子回填", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-live-persistence-integrity-"));
+  const root = join(directory, "live-root");
+  const dataFile = join(root, "store.json");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "live",
+      VM_DATA_ROOT: root,
+      VM_DATA_PLANE_ID: "live-read-test",
+      VM_PLATFORM_TENANT_NAME: "真实读取测试实例",
+      PUBLIC_BASE_URL: "https://live-read.example.test",
+      API_DATA_FILE: "",
+      SYSTEM_LOG_FILE: "",
+      UPLOAD_DIR: "",
+      API_BACKUP_DIR: "",
+      FINANCIAL_SINGLE_WRITER_LEASE_FILE: "",
+      NODE_ENV: "test",
+      APP_ENV: undefined
+    },
+    () => {
+      const state = createEmptyPersistedState();
+      state.initializationSource = "live-bootstrap";
+      state.platformTenants.push({
+        id: "live-read-test",
+        code: "current",
+        name: "真实读取测试实例",
+        status: "active",
+        instanceUrl: "https://live-read.example.test",
+        createdAt: "2026-01-01T00:00:00.000Z"
+      });
+      const rawState = state as unknown as Record<string, unknown>;
+      delete rawState.users;
+      mkdirSync(root, { recursive: true });
+      writeFileSync(dataFile, `${JSON.stringify(rawState, null, 2)}\n`, "utf8");
+
+      assert.throws(
+        () => readPersistedStateWithMetadata(),
+        /运行数据完整性检查未通过/
+      );
+    }
+  );
+});
+
+test("真实平面由受控初始化持久化唯一当前租户，并在启动时拒绝配置缺失或不一致", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-live-platform-tenant-"));
+  const root = join(directory, "live-root");
+  const dataFile = join(root, "store.json");
+  const environment = {
+    VM_DATA_PLANE: "live",
+    VM_DATA_ROOT: root,
+    VM_DATA_PLANE_ID: "live-tenant-test",
+    VM_PLATFORM_TENANT_NAME: "真实租户测试实例",
+    PUBLIC_BASE_URL: "https://live-tenant.example.test",
+    API_DATA_FILE: "",
+    SYSTEM_LOG_FILE: "",
+    UPLOAD_DIR: "",
+    API_BACKUP_DIR: "",
+    FINANCIAL_SINGLE_WRITER_LEASE_FILE: "",
+    NODE_ENV: "test",
+    APP_ENV: undefined
+  };
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  withEnvironment(environment, () => {
+    const state = createEmptyPersistedState();
+    mkdirSync(root, { recursive: true });
+    writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+    assert.equal(state.platformTenants.length, 0);
+    assert.throws(
+      () => readPersistedStateWithMetadata(),
+      /待初始化的真实数据平面只能由受控初始化命令读取/
+    );
+
+    state.initializationSource = "live-bootstrap";
+    state.platformTenants.push({
+      id: environment.VM_DATA_PLANE_ID,
+      code: "current",
+      name: environment.VM_PLATFORM_TENANT_NAME,
+      status: "active",
+      instanceUrl: environment.PUBLIC_BASE_URL,
+      contactName: "实例管理员",
+      planName: "正式版",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    });
+    writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+    assert.deepEqual(state.platformTenants, [
+      {
+        id: environment.VM_DATA_PLANE_ID,
+        code: "current",
+        name: environment.VM_PLATFORM_TENANT_NAME,
+        status: "active",
+        instanceUrl: environment.PUBLIC_BASE_URL,
+        contactName: "实例管理员",
+        planName: "正式版",
+        createdAt: "2026-01-01T00:00:00.000Z"
+      }
+    ]);
+    assert.ok(readPersistedStateWithMetadata());
+
+    const wrongUrl = structuredClone(state);
+    wrongUrl.platformTenants[0]!.instanceUrl = "https://other.example.test";
+    writeFileSync(dataFile, `${JSON.stringify(wrongUrl, null, 2)}\n`, "utf8");
+    assert.throws(
+      () => readPersistedStateWithMetadata(),
+      /客户实例 URL 必须与 PUBLIC_BASE_URL 一致/
+    );
+
+    writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    delete process.env.VM_PLATFORM_TENANT_NAME;
+    assert.throws(
+      () => readPersistedStateWithMetadata(),
+      /缺少必填配置：VM_PLATFORM_TENANT_NAME/
+    );
+  });
+});
+
+test("仅完全无 marker 的历史模拟数据可进行一次兼容迁移，半迁移 marker 一律拒绝", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-legacy-simulation-marker-"));
+  const dataFile = join(directory, "store.json");
+  const legacy = createSeededPersistedState() as unknown as Record<string, unknown>;
+  delete legacy.dataPlane;
+  delete legacy.instanceId;
+  delete legacy.initializationSource;
+  writeFileSync(dataFile, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "",
+      API_DATA_FILE: dataFile,
+      NODE_ENV: "test",
+      APP_ENV: undefined
+    },
+    () => {
+      const loaded = readPersistedStateWithMetadata();
+      assert.ok(loaded);
+      assert.equal(loaded.state.dataPlane, "simulation");
+      assert.equal(loaded.state.instanceId, "simulation-default");
+      assert.equal(loaded.state.initializationSource, "legacy-simulation");
+      assert.equal(loaded.requiresDataPlaneRewrite, true);
+    }
+  );
+
+  const invalidMarker = {
+    ...createSeededPersistedState(),
+    dataPlane: "not-a-plane"
+  };
+  writeFileSync(dataFile, `${JSON.stringify(invalidMarker, null, 2)}\n`, "utf8");
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "",
+      API_DATA_FILE: dataFile,
+      NODE_ENV: "test",
+      APP_ENV: undefined
+    },
+    () => {
+      assert.throws(
+        () => readPersistedStateWithMetadata(),
+        /运行数据平面标记无效或不完整/
+      );
     }
   );
 });

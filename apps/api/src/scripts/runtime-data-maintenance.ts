@@ -22,12 +22,10 @@ import { createInterface } from "node:readline";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
-  resolveApiBackupDir,
-  resolveApiDataFile,
+  appendSystemAuditLog,
+  readPersistedStateWithMetadata,
   resolveApiWorkspaceRoot,
-  resolveFinancialSingleWriterLeaseFile,
-  resolveSystemLogFile,
-  resolveUploadDir,
+  resolveRuntimeStoragePaths,
   writePersistedState
 } from "../common/store/persistence.js";
 import { createDurablePathSynchronizer } from "../common/store/durable-path-sync.js";
@@ -45,7 +43,9 @@ import { acquireFinancialSingleWriterForMaintenance } from "../common/coordinati
 import type { FinancialSingleWriterLease } from "../common/coordination/financial-single-writer-lease.js";
 
 const MANIFEST_FILE_NAME = "runtime-backup-manifest.json";
-const BACKUP_SCHEMA_VERSION = 1;
+const REPAIR_EVIDENCE_DIRECTORY_NAME = "repair-evidence";
+const REPAIR_EVIDENCE_MANIFEST_FILE_NAME = "repair-evidence-manifest.json";
+const BACKUP_SCHEMA_VERSION = 2;
 const PRIVATE_BACKUP_DIRECTORY_MODE = 0o700;
 const PRIVATE_BACKUP_FILE_MODE = 0o600;
 const backupPathSynchronizer = createDurablePathSynchronizer();
@@ -55,6 +55,10 @@ interface RuntimeSources {
   systemLogFile: string;
   uploadDir: string;
   backupRoot: string;
+  dataPlane: {
+    kind: "simulation" | "live";
+    planeId: string;
+  };
 }
 
 interface BackupItem {
@@ -68,7 +72,11 @@ interface BackupItem {
 }
 
 interface RuntimeBackupManifest {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
+  dataPlane?: {
+    kind: "simulation" | "live";
+    planeId: string;
+  };
   createdAt: string;
   label?: string;
   source: {
@@ -85,6 +93,19 @@ interface RuntimeBackupManifest {
     summary: Record<string, number>;
     warnings: string[];
   };
+  items: BackupItem[];
+}
+
+interface RepairEvidenceManifest {
+  schemaVersion: 1;
+  kind: "pre-repair-evidence";
+  restorable: false;
+  createdAt: string;
+  dataPlane: RuntimeSources["dataPlane"];
+  sourceSha256: string;
+  repairPlan: RuntimeDataRepairAnalysis;
+  source: RuntimeBackupManifest["source"];
+  included: RuntimeBackupManifest["included"];
   items: BackupItem[];
 }
 
@@ -222,20 +243,30 @@ const resolveCliPath = (path: string) => {
 };
 
 const getRuntimeSources = (args: ParsedArgs): RuntimeSources => {
+  const runtimePaths = resolveRuntimeStoragePaths();
+
+  if (runtimePaths.dataPlane === "live" && args.values.has("backup-dir")) {
+    throw new Error("真实数据平面不能通过 --backup-dir 覆盖受控备份根目录。");
+  }
+
   const sources: RuntimeSources = {
-    dataFile: resolveApiDataFile(),
-    systemLogFile: resolveSystemLogFile(),
-    uploadDir: resolveUploadDir(),
+    dataFile: runtimePaths.dataFile,
+    systemLogFile: runtimePaths.systemLogFile,
+    uploadDir: runtimePaths.uploadDir,
     backupRoot: args.values.has("backup-dir")
       ? resolveCliPath(args.values.get("backup-dir") ?? "")
-      : resolveApiBackupDir()
+      : runtimePaths.backupDir,
+    dataPlane: {
+      kind: runtimePaths.dataPlane,
+      planeId: runtimePaths.instanceId
+    }
   };
   assertRuntimePathsSafe({
     dataFile: sources.dataFile,
     systemLogFile: sources.systemLogFile,
     uploadDir: sources.uploadDir,
     backupDir: sources.backupRoot,
-    financialLeaseFile: resolveFinancialSingleWriterLeaseFile()
+    financialLeaseFile: runtimePaths.financialLeaseFile
   });
 
   return sources;
@@ -270,6 +301,32 @@ const readRepairSource = (filePath: string) => {
     };
   } catch {
     throw new Error("业务数据 JSON 解析失败。");
+  }
+};
+
+const assertRawStoreMarkerMatchesDataPlane = (
+  state: unknown,
+  dataPlane: RuntimeSources["dataPlane"],
+  subject: string
+) => {
+  if (!isRecord(state)) {
+    throw new Error(`${subject} 根节点必须是对象。`);
+  }
+
+  if (state.dataPlane !== dataPlane.kind || state.instanceId !== dataPlane.planeId) {
+    throw new Error(`${subject} 的数据平面标记与受控部署配置不一致。`);
+  }
+
+  const initializationSource = state.initializationSource;
+  const sourceMatchesPlane =
+    (dataPlane.kind === "simulation" &&
+      (initializationSource === "simulation-seed" ||
+        initializationSource === "simulation-empty" ||
+        initializationSource === "legacy-simulation")) ||
+    (dataPlane.kind === "live" && initializationSource === "live-bootstrap");
+
+  if (!sourceMatchesPlane) {
+    throw new Error(`${subject} 的初始化来源标记无效或不允许自动维护。`);
   }
 };
 
@@ -309,11 +366,19 @@ const runRepair = async (args: ParsedArgs) => {
     throw new Error("执行修复必须同时提供 --apply 和 --source-sha256。");
   }
 
+  if (apply && !args.flags.has("yes")) {
+    throw new Error("自动修复会改写业务数据。确认已停止 API 并核对 dry-run 后，请追加 --yes。");
+  }
+
   if (expectedSha256 && !/^[a-f0-9]{64}$/.test(expectedSha256)) {
     throw new Error("--source-sha256 必须是 64 位十六进制摘要。");
   }
 
   const sources = getRuntimeSources(args);
+
+  if (apply && sources.dataPlane.kind === "live") {
+    throw new Error("真实数据平面禁止自动 repair --apply；请保留证据并走人工复核与受控恢复流程。");
+  }
 
   if (!apply) {
     const source = readRepairSource(sources.dataFile);
@@ -324,6 +389,7 @@ const runRepair = async (args: ParsedArgs) => {
   const financialWriter = acquireFinancialSingleWriterForMaintenance();
   try {
     const source = readRepairSource(sources.dataFile);
+    assertRawStoreMarkerMatchesDataPlane(source.state, sources.dataPlane, "待修复业务数据");
 
     if (source.sha256 !== expectedSha256) {
       throw new Error("源数据摘要与修复计划不一致，请重新执行 dry-run。");
@@ -336,18 +402,105 @@ const runRepair = async (args: ParsedArgs) => {
       throw new Error("运行数据修复计划仍含需人工处理或无法证明安全的问题，已拒绝写入。");
     }
 
-    const repaired = applyApprovedRuntimeDataRepair(source.state);
+    const evidenceArchive = await createRepairEvidenceArchive(
+      sources,
+      source.sha256,
+      analysis,
+      () => financialWriter.lease.assertHeld()
+    );
+    const currentSource = readRepairSource(sources.dataFile);
+    assertRawStoreMarkerMatchesDataPlane(
+      currentSource.state,
+      sources.dataPlane,
+      "待修复业务数据"
+    );
+
+    if (currentSource.sha256 !== source.sha256) {
+      throw new Error("创建修复证据归档期间源数据发生变化，已拒绝使用过期计划写入。");
+    }
+
+    const repaired = applyApprovedRuntimeDataRepair(currentSource.state);
 
     if (!repaired.changed) {
       console.log("运行数据无需自动修复。");
       return;
     }
 
-    writePersistedState(repaired.state);
-    const verification = validateStoreFile(sources.dataFile);
-    assertNoValidationErrors(verification, "修复后的运行数据");
-    console.log("运行数据修复完成。");
-    printValidationResult("修复后摘要：", verification);
+    const operationId = randomUUID();
+    const startedAt = Date.now();
+    const evidenceManifestSha256 = await sha256File(
+      join(evidenceArchive, REPAIR_EVIDENCE_MANIFEST_FILE_NAME)
+    );
+    let intentWritten = false;
+    let stateWriteStarted = false;
+
+    try {
+      appendSystemAuditLog({
+        occurredAt: new Date(startedAt).toISOString(),
+        method: "SYSTEM",
+        path: "/internal/runtime-data-maintenance/repair",
+        statusCode: 202,
+        durationMs: 0,
+        metadata: {
+          auditPhase: "intent",
+          operationId,
+          operationClass: "runtime-data-repair",
+          dataPlane: sources.dataPlane.kind,
+          planeId: sources.dataPlane.planeId,
+          sourceSha256: source.sha256,
+          repairEvidenceManifestSha256: evidenceManifestSha256
+        }
+      });
+      intentWritten = true;
+      stateWriteStarted = true;
+      writePersistedState(repaired.state);
+      const verification = validateStoreFile(sources.dataFile);
+      assertNoValidationErrors(verification, "修复后的运行数据");
+      appendSystemAuditLog({
+        occurredAt: new Date().toISOString(),
+        method: "SYSTEM",
+        path: "/internal/runtime-data-maintenance/repair",
+        statusCode: 200,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        metadata: {
+          auditPhase: "completed",
+          operationId,
+          operationClass: "runtime-data-repair",
+          dataPlane: sources.dataPlane.kind,
+          planeId: sources.dataPlane.planeId,
+          sourceSha256: source.sha256,
+          repairEvidenceManifestSha256: evidenceManifestSha256
+        }
+      });
+      console.log("运行数据修复完成。");
+      console.log(`修复前证据已封存：${formatPath(evidenceArchive)}`);
+      printValidationResult("修复后摘要：", verification);
+    } catch (error) {
+      if (intentWritten) {
+        try {
+          appendSystemAuditLog({
+            occurredAt: new Date().toISOString(),
+            method: "SYSTEM",
+            path: "/internal/runtime-data-maintenance/repair",
+            statusCode: 500,
+            durationMs: Math.max(0, Date.now() - startedAt),
+            metadata: {
+              auditPhase: stateWriteStarted ? "indeterminate" : "rejected",
+              operationId,
+              operationClass: "runtime-data-repair",
+              dataPlane: sources.dataPlane.kind,
+              planeId: sources.dataPlane.planeId,
+              sourceSha256: source.sha256,
+              repairEvidenceManifestSha256: evidenceManifestSha256
+            }
+          });
+        } catch {
+          // 证据归档已先于修复封存；此处不能用二次审计写入错误覆盖原始维护失败。
+        }
+      }
+
+      throw error;
+    }
   } finally {
     financialWriter.release();
   }
@@ -531,6 +684,155 @@ const assertBackupRootIsSafe = (sources: RuntimeSources) => {
   }
 };
 
+/**
+ * 自动修复只允许作用于模拟数据，但依然会改变证据。因此先在普通恢复备份之外封存原始字节。
+ * 该归档没有恢复资格，永远不会被 --latest / --keep 选中或清理。
+ */
+const createRepairEvidenceArchive = async (
+  sources: RuntimeSources,
+  sourceSha256: string,
+  analysis: RuntimeDataRepairAnalysis,
+  assertLeaseHeld: () => void
+) => {
+  assertLeaseHeld();
+  assertBackupRootIsSafe(sources);
+
+  const evidenceRoot = join(sources.backupRoot, REPAIR_EVIDENCE_DIRECTORY_NAME);
+
+  if (existsSync(evidenceRoot)) {
+    const evidenceRootStat = lstatSync(evidenceRoot);
+
+    if (evidenceRootStat.isSymbolicLink() || !evidenceRootStat.isDirectory()) {
+      throw new Error("修复证据归档目录必须是普通目录，不能是文件或符号链接。");
+    }
+  } else {
+    mkdirSync(evidenceRoot, {
+      recursive: true,
+      mode: PRIVATE_BACKUP_DIRECTORY_MODE
+    });
+    backupPathSynchronizer.syncDirectoryAndAncestors(evidenceRoot, sources.backupRoot);
+  }
+
+  const archiveDir = join(
+    evidenceRoot,
+    `${createTimestamp()}-pre-repair-${sourceSha256.slice(0, 12)}-${randomUUID()}`
+  );
+
+  mkdirSync(archiveDir, {
+    recursive: false,
+    mode: PRIVATE_BACKUP_DIRECTORY_MODE
+  });
+  backupPathSynchronizer.syncDirectoryAndAncestors(archiveDir, evidenceRoot);
+
+  try {
+    const items: BackupItem[] = [];
+    const storeItem = await copyFileForBackup(
+      archiveDir,
+      sources.dataFile,
+      "store.json",
+      "store",
+      true,
+      assertLeaseHeld
+    );
+    items.push(storeItem);
+
+    if (storeItem.sha256 !== sourceSha256) {
+      throw new Error("修复证据归档的业务数据摘要与已确认源数据不一致。");
+    }
+
+    if (!existsSync(sources.systemLogFile)) {
+      throw new Error("未找到系统审计日志，已拒绝在无审计证据的情况下自动修复。");
+    }
+
+    items.push(
+      await copyFileForBackup(
+        archiveDir,
+        sources.systemLogFile,
+        "system-audit.ndjson",
+        "systemLog",
+        true,
+        assertLeaseHeld
+      )
+    );
+
+    const hasUploads = existsSync(sources.uploadDir);
+
+    if (hasUploads) {
+      const uploadStat = lstatSync(sources.uploadDir);
+
+      if (uploadStat.isSymbolicLink() || !uploadStat.isDirectory()) {
+        throw new Error("UPLOAD_DIR 必须是普通目录，不能是文件或符号链接。");
+      }
+
+      const uploadsArchiveDir = join(archiveDir, "uploads");
+      mkdirSync(uploadsArchiveDir, {
+        recursive: true,
+        mode: PRIVATE_BACKUP_DIRECTORY_MODE
+      });
+      backupPathSynchronizer.syncDirectoryAndAncestors(uploadsArchiveDir, archiveDir);
+
+      for (const relativePath of listFilesRecursive(sources.uploadDir)) {
+        assertLeaseHeld();
+        items.push(
+          await copyFileForBackup(
+            archiveDir,
+            resolve(sources.uploadDir, ...relativePath.split("/")),
+            `uploads/${relativePath}`,
+            "upload",
+            true,
+            assertLeaseHeld
+          )
+        );
+      }
+    }
+
+    const manifest: RepairEvidenceManifest = {
+      schemaVersion: 1,
+      kind: "pre-repair-evidence",
+      restorable: false,
+      createdAt: new Date().toISOString(),
+      dataPlane: sources.dataPlane,
+      sourceSha256,
+      repairPlan: analysis,
+      source: {
+        apiDataFile: sources.dataFile,
+        systemLogFile: sources.systemLogFile,
+        uploadDir: sources.uploadDir
+      },
+      included: {
+        store: true,
+        systemLog: true,
+        uploads: hasUploads
+      },
+      items
+    };
+    const manifestPath = join(archiveDir, REPAIR_EVIDENCE_MANIFEST_FILE_NAME);
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: PRIVATE_BACKUP_FILE_MODE
+    });
+    backupPathSynchronizer.syncFile(manifestPath);
+    backupPathSynchronizer.syncDirectoryAndAncestors(dirname(manifestPath), archiveDir);
+    assertLeaseHeld();
+
+    const persistedManifest = JSON.parse(readFileSync(manifestPath, "utf8")) as RepairEvidenceManifest;
+
+    if (
+      persistedManifest.sourceSha256 !== sourceSha256 ||
+      persistedManifest.dataPlane.kind !== sources.dataPlane.kind ||
+      persistedManifest.dataPlane.planeId !== sources.dataPlane.planeId ||
+      persistedManifest.items.find((item) => item.key === "store")?.sha256 !== sourceSha256
+    ) {
+      throw new Error("修复证据归档清单校验失败。");
+    }
+
+    return archiveDir;
+  } catch (error) {
+    rmSync(archiveDir, { recursive: true, force: true });
+    throw error;
+  }
+};
+
 const readManifest = (backupDir: string): RuntimeBackupManifest => {
   if (!existsSync(backupDir)) {
     throw new Error(`备份目录不存在：${backupDir}`);
@@ -558,7 +860,7 @@ const readManifest = (backupDir: string): RuntimeBackupManifest => {
 
   if (
     !isRecord(parsed) ||
-    parsed.schemaVersion !== BACKUP_SCHEMA_VERSION ||
+    (parsed.schemaVersion !== 1 && parsed.schemaVersion !== BACKUP_SCHEMA_VERSION) ||
     !isRecord(parsed.included) ||
     parsed.included.store !== true ||
     typeof parsed.included.systemLog !== "boolean" ||
@@ -566,6 +868,17 @@ const readManifest = (backupDir: string): RuntimeBackupManifest => {
     !Array.isArray(parsed.items)
   ) {
     throw new Error(`备份清单格式不受支持：${manifestPath}`);
+  }
+
+  if (parsed.schemaVersion === BACKUP_SCHEMA_VERSION) {
+    if (
+      !isRecord(parsed.dataPlane) ||
+      (parsed.dataPlane.kind !== "simulation" && parsed.dataPlane.kind !== "live") ||
+      typeof parsed.dataPlane.planeId !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(parsed.dataPlane.planeId)
+    ) {
+      throw new Error(`备份清单数据平面格式无效：${manifestPath}`);
+    }
   }
 
   if (parsed.included.systemLog !== true) {
@@ -619,6 +932,71 @@ const readManifest = (backupDir: string): RuntimeBackupManifest => {
   }
 
   return parsed as unknown as RuntimeBackupManifest;
+};
+
+const assertBackupMatchesRuntimeDataPlane = (
+  manifest: RuntimeBackupManifest,
+  sources: RuntimeSources
+) => {
+  if (manifest.schemaVersion !== BACKUP_SCHEMA_VERSION || !manifest.dataPlane) {
+    throw new Error("旧版备份未声明数据平面；可作为审计证据校验，不能恢复。");
+  }
+
+  if (
+    manifest.dataPlane.kind !== sources.dataPlane.kind ||
+    manifest.dataPlane.planeId !== sources.dataPlane.planeId
+  ) {
+    throw new Error("备份数据平面与当前运行平面不一致，已拒绝恢复。");
+  }
+};
+
+const assertBackupStoreMarkerMatchesManifest = (
+  backupDir: string,
+  manifest: RuntimeBackupManifest
+) => {
+  if (manifest.schemaVersion !== BACKUP_SCHEMA_VERSION || !manifest.dataPlane) {
+    return;
+  }
+
+  const storeItem = manifest.items.find((item) => item.key === "store");
+
+  if (!storeItem) {
+    throw new Error("备份清单缺少业务数据文件。");
+  }
+
+  const source = readRepairSource(assertRegularBackupFile(backupDir, storeItem.backupPath));
+  assertRawStoreMarkerMatchesDataPlane(source.state, manifest.dataPlane, "备份业务数据");
+};
+
+/**
+ * 备份根可能在历史上被人工混用。`--latest` 和 `--keep` 只处理当前平面、当前实例的
+ * v2 备份；旧版、损坏或其他平面的目录必须保留为审计证据，且绝不能被自动选中或删除。
+ */
+const listBackupsForRuntimeDataPlane = (
+  backupRoot: string,
+  expectedDataPlane: RuntimeSources["dataPlane"]
+) => {
+  if (!existsSync(backupRoot)) {
+    return [];
+  }
+
+  return readdirSync(backupRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(backupRoot, entry.name))
+    .filter((backupDir) => {
+      try {
+        const manifest = readManifest(backupDir);
+        assertBackupStoreMarkerMatchesManifest(backupDir, manifest);
+        return (
+          manifest.schemaVersion === BACKUP_SCHEMA_VERSION &&
+          manifest.dataPlane?.kind === expectedDataPlane.kind &&
+          manifest.dataPlane.planeId === expectedDataPlane.planeId
+        );
+      } catch {
+        return false;
+      }
+    })
+    .sort((left, right) => right.localeCompare(left));
 };
 
 const verifyBackupDirectory = async (backupDir: string): Promise<ValidationResult> => {
@@ -679,8 +1057,14 @@ const verifyBackupDirectory = async (backupDir: string): Promise<ValidationResul
     : {
         summary: {},
         warnings: [],
-        errors: []
-      };
+      errors: []
+    };
+
+  try {
+    assertBackupStoreMarkerMatchesManifest(backupDir, manifest);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
   const systemLogItem = manifest.items.find((item) => item.key === "systemLog");
 
   if (!systemLogItem) {
@@ -716,21 +1100,20 @@ const verifyBackupDirectory = async (backupDir: string): Promise<ValidationResul
   );
 };
 
-const findLatestBackupDir = (backupRoot: string) => {
+const findLatestBackupDir = (
+  backupRoot: string,
+  expectedDataPlane: RuntimeSources["dataPlane"]
+) => {
   if (!existsSync(backupRoot)) {
     throw new Error(`备份目录不存在：${backupRoot}`);
   }
 
-  const candidates = readdirSync(backupRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(backupRoot, entry.name))
-    .filter((dir) => existsSync(join(dir, MANIFEST_FILE_NAME)))
-    .sort((left, right) => right.localeCompare(left));
+  const candidates = listBackupsForRuntimeDataPlane(backupRoot, expectedDataPlane);
 
   const latest = candidates[0];
 
   if (!latest) {
-    throw new Error(`备份目录中没有可用备份：${backupRoot}`);
+    throw new Error("备份目录中没有当前数据平面的可用备份。");
   }
 
   return latest;
@@ -744,7 +1127,7 @@ const resolveBackupSelection = (args: ParsedArgs, sources: RuntimeSources) => {
   }
 
   if (args.flags.has("latest")) {
-    return findLatestBackupDir(sources.backupRoot);
+    return findLatestBackupDir(sources.backupRoot, sources.dataPlane);
   }
 
   throw new Error("请通过 --backup <目录> 指定备份，或使用 --latest 选择最新备份。");
@@ -766,12 +1149,13 @@ const printValidationResult = (title: string, result: ValidationResult) => {
   }
 };
 
-const pruneBackups = (backupRoot: string, keep: number, protectedDir: string) => {
-  const candidates = readdirSync(backupRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(backupRoot, entry.name))
-    .filter((dir) => existsSync(join(dir, MANIFEST_FILE_NAME)))
-    .sort((left, right) => right.localeCompare(left));
+const pruneBackups = (
+  backupRoot: string,
+  expectedDataPlane: RuntimeSources["dataPlane"],
+  keep: number,
+  protectedDir: string
+) => {
+  const candidates = listBackupsForRuntimeDataPlane(backupRoot, expectedDataPlane);
 
   const protectedPath = normalizeForCompare(protectedDir);
   const retained = new Set(
@@ -801,6 +1185,16 @@ const createBackup = async (
   const assertLeaseHeld = () => financialWriterLease.assertHeld();
   assertLeaseHeld();
   const sources = getRuntimeSources(args);
+  const persisted = readPersistedStateWithMetadata();
+
+  if (
+    !persisted ||
+    persisted.state.dataPlane !== sources.dataPlane.kind ||
+    persisted.state.instanceId !== sources.dataPlane.planeId
+  ) {
+    throw new Error("当前业务数据平面标记与受控部署配置不一致，已拒绝创建备份。");
+  }
+
   assertBackupRootIsSafe(sources);
   const liveStoreValidation = validateStoreFile(sources.dataFile);
   assertNoValidationErrors(liveStoreValidation, "当前业务数据");
@@ -888,6 +1282,7 @@ const createBackup = async (
 
     const manifest: RuntimeBackupManifest = {
       schemaVersion: BACKUP_SCHEMA_VERSION,
+      dataPlane: sources.dataPlane,
       createdAt: new Date().toISOString(),
       label,
       source: {
@@ -925,7 +1320,7 @@ const createBackup = async (
 
       if (keep !== undefined) {
         assertLeaseHeld();
-        pruneBackups(sources.backupRoot, keep, backupDir);
+        pruneBackups(sources.backupRoot, sources.dataPlane, keep, backupDir);
         assertLeaseHeld();
       }
     }
@@ -1199,11 +1594,20 @@ const runRestoreWithLease = async (
     throw new Error("恢复会覆盖当前运行数据。确认已停止 API 后，请追加 --yes。");
   }
 
+  if (args.flags.has("skip-system-log")) {
+    throw new Error(
+      "恢复不能跳过系统审计日志；必须将业务数据与同一受控备份中的审计日志一并恢复。"
+    );
+  }
+
   const sources = getRuntimeSources(args);
   const backupDir = resolveBackupSelection(args, sources);
   assertRestoreSelectionIsSafe(sources, backupDir);
   const backupValidation = await verifyBackupDirectory(backupDir);
   assertNoValidationErrors(backupValidation, "待恢复备份");
+  const manifest = readManifest(backupDir);
+  assertBackupMatchesRuntimeDataPlane(manifest, sources);
+  assertBackupStoreMarkerMatchesManifest(backupDir, manifest);
 
   if (!args.flags.has("no-safety-backup") && existsSync(sources.dataFile)) {
     const safetyArgs = parseArgs(
@@ -1221,32 +1625,22 @@ const runRestoreWithLease = async (
     console.log(`恢复前安全备份已创建：${formatPath(safetyBackup)}`);
   }
 
-  const manifest = readManifest(backupDir);
   const storeItem = manifest.items.find((item) => item.key === "store");
 
   if (!storeItem) {
     throw new Error("备份缺少业务数据文件，无法恢复。");
   }
 
-  const replacements: StagedReplacement[] = [
-    await stageRestoreFile(backupDir, storeItem, sources.dataFile)
-  ];
+  const systemLogItem = manifest.items.find((item) => item.key === "systemLog");
 
-  if (!args.flags.has("skip-system-log")) {
-    const systemLogItem = manifest.items.find((item) => item.key === "systemLog");
-
-    if (systemLogItem) {
-      replacements.push(
-        await stageRestoreFile(
-          backupDir,
-          systemLogItem,
-          sources.systemLogFile
-        )
-      );
-    } else {
-      console.warn("备份中没有系统审计日志，已跳过 SYSTEM_LOG_FILE。");
-    }
+  if (!systemLogItem) {
+    throw new Error("备份缺少系统审计日志，无法保证恢复证据时间线一致。");
   }
+
+  const replacements: StagedReplacement[] = [
+    await stageRestoreFile(backupDir, storeItem, sources.dataFile),
+    await stageRestoreFile(backupDir, systemLogItem, sources.systemLogFile)
+  ];
 
   if (!args.flags.has("skip-uploads") && manifest.included.uploads) {
     const backupUploadsDir = join(backupDir, "uploads");
@@ -1305,17 +1699,16 @@ const printHelp = () => {
 
 修复计划（默认只读）：
   npm run data:repair --workspace @vm/api
-  npm run data:repair --workspace @vm/api -- --apply --source-sha256 <64位摘要>
+  npm run data:repair --workspace @vm/api -- --apply --source-sha256 <64位摘要> --yes
 
 常用选项：
   --backup-dir <目录>       覆盖 API_BACKUP_DIR
   --label <标签>            备份目录名后缀
   --keep <数量>             备份后只保留最近 N 份
   --latest                  使用 API_BACKUP_DIR 中最新备份
-  --skip-system-log         恢复时不覆盖系统审计日志
   --skip-uploads            恢复时不覆盖上传目录
   --no-safety-backup        恢复前不创建当前数据安全备份
-  --yes                     确认执行恢复
+  --yes                     确认执行恢复或自动修复写入
 `);
 };
 

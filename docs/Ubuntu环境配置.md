@@ -83,10 +83,16 @@ SMARTVM_KEY=
 SMARTVM_TEST_DEVICE_CODE=91120149
 SMARTVM_TEST_DOOR_NUM=1
 
-ALIYUN_SMS_ACCESS_KEY_ID=
-ALIYUN_SMS_ACCESS_KEY_SECRET=
-ALIYUN_SMS_REGION_ID=cn-hangzhou
-ALIYUN_SMS_ENDPOINT=dysmsapi.aliyuncs.com
+ALIYUN_PNVS_ACCESS_KEY_ID=
+ALIYUN_PNVS_ACCESS_KEY_SECRET=
+ALIYUN_PNVS_REGION_ID=cn-hangzhou
+ALIYUN_PNVS_ENDPOINT=dypnsapi.aliyuncs.com
+ALIYUN_PNVS_SIGN_NAME=
+ALIYUN_PNVS_TEMPLATE_CODE=
+ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN=
+ALIYUN_PNVS_SCHEME_NAME_REGISTER=
+ALIYUN_PNVS_SCHEME_NAME_GENERAL=
+ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET=
 ```
 
 说明：
@@ -95,27 +101,24 @@ ALIYUN_SMS_ENDPOINT=dysmsapi.aliyuncs.com
 - `AMAP_WEB_KEY`：PC 端地图选点必需
 - `AMAP_SECURITY_JS_CODE`：高德 JS API 新 Key 常用的安全密钥
 - `SMARTVM_*`：真实柜机平台联调必需
-- `ALIYUN_SMS_*`：真实短信验证码必需
+- `ALIYUN_PNVS_*`：真实用户短信验证码必需；四种用途方案不得共用
 
 ## 6. 目录写权限要求
 
-后端运行时必须能写入这两个目录：
+模拟平面可使用旧式 `apps/api/runtime-data`、`apps/api/runtime-uploads` 路径，或使用独立 `VM_DATA_ROOT`。真实平面只能使用 `VM_DATA_ROOT`，并由该根目录派生 `store.json`、`system-audit.ndjson`、`uploads/`、`backups/` 和金融租约；不要另外设置 `API_DATA_FILE`、`UPLOAD_DIR`、`SYSTEM_LOG_FILE`、`API_BACKUP_DIR` 或租约文件。
 
-- `apps/api/runtime-data`
-- `apps/api/runtime-uploads`
-
-如果你自定义了 `API_DATA_FILE` 或 `UPLOAD_DIR`，对应目录也必须可写。
-
-可以先手工创建：
+部署服务用户必须对批准的真实根目录具备私有读写权限。设置 `VM_DATA_ROOT` 后可先创建根目录：
 
 ```bash
-mkdir -p apps/api/runtime-data
-mkdir -p apps/api/runtime-uploads
+mkdir -p "$VM_DATA_ROOT"
+chmod 700 "$VM_DATA_ROOT"
 ```
+
+生产环境还必须设置 `VM_PLATFORM_TENANT_NAME`，使真实库中唯一客户实例与 `VM_DATA_PLANE_ID`、`PUBLIC_BASE_URL` 和该名称绑定；详细字段见[真实入口配置与数据平面说明](真实入口配置与数据平面说明.md)。
 
 ## 7. 初始化测试数据
 
-需要把后端恢复成默认测试数据时，运行：
+首次创建默认测试数据平面时，运行：
 
 ```bash
 npm run init:api-data -- --confirm-reset
@@ -126,6 +129,8 @@ npm run init:api-data -- --confirm-reset
 ```text
 apps/api/runtime-data/store.json
 ```
+
+该命令只允许空目标。若已经存在业务数据、审计日志、上传文件、备份或租约证据，它会拒绝覆盖；请新建隔离的模拟数据平面，或按运行数据备份/恢复流程恢复已验证快照。
 
 ## 8. 启动后端
 
@@ -240,10 +245,10 @@ apps/mobile/.env.local
 ## 12. 生产前最低检查
 
 - 后端 `.env` 已填完整
-- `npm run init:api-data -- --confirm-reset` 已按需执行
+- 真实入口已通过 `init:live-data` 在独立真实数据根受控初始化；测试种子命令未用于生产数据根
 - API 数据目录与上传目录可写
 - `npm run dev:api:once` 或正式进程可正常启动
 - `npm run build --workspace @vm/admin-web` 通过
 - 地图选点可正常搜索并保存
-- 若要短信验证码，`ALIYUN_SMS_*` 已配置
+- 若要短信验证码，`ALIYUN_PNVS_*` 已配置，且 `VERIFICATION_CODE_PROVIDER=aliyun_pnvs`
 - 若要真实柜机联调，`SMARTVM_*` 与平台回调地址已配置

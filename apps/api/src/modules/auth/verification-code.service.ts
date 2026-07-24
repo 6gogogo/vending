@@ -1,26 +1,19 @@
 import { BadRequestException, Inject, Injectable, InternalServerErrorException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import * as Dysmsapi20170525 from "@alicloud/dysmsapi20170525";
+import { timingSafeEqual } from "node:crypto";
+import Dypnsapi20170525, {
+  CheckSmsVerifyCodeRequest,
+  SendSmsVerifyCodeRequest
+} from "@alicloud/dypnsapi20170525";
+import { $OpenApiUtil } from "@alicloud/openapi-core";
 
 import { isProductionRuntime } from "../../common/config/production-safety";
+import { resolveFullSimulationExternalMode } from "../../common/config/full-simulation-mode";
+import { assertConfiguredRuntimeDataPlaneVerificationPolicy } from "../../common/config/runtime-data-plane-policy";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import type { VerificationPurpose } from "../../common/store/persistence";
 
-type VerificationProvider = "mock" | "aliyun";
-type Constructor<T = unknown> = new (...args: any[]) => T;
-type AliyunResponse = { body?: Record<string, unknown> };
-
-interface AliyunSmsClient {
-  requiredPhoneCode(request: unknown): Promise<AliyunResponse>;
-  validPhoneCode(request: unknown): Promise<AliyunResponse>;
-}
-
-interface AliyunSmsRuntime {
-  SmsClient: Constructor<AliyunSmsClient>;
-  RequiredPhoneCodeRequest: Constructor;
-  ValidPhoneCodeRequest: Constructor;
-}
-
+type VerificationProvider = "mock" | "aliyun_pnvs" | "manual";
 interface VerificationCodeResult {
   phone: string;
   expiresInSeconds: number;
@@ -31,38 +24,8 @@ interface VerificationCodeResult {
 const mainlandPhonePattern = /^1\d{10}$/;
 const verificationCodePattern = /^\d{4,8}$/;
 
-const dysmsapiExports =
-  ((Dysmsapi20170525 as { default?: unknown }).default as Record<string, unknown> | undefined) ??
-  (Dysmsapi20170525 as unknown as Record<string, unknown>);
-
-const SmsClient = (dysmsapiExports.default ?? dysmsapiExports) as Constructor;
-const RequiredPhoneCodeRequest = (dysmsapiExports.RequiredPhoneCodeRequest ??
-  (dysmsapiExports.models as Record<string, unknown> | undefined)?.RequiredPhoneCodeRequest) as
-  | Constructor
-  | undefined;
-const ValidPhoneCodeRequest = (dysmsapiExports.ValidPhoneCodeRequest ??
-  (dysmsapiExports.models as Record<string, unknown> | undefined)?.ValidPhoneCodeRequest) as
-  | Constructor
-  | undefined;
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
-
-const resolveAliyunSmsRuntime = (): AliyunSmsRuntime => {
-  if (
-    typeof SmsClient !== "function" ||
-    typeof RequiredPhoneCodeRequest !== "function" ||
-    typeof ValidPhoneCodeRequest !== "function"
-  ) {
-    throw new InternalServerErrorException("短信验证码服务依赖未正确安装。");
-  }
-
-  return {
-    SmsClient: SmsClient as Constructor<AliyunSmsClient>,
-    RequiredPhoneCodeRequest,
-    ValidPhoneCodeRequest
-  };
-};
 
 @Injectable()
 export class VerificationCodeService {
@@ -79,13 +42,24 @@ export class VerificationCodeService {
     const normalizedPurpose = this.normalizePurpose(purpose);
     this.assertCanRequestCode(normalizedPhone, normalizedPurpose);
 
-    if (this.getProvider() === "aliyun") {
-      await this.requestAliyunCode(normalizedPhone);
+    const provider = this.getProvider();
+
+    if (provider === "aliyun_pnvs") {
+      await this.requestAliyunPnvsCode(normalizedPhone, normalizedPurpose);
       this.store.rememberVerificationRequest(normalizedPhone, normalizedPurpose);
       return {
         phone: normalizedPhone,
         expiresInSeconds: 300,
-        provider: "aliyun"
+        provider: "aliyun_pnvs"
+      };
+    }
+
+    if (provider === "manual") {
+      this.store.rememberVerificationRequest(normalizedPhone, normalizedPurpose);
+      return {
+        phone: normalizedPhone,
+        expiresInSeconds: 300,
+        provider: "manual"
       };
     }
 
@@ -107,12 +81,18 @@ export class VerificationCodeService {
     const normalizedCode = this.normalizeVerificationCode(code);
     const normalizedPurpose = this.normalizePurpose(purpose);
 
-    if (this.getProvider() === "aliyun") {
+    const provider = this.getProvider();
+
+    if (provider === "aliyun_pnvs") {
       if (!this.store.canAttemptVerification(normalizedPhone, normalizedPurpose)) {
         return false;
       }
 
-      const verified = await this.verifyAliyunCode(normalizedPhone, normalizedCode);
+      const verified = await this.verifyAliyunPnvsCode(
+        normalizedPhone,
+        normalizedCode,
+        normalizedPurpose
+      );
 
       if (verified) {
         // 以本地一次性状态成功消费为最终结果，避免并发校验同时获得登录资格。
@@ -121,6 +101,19 @@ export class VerificationCodeService {
         this.store.recordVerificationFailure(normalizedPhone, normalizedPurpose);
       }
 
+      return false;
+    }
+
+    if (provider === "manual") {
+      if (!this.store.canAttemptVerification(normalizedPhone, normalizedPurpose)) {
+        return false;
+      }
+
+      if (this.matchesManualVerificationCode(normalizedCode)) {
+        return this.store.consumeVerificationRequest(normalizedPhone, normalizedPurpose);
+      }
+
+      this.store.recordVerificationFailure(normalizedPhone, normalizedPurpose);
       return false;
     }
 
@@ -137,11 +130,41 @@ export class VerificationCodeService {
   }
 
   private getProvider(): VerificationProvider {
+    this.assertRuntimeDataPlaneVerificationPolicy();
+    const fullSimulationMode = resolveFullSimulationExternalMode("verification", {
+      VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE"),
+      VM_SIMULATION_PROFILE: this.configService.get<string>("VM_SIMULATION_PROFILE"),
+      VM_FULL_SIMULATION_ENABLED: this.configService.get<string>("VM_FULL_SIMULATION_ENABLED"),
+      VM_FULL_SIMULATION_VERIFICATION_MODE: this.configService.get<string>(
+        "VM_FULL_SIMULATION_VERIFICATION_MODE"
+      )
+    });
+
+    if (fullSimulationMode) {
+      return fullSimulationMode === "real"
+        ? "aliyun_pnvs"
+        : fullSimulationMode === "manual"
+          ? "manual"
+          : "mock";
+    }
+
     const raw = (this.configService.get<string>("VERIFICATION_CODE_PROVIDER") ?? "mock")
       .trim()
       .toLowerCase();
 
-    return raw === "aliyun" ? "aliyun" : "mock";
+    let provider: VerificationProvider;
+
+    if (!raw || raw === "mock") {
+      provider = "mock";
+    } else if (raw === "aliyun_pnvs") {
+      provider = "aliyun_pnvs";
+    } else {
+      throw new InternalServerErrorException(
+        "VERIFICATION_CODE_PROVIDER 只能设置为 mock 或 aliyun_pnvs。"
+      );
+    }
+
+    return provider;
   }
 
   private isPreviewEnabled() {
@@ -151,7 +174,12 @@ export class VerificationCodeService {
       return false;
     }
 
-    return !isProductionRuntime() && this.isLocalPublicBaseUrl() && this.isLoopbackApiHost();
+    return (
+      !isProductionRuntime() &&
+      !this.isLiveDataPlane() &&
+      this.isLocalPublicBaseUrl() &&
+      this.isLoopbackApiHost()
+    );
   }
 
   private isLoopbackApiHost() {
@@ -180,6 +208,62 @@ export class VerificationCodeService {
     }
   }
 
+  private assertRuntimeDataPlaneVerificationPolicy() {
+    try {
+      assertConfiguredRuntimeDataPlaneVerificationPolicy({
+        VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE"),
+        VM_DATA_ROOT: this.configService.get<string>("VM_DATA_ROOT"),
+        VM_DATA_PLANE_ID: this.configService.get<string>("VM_DATA_PLANE_ID"),
+        VM_SIMULATION_PROFILE: this.configService.get<string>("VM_SIMULATION_PROFILE"),
+        VM_FULL_SIMULATION_ENABLED: this.configService.get<string>("VM_FULL_SIMULATION_ENABLED"),
+        VM_FULL_SIMULATION_VERIFICATION_MODE: this.configService.get<string>(
+          "VM_FULL_SIMULATION_VERIFICATION_MODE"
+        ),
+        VERIFICATION_CODE_PROVIDER: this.configService.get<string>(
+          "VERIFICATION_CODE_PROVIDER"
+        ),
+        VERIFICATION_CODE_PREVIEW_ENABLED: this.configService.get<string>(
+          "VERIFICATION_CODE_PREVIEW_ENABLED"
+        ),
+        VERIFICATION_CODE_MANUAL_VALUE: this.configService.get<string>(
+          "VERIFICATION_CODE_MANUAL_VALUE"
+        )
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        error instanceof Error ? error.message : "验证码数据平面配置无效。"
+      );
+    }
+  }
+
+  private isLiveDataPlane() {
+    const store = this.store as unknown as {
+      isLiveDataPlane?: () => boolean;
+    };
+
+    if (typeof store.isLiveDataPlane === "function") {
+      return store.isLiveDataPlane();
+    }
+
+    return this.configService.get<string>("VM_DATA_PLANE")?.trim().toLowerCase() === "live";
+  }
+
+  private matchesManualVerificationCode(code: string) {
+    const configuredCode =
+      this.configService.get<string>("VERIFICATION_CODE_MANUAL_VALUE")?.trim() ?? "";
+
+    if (!verificationCodePattern.test(configuredCode)) {
+      throw new InternalServerErrorException(
+        "全真模拟手动验证码必须通过 VERIFICATION_CODE_MANUAL_VALUE 设置为 4 至 8 位数字。"
+      );
+    }
+
+    const expected = Buffer.from(configuredCode, "utf8");
+    const received = Buffer.from(code, "utf8");
+
+    return expected.length === received.length && timingSafeEqual(expected, received);
+  }
+
   private normalizePhone(phone: string) {
     const normalizedPhone = String(phone ?? "").trim();
 
@@ -201,7 +285,7 @@ export class VerificationCodeService {
   }
 
   private normalizePurpose(purpose: VerificationPurpose): VerificationPurpose {
-    if (purpose === "app-login" || purpose === "register") {
+    if (purpose === "app-login" || purpose === "register" || purpose === "password-reset") {
       return purpose;
     }
 
@@ -219,39 +303,49 @@ export class VerificationCodeService {
     }
   }
 
-  private createAliyunClient() {
-    const accessKeyId = this.configService.get<string>("ALIYUN_SMS_ACCESS_KEY_ID")?.trim();
+  private createAliyunPnvsClient() {
+    const accessKeyId = this.configService.get<string>("ALIYUN_PNVS_ACCESS_KEY_ID")?.trim();
     const accessKeySecret = this.configService
-      .get<string>("ALIYUN_SMS_ACCESS_KEY_SECRET")
+      .get<string>("ALIYUN_PNVS_ACCESS_KEY_SECRET")
       ?.trim();
     const regionId =
-      this.configService.get<string>("ALIYUN_SMS_REGION_ID")?.trim() || "cn-hangzhou";
+      this.configService.get<string>("ALIYUN_PNVS_REGION_ID")?.trim() || "cn-hangzhou";
     const endpoint =
-      this.configService.get<string>("ALIYUN_SMS_ENDPOINT")?.trim() || "dysmsapi.aliyuncs.com";
+      this.configService.get<string>("ALIYUN_PNVS_ENDPOINT")?.trim() || "dypnsapi.aliyuncs.com";
 
     if (!accessKeyId || !accessKeySecret) {
       throw new InternalServerErrorException("短信验证码服务未完成配置。");
     }
 
-    const runtime = resolveAliyunSmsRuntime();
-
-    return new runtime.SmsClient({
+    const config = new $OpenApiUtil.Config({
       accessKeyId,
       accessKeySecret,
-      regionId,
-      endpoint
     });
+    config.regionId = regionId;
+    config.endpoint = endpoint;
+
+    return new Dypnsapi20170525(config);
   }
 
-  private async requestAliyunCode(phone: string) {
+  private async requestAliyunPnvsCode(phone: string, purpose: VerificationPurpose) {
     try {
-      const runtime = resolveAliyunSmsRuntime();
-      const client = this.createAliyunClient();
-      const request = new runtime.RequiredPhoneCodeRequest({
-        phoneNo: phone
+      const request = new SendSmsVerifyCodeRequest({
+        phoneNumber: phone,
+        countryCode: "86",
+        schemeName: this.getAliyunPnvsSchemeName(purpose),
+        signName: this.requireAliyunPnvsConfig("ALIYUN_PNVS_SIGN_NAME"),
+        templateCode: this.requireAliyunPnvsConfig("ALIYUN_PNVS_TEMPLATE_CODE"),
+        templateParam: JSON.stringify({ code: "##code##" }),
+        returnVerifyCode: false,
+        codeLength: 6,
+        codeType: 1,
+        validTime: 300,
+        interval: 60,
+        duplicatePolicy: 1,
+        autoRetry: 0
       });
-      const response = await client.requiredPhoneCode(request);
-      const body = isRecord(response) && isRecord(response.body) ? response.body : {};
+      const response = await this.createAliyunPnvsClient().sendSmsVerifyCode(request);
+      const body = isRecord(response.body) ? response.body : ({} as Record<string, unknown>);
 
       if (!(body.code === "OK" || body.success === true)) {
         throw new Error(
@@ -259,27 +353,56 @@ export class VerificationCodeService {
         );
       }
     } catch (error) {
-      throw this.wrapAliyunError(error, "短信验证码发送失败。");
+      throw this.wrapAliyunPnvsError(error, "短信验证码发送失败。");
     }
   }
 
-  private async verifyAliyunCode(phone: string, code: string) {
+  private async verifyAliyunPnvsCode(
+    phone: string,
+    code: string,
+    purpose: VerificationPurpose
+  ) {
     try {
-      const runtime = resolveAliyunSmsRuntime();
-      const client = this.createAliyunClient();
-      const request = new runtime.ValidPhoneCodeRequest({
-        phoneNo: phone,
-        certifyCode: code
+      const request = new CheckSmsVerifyCodeRequest({
+        phoneNumber: phone,
+        countryCode: "86",
+        schemeName: this.getAliyunPnvsSchemeName(purpose),
+        verifyCode: code
       });
-      const response = await client.validPhoneCode(request);
-      const body = isRecord(response) && isRecord(response.body) ? response.body : {};
-      return Boolean((body.code === "OK" || body.success === true) && body.data);
+      const response = await this.createAliyunPnvsClient().checkSmsVerifyCode(request);
+      const body = isRecord(response.body) ? response.body : ({} as Record<string, unknown>);
+      const model = isRecord(body.model) ? body.model : undefined;
+      return Boolean(
+        (body.code === "OK" || body.success === true) && model?.verifyResult === "PASS"
+      );
     } catch (error) {
-      throw this.wrapAliyunError(error, "短信验证码校验失败。");
+      throw this.wrapAliyunPnvsError(error, "短信验证码校验失败。");
     }
   }
 
-  private wrapAliyunError(error: unknown, fallback: string) {
+  private getAliyunPnvsSchemeName(purpose: VerificationPurpose) {
+    const key =
+      purpose === "app-login"
+        ? "ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN"
+        : purpose === "register"
+          ? "ALIYUN_PNVS_SCHEME_NAME_REGISTER"
+          : purpose === "password-reset"
+            ? "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET"
+            : "ALIYUN_PNVS_SCHEME_NAME_GENERAL";
+    return this.requireAliyunPnvsConfig(key);
+  }
+
+  private requireAliyunPnvsConfig(key: string) {
+    const value = this.configService.get<string>(key)?.trim();
+
+    if (!value) {
+      throw new InternalServerErrorException("短信验证码服务未完成配置。");
+    }
+
+    return value;
+  }
+
+  private wrapAliyunPnvsError(error: unknown, fallback: string) {
     if (error instanceof BadRequestException || error instanceof InternalServerErrorException) {
       return error;
     }

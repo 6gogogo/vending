@@ -285,7 +285,7 @@ test("预约、预结算和正式开柜都拒绝只有过期批次的货品，�
     {} as InventoryOrdersService,
     new AlertsService(store),
     reservations,
-    new ConfigService({})
+    new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "false" })
   );
   const payload = {
     phone: user.phone,

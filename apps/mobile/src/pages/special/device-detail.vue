@@ -5,7 +5,6 @@ import { onLoad, onUnload } from "@dcloudio/uni-app";
 import type {
   CabinetEventRecord,
   CabinetOpenRequest,
-  CabinetPreSettlement,
   CabinetReservationRecord,
   DeviceRecord,
   GoodsCategory,
@@ -54,22 +53,16 @@ const goodsList = ref<Array<{
   expiresAt?: string;
 }>>([]);
 const selectedMap = reactive<Record<string, number>>({});
-const preSettlement = ref<CabinetPreSettlement>();
 const reservationSettings = ref<ReservationSettings>();
 const reservations = ref<CabinetReservationRecord[]>([]);
 const reservationFulfillmentIssue = ref<{ reservationId: string; message: string }>();
 const openConfirmation = ref<{
   payload: CabinetOpenRequest;
-  settlement?: CabinetPreSettlement;
-  quoteId?: string;
-  quoteExpiresAt?: string;
 }>();
 const openConfirmationDialog = ref<HTMLElement | { $el?: HTMLElement }>();
-type OpenConfirmationDecision = "confirmed" | "cancelled" | "expired";
+type OpenConfirmationDecision = "confirmed" | "cancelled";
 let openConfirmationResolver: ((decision: OpenConfirmationDecision) => void) | undefined;
 let openConfirmationPreviousFocus: HTMLElement | undefined;
-let openConfirmationExpiryTimer: ReturnType<typeof setTimeout> | undefined;
-let pendingBillingPromptShown = false;
 
 uiPreferencesStore.hydrate();
 
@@ -117,7 +110,7 @@ const reservationRuleLines = computed(() => {
   }
 
   if (!settings.enabled) {
-    return ["当前暂未开放提前预约，请到柜机旁直接扫码或手动开柜。"];
+    return ["当前暂未开放预约取货，暂时不能开柜领取。"];
   }
 
   return [
@@ -131,31 +124,12 @@ const reservationRuleLines = computed(() => {
 const selectedGoodsDetails = computed(() =>
   selectedItems.value.map((item) => {
     const goods = goodsList.value.find((entry) => entry.goodsId === item.goodsId);
-    const freeQuantity = Math.min(item.quantity, Math.max(0, getRemaining(item.goodsId)));
-    const paidQuantity = Math.max(0, item.quantity - freeQuantity);
-    const unitPrice = goods?.price ?? 0;
 
     return {
       ...item,
-      stock: goods?.stock ?? 0,
-      unitPrice,
-      freeQuantity,
-      paidQuantity,
-      paidAmount: paidQuantity * unitPrice
+      stock: goods?.stock ?? 0
     };
   })
-);
-
-const selectedFreeTotal = computed(() =>
-  selectedGoodsDetails.value.reduce((total, item) => total + item.freeQuantity, 0)
-);
-
-const selectedPaidTotal = computed(() =>
-  selectedGoodsDetails.value.reduce((total, item) => total + item.paidQuantity, 0)
-);
-
-const estimatedPayableAmount = computed(() =>
-  selectedGoodsDetails.value.reduce((total, item) => total + item.paidAmount, 0)
 );
 
 const availableGoodsCount = computed(() =>
@@ -218,7 +192,7 @@ const distanceBanner = computed(() => {
       title: "已确认你就在柜机附近",
       lines: [
         `当前检测距离约 ${formatDistance(manualDistanceMeters.value)}，可以继续选择物资。`,
-        "本页展示柜内有库存的物资，超出免费额度的部分会按物资价格计费。"
+        "请先选择物资并提交预约；只有有效预约才可以开柜取货。"
       ]
     };
   }
@@ -226,14 +200,14 @@ const distanceBanner = computed(() => {
   return {
     tone: "warning",
     title: "暂未确认你与柜机的相对距离",
-    lines: ["如果不是扫码进入，建议站到柜机旁后再继续操作。", "超出免费额度的部分会按物资价格计费。"]
+    lines: ["如果不是扫码进入，建议站到柜机旁后再继续操作。", "请先提交预约，到柜后使用预约开柜。"]
   };
 });
 
 const openGuideText = computed(() =>
   scanMode.value
-    ? "当前通过相机扫码识别柜机；开门前仍需核对现场位置、物资和预结算。"
-    : "建议站在柜机旁再操作，先选好计划领取的物资，取货后及时关门。"
+    ? "当前通过相机扫码识别柜机；请先确认现场位置并选择要预约的物资。"
+    : "先选好计划领取的物资并提交预约，到柜后使用预约开柜。"
 );
 const distanceStepText = computed(() => {
   if (manualDistanceState.value === "far") {
@@ -262,8 +236,8 @@ const pickupFlowSteps = computed(() => [
           : ("todo" as const)
   },
   {
-    label: "开柜",
-    description: selectedItems.value.length ? "可发起开柜" : "先选物资",
+    label: "预约",
+    description: selectedItems.value.length ? "可提交预约" : "先选物资",
     state: selectedItems.value.length ? ("current" as const) : ("todo" as const)
   },
   {
@@ -272,89 +246,11 @@ const pickupFlowSteps = computed(() => [
     state: "todo" as const
   },
   {
-    label: "完成结算",
-    description: "自动核对",
+    label: "领取核对",
+    description: "自动记录",
     state: "todo" as const
   }
 ]);
-
-const findPendingBillingEvent = async () => {
-  if (!sessionStore.user) {
-    return undefined;
-  }
-
-  const events = await mobileApi.listCabinetEvents(sessionStore.user.id);
-  return events.find((entry) => {
-    if (entry.role !== "special" || entry.refundedAt || entry.billingResolvedAt) {
-      return false;
-    }
-
-    const pendingAdjustment = entry.adjustments?.some(
-      (adjustment) =>
-        adjustment.amount > 0 &&
-        adjustment.paymentNotifyStatus !== "success" &&
-        !adjustment.refundedAt
-    );
-
-    if (pendingAdjustment) {
-      return true;
-    }
-
-    return (
-      (entry.status === "settled" || entry.status === "closed") &&
-      entry.amount > 0 &&
-      entry.paymentNotifyStatus !== "success" &&
-      entry.billingStatus !== "mismatch"
-    );
-  });
-};
-
-const promptPendingBillingIfNeeded = async (force = false) => {
-  if (pendingBillingPromptShown && !force) {
-    return false;
-  }
-
-  let pendingEvent: CabinetEventRecord | undefined;
-
-  try {
-    pendingEvent = await findPendingBillingEvent();
-  } catch {
-    return false;
-  }
-
-  if (!pendingEvent) {
-    return false;
-  }
-
-  pendingBillingPromptShown = true;
-  const pendingAdjustment = pendingEvent.adjustments?.find(
-    (adjustment) =>
-      adjustment.amount > 0 &&
-      adjustment.paymentNotifyStatus !== "success" &&
-      !adjustment.refundedAt
-  );
-  const amount = pendingAdjustment?.amount ?? pendingEvent.amount;
-  const orderNo = pendingAdjustment?.orderNo ?? pendingEvent.orderNo;
-  const confirmed = await new Promise<boolean>((resolve) => {
-    uni.showModal({
-      title: pendingAdjustment ? "补扣待支付" : "结算待支付",
-      content: `订单 ${orderNo} 仍需支付 ${formatCurrency(amount)}，处理完成后才能继续开柜或预约。`,
-      confirmText: "去支付",
-      cancelText: "稍后",
-      success: ({ confirm }) => resolve(confirm),
-      fail: () => resolve(false)
-    });
-  });
-
-  if (!confirmed) {
-    return false;
-  }
-
-  uni.navigateTo({
-    url: `/pages/common/door-closed?eventId=${encodeURIComponent(pendingEvent.eventId)}`
-  });
-  return true;
-};
 
 const load = async () => {
   await sessionStore.bootstrap();
@@ -363,10 +259,6 @@ const load = async () => {
     uni.reLaunch({
       url: "/pages/common/login"
     });
-    return;
-  }
-
-  if (await promptPendingBillingIfNeeded()) {
     return;
   }
 
@@ -494,7 +386,6 @@ const updateSelected = (goodsId: string, delta: number) => {
     return;
   }
 
-  preSettlement.value = undefined;
   selectedMap[goodsId] = next;
 };
 
@@ -524,12 +415,11 @@ const buildOpenPayload = (reservation?: CabinetReservationRecord): CabinetOpenRe
 const performOpen = async (
   payload: CabinetOpenRequest,
   knownMatchingEventIds?: Set<string>
-): Promise<"handled" | "requote"> => {
+): Promise<"handled"> => {
   submitting.value = true;
   const requestedAt = Date.now();
   try {
     const response = await mobileApi.openCabinet(payload);
-    preSettlement.value = response.preSettlement;
 
     if (response.remainingQuota) {
       sessionStore.setQuota({
@@ -544,10 +434,6 @@ const performOpen = async (
     return "handled";
   } catch (error) {
     const message = getErrorMessage(error);
-
-    if (isOpenQuoteRefreshRequired(message)) {
-      return "requote";
-    }
 
     if (isOpenOutcomeUncertain(message, error)) {
       const pendingEvent = await findLikelyOpenEvent(payload, requestedAt, knownMatchingEventIds);
@@ -573,14 +459,6 @@ const performOpen = async (
     submitting.value = false;
   }
 };
-
-const isOpenQuoteRefreshRequired = (message: string) =>
-  [
-    "需要重新获取并确认预结算报价",
-    "预结算报价已失效",
-    "商品、额度或价格已经变化",
-    "请重新确认预结算报价"
-  ].some((keyword) => message.includes(keyword));
 
 const sameIntentItems = (
   expected: CabinetOpenRequest["intentItems"],
@@ -746,13 +624,6 @@ const trapOpenConfirmationFocus = (event: KeyboardEvent) => {
   }
 };
 
-const clearOpenConfirmationExpiryTimer = () => {
-  if (openConfirmationExpiryTimer) {
-    clearTimeout(openConfirmationExpiryTimer);
-    openConfirmationExpiryTimer = undefined;
-  }
-};
-
 const restoreOpenConfirmationFocus = async () => {
   const target = openConfirmationPreviousFocus;
   openConfirmationPreviousFocus = undefined;
@@ -763,16 +634,8 @@ const restoreOpenConfirmationFocus = async () => {
   }
 };
 
-const requestOpenConfirmation = (
-  payload: CabinetOpenRequest,
-  preview: {
-    preSettlement?: CabinetPreSettlement;
-    quoteId?: string;
-    quoteExpiresAt?: string;
-  }
-) =>
+const requestOpenConfirmation = (payload: CabinetOpenRequest) =>
   new Promise<OpenConfirmationDecision>((resolve) => {
-    clearOpenConfirmationExpiryTimer();
     openConfirmationPreviousFocus =
       typeof document !== "undefined" &&
       typeof HTMLElement !== "undefined" &&
@@ -780,43 +643,13 @@ const requestOpenConfirmation = (
         ? document.activeElement
         : undefined;
     openConfirmationResolver = resolve;
-    openConfirmation.value = {
-      payload,
-      settlement: preview.preSettlement,
-      quoteId: preview.quoteId,
-      quoteExpiresAt: preview.quoteExpiresAt
-    };
-
-    const expiresAt = preview.quoteExpiresAt ? Date.parse(preview.quoteExpiresAt) : Number.NaN;
-
-    if (Number.isFinite(expiresAt)) {
-      const remainingMs = Math.max(0, expiresAt - Date.now());
-      openConfirmationExpiryTimer = setTimeout(() => {
-        void finishOpenConfirmation("expired");
-      }, Math.min(remainingMs, 2_147_483_647));
-    }
+    openConfirmation.value = { payload };
 
     void nextTick(() => resolveOpenConfirmationElement()?.focus());
   });
 
 const finishOpenConfirmation = async (decision: OpenConfirmationDecision) => {
-  if (
-    decision === "confirmed" &&
-    openConfirmation.value?.quoteExpiresAt &&
-    Date.parse(openConfirmation.value.quoteExpiresAt) <= Date.now()
-  ) {
-    decision = "expired";
-  }
-
-  if (
-    decision === "confirmed" &&
-    (!openConfirmation.value?.settlement || !openConfirmation.value.quoteId)
-  ) {
-    return;
-  }
-
   const resolve = openConfirmationResolver;
-  clearOpenConfirmationExpiryTimer();
   openConfirmationResolver = undefined;
   openConfirmation.value = undefined;
   resolve?.(decision);
@@ -836,68 +669,17 @@ const previewAndConfirmOpen = async (
     return;
   }
 
-  submitting.value = true;
   try {
-    let preview = await mobileApi.previewOpenSettlement(payload);
-    let knownMatchingEventIdsPromise = captureMatchingOpenEventIds(payload);
+    const decision = await requestOpenConfirmation(payload);
 
-    while (true) {
-      preSettlement.value = preview.preSettlement;
-      const decision = await requestOpenConfirmation(payload, preview);
-
-      if (decision === "cancelled") {
-        return;
-      }
-
-      if (decision === "expired") {
-        uni.showToast({
-          title: "报价已过期，正在重新核对",
-          icon: "none"
-        });
-        preview = await mobileApi.previewOpenSettlement(payload);
-        knownMatchingEventIdsPromise = captureMatchingOpenEventIds(payload);
-        continue;
-      }
-
-      const knownMatchingEventIds = await readKnownEventIdsWithoutDelayingOpen(
-        knownMatchingEventIdsPromise
-      );
-      const quoteExpiresAt = preview.quoteExpiresAt
-        ? Date.parse(preview.quoteExpiresAt)
-        : Number.NaN;
-
-      if (Number.isFinite(quoteExpiresAt) && quoteExpiresAt <= Date.now()) {
-        uni.showToast({
-          title: "报价已过期，正在重新核对",
-          icon: "none"
-        });
-        preview = await mobileApi.previewOpenSettlement(payload);
-        knownMatchingEventIdsPromise = captureMatchingOpenEventIds(payload);
-        continue;
-      }
-
-      submitting.value = false;
-      const openResult = await performOpen(
-        {
-          ...payload,
-          quoteId: preview.quoteId
-        },
-        knownMatchingEventIds
-      );
-
-      if (openResult === "requote") {
-        submitting.value = true;
-        uni.showToast({
-          title: "物资、额度或报价已变化，正在重新核对",
-          icon: "none"
-        });
-        preview = await mobileApi.previewOpenSettlement(payload);
-        knownMatchingEventIdsPromise = captureMatchingOpenEventIds(payload);
-        continue;
-      }
-
+    if (decision === "cancelled") {
       return;
     }
+
+    const knownMatchingEventIds = await readKnownEventIdsWithoutDelayingOpen(
+      captureMatchingOpenEventIds(payload)
+    );
+    await performOpen(payload, knownMatchingEventIds);
   } catch (error) {
     const message = getErrorMessage(error);
 
@@ -909,10 +691,6 @@ const previewAndConfirmOpen = async (
       return;
     }
 
-    if ((message.includes("待完成结算") || message.includes("费用")) && await promptPendingBillingIfNeeded(true)) {
-      return;
-    }
-
     uni.showToast({
       title: message,
       icon: "none"
@@ -920,34 +698,6 @@ const previewAndConfirmOpen = async (
   } finally {
     submitting.value = false;
   }
-};
-
-const submit = async () => {
-  if (submitting.value) {
-    return;
-  }
-
-  if (!deviceCanOpen.value) {
-    showOpenBlocked();
-    return;
-  }
-
-  if (!selectedItems.value.length) {
-    uni.showModal({
-      title: "请选择物资",
-      content: "正式开柜前需要先选择本次计划领取的物资。",
-      showCancel: false
-    });
-    return;
-  }
-
-  const payload = buildOpenPayload();
-
-  if (!payload) {
-    return;
-  }
-
-  await previewAndConfirmOpen(payload);
 };
 
 const createReservation = async () => {
@@ -1052,15 +802,6 @@ const cancelReservation = async (reservation: CabinetReservationRecord) => {
   }
 };
 
-const formatSettlementBreakdown = (item: {
-  freeQuantity: number;
-  paidQuantity: number;
-  paidAmount: number;
-}) =>
-  `免费 ${item.freeQuantity} 件 · 付费 ${item.paidQuantity} 件${
-    item.paidQuantity > 0 ? ` · ${formatCurrency(item.paidAmount)}` : ""
-  }`;
-
 const goFeedback = () => {
   uni.navigateTo({
     url: `/pages/common/feedback?deviceCode=${deviceCode.value}`
@@ -1093,8 +834,6 @@ const openNavigation = () => {
   });
 };
 
-const formatCurrency = (amount: number) => `￥${(amount / 100).toFixed(2)}`;
-
 const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters === undefined) {
     return "未知距离";
@@ -1118,7 +857,6 @@ onLoad((query) => {
 });
 
 onUnload(() => {
-  clearOpenConfirmationExpiryTimer();
   const resolve = openConfirmationResolver;
   openConfirmationResolver = undefined;
   openConfirmation.value = undefined;
@@ -1155,13 +893,13 @@ onUnload(() => {
         </view>
 
         <view v-if="!accessibilityEnabled" class="section-heading">
-          <text class="section-heading__title">本次领取计划</text>
-          <text class="vm-subtitle">请先选择本次要领取的物资，再确认开柜。</text>
+          <text class="section-heading__title">{{ appCopy.reservationPickup.planTitle }}</text>
+          <text class="vm-subtitle">{{ appCopy.reservationPickup.planSubtitle }}</text>
         </view>
 
         <view v-if="!accessibilityEnabled" class="overview-grid">
-          <ServiceMetric label="已选种类" :value="selectedItems.length" hint="已加入本次计划的物资种类" tone="accent" />
-          <ServiceMetric label="已选件数" :value="selectedTotal" :hint="`免费 ${selectedFreeTotal} 件，付费 ${selectedPaidTotal} 件`" />
+          <ServiceMetric label="已选种类" :value="selectedItems.length" hint="已加入本次预约的物资种类" tone="accent" />
+          <ServiceMetric label="已选件数" :value="selectedTotal" hint="将用于创建预约" />
           <ServiceMetric label="可选物资" :value="availableGoodsCount" hint="当前柜机仍有库存的物资种类" />
         </view>
 
@@ -1169,9 +907,7 @@ onUnload(() => {
           <text class="selection-banner__label">{{ scanMode ? "扫码模式" : "手动模式" }}</text>
           <text class="selection-banner__value">{{ selectedSummary || "暂未选择物资" }}</text>
           <text class="selection-banner__hint">{{ openGuideText }}</text>
-          <text class="selection-banner__hint">
-            {{ estimatedPayableAmount > 0 ? `当前预估需支付 ${formatCurrency(estimatedPayableAmount)}` : "当前选择预计免费" }}，正式结算仍以柜门关闭后的平台识别结果为准。
-          </text>
+          <text class="selection-banner__hint">{{ appCopy.reservationPickup.selectionHint }}</text>
         </view>
 
         <view v-if="reservationSettings?.enabled && nearestReservation" class="reservation-panel">
@@ -1215,16 +951,11 @@ onUnload(() => {
 
         <view v-if="selectedGoodsDetails.length" class="settlement-preview">
           <view class="settlement-preview__head">
-            <text class="settlement-preview__title">预结算明细</text>
-            <text class="settlement-preview__amount">
-              {{ estimatedPayableAmount > 0 ? formatCurrency(estimatedPayableAmount) : "免费" }}
-            </text>
+            <text class="settlement-preview__title">{{ appCopy.reservationPickup.itemListTitle }}</text>
           </view>
           <view v-for="item in selectedGoodsDetails" :key="item.goodsId" class="settlement-row">
             <text class="settlement-row__name">{{ item.goodsName }} x{{ item.quantity }}</text>
-            <text class="settlement-row__meta">
-              {{ formatSettlementBreakdown(item) }}
-            </text>
+            <text class="settlement-row__meta">当前库存 {{ item.stock }} 件</text>
           </view>
         </view>
 
@@ -1241,8 +972,8 @@ onUnload(() => {
               <text class="goods-item__meta">
                 {{
                   accessibilityEnabled
-                    ? `现有 ${goods.stock ?? 0} 件，今日免费额度 ${getRemaining(goods.goodsId)} 件，超出按 ${formatCurrency(goods.price)} 每件计费`
-                    : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 免费 ${getRemaining(goods.goodsId)} 件 · 超出 ${formatCurrency(goods.price)}/件`
+                    ? `现有 ${goods.stock ?? 0} 件，今日可领取额度 ${getRemaining(goods.goodsId)} 件`
+                    : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 今日可领取 ${getRemaining(goods.goodsId)} 件`
                 }}
               </text>
               <text v-if="goods.expiresAt" class="goods-item__hint">
@@ -1259,15 +990,12 @@ onUnload(() => {
         <EmptyState
           v-else
           :title="loading ? '正在加载物资信息' : '当前柜机暂无可选物资'"
-          :description="loading ? '请稍候，系统正在同步柜机物资列表。' : accessibilityEnabled ? '' : '柜内有库存的物资会在这里展示，超出免费额度的部分会按物资价格计费。'"
+          :description="loading ? '请稍候，系统正在同步柜机物资列表。' : accessibilityEnabled ? '' : '柜内有库存的物资会在这里展示，可领取额度由预约规则校验。'"
         />
 
         <view class="action-stack">
-          <button class="vm-button vm-button--warning" :disabled="!deviceCanOpen || submitting" :loading="submitting" @tap="submit">
-            {{ deviceCanOpen ? (scanMode ? "确认物资并扫码开柜" : "确认物资并手动开柜") : "柜机状态待刷新" }}
-          </button>
           <button v-if="reservationSettings?.enabled" class="vm-button vm-button--ghost" :loading="submitting" @tap="createReservation">
-            提前预约所选物资
+            {{ appCopy.reservationPickup.submitAction }}
           </button>
           <button v-if="hasNavigationTarget" class="vm-button vm-button--ghost" @tap="openNavigation">
             导航到此柜机
@@ -1292,16 +1020,8 @@ onUnload(() => {
       >
         <view class="open-confirmation-dialog__header">
           <text class="open-confirmation-dialog__eyebrow">开门前最后核对</text>
-          <text id="open-confirmation-title" class="open-confirmation-dialog__title">
-            {{
-              openConfirmation.settlement?.chargeRequired
-                ? "确认预结算"
-                : openConfirmation.settlement
-                  ? "确认免费领取"
-                  : "确认开柜"
-            }}
-          </text>
-          <text class="open-confirmation-dialog__hint">请逐项核对现场柜机、距离和费用，再决定是否开门。</text>
+          <text id="open-confirmation-title" class="open-confirmation-dialog__title">{{ appCopy.reservationPickup.openConfirmTitle }}</text>
+          <text class="open-confirmation-dialog__hint">{{ appCopy.reservationPickup.openConfirmHint }}</text>
         </view>
 
         <scroll-view class="open-confirmation-dialog__body" scroll-y aria-label="开柜核对信息">
@@ -1329,54 +1049,21 @@ onUnload(() => {
             </view>
           </view>
 
-          <view v-if="openConfirmation.settlement" class="open-confirmation-settlement">
+          <view class="open-confirmation-settlement">
             <view class="open-confirmation-settlement__summary">
-              <view>
-                <text id="open-confirmation-summary" class="open-confirmation-settlement__label">
-                  {{ openConfirmation.settlement.chargeRequired ? "预计需支付" : "本次预计" }}
-                </text>
-                <text class="open-confirmation-settlement__count">
-                  免费 {{ openConfirmation.settlement.freeQuantity }} 件 · 付费
-                  {{ openConfirmation.settlement.paidQuantity }} 件
-                </text>
-              </view>
-              <text
-                class="open-confirmation-settlement__amount"
-                :class="{ 'open-confirmation-settlement__amount--free': !openConfirmation.settlement.chargeRequired }"
-              >
-                {{
-                  openConfirmation.settlement.chargeRequired
-                    ? formatCurrency(openConfirmation.settlement.payableAmount)
-                    : "免费"
-                }}
-              </text>
+              <text id="open-confirmation-summary" class="open-confirmation-settlement__label">{{ appCopy.reservationPickup.openConfirmSummary }}</text>
             </view>
             <view
-              v-for="item in openConfirmation.settlement.items"
+              v-for="item in openConfirmation.payload.intentItems"
               :key="item.goodsId"
               class="open-confirmation-settlement__item"
             >
               <text class="open-confirmation-settlement__name">{{ item.goodsName }} x{{ item.quantity }}</text>
-              <text class="open-confirmation-settlement__detail">{{ formatSettlementBreakdown(item) }}</text>
             </view>
           </view>
 
-          <view v-else class="open-confirmation-risk open-confirmation-risk--warning">
-            <text id="open-confirmation-summary" class="open-confirmation-risk__label">预结算明细暂不可用</text>
-            <text class="open-confirmation-risk__body">请返回重新加载；不要在费用未确认时继续开门。</text>
-          </view>
-
-          <view v-if="!openConfirmation.quoteId" class="open-confirmation-risk open-confirmation-risk--warning">
-            <text class="open-confirmation-risk__label">服务端报价暂不可用</text>
-            <text class="open-confirmation-risk__body">当前不会允许开门，请返回修改后重新核对。</text>
-          </view>
-
           <text id="open-confirmation-notice" class="open-confirmation-dialog__notice">
-            {{
-              openConfirmation.settlement?.chargeRequired
-                ? "柜门关闭后，若实际拿取与选择一致，将按以上金额支付；物资、额度或价格变化时系统会要求重新确认。"
-                : "柜门关闭后仍以平台实际识别结果为准；如物资、额度或价格变化，系统会要求重新确认。"
-            }}
+            {{ appCopy.reservationPickup.openConfirmNotice }}
           </text>
         </scroll-view>
 
@@ -1391,7 +1078,7 @@ onUnload(() => {
           <button
             class="vm-button vm-button--warning"
             tabindex="0"
-            :disabled="!openConfirmation.settlement || !openConfirmation.quoteId"
+            :disabled="submitting"
             @tap="finishOpenConfirmation('confirmed')"
           >
             确认并开柜

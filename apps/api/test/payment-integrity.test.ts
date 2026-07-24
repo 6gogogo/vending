@@ -4601,4 +4601,217 @@ describe("SmartVM 回调完整性", () => {
     assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
     assert.equal(harness.paymentNotifyCalls, 1);
   });
+
+  test("预约取货把非零结算金额归零，不创建用户付款", async () => {
+    const now = new Date().toISOString();
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "closed",
+        role: "special",
+        reservationId: "reservation-only-settlement",
+        reservationOnlyPickup: true,
+        amount: 500,
+        intentItems: [
+          {
+            goodsId: "goods-1",
+            goodsName: "测试商品",
+            category: "daily",
+            quantity: 1
+          }
+        ],
+        preSettlement: {
+          deviceCode: "CAB-PAYMENT-1",
+          doorNum: "1",
+          createdAt: now,
+          totalQuantity: 1,
+          freeQuantity: 0,
+          paidQuantity: 1,
+          originalAmount: 500,
+          freeAmount: 0,
+          payableAmount: 500,
+          chargeRequired: true,
+          summary: "历史预结算记录",
+          items: [
+            {
+              goodsId: "goods-1",
+              goodsName: "测试商品",
+              category: "daily",
+              quantity: 1,
+              freeQuantity: 0,
+              paidQuantity: 1,
+              unitPrice: 500,
+              originalAmount: 500,
+              freeAmount: 0,
+              paidAmount: 500
+            }
+          ]
+        }
+      }),
+      config: { VM_RESERVATION_ONLY_PICKUP: "false" }
+    });
+
+    harness.service.handleSettlement({
+      orderNo: harness.event.orderNo,
+      eventId: harness.event.eventId,
+      phone: harness.event.phone,
+      deviceCode: harness.event.deviceCode,
+      amount: 500,
+      notifyUrl: "http://127.0.0.1/mock-payment-notify",
+      detail: [
+        {
+          goodsId: "goods-1",
+          goodsName: "测试商品",
+          quantity: 1,
+          unitPrice: 500
+        }
+      ],
+      clientId: "smartvm-client",
+      nonceStr: "reservation-only-settlement",
+      timestamp: Math.floor(Date.now() / 1000),
+      sign: "verified"
+    });
+
+    assert.equal(harness.event.platformAmount, 500);
+    assert.equal(harness.event.amount, 0);
+    assert.equal(harness.event.billingStatus, "free");
+    assert.equal(harness.event.billingDeltaType, "none");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(harness.paymentNotifyCalls, 1);
+  });
+
+  test("历史预约支付事件不因当前切换预约取货模式而被改写", async () => {
+    const now = new Date().toISOString();
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "closed",
+        role: "special",
+        reservationId: "legacy-reservation-payment",
+        reservationOnlyPickup: undefined,
+        amount: 500,
+        intentItems: [
+          {
+            goodsId: "goods-1",
+            goodsName: "测试商品",
+            category: "daily",
+            quantity: 1
+          }
+        ],
+        preSettlement: {
+          deviceCode: "CAB-PAYMENT-1",
+          doorNum: "1",
+          createdAt: now,
+          totalQuantity: 1,
+          freeQuantity: 0,
+          paidQuantity: 1,
+          originalAmount: 500,
+          freeAmount: 0,
+          payableAmount: 500,
+          chargeRequired: true,
+          summary: "历史预结算记录",
+          items: [
+            {
+              goodsId: "goods-1",
+              goodsName: "测试商品",
+              category: "daily",
+              quantity: 1,
+              freeQuantity: 0,
+              paidQuantity: 1,
+              unitPrice: 500,
+              originalAmount: 500,
+              freeAmount: 0,
+              paidAmount: 500
+            }
+          ]
+        }
+      }),
+      config: { VM_RESERVATION_ONLY_PICKUP: "true" }
+    });
+
+    harness.service.handleSettlement({
+      orderNo: harness.event.orderNo,
+      eventId: harness.event.eventId,
+      phone: harness.event.phone,
+      deviceCode: harness.event.deviceCode,
+      amount: 500,
+      notifyUrl: "http://127.0.0.1/mock-payment-notify",
+      detail: [
+        {
+          goodsId: "goods-1",
+          goodsName: "测试商品",
+          quantity: 1,
+          unitPrice: 500
+        }
+      ],
+      clientId: "smartvm-client",
+      nonceStr: "legacy-reservation-payment",
+      timestamp: Math.floor(Date.now() / 1000),
+      sign: "verified"
+    });
+
+    assert.equal(harness.event.platformAmount, 500);
+    assert.equal(harness.event.amount, 500);
+    assert.equal(harness.event.billingStatus, "payable");
+    assert.equal(harness.event.paymentNotifyStatus, "pending");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(harness.paymentNotifyCalls, 0);
+  });
+
+  test("预约取货的非零补扣只进入管理员核对，并以零金额回写完成状态", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "settled",
+        role: "special",
+        reservationId: "reservation-only-adjustment",
+        reservationOnlyPickup: true,
+        amount: 0,
+        billingStatus: "free"
+      }),
+      config: { VM_RESERVATION_ONLY_PICKUP: "false" }
+    });
+    const callback = {
+      orgOrderNo: harness.event.orderNo,
+      orderNo: "reservation-only-adjustment-order",
+      eventId: harness.event.eventId,
+      phone: harness.event.phone,
+      deviceCode: harness.event.deviceCode,
+      amount: 200,
+      noticeUrl: "http://127.0.0.1/mock-adjustment-notify",
+      detail: [],
+      clientId: "smartvm-client",
+      nonceStr: "reservation-only-adjustment",
+      timestamp: Math.floor(Date.now() / 1000),
+      sign: "verified"
+    };
+
+    const result = harness.service.handleAdjustment(callback);
+    assert.match(result.message, /等待管理员核对/);
+    assert.equal(harness.event.amount, 0);
+    assert.equal(harness.event.billingStatus, "mismatch");
+    assert.equal(harness.event.adjustments?.[0]?.amount, 200);
+    assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "pending");
+    assert.equal(harness.paymentNotifyCalls, 0);
+
+    await assert.rejects(
+      harness.service.notifyPaymentSuccess(
+        {
+          orderNo: callback.orderNo,
+          eventId: callback.eventId,
+          transactionId: "forbidden-manual-payment",
+          deviceCode: callback.deviceCode,
+          amount: 0
+        },
+        "admin-1"
+      ),
+      /不能手工回写付款成功/
+    );
+
+    harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
+      note: "已核对实际领取差异"
+    });
+    assert.equal(harness.event.billingStatus, "admin_confirmed");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(harness.paymentNotifyCalls, 1);
+    assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
+    assert.match(harness.event.adjustments?.[0]?.paymentNotifyMessage ?? "", /预约取货完成状态/);
+  });
 });

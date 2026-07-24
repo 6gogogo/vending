@@ -9,6 +9,7 @@ import { firstValueFrom, of, throwError } from "rxjs";
 
 import { PersistenceInterceptor } from "../src/common/store/persistence.interceptor";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
+import type { VerificationPurpose } from "../src/common/store/persistence";
 import { AuthController } from "../src/modules/auth/auth.controller";
 import { AuthService } from "../src/modules/auth/auth.service";
 import { VerificationCodeService } from "../src/modules/auth/verification-code.service";
@@ -37,12 +38,12 @@ const createIsolatedStore = () => {
 const createAuthService = (
   store: InMemoryStoreService,
   verificationCodeService: {
-    requestCode: (phone: string, purpose?: string) => Promise<{
+    requestCode: (phone: string, purpose?: VerificationPurpose) => Promise<{
       phone: string;
       expiresInSeconds: number;
-      provider: "mock";
+      provider: "mock" | "aliyun_pnvs" | "manual";
     }>;
-    verifyCode: (phone: string, code: string, purpose?: string) => Promise<boolean>;
+    verifyCode: (phone: string, code: string, purpose?: VerificationPurpose) => Promise<boolean>;
   } = {
     requestCode: async (phone) => ({
       phone,
@@ -440,22 +441,22 @@ test("新设和修改后台密码至少八位，既有短密码仍可登录后�
   assert.ok(merchantCredential);
   const credentialPayload = {
     userId: merchantCredential.userId,
-    username: merchantCredential.username,
-    role: merchantCredential.role,
-    tenantId: merchantCredential.tenantId
+    role: merchantCredential.role
   };
   assert.throws(
     () =>
-      authService.createBackofficeCredential(superAdmin.token, {
+      authService.resetBackofficePasswordAsSuperAdmin(superAdmin.token, {
         ...credentialPayload,
-        password: "1234567"
+        newPassword: "1234567",
+        reason: "密码长度测试"
       }),
     /至少需要 8 位/
   );
   assert.doesNotThrow(() =>
-    authService.createBackofficeCredential(superAdmin.token, {
+    authService.resetBackofficePasswordAsSuperAdmin(superAdmin.token, {
       ...credentialPayload,
-      password: "12345678"
+      newPassword: "12345678",
+      reason: "密码长度测试"
     })
   );
 
@@ -523,7 +524,7 @@ test("停用用户时，单个更新和批量更新都会立即撤销其已有�
   assert.equal(store.sessions.has(merchantToken), false);
 });
 
-test("管理员重置其他后台账号密码时，目标账号旧会话立即失效", async () => {
+test("超级管理员重置其他后台账号密码时，目标账号旧会话立即失效", async () => {
   const store = createIsolatedStore();
   const authService = createAuthService(store);
   const superAdmin = await authService.backofficeLogin("super", "super123");
@@ -531,17 +532,86 @@ test("管理员重置其他后台账号密码时，目标账号旧会话立即�
   const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
   assert.ok(merchantCredential);
 
-  authService.createBackofficeCredential(superAdmin.token, {
+  authService.resetBackofficePasswordAsSuperAdmin(superAdmin.token, {
     userId: merchantCredential.userId,
-    username: merchantCredential.username,
-    password: "merchant-new-password",
     role: merchantCredential.role,
-    tenantId: merchantCredential.tenantId
+    newPassword: "merchant-new-password",
+    reason: "受控测试重置"
   });
 
   assert.equal(store.getSession(merchant.token), undefined);
   const refreshedMerchant = await authService.backofficeLogin("merchant", "merchant-new-password");
   assert.equal(refreshedMerchant.user.id, merchant.user.id);
+});
+
+test("普通后台管理员不能重置其他账号密码，通用账号配置接口也拒绝已有账号密码字段", async () => {
+  const store = createIsolatedStore();
+  const authService = createAuthService(store);
+  const admin = await authService.backofficeLogin("admin", "admin");
+  const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
+  assert.ok(merchantCredential);
+
+  assert.throws(
+    () =>
+      authService.resetBackofficePasswordAsSuperAdmin(admin.token, {
+        userId: merchantCredential.userId,
+        role: merchantCredential.role,
+        newPassword: "merchant-new-password",
+        reason: "越权测试"
+      }),
+    /只有超级管理员/
+  );
+
+  assert.throws(
+    () =>
+      authService.createBackofficeCredential(admin.token, {
+        userId: merchantCredential.userId,
+        username: merchantCredential.username,
+        password: "merchant-new-password",
+        role: merchantCredential.role,
+        tenantId: merchantCredential.tenantId
+      }),
+    /不能通过通用账号配置接口重置密码/
+  );
+});
+
+test("账号本人通过手机号验证码重置后台密码会撤销旧会话", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+  const issued = await verificationCodes.requestCode(merchant.user.phone, "password-reset");
+  assert.ok(issued.previewCode);
+
+  const result = await authService.resetOwnBackofficePassword({
+    username: "merchant",
+    phone: merchant.user.phone,
+    code: issued.previewCode,
+    newPassword: "merchant-owner-reset"
+  });
+
+  assert.deepEqual(result, { reset: true });
+  assert.equal(store.getSession(merchant.token), undefined);
+  const refreshedMerchant = await authService.backofficeLogin("merchant", "merchant-owner-reset");
+  assert.equal(refreshedMerchant.user.id, merchant.user.id);
+});
+
+test("删除用户时立即撤销关联会话和资料草稿", () => {
+  const store = createIsolatedStore();
+  const usersService = new UsersService(store, {} as never, {} as never);
+  const user = store.users.find((entry) => entry.role === "special" && entry.status === "active");
+  assert.ok(user);
+  const token = store.createSession(user);
+  const draftToken = store.createDraftSession({
+    phone: user.phone,
+    linkedUserId: user.id,
+    requestedRole: user.role
+  });
+
+  usersService.removeUser(user.id);
+
+  assert.equal(store.sessions.has(token), false);
+  assert.equal(store.draftSessions.has(draftToken), false);
 });
 
 test("验证码成功后立即消费，同一验证码不能再次使用", async () => {
@@ -592,6 +662,31 @@ test("API 显式监听非回环地址时，即使是 mock 提供方也不返回�
   assert.equal(issued.previewCode, undefined);
 });
 
+test("全真模拟可使用手动设置的验证码，且仍受一次性校验保护", async () => {
+  const store = createIsolatedStore();
+  const service = new VerificationCodeService(
+    {
+      get: (key: string) =>
+        ({
+          VM_DATA_PLANE: "simulation",
+          VM_SIMULATION_PROFILE: "full",
+          VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
+          VERIFICATION_CODE_PROVIDER: "mock",
+          VERIFICATION_CODE_MANUAL_VALUE: "246810"
+        })[key]
+    } as never,
+    store
+  );
+
+  const issued = await service.requestCode("13812345684", "app-login");
+
+  assert.equal(issued.provider, "manual");
+  assert.equal(issued.previewCode, undefined);
+  assert.equal(await service.verifyCode("13812345684", "000000", "app-login"), false);
+  assert.equal(await service.verifyCode("13812345684", "246810", "app-login"), true);
+  assert.equal(await service.verifyCode("13812345684", "246810", "app-login"), false);
+});
+
 test("真实短信校验并发返回成功时，也只有一次能消费本地验证码状态", async () => {
   const store = createIsolatedStore();
   process.env.NODE_ENV = "test";
@@ -599,14 +694,14 @@ test("真实短信校验并发返回成功时，也只有一次能消费本地�
     {
       get: (key: string) =>
         ({
-          VERIFICATION_CODE_PROVIDER: "aliyun"
+          VERIFICATION_CODE_PROVIDER: "aliyun_pnvs"
         })[key]
     } as never,
     store
   );
   const phone = "13812345684";
   store.rememberVerificationRequest(phone, "app-login");
-  (service as unknown as { verifyAliyunCode: () => Promise<boolean> }).verifyAliyunCode =
+  (service as unknown as { verifyAliyunPnvsCode: () => Promise<boolean> }).verifyAliyunPnvsCode =
     async () => true;
 
   const results = await Promise.all([
@@ -615,6 +710,73 @@ test("真实短信校验并发返回成功时，也只有一次能消费本地�
   ]);
 
   assert.deepEqual(results.sort(), [false, true]);
+});
+
+test("阿里云 PNVS 按用途隔离发送和核验方案，且绝不返回真实验证码", async () => {
+  const store = createIsolatedStore();
+  const requests: Array<{ type: "send" | "check"; request: Record<string, unknown> }> = [];
+  const service = new VerificationCodeService(
+    {
+      get: (key: string) =>
+        ({
+          VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
+          ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key",
+          ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-secret",
+          ALIYUN_PNVS_SIGN_NAME: "test-sign",
+          ALIYUN_PNVS_TEMPLATE_CODE: "test-template",
+          ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: "scheme-app-login",
+          ALIYUN_PNVS_SCHEME_NAME_REGISTER: "scheme-register",
+          ALIYUN_PNVS_SCHEME_NAME_GENERAL: "scheme-general",
+          ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: "scheme-password-reset"
+        })[key]
+    } as never,
+    store
+  );
+  (
+    service as unknown as {
+      createAliyunPnvsClient: () => {
+        sendSmsVerifyCode: (request: Record<string, unknown>) => Promise<unknown>;
+        checkSmsVerifyCode: (request: Record<string, unknown>) => Promise<unknown>;
+      };
+    }
+  ).createAliyunPnvsClient = () => ({
+    sendSmsVerifyCode: async (request) => {
+      requests.push({ type: "send", request });
+      return { body: { code: "OK", success: true } };
+    },
+    checkSmsVerifyCode: async (request) => {
+      requests.push({ type: "check", request });
+      return { body: { code: "OK", success: true, model: { verifyResult: "PASS" } } };
+    }
+  });
+
+  const issued = await service.requestCode("13812345685", "password-reset");
+  assert.equal(issued.provider, "aliyun_pnvs");
+  assert.equal(issued.previewCode, undefined);
+  assert.equal(await service.verifyCode("13812345685", "123456", "password-reset"), true);
+
+  assert.deepEqual(
+    requests.map(({ type, request }) => ({
+      type,
+      schemeName: request.schemeName,
+      returnVerifyCode: request.returnVerifyCode,
+      templateParam: request.templateParam
+    })),
+    [
+      {
+        type: "send",
+        schemeName: "scheme-password-reset",
+        returnVerifyCode: false,
+        templateParam: JSON.stringify({ code: "##code##" })
+      },
+      {
+        type: "check",
+        schemeName: "scheme-password-reset",
+        returnVerifyCode: undefined,
+        templateParam: undefined
+      }
+    ]
+  );
 });
 
 test("同一手机号的发码冷却和验证码按用途隔离", async () => {

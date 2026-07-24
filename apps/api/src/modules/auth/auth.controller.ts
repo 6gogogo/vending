@@ -19,7 +19,7 @@ export class AuthController {
     @Body()
     body: {
       phone: string;
-      scene?: "app-login" | "register" | "general";
+      scene?: "app-login" | "register" | "general" | "password-reset";
     }
   ) {
     return ok(await this.authService.requestCode(body.phone, body.scene));
@@ -123,6 +123,16 @@ export class AuthController {
     );
   }
 
+  @Post("backoffice-password-reset")
+  async resetOwnBackofficePassword(
+    @Body() body: { username: string; phone: string; code: string; newPassword: string }
+  ) {
+    return ok(
+      await this.authService.resetOwnBackofficePassword(body),
+      "密码已重置，请重新登录。"
+    );
+  }
+
   @Post("backoffice-credentials")
   createBackofficeCredential(
     @Headers("authorization") authorization: string | undefined,
@@ -139,6 +149,20 @@ export class AuthController {
     return ok(
       this.authService.createBackofficeCredential(this.extractBearerToken(authorization), body),
       "后台账号已保存。"
+    );
+  }
+
+  @Post("backoffice-password-reset-as-super-admin")
+  resetBackofficePasswordAsSuperAdmin(
+    @Headers("authorization") authorization: string | undefined,
+    @Body() body: { userId: string; role: BackofficeRole; newPassword: string; reason: string }
+  ) {
+    return ok(
+      this.authService.resetBackofficePasswordAsSuperAdmin(
+        this.extractBearerToken(authorization),
+        body
+      ),
+      "密码已重置。"
     );
   }
 

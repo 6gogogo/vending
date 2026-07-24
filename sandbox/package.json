@@ -24,8 +24,7 @@
     "sms:verify": "node scripts/verify-sms-code.mjs"
   },
   "dependencies": {
-    "@alicloud/credentials": "^2.4.4",
-    "@alicloud/dysmsapi20170525": "^4.5.1",
-    "@alicloud/openapi-client": "^0.4.15"
+    "@alicloud/dypnsapi20170525": "^2.0.0",
+    "@alicloud/openapi-core": "^1.0.0"
   }
 }

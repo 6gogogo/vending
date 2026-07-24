@@ -52,6 +52,7 @@ import {
   type AdminCredentialRecord,
   type BackofficeCredentialRecord,
   type DraftSessionRecord,
+  isControlledLiveBootstrapProcess,
   type PersistedStoreState,
   type SessionRecord,
   type VerificationPurpose,
@@ -60,6 +61,14 @@ import {
 } from "./persistence";
 import { validatePersistedState } from "./persisted-state-integrity";
 import { isProductionRuntime } from "../config/runtime-environment";
+import {
+  assertLivePlatformTenantConfiguration,
+  createSimulationPlatformTenant,
+  resolveLivePlatformTenantConfiguration,
+  resolveRuntimeDataPlane,
+  resolveRuntimeDataPlaneInstanceId,
+  type RuntimeDataPlane
+} from "../config/runtime-data-plane";
 
 interface BatchConsumptionEntry {
   batchId: string;
@@ -92,8 +101,6 @@ const DEFAULT_MERCHANT_PASSWORD = "merchant123";
 const DEFAULT_MERCHANT_PHONE = "13800000004";
 const DEFAULT_MERCHANT_NAME = "鲜食商家";
 const DEFAULT_SUPER_ADMIN_REGION_NAME = "系统管理";
-const DEFAULT_TENANT_ID = "tenant-a";
-const DEFAULT_TENANT_NAME = "公益智助柜当前实例";
 
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
@@ -103,6 +110,10 @@ type PersistedStateIntegrityStatus = "unverified" | "checking" | "ready" | "fail
 @Injectable()
 export class InMemoryStoreService {
   private readonly seed = cloneSeedState();
+  private readonly runtimeDataPlane: RuntimeDataPlane = resolveRuntimeDataPlane();
+  private dataPlaneInstanceId: string = resolveRuntimeDataPlaneInstanceId();
+  private initializationSource: PersistedStoreState["initializationSource"] =
+    this.runtimeDataPlane === "live" ? "live-bootstrap-pending" : "simulation-seed";
   private persistenceFlags: PersistedStoreState["flags"];
   private bootstrapPersistencePending = false;
   private persistedStateIntegrityStatus: PersistedStateIntegrityStatus = "unverified";
@@ -136,18 +147,8 @@ export class InMemoryStoreService {
   };
   readonly alerts: AlertTask[] = this.seed.alerts;
   readonly logs: OperationLogRecord[] = this.seed.logs.map((entry) => this.decorateStoredLog(entry));
-  readonly platformTenants: PlatformTenantRecord[] = [
-    {
-      id: DEFAULT_TENANT_ID,
-      code: "current",
-      name: DEFAULT_TENANT_NAME,
-      status: "active",
-      instanceUrl: "https://5gogogo.top",
-      contactName: "实例管理员",
-      planName: "正式版",
-      createdAt: "2026-01-01T00:00:00.000Z"
-    }
-  ];
+  readonly platformTenants: PlatformTenantRecord[] =
+    this.runtimeDataPlane === "simulation" ? [createSimulationPlatformTenant()] : [];
 
   readonly verificationCodes = new Map<string, VerificationRecord>();
   readonly sessions = new Map<string, SessionRecord>();
@@ -180,14 +181,31 @@ export class InMemoryStoreService {
   constructor() {
     const persistedResult = readPersistedStateWithMetadata();
     const persisted = persistedResult?.state;
+
+    if (!persisted && this.runtimeDataPlane === "live") {
+      throw new Error(
+        "真实数据平面尚未初始化；请先使用受控的真实初始化命令创建空库和首个超级管理员。"
+      );
+    }
+
     this.persistenceFlags = persisted?.flags;
     let shouldPersist = false;
 
     if (persisted) {
       this.hydrate(persisted);
+      if (
+        this.isLiveDataPlane() &&
+        this.initializationSource !== "live-bootstrap" &&
+        !isControlledLiveBootstrapProcess()
+      ) {
+        throw new Error(
+          "真实数据平面初始化尚未完成；常规 API 进程不能加载待初始化的真实库。"
+        );
+      }
       // 短期认证状态只应存在于当前进程内；升级后顺手清除旧版本可能落盘的明文 token。
       shouldPersist =
         Boolean(persistedResult?.requiresPrivacyRewrite) ||
+        Boolean(persistedResult?.requiresDataPlaneRewrite) ||
         persisted.verificationCodes.length > 0 ||
         persisted.sessions.length > 0 ||
         persisted.draftSessions.length > 0;
@@ -198,11 +216,16 @@ export class InMemoryStoreService {
     shouldPersist = this.normalizeRegionsState() || shouldPersist;
     shouldPersist = this.ensureBootstrapAdmin() || shouldPersist;
 
+    const testDeviceBootstrapRequested = ["1", "true", "yes", "on"].includes(
+      (process.env.ENABLE_TEST_DEVICE_BOOTSTRAP ?? "").trim().toLowerCase()
+    );
+
+    if (this.isLiveDataPlane() && testDeviceBootstrapRequested) {
+      throw new Error("真实数据平面禁止启用 ENABLE_TEST_DEVICE_BOOTSTRAP。");
+    }
+
     const allowTestDeviceBootstrap =
-      !isProductionRuntime() &&
-      ["1", "true", "yes", "on"].includes(
-        (process.env.ENABLE_TEST_DEVICE_BOOTSTRAP ?? "").trim().toLowerCase()
-      );
+      !isProductionRuntime() && !this.isLiveDataPlane() && testDeviceBootstrapRequested;
 
     if (allowTestDeviceBootstrap && !persisted?.flags?.skipCompetitionTestDevice) {
       this.ensureCompetitionTestDevice();
@@ -223,6 +246,92 @@ export class InMemoryStoreService {
     this.persist();
     this.bootstrapPersistencePending = false;
     return true;
+  }
+
+  getRuntimeDataPlaneIdentity() {
+    return {
+      dataPlane: this.runtimeDataPlane,
+      instanceId: this.dataPlaneInstanceId,
+      initializationSource: this.initializationSource
+    };
+  }
+
+  isLiveDataPlane() {
+    return this.runtimeDataPlane === "live";
+  }
+
+  /**
+   * 仅由受控真实初始化脚本调用。待初始化快照保持完全空白，避免把错误历史数据当作新库；
+   * 首个管理员写入前才将部署绑定的唯一当前租户加入同一次持久化快照。
+   */
+  initializeLivePlatformTenant() {
+    if (!this.isLiveDataPlane()) {
+      throw new BadRequestException("只有真实数据平面可以创建真实客户实例。");
+    }
+
+    if (!isControlledLiveBootstrapProcess()) {
+      throw new BadRequestException("真实客户实例只能由受控初始化命令创建。");
+    }
+
+    if (this.initializationSource !== "live-bootstrap-pending") {
+      throw new BadRequestException("真实数据平面不处于可创建客户实例的待初始化状态。");
+    }
+
+    if (this.platformTenants.length !== 0) {
+      throw new BadRequestException("待初始化真实数据平面已含有客户实例，已拒绝覆盖。");
+    }
+
+    const tenant = resolveLivePlatformTenantConfiguration();
+
+    if (tenant.id !== this.dataPlaneInstanceId) {
+      throw new BadRequestException("真实客户实例 ID 与受控数据平面不一致。");
+    }
+
+    this.platformTenants.push({
+      id: tenant.id,
+      code: "current",
+      name: tenant.name,
+      status: "active",
+      instanceUrl: tenant.instanceUrl,
+      contactName: "实例管理员",
+      planName: "正式版",
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  /**
+   * 仅由受控真实库初始化脚本在写入首个非默认超级管理员后调用。
+   * 该标记会随状态落盘，并作为生产启动门禁的一部分，防止空库或中断初始化被误当成可上线数据。
+   */
+  completeLiveDataPlaneBootstrap() {
+    if (!this.isLiveDataPlane()) {
+      throw new BadRequestException("只有真实数据平面可以完成真实库初始化。");
+    }
+
+    if (this.initializationSource !== "live-bootstrap-pending") {
+      throw new BadRequestException("真实数据平面初始化状态不允许重复完成。");
+    }
+
+    assertLivePlatformTenantConfiguration(this.platformTenants);
+
+    if (this.adminCredentials.length > 0) {
+      throw new BadRequestException("真实数据平面不能在初始化时写入旧管理员密码凭据。");
+    }
+
+    const hasActiveNonDefaultSuperAdmin = this.backofficeCredentials.some((credential) => {
+      if (credential.role !== "super_admin" || credential.usesDefaultPassword !== false) {
+        return false;
+      }
+
+      const user = this.users.find((entry) => entry.id === credential.userId);
+      return user?.role === "admin" && user.status === "active";
+    });
+
+    if (!hasActiveNonDefaultSuperAdmin) {
+      throw new BadRequestException("真实数据平面初始化必须先创建有效的超级管理员账号。");
+    }
+
+    this.initializationSource = "live-bootstrap";
   }
 
   createId(prefix: string) {
@@ -397,7 +506,13 @@ export class InMemoryStoreService {
   }
 
   getDefaultTenantId() {
-    return DEFAULT_TENANT_ID;
+    const currentTenant = this.platformTenants[0];
+
+    if (!currentTenant) {
+      throw new Error("当前数据平面缺少受控平台租户，已拒绝继续处理后台会话。");
+    }
+
+    return currentTenant.id;
   }
 
   createDraftSession(payload: {
@@ -453,7 +568,7 @@ export class InMemoryStoreService {
       const mobileAdminBindingIsValid = Boolean(
         mobileAdminCredential &&
           mobileAdminTenantCredential &&
-          session.tenantId === DEFAULT_TENANT_ID &&
+          session.tenantId === this.getDefaultTenantId() &&
           mobileAdminTenantCredential.tenantId === session.tenantId &&
           session.mobileAdminCredentialUpdatedAt === mobileAdminCredential.passwordUpdatedAt &&
           session.mobileAdminTenantCredentialUpdatedAt ===
@@ -471,7 +586,7 @@ export class InMemoryStoreService {
     if (
       session.backofficeRole &&
       session.backofficeRole !== "super_admin" &&
-      session.tenantId !== DEFAULT_TENANT_ID
+      session.tenantId !== this.getDefaultTenantId()
     ) {
       this.sessions.delete(session.token);
       return undefined;
@@ -1705,6 +1820,9 @@ export class InMemoryStoreService {
 
   snapshot(): PersistedStoreState {
     return {
+      dataPlane: this.runtimeDataPlane,
+      instanceId: this.dataPlaneInstanceId,
+      initializationSource: this.initializationSource,
       flags: this.persistenceFlags,
       users: structuredClone(this.users),
       rules: structuredClone(this.rules),
@@ -1731,6 +1849,7 @@ export class InMemoryStoreService {
       reservationSettings: structuredClone(this.reservationSettings),
       alerts: structuredClone(this.alerts),
       logs: structuredClone(this.logs),
+      platformTenants: structuredClone(this.platformTenants),
       // 验证码、Bearer 会话和资料草稿都属于短期认证状态，不进入业务快照或备份。
       verificationCodes: [],
       sessions: [],
@@ -1760,8 +1879,12 @@ export class InMemoryStoreService {
   }
 
   resetToSeed() {
+    if (this.isLiveDataPlane()) {
+      throw new BadRequestException("真实数据平面不能重置为测试种子。");
+    }
+
     this.persistenceFlags = undefined;
-    this.hydrate(createSeededPersistedState());
+    this.hydrate(createSeededPersistedState(this.dataPlaneInstanceId));
     this.ensureBootstrapAdmin();
     this.persist();
   }
@@ -1778,6 +1901,12 @@ export class InMemoryStoreService {
   }
 
   private hydrate(state: PersistedStoreState) {
+    if (state.dataPlane !== this.runtimeDataPlane) {
+      throw new Error("运行数据平面标记与当前进程不一致，已拒绝加载。");
+    }
+
+    this.dataPlaneInstanceId = state.instanceId;
+    this.initializationSource = state.initializationSource;
     this.replaceArray(this.users, state.users);
     this.replaceArray(this.rules, state.rules);
     this.replaceArray(this.devices, state.devices);
@@ -1806,6 +1935,7 @@ export class InMemoryStoreService {
       this.logs,
       state.logs.map((entry) => this.decorateStoredLog(entry))
     );
+    this.replaceArray(this.platformTenants, state.platformTenants);
 
     this.verificationCodes.clear();
     // 历史快照可能含有明文 token；启动时主动丢弃，避免恢复旧登录态。
@@ -1836,6 +1966,10 @@ export class InMemoryStoreService {
   }
 
   private ensureBootstrapAdmin() {
+    if (this.isLiveDataPlane()) {
+      return false;
+    }
+
     let changed = false;
     let superAdminUser =
       this.users.find((entry) => entry.id === DEFAULT_SUPER_ADMIN_USER_ID) ??
@@ -1967,7 +2101,7 @@ export class InMemoryStoreService {
       DEFAULT_ADMIN_USERNAME,
       DEFAULT_ADMIN_PASSWORD,
       this.findAdminCredentialByUserId(adminUser.id),
-      DEFAULT_TENANT_ID
+      this.getDefaultTenantId()
     ) || changed;
     changed =
       this.ensureDefaultBackofficeCredential(
@@ -1976,7 +2110,7 @@ export class InMemoryStoreService {
         DEFAULT_MERCHANT_USERNAME,
         DEFAULT_MERCHANT_PASSWORD,
         undefined,
-        DEFAULT_TENANT_ID
+        this.getDefaultTenantId()
       ) || changed;
 
     return changed;
@@ -2006,7 +2140,7 @@ export class InMemoryStoreService {
       }
 
       if (!credential.tenantId) {
-        credential.tenantId = DEFAULT_TENANT_ID;
+        credential.tenantId = this.getDefaultTenantId();
         changed = true;
       }
     }

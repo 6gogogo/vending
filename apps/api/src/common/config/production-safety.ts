@@ -5,6 +5,12 @@ import { isIP } from "node:net";
 import type { InMemoryStoreService } from "../store/in-memory-store.service";
 import type { SystemAuditLogService } from "../store/system-audit-log.service";
 import { isProductionRuntime } from "./runtime-environment";
+import {
+  RUNTIME_DATA_PLANE_ENV_KEY,
+  RUNTIME_DATA_PLANE_ID_ENV_KEY,
+  RUNTIME_DATA_ROOT_ENV_KEY,
+  RUNTIME_PLATFORM_TENANT_NAME_ENV_KEY
+} from "./runtime-data-plane";
 
 export { isProductionRuntime } from "./runtime-environment";
 
@@ -176,12 +182,22 @@ export const productionSmartVmSafetyCriticalKeys = [
 export const productionConfigurationSafetyCriticalKeys = [
   "NODE_ENV",
   "APP_ENV",
+  RUNTIME_DATA_PLANE_ENV_KEY,
+  RUNTIME_DATA_PLANE_ID_ENV_KEY,
+  RUNTIME_DATA_ROOT_ENV_KEY,
+  RUNTIME_PLATFORM_TENANT_NAME_ENV_KEY,
   "PUBLIC_BASE_URL",
   "CORS_ORIGINS",
   "VERIFICATION_CODE_PROVIDER",
   "VERIFICATION_CODE_PREVIEW_ENABLED",
-  "ALIYUN_SMS_ACCESS_KEY_ID",
-  "ALIYUN_SMS_ACCESS_KEY_SECRET",
+  "ALIYUN_PNVS_ACCESS_KEY_ID",
+  "ALIYUN_PNVS_ACCESS_KEY_SECRET",
+  "ALIYUN_PNVS_SIGN_NAME",
+  "ALIYUN_PNVS_TEMPLATE_CODE",
+  "ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN",
+  "ALIYUN_PNVS_SCHEME_NAME_REGISTER",
+  "ALIYUN_PNVS_SCHEME_NAME_GENERAL",
+  "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET",
   "ALLOW_DEFAULT_BACKOFFICE_LOGIN",
   ...productionSmartVmSafetyCriticalKeys,
   ...productionPaymentSafetyCriticalKeys
@@ -345,8 +361,29 @@ export const assertProductionSmartVmSafety = (configService: ConfigService) => {
 export const assertProductionConfigurationSafety = (
   configService: ConfigService
 ) => {
+  const runtimeDataPlane = readConfig(configService, RUNTIME_DATA_PLANE_ENV_KEY);
+
+  if (runtimeDataPlane !== "live") {
+    throw new BadRequestException(
+      `生产环境必须显式设置 ${RUNTIME_DATA_PLANE_ENV_KEY}=live。`
+    );
+  }
+
+  requireConfig(configService, RUNTIME_DATA_ROOT_ENV_KEY);
+  requireConfig(configService, RUNTIME_DATA_PLANE_ID_ENV_KEY);
+
   const publicBaseUrl = requireConfig(configService, "PUBLIC_BASE_URL");
   assertPublicHttpsUrl(publicBaseUrl, "PUBLIC_BASE_URL");
+
+  const platformTenantName = requireConfig(
+    configService,
+    RUNTIME_PLATFORM_TENANT_NAME_ENV_KEY
+  );
+  if ([...platformTenantName].length > 100 || /[\r\n]/.test(platformTenantName)) {
+    throw new BadRequestException(
+      `${RUNTIME_PLATFORM_TENANT_NAME_ENV_KEY} 必须是 1 至 100 个字符的单行名称。`
+    );
+  }
 
   const corsOrigins = requireConfig(configService, "CORS_ORIGINS");
   const parsedCorsOrigins = corsOrigins
@@ -368,8 +405,8 @@ export const assertProductionConfigurationSafety = (
     configService,
     "VERIFICATION_CODE_PROVIDER"
   );
-  if (verificationProvider !== "aliyun") {
-    throw new BadRequestException("生产环境必须使用真实短信验证码服务。");
+  if (verificationProvider !== "aliyun_pnvs") {
+    throw new BadRequestException("生产环境必须使用阿里云 PNVS 真实短信验证码服务。");
   }
 
   if (
@@ -381,8 +418,14 @@ export const assertProductionConfigurationSafety = (
   }
 
   requireConfigs(configService, [
-    "ALIYUN_SMS_ACCESS_KEY_ID",
-    "ALIYUN_SMS_ACCESS_KEY_SECRET"
+    "ALIYUN_PNVS_ACCESS_KEY_ID",
+    "ALIYUN_PNVS_ACCESS_KEY_SECRET",
+    "ALIYUN_PNVS_SIGN_NAME",
+    "ALIYUN_PNVS_TEMPLATE_CODE",
+    "ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN",
+    "ALIYUN_PNVS_SCHEME_NAME_REGISTER",
+    "ALIYUN_PNVS_SCHEME_NAME_GENERAL",
+    "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET"
   ]);
   assertProductionSmartVmSafety(configService);
   assertProductionPaymentSafety(configService);
@@ -404,6 +447,27 @@ export const assertProductionSafety = (
   }
 
   const mockDeviceCount = store.devices.filter((device) => device.isMock === true).length;
+
+  if (!store.isLiveDataPlane()) {
+    throw new BadRequestException("生产进程只能加载真实数据平面。");
+  }
+
+  const runtimeDataPlane = store.getRuntimeDataPlaneIdentity();
+  const configuredDataPlaneId = requireConfig(
+    configService,
+    RUNTIME_DATA_PLANE_ID_ENV_KEY
+  );
+
+  if (
+    runtimeDataPlane.dataPlane !== "live" ||
+    runtimeDataPlane.instanceId !== configuredDataPlaneId
+  ) {
+    throw new BadRequestException("真实运行数据与受控部署标识不一致。");
+  }
+
+  if (runtimeDataPlane.initializationSource !== "live-bootstrap") {
+    throw new BadRequestException("真实数据平面尚未完成受控初始化。");
+  }
 
   if (mockDeviceCount > 0) {
     throw new BadRequestException(
@@ -438,6 +502,23 @@ export const assertProductionSafety = (
 
   if (defaultCredentialCount > 0) {
     throw new BadRequestException("生产环境仍存在默认后台密码账号。");
+  }
+
+  if (store.adminCredentials.length > 0) {
+    throw new BadRequestException("真实数据平面不能保留旧管理员密码凭据。");
+  }
+
+  const hasActiveSuperAdmin = store.backofficeCredentials.some((credential) => {
+    if (credential.role !== "super_admin" || credential.usesDefaultPassword !== false) {
+      return false;
+    }
+
+    const user = store.users.find((entry) => entry.id === credential.userId);
+    return user?.status === "active" && user.role === "admin";
+  });
+
+  if (!hasActiveSuperAdmin) {
+    throw new BadRequestException("真实数据平面尚未配置有效的超级管理员账号。");
   }
 };
 

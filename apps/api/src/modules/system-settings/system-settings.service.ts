@@ -16,6 +16,10 @@ import {
   isProductionRuntime,
   productionConfigurationSafetyCriticalKeys
 } from "../../common/config/production-safety";
+import {
+  assertRuntimeDataPlaneExternalIntegrationPolicy,
+  runtimeDataPlaneExternalIntegrationKeys
+} from "../../common/config/runtime-data-plane-policy";
 import { appendSystemAuditLog, resolveApiEnvFile } from "../../common/store/persistence";
 import {
   PrivateConfigWriteError,
@@ -54,9 +58,15 @@ const productionConfigurationSafetyCriticalKeySet = new Set<string>(
   productionConfigurationSafetyCriticalKeys
 );
 const runtimeEnvironmentKeys = new Set(["NODE_ENV", "APP_ENV"]);
+const runtimeDataPlaneExternalIntegrationKeySet = new Set<string>(
+  runtimeDataPlaneExternalIntegrationKeys
+);
 // 这些路径共同定义一份运行态快照。在线切换任一项都会让审计、账本、上传或维护命令
 // 落到不同位置，必须在停服维护窗口通过受控部署配置统一修改。
 const liveRuntimeStorageBoundaryKeys = new Set([
+  "VM_DATA_PLANE",
+  "VM_DATA_ROOT",
+  "VM_DATA_PLANE_ID",
   "API_DATA_FILE",
   "SYSTEM_LOG_FILE",
   "UPLOAD_DIR",
@@ -68,6 +78,8 @@ const liveRuntimeStorageBoundaryKeys = new Set([
 export class SystemSettingsService {
   private readonly envFilePath: string;
   private readonly auditLog: SystemAuditLogService;
+  /** live 平面只有部署层显式注入受控写入适配器时才允许写配置，默认 .env 永远只读。 */
+  private readonly hasManagedLiveConfigWriter: boolean;
 
   constructor(
     @Inject(ConfigService) private readonly configService: ConfigService,
@@ -79,6 +91,7 @@ export class SystemSettingsService {
     auditLog?: SystemAuditLogService
   ) {
     this.envFilePath = runtimeAdapter?.envFilePath ?? resolveApiEnvFile();
+    this.hasManagedLiveConfigWriter = Boolean(runtimeAdapter?.envFilePath);
     this.auditLog = auditLog ?? new SystemAuditLogService({
       appendAuditLog: runtimeAdapter?.appendAuditLog ?? appendSystemAuditLog
     });
@@ -103,6 +116,15 @@ export class SystemSettingsService {
     payload: SystemSettingsUpdatePayload,
     options?: { includeSensitiveValues?: boolean }
   ): SystemSettingsUpdateResult {
+    if (
+      this.configService.get<string>("VM_DATA_PLANE")?.trim().toLowerCase() === "live" &&
+      !this.hasManagedLiveConfigWriter
+    ) {
+      throw new BadRequestException(
+        "真实数据平面禁止通过后台写入默认 .env；请由部署系统或密钥管理器注入受控配置。"
+      );
+    }
+
     if (!payload || typeof payload.values !== "object" || Array.isArray(payload.values)) {
       throw new BadRequestException("配置保存参数不正确。");
     }
@@ -133,6 +155,17 @@ export class SystemSettingsService {
     }
 
     this.assertCrossSettingConstraints(nextValues);
+
+    // 无论 NODE_ENV/APP_ENV 为何，候选配置都必须先满足当前数据平面的外部集成边界。
+    // 这样后台保存不能绕过启动门禁，将 mock/真实渠道错误写入运行时或配置文件。
+    assertRuntimeDataPlaneExternalIntegrationPolicy(
+      Object.fromEntries(
+        runtimeDataPlaneExternalIntegrationKeys.map((key) => [
+          key,
+          nextValues.get(key) ?? this.configService.get<string>(key)
+        ])
+      )
+    );
 
     const changedKeys = snapshotBefore.settings
       .filter((entry) => entry.value !== nextValues.get(entry.key))
@@ -170,10 +203,14 @@ export class SystemSettingsService {
     }
 
     const restartRequiredKeys = changedKeys.filter(
-      (key) => entriesByKey.get(key)?.restartRequired
+      (key) =>
+        entriesByKey.get(key)?.restartRequired ||
+        runtimeDataPlaneExternalIntegrationKeySet.has(key)
     );
     const runtimeAppliedKeys = changedKeys.filter(
-      (key) => !entriesByKey.get(key)?.restartRequired
+      (key) =>
+        !entriesByKey.get(key)?.restartRequired &&
+        !runtimeDataPlaneExternalIntegrationKeySet.has(key)
     );
     const criticalAudit = isProductionRuntime()
       ? this.auditLog.beginCriticalIntent({

@@ -7,6 +7,8 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 
 import { AppModule } from "./app.module";
 import { assertProductionSafety, isProductionRuntime } from "./common/config/production-safety";
+import { assertProductionRuntimeDataPlane } from "./common/config/runtime-data-plane";
+import { assertRuntimeDataPlaneExternalIntegrationPolicy } from "./common/config/runtime-data-plane-policy";
 import { FinancialSingleWriterService } from "./common/coordination/financial-single-writer.service";
 import { acquireFinancialSingleWriterForApiBootstrap } from "./common/coordination/financial-single-writer-runtime";
 import { resolveTrustProxySetting } from "./common/config/http-runtime";
@@ -68,6 +70,10 @@ const setApiSecurityHeaders = (
 async function bootstrap() {
   // AppModule 的 ConfigModule.forRoot 会先加载 .env；租约随后必须早于 Nest DI/Store 构造取得。
   await ConfigModule.envVariablesLoaded;
+  // 数据平面先于 DI、租约与任何外部客户端确定：模拟入口绝不获得真实支付/短信能力，
+  // 真实入口也不能带着模拟通道继续启动，且必须进入 production 严格门禁。
+  assertProductionRuntimeDataPlane();
+  assertRuntimeDataPlaneExternalIntegrationPolicy();
   if (isProductionRuntime()) {
     assertRuntimePathsSafe({
       dataFile: resolveApiDataFile(),

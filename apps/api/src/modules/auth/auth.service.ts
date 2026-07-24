@@ -67,7 +67,10 @@ export class AuthService {
     @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
-  async requestCode(phone: string, scene: "app-login" | "register" | "general" = "general") {
+  async requestCode(
+    phone: string,
+    scene: "app-login" | "register" | "general" | "password-reset" = "general"
+  ) {
     return this.verificationCodeService.requestCode(phone, scene);
   }
 
@@ -297,6 +300,10 @@ export class AuthService {
     password: string,
     sourceKey = "unknown"
   ): Promise<AdminSessionResult> {
+    if (this.store.isLiveDataPlane()) {
+      throw new UnauthorizedException("真实数据平面不支持旧管理员密码登录入口。");
+    }
+
     this.assertPasswordLoginAllowed(username, sourceKey);
     const credential = this.store.findAdminCredentialByUsername(username);
 
@@ -459,6 +466,10 @@ export class AuthService {
   }
 
   changeAdminPassword(token: string | undefined, currentPassword: string, newPassword: string): AdminSessionResult {
+    if (this.store.isLiveDataPlane()) {
+      throw new UnauthorizedException("真实数据平面不支持旧管理员密码入口。");
+    }
+
     const user = this.store.getSessionUser(token);
 
     if (!user || user.role !== "admin") {
@@ -605,6 +616,80 @@ export class AuthService {
     );
   }
 
+  async resetOwnBackofficePassword(payload: {
+    username: string;
+    phone: string;
+    code: string;
+    newPassword: string;
+  }) {
+    const normalizedUsername = payload.username.trim().toLowerCase();
+    const normalizedPassword = payload.newPassword.trim();
+
+    if (!normalizedUsername || normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      throw new BadRequestException(`新密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
+    }
+
+    const verified = await this.verificationCodeService.verifyCode(
+      payload.phone,
+      payload.code,
+      "password-reset"
+    );
+
+    const credential = this.store.findBackofficeCredentialByUsername(normalizedUsername);
+    const user = credential
+      ? this.store.users.find((entry) => entry.id === credential.userId)
+      : undefined;
+
+    if (
+      !verified ||
+      !credential ||
+      !user ||
+      user.status !== "active" ||
+      user.phone !== payload.phone.trim()
+    ) {
+      throw new UnauthorizedException("账号、手机号或验证码不正确。");
+    }
+
+    if (verifyAdminPassword(normalizedPassword, credential.passwordSalt, credential.passwordHash)) {
+      throw new BadRequestException("新密码不能与当前密码相同。");
+    }
+
+    const passwordHash = hashAdminPassword(normalizedPassword);
+    const updatedCredential = this.store.upsertBackofficeCredential({
+      ...credential,
+      passwordSalt: passwordHash.salt,
+      passwordHash: passwordHash.hash,
+      usesDefaultPassword: false,
+      passwordUpdatedAt: new Date().toISOString()
+    });
+
+    this.store.logOperation({
+      category: "admin",
+      type: "reset-backoffice-password-by-owner",
+      status: "success",
+      actor: {
+        type: user.role,
+        id: user.id,
+        name: user.name,
+        role: user.role
+      },
+      primarySubject: {
+        type: "user",
+        id: user.id,
+        label: user.name
+      },
+      metadata: {
+        username: updatedCredential.username,
+        backofficeRole: updatedCredential.role,
+        resetMethod: "phone-verification",
+        undoState: "not_undoable"
+      }
+    });
+
+    this.store.revokeSessionsForUser(user.id);
+    return { reset: true };
+  }
+
   createBackofficeCredential(
     token: string | undefined,
     payload: {
@@ -704,6 +789,12 @@ export class AuthService {
       throw new BadRequestException(`后台密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
     }
 
+    if (existingCredential && normalizedPassword) {
+      throw new BadRequestException(
+        "已有后台账号不能通过通用账号配置接口重置密码；请使用专用重置接口。"
+      );
+    }
+
     const sameUsername = this.store.findBackofficeCredentialByUsername(normalizedUsername);
 
     if (sameUsername && (sameUsername.userId !== targetUser.id || sameUsername.role !== role)) {
@@ -757,6 +848,81 @@ export class AuthService {
     }
 
     return this.createBackofficeCredentialSnapshot(credential);
+  }
+
+  resetBackofficePasswordAsSuperAdmin(
+    token: string | undefined,
+    payload: {
+      userId: string;
+      role: BackofficeRole;
+      newPassword: string;
+      reason: string;
+    }
+  ) {
+    const actor = this.getBackofficeSession(token);
+
+    if (actor.user.backofficeRole !== "super_admin") {
+      throw new ForbiddenException("只有超级管理员可以重置后台账号密码。");
+    }
+
+    const targetUser = this.store.users.find((entry) => entry.id === payload.userId);
+    const credential = targetUser
+      ? this.store.findBackofficeCredentialByUserId(targetUser.id, payload.role)
+      : undefined;
+    const normalizedPassword = payload.newPassword.trim();
+    const normalizedReason = payload.reason.trim();
+
+    if (!targetUser || !credential || targetUser.status !== "active") {
+      throw new BadRequestException("目标后台账号不存在或已停用。");
+    }
+
+    if (normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      throw new BadRequestException(`后台密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
+    }
+
+    if (!normalizedReason || [...normalizedReason].length > 500) {
+      throw new BadRequestException("重置原因不能为空且不能超过 500 个字符。");
+    }
+
+    if (verifyAdminPassword(normalizedPassword, credential.passwordSalt, credential.passwordHash)) {
+      throw new BadRequestException("新密码不能与当前密码相同。");
+    }
+
+    const passwordHash = hashAdminPassword(normalizedPassword);
+    const updatedCredential = this.store.upsertBackofficeCredential({
+      ...credential,
+      passwordSalt: passwordHash.salt,
+      passwordHash: passwordHash.hash,
+      usesDefaultPassword: false,
+      passwordUpdatedAt: new Date().toISOString()
+    });
+
+    this.store.logOperation({
+      category: "admin",
+      type: "reset-backoffice-password-by-super-admin",
+      status: "success",
+      actor: {
+        type: actor.user.role,
+        id: actor.user.id,
+        name: actor.user.name,
+        role: actor.user.role
+      },
+      primarySubject: {
+        type: "user",
+        id: targetUser.id,
+        label: targetUser.name
+      },
+      metadata: {
+        username: updatedCredential.username,
+        backofficeRole: updatedCredential.role,
+        reason: normalizedReason,
+        resetMethod: "super-admin",
+        undoState: "not_undoable"
+      }
+    });
+
+    this.store.revokeSessionsForUser(targetUser.id);
+    return this.createBackofficeCredentialSnapshot(updatedCredential);
   }
 
   listBackofficeCredentials(token: string | undefined): BackofficeCredentialSnapshot[] {

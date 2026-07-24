@@ -30,6 +30,105 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "text",
     restartRequired: true
   },
+  VM_DATA_PLANE: {
+    label: "运行数据平面",
+    description: "由部署进程管理器固定注入；simulation 为本地模拟平面，live 为纯净真实平面。运行中不得在线修改。",
+    inputType: "select",
+    options: [
+      { label: "模拟平面", value: "simulation" },
+      { label: "真实平面", value: "live" }
+    ],
+    required: true,
+    restartRequired: true
+  },
+  VM_SIMULATION_PROFILE: {
+    label: "模拟运行档",
+    description: "standard 为全模块 mock；full 为隔离的全真模拟，允许逐项选择真实外部模块，但仍绝不使用真实数据平面。",
+    inputType: "select",
+    options: [
+      { label: "标准模拟：全部 mock", value: "standard" },
+      { label: "全真模拟：按模块选择", value: "full" }
+    ],
+    required: true,
+    restartRequired: true
+  },
+  VM_FULL_SIMULATION_ENABLED: {
+    label: "确认启用全真模拟",
+    description: "只有 VM_SIMULATION_PROFILE=full 时生效。必须显式开启，并配合独立的数据根和实例标识后才能启动。",
+    inputType: "boolean",
+    restartRequired: true
+  },
+  VM_FULL_SIMULATION_SMARTVM_MODE: {
+    label: "全真模拟：柜机平台",
+    description: "mock 不会向 SmartVM 发请求；real 仅在隔离模拟数据下使用已配置的真实柜机平台，缺少接入配置将拒绝启动。",
+    inputType: "select",
+    options: [
+      { label: "模拟柜机", value: "mock" },
+      { label: "真实 SmartVM", value: "real" }
+    ],
+    restartRequired: true
+  },
+  VM_FULL_SIMULATION_PAYMENT_MODE: {
+    label: "全真模拟：支付",
+    description: "mock 使用本地模拟支付；real 按真实微信/支付宝配置创建真实渠道订单，缺少配置时会明确报错且不回退。",
+    inputType: "select",
+    options: [
+      { label: "模拟支付", value: "mock" },
+      { label: "真实支付", value: "real" }
+    ],
+    restartRequired: true
+  },
+  VM_FULL_SIMULATION_VERIFICATION_MODE: {
+    label: "全真模拟：短信验证码",
+    description: "mock 使用本地验证码；real 使用阿里云 PNVS；manual 仅使用手动设置的固定验证码且不发送短信。真实短信配置缺失时会明确报错，绝不发送到模拟通道。",
+    inputType: "select",
+    options: [
+      { label: "模拟验证码", value: "mock" },
+      { label: "真实 PNVS 短信", value: "real" },
+      { label: "手动设置验证码", value: "manual" }
+    ],
+    restartRequired: true
+  },
+  VM_FULL_SIMULATION_AI_MODE: {
+    label: "全真模拟：AI",
+    description: "mock 返回本地稳定兜底结果且不外发业务上下文；real 调用已配置的 OpenAI 兼容服务。",
+    inputType: "select",
+    options: [
+      { label: "模拟 AI", value: "mock" },
+      { label: "真实 AI", value: "real" }
+    ],
+    restartRequired: true
+  },
+  VM_FULL_SIMULATION_MAP_MODE: {
+    label: "全真模拟：地图",
+    description: "mock 不加载高德脚本，可手工录入坐标；real 向后台提供已配置的高德 Web Key。",
+    inputType: "select",
+    options: [
+      { label: "模拟地图", value: "mock" },
+      { label: "真实高德地图", value: "real" }
+    ],
+    restartRequired: true
+  },
+  VM_RESERVATION_ONLY_PICKUP: {
+    label: "预约取货模式",
+    description: "开启后，特殊群体只能先预约再开柜；新流程只做领取核对，不创建新的支付单或补扣。历史订单的查询、核对和退款仍保留。",
+    inputType: "boolean",
+    restartRequired: true
+  },
+  VM_DATA_ROOT: {
+    label: "运行数据根目录",
+    description: "真实平面与全真模拟均从此根目录统一派生状态、审计、上传、备份和金融租约路径；全真模拟必须使用与其他平面不同的目录。",
+    inputType: "path",
+    required: true,
+    restartRequired: true
+  },
+  VM_DATA_PLANE_ID: {
+    label: "运行数据平面实例标识",
+    description: "由受控部署环境为每个数据根固定分配；用于拒绝跨实例备份恢复，运行中不得在线修改。",
+    inputType: "text",
+    required: true,
+    restartRequired: true
+  },
   PORT: {
     label: "API 服务端口",
     description: "Nest 后端监听端口，修改后需要重启服务才会切换监听端口。",
@@ -471,11 +570,11 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   VERIFICATION_CODE_PROVIDER: {
     label: "验证码服务",
-    description: "mock 为本地验证码，aliyun 为阿里云短信验证码。",
+    description: "mock 为本地验证码；aliyun_pnvs 为阿里云号码认证短信验证码。真实平面必须使用 aliyun_pnvs。",
     inputType: "select",
     options: [
       { label: "本地模拟", value: "mock" },
-      { label: "阿里云短信", value: "aliyun" }
+      { label: "阿里云号码认证（PNVS）", value: "aliyun_pnvs" }
     ],
     required: true
   },
@@ -484,32 +583,75 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "仅限本机联调。开启后，接口响应可能返回验证码；生产环境必须关闭。",
     inputType: "boolean"
   },
+  VERIFICATION_CODE_MANUAL_VALUE: {
+    label: "全真模拟手动验证码",
+    description: "仅在全真模拟的验证码模式选择 manual 时使用。填写 4 至 8 位数字；不会返回给客户端，也绝不能用于真实数据平面。",
+    inputType: "password",
+    sensitive: true,
+    restartRequired: true
+  },
   ALLOW_DEFAULT_BACKOFFICE_LOGIN: {
     label: "允许默认后台密码登录",
     description: "仅限本机初始化联调。关闭后，仍使用默认密码的后台账号不能登录。",
     inputType: "boolean"
   },
-  ALIYUN_SMS_ACCESS_KEY_ID: {
-    label: "阿里云 AccessKey ID",
-    description: "阿里云短信服务 AccessKey ID。",
+  ALIYUN_PNVS_ACCESS_KEY_ID: {
+    label: "阿里云 PNVS AccessKey ID",
+    description: "仅授予号码认证短信所需最小权限的 RAM AccessKey ID。",
     inputType: "password",
     sensitive: true
   },
-  ALIYUN_SMS_ACCESS_KEY_SECRET: {
-    label: "阿里云 AccessKey Secret",
-    description: "阿里云短信服务 AccessKey Secret。",
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: {
+    label: "阿里云 PNVS AccessKey Secret",
+    description: "仅服务端密钥管理保存的号码认证 RAM AccessKey Secret。",
     inputType: "password",
     sensitive: true
   },
-  ALIYUN_SMS_REGION_ID: {
-    label: "阿里云短信地域",
-    description: "阿里云短信服务地域 ID。",
+  ALIYUN_PNVS_REGION_ID: {
+    label: "阿里云 PNVS 地域",
+    description: "号码认证服务地域，通常为 cn-hangzhou。",
     inputType: "text"
   },
-  ALIYUN_SMS_ENDPOINT: {
-    label: "阿里云短信 Endpoint",
-    description: "阿里云短信服务接入域名。",
+  ALIYUN_PNVS_ENDPOINT: {
+    label: "阿里云 PNVS Endpoint",
+    description: "号码认证服务官方 HTTPS Endpoint，通常为 dypnsapi.aliyuncs.com。",
     inputType: "url"
+  },
+  ALIYUN_PNVS_SIGN_NAME: {
+    label: "阿里云 PNVS 系统签名",
+    description: "已在号码认证控制台配置并审核通过的系统签名。",
+    inputType: "text",
+    required: true
+  },
+  ALIYUN_PNVS_TEMPLATE_CODE: {
+    label: "阿里云 PNVS 系统模板",
+    description: "已审核的验证码模板；模板参数必须包含 ##code## 占位符。",
+    inputType: "text",
+    required: true
+  },
+  ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: {
+    label: "PNVS 小程序登录方案",
+    description: "只用于 app-login；发送与核验必须使用同一方案名称。",
+    inputType: "text",
+    required: true
+  },
+  ALIYUN_PNVS_SCHEME_NAME_REGISTER: {
+    label: "PNVS 注册方案",
+    description: "只用于 register；不得与登录或通用验证码共用。",
+    inputType: "text",
+    required: true
+  },
+  ALIYUN_PNVS_SCHEME_NAME_GENERAL: {
+    label: "PNVS 通用登录方案",
+    description: "只用于 general；发送与核验必须使用同一方案名称。",
+    inputType: "text",
+    required: true
+  },
+  ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: {
+    label: "PNVS 本人密码重置方案",
+    description: "只用于 password-reset；发送与核验必须使用同一方案名称。",
+    inputType: "text",
+    required: true
   }
 };
 

@@ -1,23 +1,14 @@
-import * as Dysmsapi20170525 from "@alicloud/dysmsapi20170525";
+import Dypnsapi20170525, {
+  CheckSmsVerifyCodeRequest,
+  SendSmsVerifyCodeRequest
+} from "@alicloud/dypnsapi20170525";
+import { $OpenApiUtil } from "@alicloud/openapi-core";
 
 import "./helpers.mjs";
 
-const packageExports = Dysmsapi20170525.default ?? Dysmsapi20170525;
-const SmsClient = packageExports.default ?? packageExports;
-const RequiredPhoneCodeRequest = packageExports.RequiredPhoneCodeRequest;
-const ValidPhoneCodeRequest = packageExports.ValidPhoneCodeRequest;
-
-if (
-  typeof SmsClient !== "function" ||
-  typeof RequiredPhoneCodeRequest !== "function" ||
-  typeof ValidPhoneCodeRequest !== "function"
-) {
-  throw new Error("阿里云短信 SDK 加载失败，请检查 @alicloud/dysmsapi20170525 的安装结果。");
-}
-
-const defaultAliyunSmsConfig = {
+const defaultAliyunPnvsConfig = {
   regionId: "cn-hangzhou",
-  endpoint: "dysmsapi.aliyuncs.com"
+  endpoint: "dypnsapi.aliyuncs.com"
 };
 
 const mainlandPhonePattern = /^(?:\+?86)?1\d{10}$/;
@@ -26,48 +17,41 @@ const verificationCodePattern = /^\d{4,8}$/;
 const normalizePhoneNumber = (phoneNumber) => {
   const digitsOnly = String(phoneNumber ?? "").replace(/[^\d+]/g, "");
 
-  if (!digitsOnly) {
-    return "";
-  }
-
-  if (digitsOnly.startsWith("+86")) {
-    return digitsOnly.slice(3);
-  }
-
-  if (digitsOnly.startsWith("0086")) {
-    return digitsOnly.slice(4);
-  }
-
-  if (digitsOnly.startsWith("86") && digitsOnly.length === 13) {
-    return digitsOnly.slice(2);
-  }
-
+  if (digitsOnly.startsWith("+86")) return digitsOnly.slice(3);
+  if (digitsOnly.startsWith("0086")) return digitsOnly.slice(4);
+  if (digitsOnly.startsWith("86") && digitsOnly.length === 13) return digitsOnly.slice(2);
   return digitsOnly;
 };
 
 const maskPhoneNumber = (phoneNumber) => {
   const normalized = normalizePhoneNumber(phoneNumber);
-
-  if (normalized.length < 7) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, 3)}****${normalized.slice(-4)}`;
+  return normalized.length < 7
+    ? normalized
+    : `${normalized.slice(0, 3)}****${normalized.slice(-4)}`;
 };
 
-const getAliyunSmsConfig = () => ({
-  accessKeyId: process.env.ALIYUN_SMS_ACCESS_KEY_ID?.trim() ?? "",
-  accessKeySecret: process.env.ALIYUN_SMS_ACCESS_KEY_SECRET?.trim() ?? "",
-  regionId: process.env.ALIYUN_SMS_REGION_ID?.trim() || defaultAliyunSmsConfig.regionId,
-  endpoint: process.env.ALIYUN_SMS_ENDPOINT?.trim() || defaultAliyunSmsConfig.endpoint
+const getAliyunPnvsConfig = () => ({
+  accessKeyId: process.env.ALIYUN_PNVS_ACCESS_KEY_ID?.trim() ?? "",
+  accessKeySecret: process.env.ALIYUN_PNVS_ACCESS_KEY_SECRET?.trim() ?? "",
+  regionId: process.env.ALIYUN_PNVS_REGION_ID?.trim() || defaultAliyunPnvsConfig.regionId,
+  endpoint: process.env.ALIYUN_PNVS_ENDPOINT?.trim() || defaultAliyunPnvsConfig.endpoint,
+  signName: process.env.ALIYUN_PNVS_SIGN_NAME?.trim() ?? "",
+  templateCode: process.env.ALIYUN_PNVS_TEMPLATE_CODE?.trim() ?? "",
+  schemeName: process.env.SANDBOX_PNVS_SCHEME_NAME?.trim() ?? ""
 });
 
-const ensureAliyunSmsConfig = () => {
-  const config = getAliyunSmsConfig();
+const ensureAliyunPnvsConfig = () => {
+  const config = getAliyunPnvsConfig();
 
-  if (!config.accessKeyId || !config.accessKeySecret) {
+  if (
+    !config.accessKeyId ||
+    !config.accessKeySecret ||
+    !config.signName ||
+    !config.templateCode ||
+    !config.schemeName
+  ) {
     throw new Error(
-      "必须提供 ALIYUN_SMS_ACCESS_KEY_ID 和 ALIYUN_SMS_ACCESS_KEY_SECRET，才能调用阿里云短信验证码服务。"
+      "PNVS sandbox 需要 ALIYUN_PNVS_ACCESS_KEY_ID、ALIYUN_PNVS_ACCESS_KEY_SECRET、ALIYUN_PNVS_SIGN_NAME、ALIYUN_PNVS_TEMPLATE_CODE 和显式 SANDBOX_PNVS_SCHEME_NAME。"
     );
   }
 
@@ -94,39 +78,25 @@ const validateVerificationCode = (verificationCode) => {
   return normalized;
 };
 
-const createSmsClient = () => {
-  const config = ensureAliyunSmsConfig();
-
-  return new SmsClient({
+const createPnvsClient = () => {
+  const config = ensureAliyunPnvsConfig();
+  const openApiConfig = new $OpenApiUtil.Config({
     accessKeyId: config.accessKeyId,
-    accessKeySecret: config.accessKeySecret,
-    regionId: config.regionId,
-    endpoint: config.endpoint
+    accessKeySecret: config.accessKeySecret
   });
-};
-
-const normalizeSendResponse = (phoneNumber, response) => {
-  const body = response?.body ?? {};
-  const success = body.code === "OK" || body.success === true;
-
+  openApiConfig.regionId = config.regionId;
+  openApiConfig.endpoint = config.endpoint;
   return {
-    phoneNumber: maskPhoneNumber(phoneNumber),
-    success,
-    requestId: body.requestId ?? "",
-    responseCode: body.code ?? "",
-    message: body.message ?? "",
-    traceId: body.data ?? ""
+    client: new Dypnsapi20170525(openApiConfig),
+    config
   };
 };
 
-const normalizeVerifyResponse = (phoneNumber, response) => {
+const normalizeResponse = (phoneNumber, response, verified = false) => {
   const body = response?.body ?? {};
-  const verified = Boolean(body.data);
-  const success = (body.code === "OK" || body.success === true) && verified;
-
   return {
     phoneNumber: maskPhoneNumber(phoneNumber),
-    success,
+    success: body.code === "OK" || body.success === true,
     verified,
     requestId: body.requestId ?? "",
     responseCode: body.code ?? "",
@@ -134,44 +104,60 @@ const normalizeVerifyResponse = (phoneNumber, response) => {
   };
 };
 
-const wrapAliyunSmsError = (error) => {
+const wrapAliyunPnvsError = (error) => {
   const detail =
     error?.data?.Recommend ??
     error?.data?.Message ??
     error?.data?.message ??
     error?.message;
-
-  return new Error(detail ? `阿里云短信服务调用失败：${detail}` : "阿里云短信服务调用失败。");
+  return new Error(detail ? `阿里云 PNVS 调用失败：${detail}` : "阿里云 PNVS 调用失败。");
 };
 
 export const requestPhoneCode = async (phoneNumber) => {
   const normalizedPhoneNumber = validateMainlandPhoneNumber(phoneNumber);
-  const client = createSmsClient();
+  const { client, config } = createPnvsClient();
 
   try {
-    const request = new RequiredPhoneCodeRequest({
-      phoneNo: normalizedPhoneNumber
-    });
-    const response = await client.requiredPhoneCode(request);
-    return normalizeSendResponse(normalizedPhoneNumber, response);
+    const response = await client.sendSmsVerifyCode(
+      new SendSmsVerifyCodeRequest({
+        phoneNumber: normalizedPhoneNumber,
+        countryCode: "86",
+        schemeName: config.schemeName,
+        signName: config.signName,
+        templateCode: config.templateCode,
+        templateParam: JSON.stringify({ code: "##code##" }),
+        returnVerifyCode: false,
+        codeLength: 6,
+        codeType: 1,
+        validTime: 300,
+        interval: 60,
+        duplicatePolicy: 1,
+        autoRetry: 0
+      })
+    );
+    return normalizeResponse(normalizedPhoneNumber, response);
   } catch (error) {
-    throw wrapAliyunSmsError(error);
+    throw wrapAliyunPnvsError(error);
   }
 };
 
 export const verifyPhoneCode = async (phoneNumber, verificationCode) => {
   const normalizedPhoneNumber = validateMainlandPhoneNumber(phoneNumber);
   const normalizedVerificationCode = validateVerificationCode(verificationCode);
-  const client = createSmsClient();
+  const { client, config } = createPnvsClient();
 
   try {
-    const request = new ValidPhoneCodeRequest({
-      phoneNo: normalizedPhoneNumber,
-      certifyCode: normalizedVerificationCode
-    });
-    const response = await client.validPhoneCode(request);
-    return normalizeVerifyResponse(normalizedPhoneNumber, response);
+    const response = await client.checkSmsVerifyCode(
+      new CheckSmsVerifyCodeRequest({
+        phoneNumber: normalizedPhoneNumber,
+        countryCode: "86",
+        schemeName: config.schemeName,
+        verifyCode: normalizedVerificationCode
+      })
+    );
+    const verified = response.body?.model?.verifyResult === "PASS";
+    return normalizeResponse(normalizedPhoneNumber, response, verified);
   } catch (error) {
-    throw wrapAliyunSmsError(error);
+    throw wrapAliyunPnvsError(error);
   }
 };

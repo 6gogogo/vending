@@ -1,11 +1,31 @@
 import { existsSync, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { createSeededPersistedState, resolveApiDataFile, writePersistedState } from "../common/store/persistence.js";
+import {
+  createSeededPersistedState,
+  resolveRuntimeStoragePaths,
+  writePersistedState
+} from "../common/store/persistence.js";
 import { isProductionRuntime } from "../common/config/runtime-environment.js";
+import {
+  resolveRuntimeDataPlane,
+  resolveRuntimeDataPlaneInstanceId
+} from "../common/config/runtime-data-plane.js";
 import { acquireFinancialSingleWriterForMaintenance } from "../common/coordination/financial-single-writer-runtime.js";
+import { assertRuntimePathsSafe } from "../common/store/runtime-path-safety.js";
+import { assertSimulationDataPlaneIsEmptyForInitialization } from "../common/store/runtime-evidence-guard.js";
 
-const dataFile = resolveApiDataFile();
+const runtimePaths = resolveRuntimeStoragePaths();
+const dataFile = runtimePaths.dataFile;
+const dataPlane = resolveRuntimeDataPlane();
+
+assertRuntimePathsSafe({
+  dataFile: runtimePaths.dataFile,
+  systemLogFile: runtimePaths.systemLogFile,
+  uploadDir: runtimePaths.uploadDir,
+  backupDir: runtimePaths.backupDir,
+  financialLeaseFile: runtimePaths.financialLeaseFile
+});
 
 const normalizePath = (path: string) => {
   const normalized = resolve(path);
@@ -30,6 +50,11 @@ if (!process.argv.includes("--confirm-reset")) {
   process.exit(2);
 }
 
+if (dataPlane === "live") {
+  console.error("真实数据平面禁止写入测试种子。请使用受控的真实初始化命令创建纯净库。");
+  process.exit(2);
+}
+
 const productionConfirmation = readOption("confirm-production-data-file");
 
 if (isProductionRuntime() && normalizePath(productionConfirmation ?? "") !== normalizePath(dataFile)) {
@@ -46,10 +71,11 @@ if (existsSync(dataFile)) {
   }
 }
 
-const state = createSeededPersistedState();
+assertSimulationDataPlaneIsEmptyForInitialization(runtimePaths);
+
 const financialWriter = acquireFinancialSingleWriterForMaintenance();
 try {
-  writePersistedState(state);
+  writePersistedState(createSeededPersistedState(resolveRuntimeDataPlaneInstanceId()));
 } finally {
   financialWriter.release();
 }

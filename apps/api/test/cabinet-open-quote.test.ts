@@ -261,7 +261,7 @@ test("真实开柜绑定服务端报价，价格漂移零副作用且丢失响�
       {} as InventoryOrdersService,
       new AlertsService(store),
       reservations,
-      new ConfigService({}),
+      new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "false" }),
       undefined,
       quotes
     );

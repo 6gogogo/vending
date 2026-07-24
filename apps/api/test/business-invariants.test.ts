@@ -23,6 +23,7 @@ import { SmartVmGateway } from "../src/modules/devices/smartvm.gateway";
 import { InventoryOrdersController } from "../src/modules/inventory-orders/inventory-orders.controller";
 import { InventoryOrdersService } from "../src/modules/inventory-orders/inventory-orders.service";
 import { MerchantGoodsTemplatesService } from "../src/modules/merchant-goods-templates/merchant-goods-templates.service";
+import { PaymentsService } from "../src/modules/payments/payments.service";
 import { ReservationsService } from "../src/modules/reservations/reservations.service";
 import { WarehousesService } from "../src/modules/warehouses/warehouses.service";
 
@@ -317,7 +318,7 @@ test("服务时段内免费额度用尽后仍进入全额付费预结算", () =>
     {} as InventoryOrdersService,
     new AlertsService(store),
     reservations,
-    new ConfigService({})
+    new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "false" })
   );
   const preview = cabinetEvents.previewOpenSettlement(
     {
@@ -340,6 +341,161 @@ test("服务时段内免费额度用尽后仍进入全额付费预结算", () =>
   assert.equal(preview.preSettlement?.paidQuantity, 1);
   assert.equal(preview.preSettlement?.payableAmount, 500);
   assert.equal(preview.preSettlement?.chargeRequired, true);
+});
+
+test("预约取货模式要求先预约，且未履约预约会共同占用免费额度", async () => {
+  const store = createIsolatedStore();
+  store.events.splice(0, store.events.length);
+  store.reservations.splice(0, store.reservations.length);
+  const user = store.users.find((entry) => entry.role === "special" && entry.status === "active");
+  const device = store.devices[0];
+  const door = device?.doors[0];
+  const goods = door?.goods[0];
+  assert.ok(user);
+  assert.ok(device);
+  assert.ok(door);
+  assert.ok(goods);
+
+  user.quota = {
+    dailyLimit: 2,
+    categoryLimit: { food: 2, drink: 2, daily: 2 }
+  };
+  new InventoryBatchChangesService(store).recordBatchOnly({
+    deviceCode: device.deviceCode,
+    goodsId: goods.goodsId,
+    quantity: 4,
+    sourceType: "system"
+  });
+  store.specialAccessPolicies.unshift({
+    id: "policy-reservation-only-pickup",
+    name: "预约取货测试策略",
+    weekdays: [0, 1, 2, 3, 4, 5, 6],
+    startHour: 0,
+    endHour: 24,
+    goodsLimits: [
+      {
+        goodsId: goods.goodsId,
+        goodsName: goods.name,
+        category: goods.category,
+        quantity: 2
+      }
+    ],
+    applicableUserIds: [user.id],
+    status: "active"
+  });
+  device.status = "online";
+  device.lastSeenAt = new Date().toISOString();
+  store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
+
+  const config = new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "true" });
+  const accessRules = new AccessRulesService(store);
+  const reservations = new ReservationsService(store, accessRules, config);
+  const cabinetEvents = new CabinetEventsService(
+    store,
+    accessRules,
+    {
+      async openDoor() {
+        return { orderNo: "reservation-only-open-order" };
+      }
+    } as unknown as SmartVmGateway,
+    {} as InventoryOrdersService,
+    new AlertsService(store),
+    reservations,
+    config
+  );
+  const intentItem = {
+    goodsId: goods.goodsId,
+    goodsName: goods.name,
+    category: goods.category,
+    quantity: 1
+  };
+
+  assert.throws(
+    () =>
+      cabinetEvents.previewOpenSettlement(
+        {
+          phone: user.phone,
+          deviceCode: device.deviceCode,
+          doorNum: door.doorNum,
+          intentItems: [intentItem]
+        },
+        { id: user.id, role: "special" }
+      ),
+    /请先预约后再开柜/
+  );
+
+  const reservation = reservations.create(
+    {
+      deviceCode: device.deviceCode,
+      doorNum: door.doorNum,
+      intentItems: [intentItem]
+    },
+    { id: user.id, role: "special" }
+  );
+  const preview = cabinetEvents.previewOpenSettlement(
+    {
+      phone: user.phone,
+      deviceCode: device.deviceCode,
+      doorNum: door.doorNum,
+      reservationId: reservation.id,
+      intentItems: [intentItem]
+    },
+    { id: user.id, role: "special" }
+  );
+  assert.equal(preview.preSettlement?.payableAmount, 0);
+  assert.equal(preview.preSettlement?.chargeRequired, false);
+
+  assert.throws(
+    () =>
+      reservations.create(
+        {
+          deviceCode: device.deviceCode,
+          doorNum: door.doorNum,
+          intentItems: [{ ...intentItem, quantity: 2 }]
+        },
+        { id: user.id, role: "special" }
+      ),
+    /预约数量超过当前可领取额度/
+  );
+
+  await cabinetEvents.openCabinet(
+    {
+      phone: user.phone,
+      deviceCode: device.deviceCode,
+      doorNum: door.doorNum,
+      reservationId: reservation.id,
+      intentItems: [intentItem]
+    },
+    { id: user.id, role: "special" }
+  );
+  assert.equal(store.events[0]?.reservationOnlyPickup, true);
+});
+
+test("预约取货模式不创建新的支付单或付款人身份授权", async () => {
+  const config = new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "true" });
+  const payments = new PaymentsService(
+    {} as InMemoryStoreService,
+    config,
+    {} as CabinetEventsService,
+    {} as InventoryOrdersService
+  );
+
+  await assert.rejects(
+    () =>
+      payments.createOrder(
+        {} as never,
+        { id: "special-reservation-only", role: "special" }
+      ),
+    /不创建新的支付单/
+  );
+  await assert.rejects(
+    () =>
+      payments.resolvePayerIdentity(
+        {} as never,
+        { id: "special-reservation-only", role: "special" }
+      ),
+    /不创建新的支付单/
+  );
 });
 
 test("预约和开柜意向只信任所选柜门的后端货品名称与品类", () => {
@@ -452,7 +608,7 @@ test("预约和开柜意向只信任所选柜门的后端货品名称与品类",
     {} as InventoryOrdersService,
     new AlertsService(store),
     reservations,
-    new ConfigService({})
+    new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "false" })
   );
   device.status = "online";
   device.lastSeenAt = new Date().toISOString();

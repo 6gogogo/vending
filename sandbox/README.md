@@ -14,10 +14,19 @@
 - `LOCAL_API_BASE_URL`
 - `TEST_PLATFORM_ACCOUNT`
 - `TEST_PLATFORM_PASSWORD`
-- `ALIYUN_SMS_ACCESS_KEY_ID`
-- `ALIYUN_SMS_ACCESS_KEY_SECRET`
-- `ALIYUN_SMS_REGION_ID`
-- `ALIYUN_SMS_ENDPOINT`
+- `VERIFICATION_CODE_PROVIDER=aliyun_pnvs`（公网/预发布预检）
+- `VERIFICATION_CODE_PREVIEW_ENABLED=false`（公网/预发布预检）
+- `ALIYUN_PNVS_ACCESS_KEY_ID`
+- `ALIYUN_PNVS_ACCESS_KEY_SECRET`
+- `ALIYUN_PNVS_REGION_ID`（默认 `cn-hangzhou`）
+- `ALIYUN_PNVS_ENDPOINT`（默认 `dypnsapi.aliyuncs.com`）
+- `ALIYUN_PNVS_SIGN_NAME`
+- `ALIYUN_PNVS_TEMPLATE_CODE`
+- `ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN`
+- `ALIYUN_PNVS_SCHEME_NAME_REGISTER`
+- `ALIYUN_PNVS_SCHEME_NAME_GENERAL`
+- `ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET`
+- `SANDBOX_PNVS_SCHEME_NAME`（只供 sandbox 直接发送/校验，必须显式设置）
 
 ## 常用命令
 
@@ -54,9 +63,10 @@
 - `refund:api` 会先登录本地管理员账号，再请求本地后端 `/inventory-orders/refund`，适合核对 PC 后台同款退款链路。
 - `door:probe` 会分别测试 `payStyle=2/3/7` 以及 `SMARTVM_EXTRA_PAY_STYLES` 里配置的自定义支付方式，并同时覆盖“传 doorNum / 不传 doorNum”两组情况。
 - 当前文档里没有“由我们主动发起补扣订单”的平台接口；补扣是平台回推给我们，若补扣待支付，再由我们调用“付款成功异步通知”告知平台支付完成。
-- `sms:send` 和 `sms:verify` 通过阿里云短信验证码服务做真实发送与校验，目前只放在 `sandbox` 中单独测试，还没有接入正式登录/注册流程。
-- 阿里云短信验证码脚本走的是官方 SDK 提供的手机验证码接口，因此至少要提供 `ALIYUN_SMS_ACCESS_KEY_ID` 和 `ALIYUN_SMS_ACCESS_KEY_SECRET`。
-- 如果你已经把阿里云短信密钥写进 `apps/api/.env`，这里不需要再重复配置。
+- `sms:send` 和 `sms:verify` 使用阿里云 PNVS 的 `SendSmsVerifyCode` / `CheckSmsVerifyCode` 做真实发送与校验；后端登录、注册和密码重置也使用同一 PNVS 模型。
+- PNVS 发送请求固定 `returnVerifyCode=false`，脚本不会取得或输出验证码；输出只包含已脱敏手机号、请求标识和结果。
+- 真实短信不会由 `external-preflight` 默认触发；只有同时传入 `--send-sms --sms-phone <手机号>` 且已配置独立的 `SANDBOX_PNVS_SCHEME_NAME` 时才会发送。只可使用已获授权的测试号码。
+- 如果你已在后端环境中配置 PNVS 凭据，sandbox 可以复用；不要把密钥写入示例文件、命令行参数或报告。
 - `goods` 现在支持直接传柜机编号，例如 `npm run sandbox:goods -- CAB-1001`；如果是双门柜，还可以再补一个门号，例如 `npm run sandbox:goods -- CAB-1001 1`。
 - 如果你已经把真实柜机编号写进 `SMARTVM_DEVICE_CODE`，那么 `npm run sandbox:device` 和 `npm run sandbox:goods` 可以直接运行，不用每次再手敲编号。
 - 如果只是想验证柜机接口，不建议让小程序直接请求测试平台；优先通过本地后端或 `sandbox` 脚本中转，避免把签名凭据暴露到前端。

@@ -1298,7 +1298,7 @@ export class DevicesService {
   }
 
   private isLocalMockDeviceApiEnabled() {
-    if (isProductionRuntime()) {
+    if (isProductionRuntime() || this.isLiveDataPlane()) {
       return false;
     }
 
@@ -1312,6 +1312,14 @@ export class DevicesService {
       apiHost.startsWith("127.");
 
     return explicitlyEnabled && isLoopbackHost;
+  }
+
+  private isLiveDataPlane() {
+    const store = this.store as unknown as {
+      isLiveDataPlane?: () => boolean;
+    };
+
+    return typeof store.isLiveDataPlane === "function" && store.isLiveDataPlane();
   }
 
   private getAdminActor(actorUserId?: string) {

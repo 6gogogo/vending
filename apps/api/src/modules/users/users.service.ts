@@ -426,11 +426,7 @@ export class UsersService {
       }
     }
 
-    for (const [token, session] of this.store.sessions.entries()) {
-      if (session.userId === removed.id) {
-        this.store.sessions.delete(token);
-      }
-    }
+    this.store.revokeSessionsForUser(removed.id);
 
     for (const application of this.store.registrationApplications) {
       if (application.linkedUserId !== removed.id) {

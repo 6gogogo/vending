@@ -9,6 +9,7 @@
     "test:typecheck": "tsc -p tsconfig.test.json --noEmit",
     "data:init": "tsx src/scripts/init-data.ts",
     "data:init:empty": "tsx src/scripts/init-empty-data.ts",
+    "data:init:live": "tsx src/scripts/initialize-live-data.ts",
     "data:backup": "tsx src/scripts/runtime-data-maintenance.ts backup",
     "data:verify": "tsx src/scripts/runtime-data-maintenance.ts verify",
     "data:restore": "tsx src/scripts/runtime-data-maintenance.ts restore",
@@ -25,7 +26,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@alicloud/dysmsapi20170525": "^4.5.1",
+    "@alicloud/dypnsapi20170525": "^2.0.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.0",

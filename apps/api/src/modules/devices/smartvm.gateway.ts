@@ -15,6 +15,8 @@ import type {
 } from "@vm/shared-types";
 
 import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
+import { resolveFullSimulationExternalMode } from "../../common/config/full-simulation-mode";
+import { assertConfiguredRuntimeDataPlaneSmartVmPolicy } from "../../common/config/runtime-data-plane-policy";
 import { isProductionRuntime } from "../../common/config/runtime-environment";
 import { SystemAuditLogService } from "../../common/store/system-audit-log.service";
 
@@ -142,6 +144,12 @@ export class SmartVmGateway {
   }
 
   private createClient(onExchange?: (exchange: SmartVmExchangeTrace) => void) {
+    this.assertRuntimeDataPlaneSmartVmPolicy();
+
+    if (this.getFullSimulationTransportMode() === "mock") {
+      return undefined;
+    }
+
     const baseUrl = this.configService.get<string>("SMARTVM_BASE_URL");
     const credentials = this.credentials;
 
@@ -201,7 +209,7 @@ export class SmartVmGateway {
     action: "open-door" | "notify-payment-success" | "refund",
     operation: () => Promise<T>
   ): Promise<T> {
-    const criticalAudit = isProductionRuntime()
+    const criticalAudit = (isProductionRuntime() || this.isLiveDataPlane())
       ? this.auditLog.beginCriticalIntent({
           method: "POST",
           path: "/internal/smartvm/outbound-command",
@@ -311,6 +319,12 @@ export class SmartVmGateway {
   }
 
   isUsingMockTransport() {
+    this.assertRuntimeDataPlaneSmartVmPolicy();
+
+    if (this.getFullSimulationTransportMode() === "mock") {
+      return true;
+    }
+
     const baseUrl = this.configService.get<string>("SMARTVM_BASE_URL");
     return !baseUrl || !this.credentials;
   }
@@ -456,6 +470,7 @@ export class SmartVmGateway {
       | (SmartVmSettlementPayload & Record<string, unknown>)
       | Record<string, unknown>
   ) {
+    this.assertRuntimeDataPlaneSmartVmPolicy();
     const credentials = this.credentials;
 
     if (!credentials) {
@@ -580,7 +595,7 @@ export class SmartVmGateway {
   }
 
   private allowUnsignedCallbacks() {
-    if (isProductionRuntime()) {
+    if (isProductionRuntime() || this.isLiveDataPlane()) {
       return false;
     }
 
@@ -589,5 +604,51 @@ export class SmartVmGateway {
       this.configService.get<string>("ALLOW_UNSIGNED_SMARTVM_CALLBACKS");
 
     return ["1", "true", "yes", "on"].includes(raw?.trim().toLowerCase() ?? "");
+  }
+
+  private assertRuntimeDataPlaneSmartVmPolicy() {
+    try {
+      assertConfiguredRuntimeDataPlaneSmartVmPolicy({
+        VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE"),
+        VM_DATA_ROOT: this.configService.get<string>("VM_DATA_ROOT"),
+        VM_DATA_PLANE_ID: this.configService.get<string>("VM_DATA_PLANE_ID"),
+        VM_SIMULATION_PROFILE: this.configService.get<string>("VM_SIMULATION_PROFILE"),
+        VM_FULL_SIMULATION_ENABLED: this.configService.get<string>("VM_FULL_SIMULATION_ENABLED"),
+        VM_FULL_SIMULATION_SMARTVM_MODE: this.configService.get<string>(
+          "VM_FULL_SIMULATION_SMARTVM_MODE"
+        ),
+        SMARTVM_BASE_URL: this.configService.get<string>("SMARTVM_BASE_URL"),
+        SMARTVM_CLIENT_ID: this.configService.get<string>("SMARTVM_CLIENT_ID"),
+        SMARTVM_KEY: this.configService.get<string>("SMARTVM_KEY"),
+        SMARTVM_ALLOW_UNSIGNED_CALLBACKS: this.configService.get<string>(
+          "SMARTVM_ALLOW_UNSIGNED_CALLBACKS"
+        ),
+        ALLOW_UNSIGNED_SMARTVM_CALLBACKS: this.configService.get<string>(
+          "ALLOW_UNSIGNED_SMARTVM_CALLBACKS"
+        ),
+        SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS: this.configService.get<string>(
+          "SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS"
+        )
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : "SmartVM 数据平面配置无效。"
+      );
+    }
+  }
+
+  private getFullSimulationTransportMode() {
+    return resolveFullSimulationExternalMode("smartvm", {
+      VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE"),
+      VM_SIMULATION_PROFILE: this.configService.get<string>("VM_SIMULATION_PROFILE"),
+      VM_FULL_SIMULATION_ENABLED: this.configService.get<string>("VM_FULL_SIMULATION_ENABLED"),
+      VM_FULL_SIMULATION_SMARTVM_MODE: this.configService.get<string>(
+        "VM_FULL_SIMULATION_SMARTVM_MODE"
+      )
+    });
+  }
+
+  private isLiveDataPlane() {
+    return this.configService.get<string>("VM_DATA_PLANE")?.trim().toLowerCase() === "live";
   }
 }

@@ -573,7 +573,11 @@ export interface PaymentProviderDiagnostics {
 export interface PaymentDiagnosticsResult {
   generatedAt: string;
   requestedMode: PaymentRuntimeMode;
-  requestedModeSource: "PAYMENT_MODE" | "PAYMENT_MOCK_ENABLED" | "default";
+  requestedModeSource:
+    | "PAYMENT_MODE"
+    | "PAYMENT_MOCK_ENABLED"
+    | "VM_FULL_SIMULATION_PAYMENT_MODE"
+    | "default";
   paymentModeRaw?: string;
   legacyPaymentMockEnabled?: string;
   summary: {
@@ -950,6 +954,11 @@ export interface CabinetEventRecord {
   billingConfirmedByUserId?: string;
   billingResolutionNote?: string;
   reservationId?: string;
+  /**
+   * 开柜时固化的预约取货账务策略。缺失表示历史事件，必须保留其原有支付语义，
+   * 不能在回调时按当前部署开关重判。
+   */
+  reservationOnlyPickup?: boolean;
   intentItems?: CabinetIntentItem[];
   preSettlement?: CabinetPreSettlement;
   settlementComparison?: CabinetSettlementComparison;

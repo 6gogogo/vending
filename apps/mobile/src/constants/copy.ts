@@ -15,6 +15,26 @@ export const appCopy = {
       "暂时无法确认柜机是否已收到指令。请先查看现场柜门，不要重复开柜；返回首页等待状态更新，必要时联系工作人员。",
     actionText: "返回首页"
   },
+  reservationPickup: {
+    planTitle: "预约取货计划",
+    planSubtitle: "请先选择物资并提交预约，到柜后使用预约开柜。",
+    selectionHint: "预约仅保留物资种类和数量；到柜后请按预约内容取货并及时关门。",
+    itemListTitle: "预约物资清单",
+    submitAction: "提交预约取货",
+    openConfirmTitle: "确认预约取货",
+    openConfirmHint: "请逐项核对现场柜机、距离和预约物资，再决定是否开门。",
+    openConfirmSummary: "本次预约物资",
+    openConfirmNotice: "柜门关闭后系统会记录实际领取结果；若与预约不一致，将转入管理员核对，不会发起支付。",
+    resultTitle: "预约取货结果",
+    completedStatus: "预约取货完成",
+    mismatchStatus: "领取待核对",
+    completedHint: "平台已完成本次预约取货核对，不涉及支付。",
+    mismatchHint: "实际领取结果与预约不一致，已转交管理员核对；本次不会产生支付。",
+    completionTitle: "预约取货完成",
+    completionAction: "确认取货",
+    completionContent: (settledItems: string, comparisonText: string) =>
+      `平台核对：${settledItems}${comparisonText}\n本次预约取货已完成，不涉及支付。确认后将返回首页。`
+  },
   serviceHighlights: ["手机号验证码注册登录", "审核状态实时同步", "取货、补货、反馈全程留痕"],
   firstUseSteps: [
     "首次使用先提交注册申请",

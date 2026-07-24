@@ -25,6 +25,7 @@ const REQUIRED_ARRAY_KEYS = [
   "reservations",
   "alerts",
   "logs",
+  "platformTenants",
   "adminCredentials",
   "backofficeCredentials",
   "callbackLog"
@@ -44,6 +45,17 @@ const PAYMENT_ORDER_STATUSES = new Set([
 const PAYMENT_REFUND_STATUSES = new Set(["pending", "success", "failed"]);
 const PAYMENT_REFUND_PROVIDER_OUTCOMES = new Set(["unknown", "pending", "success", "failed"]);
 const PAYMENT_REFUND_BUSINESS_APPLY_STATES = new Set(["pending", "completed"]);
+const PLATFORM_TENANT_STATUSES = new Set(["active", "trial", "paused"]);
+const DATA_PLANE_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
+const SIMULATION_INITIALIZATION_SOURCES = new Set([
+  "simulation-seed",
+  "simulation-empty",
+  "legacy-simulation"
+]);
+const LIVE_INITIALIZATION_SOURCES = new Set([
+  "live-bootstrap-pending",
+  "live-bootstrap"
+]);
 
 export interface PersistedStateValidationResult {
   summary: Record<string, number>;
@@ -469,6 +481,35 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
     return result;
   }
 
+  if (parsed.dataPlane !== "simulation" && parsed.dataPlane !== "live") {
+    result.errors.push("dataPlane 必须是 simulation 或 live。");
+  }
+
+  if (
+    typeof parsed.instanceId !== "string" ||
+    !DATA_PLANE_INSTANCE_ID_PATTERN.test(parsed.instanceId)
+  ) {
+    result.errors.push("instanceId 格式无效。");
+  }
+
+  if (parsed.dataPlane === "simulation") {
+    if (
+      typeof parsed.initializationSource !== "string" ||
+      !SIMULATION_INITIALIZATION_SOURCES.has(parsed.initializationSource)
+    ) {
+      result.errors.push("simulation 数据平面的 initializationSource 无效。");
+    }
+  }
+
+  if (parsed.dataPlane === "live") {
+    if (
+      typeof parsed.initializationSource !== "string" ||
+      !LIVE_INITIALIZATION_SOURCES.has(parsed.initializationSource)
+    ) {
+      result.errors.push("live 数据平面的 initializationSource 无效。");
+    }
+  }
+
   for (const key of REQUIRED_ARRAY_KEYS) {
     if (!Array.isArray(parsed[key])) {
       result.errors.push(`${key} 必须是数组。`);
@@ -529,6 +570,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateUniqueField(parsed, "reservations", "id", result);
   validateUniqueField(parsed, "alerts", "id", result);
   validateUniqueField(parsed, "logs", "id", result);
+  validateUniqueField(parsed, "platformTenants", "id", result);
   validateUniqueField(parsed, "callbackLog", "id", result);
   validateUniqueField(parsed, "adminCredentials", "username", result, (value) => value.toLowerCase());
   validateUniqueField(parsed, "backofficeCredentials", "username", result, (value) => value.toLowerCase());
@@ -541,6 +583,12 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateRequiredStringFields(parsed, "paymentOrders", ["id", "paymentNo", "provider", "phase", "status"], result);
   validateRequiredStringFields(parsed, "paymentRefunds", ["id", "paymentOrderId", "paymentNo", "refundNo", "provider", "status"], result);
   validateRequiredStringFields(parsed, "reservations", ["id", "userId", "deviceCode", "status"], result);
+  validateRequiredStringFields(
+    parsed,
+    "platformTenants",
+    ["id", "code", "name", "status", "createdAt"],
+    result
+  );
   validateRequiredStringFields(
     parsed,
     "adminCredentials",
@@ -566,6 +614,14 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
     "provider",
     PAYMENT_PROVIDERS,
     "支付渠道",
+    result
+  );
+  validateAllowedStringField(
+    parsed,
+    "platformTenants",
+    "status",
+    PLATFORM_TENANT_STATUSES,
+    "平台租户状态",
     result
   );
   validateAllowedStringField(
@@ -636,6 +692,18 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateReferenceField(parsed, "goodsBatches", "goodsId", catalogGoodsIds, "货品", result);
   validatePaymentRefundCompletionMarkers(parsed, result);
   validatePaymentRefundBindings(parsed, result);
+
+  if (parsed.dataPlane === "live") {
+    const platformTenants = parsed.platformTenants;
+
+    if (parsed.initializationSource === "live-bootstrap-pending") {
+      if (!Array.isArray(platformTenants) || platformTenants.length !== 0) {
+        result.errors.push("待初始化 live 数据平面不能预先包含平台租户。");
+      }
+    } else if (!Array.isArray(platformTenants) || platformTenants.length !== 1) {
+      result.errors.push("live 数据平面必须包含且仅包含一个当前平台租户。");
+    }
+  }
 
   const batches = parsed.goodsBatches;
 

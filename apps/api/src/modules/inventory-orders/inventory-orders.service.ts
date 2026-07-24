@@ -34,6 +34,10 @@ export interface InventoryQuotaAccountingOptions {
    * 传入空数组表示本次全部付费；省略则兼容未保存额度拆分的旧调用方。
    */
   quotaItems?: readonly InventoryQuotaAllocationItem[];
+  /**
+   * 物资变动仍需如实入账，但当前业务不再要求用户付款时，调用方关闭“待支付”告警。
+   */
+  suppressPaymentFollowup?: boolean;
 }
 
 @Injectable()
@@ -284,7 +288,7 @@ export class InventoryOrdersService {
       }
     }
 
-    if (payload.amount > 0) {
+    if (payload.amount > 0 && !quotaOptions?.suppressPaymentFollowup) {
       this.alertsService.create({
         type: "callback",
         title: "补扣订单待支付跟进",
