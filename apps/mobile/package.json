@@ -23,7 +23,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-4030620241128001",
     "@vm/shared-client": "file:../../packages/shared-client",
     "@vm/shared-types": "file:../../packages/shared-types",
-    "pinia": "^3.0.1",
+    "pinia": "2.1.7",
     "vue": "3.4.21"
   },
   "devDependencies": {
