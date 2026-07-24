@@ -45,7 +45,7 @@ export const mobileApi = {
     return mobileClient.post<{
       phone: string;
       expiresInSeconds: number;
-      provider: "mock" | "aliyun";
+      provider: "mock" | "aliyun_pnvs" | "manual";
       previewCode?: string;
     }>(
       "/auth/request-code",
