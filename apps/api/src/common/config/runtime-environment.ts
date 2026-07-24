@@ -28,3 +28,26 @@ export const envFilesDeclareProductionRuntime = (
       )
     );
   });
+
+/**
+ * 全真模拟的运行配置必须完整自洽；不能在 ConfigModule 初始化时继续混入
+ * `.env.example` 中的旧路径配置，否则隔离根目录门禁会失效。
+ */
+export const envFilesDeclareFullSimulationProfile = (
+  paths: readonly string[],
+  cwd = process.cwd()
+) =>
+  paths.some((path) => {
+    const filePath = isAbsolute(path) ? path : resolve(cwd, path);
+
+    if (!existsSync(filePath)) {
+      return false;
+    }
+
+    const content = readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+    return content.split(/\r?\n/).some((line) =>
+      /^\s*(?:export\s+)?VM_SIMULATION_PROFILE\s*=\s*(?:["']full["']|full)\s*(?:#.*)?$/i.test(
+        line
+      )
+    );
+  });

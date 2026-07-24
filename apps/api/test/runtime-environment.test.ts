@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  envFilesDeclareFullSimulationProfile,
   envFilesDeclareProductionRuntime,
   isProductionRuntime
 } from "../src/common/config/runtime-environment.js";
@@ -44,4 +45,26 @@ test("本地环境文件声明 production 时不会再回落加载示例配置",
   assert.equal(envFilesDeclareProductionRuntime([".env"], directory), true);
   assert.equal(envFilesDeclareProductionRuntime([".env.development"], directory), false);
   assert.equal(envFilesDeclareProductionRuntime(["missing.env"], directory), false);
+});
+
+test("全真模拟环境文件不会再混入示例配置", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-full-simulation-env-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(
+    join(directory, ".env"),
+    "VM_DATA_PLANE=simulation\nVM_SIMULATION_PROFILE = 'full'\n",
+    "utf8"
+  );
+  writeFileSync(
+    join(directory, ".env.development"),
+    "VM_SIMULATION_PROFILE=standard\n",
+    "utf8"
+  );
+
+  assert.equal(envFilesDeclareFullSimulationProfile([".env"], directory), true);
+  assert.equal(
+    envFilesDeclareFullSimulationProfile([".env.development"], directory),
+    false
+  );
+  assert.equal(envFilesDeclareFullSimulationProfile(["missing.env"], directory), false);
 });

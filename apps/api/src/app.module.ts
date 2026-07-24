@@ -25,6 +25,7 @@ import { UploadsModule } from "./modules/uploads/uploads.module";
 import { UsersModule } from "./modules/users/users.module";
 import { WarehousesModule } from "./modules/warehouses/warehouses.module";
 import {
+  envFilesDeclareFullSimulationProfile,
   envFilesDeclareProductionRuntime,
   isProductionRuntime
 } from "./common/config/runtime-environment";
@@ -37,7 +38,11 @@ const resolveEnvFilePath = () => {
     "apps/api/.env"
   ];
 
-  if (isProductionRuntime() || envFilesDeclareProductionRuntime(localEnvFiles)) {
+  if (
+    isProductionRuntime() ||
+    envFilesDeclareProductionRuntime(localEnvFiles) ||
+    envFilesDeclareFullSimulationProfile(localEnvFiles)
+  ) {
     return localEnvFiles;
   }
 
