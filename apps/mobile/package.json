@@ -9,7 +9,7 @@
     "dev:alipay": "uni -p mp-alipay",
     "dev:app": "uni -p app",
     "build": "uni build -p h5",
-    "build:weixin": "uni build -p mp-weixin",
+    "build:weixin": "uni build -p mp-weixin && node ./scripts/verify-weixin-production-api.mjs",
     "build:alipay": "uni build -p mp-alipay",
     "build:app": "uni build -p app",
     "test": "tsx --test src/utils/*.test.ts",
