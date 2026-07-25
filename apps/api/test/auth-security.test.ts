@@ -11,6 +11,11 @@ import { PersistenceInterceptor } from "../src/common/store/persistence.intercep
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import type { VerificationPurpose } from "../src/common/store/persistence";
 import { AuthController } from "../src/modules/auth/auth.controller";
+import {
+  initializeFirstBackofficePassword,
+  MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH
+} from "../src/modules/auth/first-backoffice-password";
+import { verifyAdminPassword } from "../src/modules/auth/admin-password.utils";
 import { AuthService } from "../src/modules/auth/auth.service";
 import { VerificationCodeService } from "../src/modules/auth/verification-code.service";
 import { UsersService } from "../src/modules/users/users.service";
@@ -397,6 +402,45 @@ test("后台密码变更撤销该用户全部旧会话，并只返回一个新�
   await assert.rejects(
     () => authService.backofficeLogin("admin", "admin"),
     /账号或密码不正确/
+  );
+});
+
+test("首次后台密码初始化仅允许仍为默认密码的 admin，并撤销旧会话", () => {
+  const store = createIsolatedStore();
+  const credential = store.findBackofficeCredentialByUsername("admin");
+  const user = store.users.find((entry) => entry.id === credential?.userId);
+  assert.ok(credential);
+  assert.ok(user);
+
+  const existingSession = store.createBackofficeSession(user, credential.role, credential.tenantId);
+  const password = "first-backoffice-password";
+  const result = initializeFirstBackofficePassword(store, password);
+
+  assert.equal(result.credential.username, "admin");
+  assert.equal(result.credential.usesDefaultPassword, false);
+  assert.equal(
+    verifyAdminPassword(password, result.credential.passwordSalt, result.credential.passwordHash),
+    true
+  );
+  assert.equal(store.getSession(existingSession), undefined);
+  assert.ok(
+    store.logs.some(
+      (entry) =>
+        entry.type === "initialize-first-backoffice-password" &&
+        entry.metadata?.initializationMethod === "local-tty"
+    )
+  );
+  assert.throws(
+    () => initializeFirstBackofficePassword(store, password),
+    /不处于可初始化的默认密码状态/
+  );
+  assert.throws(
+    () =>
+      initializeFirstBackofficePassword(
+        createIsolatedStore(),
+        "x".repeat(MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH - 1)
+      ),
+    /至少需要/
   );
 });
 

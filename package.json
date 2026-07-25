@@ -11,6 +11,7 @@
     "init:api-data": "npm run data:init --workspace @vm/api",
     "init:all-data": "npm run data:init:empty --workspace @vm/api --",
     "init:live-data": "npm run data:init:live --workspace @vm/api",
+    "init:first-backoffice-password": "npm run data:init:first-backoffice-password --workspace @vm/api",
     "init:all-data:keep-uploads": "npm run data:init:empty --workspace @vm/api -- --keep-uploads",
     "backup:api-data": "npm run data:backup --workspace @vm/api --",
     "verify:api-data": "npm run data:verify --workspace @vm/api --",
