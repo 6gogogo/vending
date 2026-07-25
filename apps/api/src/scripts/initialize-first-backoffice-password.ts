@@ -85,9 +85,7 @@ const main = async () => {
 
   assertInteractiveTerminal();
 
-  if (resolveRuntimeDataPlane() !== "live") {
-    throw new Error("首次后台密码初始化只能在 VM_DATA_PLANE=live 的真实数据平面执行。");
-  }
+  const dataPlane = resolveRuntimeDataPlane();
 
   const runtimePaths = resolveRuntimeStoragePaths();
   assertRuntimePathsSafe({
@@ -115,7 +113,7 @@ const main = async () => {
       metadata: {
         action: "initialize-first-backoffice-password",
         username: "admin",
-        dataPlane: "live",
+        dataPlane,
         inputMethod: "local-tty"
       }
     });
@@ -134,7 +132,7 @@ const main = async () => {
           metadata: {
             action: "initialize-first-backoffice-password",
             username: result.credential.username,
-            dataPlane: "live",
+            dataPlane,
             inputMethod: "local-tty",
             revokedSessionCount: result.revokedSessionCount
           }
@@ -154,7 +152,7 @@ const main = async () => {
         metadata: {
           action: "initialize-first-backoffice-password",
           username: "admin",
-          dataPlane: "live",
+          dataPlane,
           inputMethod: "local-tty"
         }
       });
