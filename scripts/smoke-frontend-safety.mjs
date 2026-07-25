@@ -90,6 +90,36 @@ assert.match(resultSource, /resultType\.value === "open-pending"/, "结果页必
 assert.match(resultSource, /不要重复发起开柜/, "开门待确认结果必须明确阻止重复开柜");
 
 const adminDeviceSource = readSource("apps/admin-web/src/pages/DeviceDetailPage.vue");
+const adminAppSource = readSource("apps/admin-web/src/App.vue");
+assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
+assert.match(adminAppSource, /验收模拟实例/, "管理后台必须持续标明模拟实例");
+assert.match(
+  adminAppSource,
+  /role="status"[\s\S]+aria-live="polite"/,
+  "模拟实例标识必须向辅助技术声明"
+);
+const amapLoaderSource = readSource("apps/admin-web/src/utils/amap-loader.ts");
+const amapPickerSource = readSource("apps/admin-web/src/components/AmapLocationPicker.vue");
+assert.match(
+  amapLoaderSource,
+  /地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求/,
+  "地图模拟模式必须明确说明脚本与地点搜索请求均未发生"
+);
+assert.match(
+  amapLoaderSource,
+  /VM_FULL_SIMULATION_MAP_MODE[\s\S]+AMAP_WEB_KEY[\s\S]+AMAP_SECURITY_JS_CODE/,
+  "地图模拟模式提示必须给出可执行的最小配置条件"
+);
+assert.match(
+  amapPickerSource,
+  /:role="searchFeedbackTone === 'danger' \? 'alert' : 'status'"/,
+  "地点搜索错误必须使用可访问的告警语义"
+);
+assert.match(
+  amapPickerSource,
+  /:aria-live="searchFeedbackTone === 'danger' \? 'assertive' : 'polite'"/,
+  "地点搜索结果必须按严重程度播报"
+);
 const remoteOpenSource = adminDeviceSource.slice(
   adminDeviceSource.indexOf("const remoteOpen"),
   adminDeviceSource.indexOf("const notifyPaymentSuccess")
@@ -323,9 +353,16 @@ for (const [rootId, labelId] of [
 assert.match(appLoginSource, /role="dialog"/, "免责声明必须暴露对话框语义");
 assert.match(appLoginSource, /aria-modal="true"/, "免责声明必须标记为模态内容");
 assert.match(appLoginSource, /aria-labelledby="disclaimer-dialog-title"/, "免责声明必须关联可访问标题");
-assert.match(appLoginSource, /@scrolltolower="markDisclaimerRead"/, "免责声明必须读到末尾后才允许同意");
-assert.match(appLoginSource, /:disabled="!disclaimerReadToEnd"/, "免责声明未读完时必须禁用同意按钮");
-assert.match(appLoginSource, />\s*\{\{ disclaimerReadToEnd \? "同意并继续" : "请先读完" \}\}\s*</, "免责声明必须明确展示阅读门槛");
+assert.match(appLoginSource, /<checkbox-group[\s\S]+@change="handleDisclaimerAgreementChange"/, "登录页必须使用可直接勾选的免责声明复选框");
+assert.match(appLoginSource, /class="disclaimer-agreement"[\s\S]+disclaimer-agreement--invalid/, "未勾选免责声明时必须高亮协议区域");
+assert.match(appLoginSource, /role="alert"[\s\S]+aria-live="assertive"[\s\S]+disclaimerValidationMessage/, "免责声明校验失败必须提供可访问文本提示");
+assert.doesNotMatch(appLoginSource, /@scrolltolower="markDisclaimerRead"/, "免责声明不得以滚动到底作为同意门槛");
+assert.doesNotMatch(appLoginSource, /disclaimerReadToEnd/, "免责声明阅读弹窗不得控制登录复选框状态");
+const ensureDisclaimerSource = appLoginSource.slice(
+  appLoginSource.indexOf("const ensureDisclaimerAccepted"),
+  appLoginSource.indexOf("const resolveDisclaimerElement")
+);
+assert.doesNotMatch(ensureDisclaimerSource, /openDisclaimer|showModal/, "未勾选时只能高亮提示，不得强制打开弹窗");
 assert.match(appLoginSource, /disclaimerPreviousFocus/, "免责声明关闭后必须恢复触发点焦点");
 
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
@@ -373,7 +410,7 @@ assert.match(primarySource, /adminAlertsError/, "管理员首页必须显示独�
 assert.match(primarySource, /specialHasLoadedData/, "用户主入口必须区分首次同步失败和可参考的历史数据");
 assert.match(primarySource, /资格与领取数据未更新/, "用户主入口必须明确展示资格数据同步失败");
 assert.match(primarySource, /这不是“无额度”/, "用户主入口不得把同步失败伪装成无额度");
-assert.match(primarySource, /:disabled="Boolean\(loadError\)" @tap="goScanPickup"/, "资格同步失败时扫码开柜入口必须禁用");
+assert.match(primarySource, /:disabled="Boolean\(loadError\) \|\| remainingTotal <= 0" @tap="goScanPickup"/, "资格同步失败或免费额度用尽时扫码开柜入口必须禁用");
 assert.match(primarySource, /:disabled="Boolean\(loadError\)" @tap="goNearby"/, "资格同步失败时柜机选择入口必须禁用");
 assert.match(primarySource, /let latestLoadRequestId = 0/, "首页加载必须使用递增请求代次");
 assert.match(primarySource, /const ownsLatestLoad = \(\) =>[\s\S]{0,240}sessionStore\.token === sessionToken/, "首页异步结果必须同时绑定最新请求、用户和会话");
@@ -381,6 +418,7 @@ assert.match(primarySource, /catch \(error\) \{[\s\S]{0,120}if \(!ownsLatestLoad
 assert.match(primarySource, /remainingFreeTotal/, "首页总剩余额度必须优先使用服务端同时受每日上限约束的聚合值");
 assert.match(primarySource, /Math\.min\(sessionStore\.quota\?\.remainingDaily/, "旧会话数据也必须用每日总上限约束商品额度求和");
 assert.match(primarySource, /已用免费额度/, "首页不得把仅消耗免费额度的统计误写成全部领取数量");
+assert.doesNotMatch(primarySource, /按商品价格结算|超出免费额度的部分/, "当前公益领取入口不得保留普通用户付费导向文案");
 assert.doesNotMatch(deviceDetailSource, /quoteId:\s*preview\.quoteId/, "预约取货开柜不得携带支付报价标识");
 assert.match(mobileReviewsSource, /const loadError = ref\(""\)/, "移动审核工作台必须保留可见加载错误态");
 assert.match(mobileReviewsSource, /审核数据加载失败/, "移动审核工作台必须提供失败说明和重试入口");
@@ -538,6 +576,13 @@ const contrastAgainstWhite = (hex) => 1.05 / (relativeLuminance(hex) + 0.05);
 const themeSource = readSource("apps/mobile/src/styles/theme.css");
 const mobileShellSource = readSource("apps/mobile/src/layouts/MobileShell.vue");
 const specialHomeSource = readSource("apps/mobile/src/pages/special/home.vue");
+assert.match(mobileShellSource, /runtimeDataPlane/, "移动端全局壳层必须读取公开运行数据平面");
+assert.match(mobileShellSource, /验收模拟实例/, "移动端必须持续标明模拟实例");
+assert.match(
+  mobileShellSource,
+  /role="status"[\s\S]+aria-live="polite"/,
+  "移动端模拟实例标识必须向辅助技术声明"
+);
 for (const color of ["#9a4f00", "#8f4700", "#a95500", "#ad5700"]) {
   assert.ok(themeSource.includes(color), `主题必须包含已核验的高对比度颜色 ${color}`);
   assert.ok(contrastAgainstWhite(color) >= 4.5, `${color} 上的白字对比度必须至少为 4.5:1`);

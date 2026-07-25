@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type { CabinetPreSettlement } from "@vm/shared-types";
@@ -174,14 +173,13 @@ test("报价过期和付费开柜缺少报价都安全失败，免费兼容请�
   );
 });
 
-test("真实开柜绑定服务端报价，价格漂移零副作用且丢失响应后重放不再外呼", async () => {
+test("公益免费领取超出额度时，预览和正式开柜都在外呼前阻断", async () => {
   const previousDataFile = process.env.API_DATA_FILE;
   const previousBootstrap = process.env.ENABLE_TEST_DEVICE_BOOTSTRAP;
-  const directory = mkdtempSync(join(tmpdir(), "vm-cabinet-quote-"));
+  const directory = mkdtempSync(join(tmpdir(), "vm-cabinet-free-only-"));
 
   try {
-    const dataFile = join(directory, "store.json");
-    process.env.API_DATA_FILE = dataFile;
+    process.env.API_DATA_FILE = join(directory, "store.json");
     process.env.ENABLE_TEST_DEVICE_BOOTSTRAP = "false";
     const store = new InMemoryStoreService();
     store.events.splice(0, store.events.length);
@@ -209,13 +207,14 @@ test("真实开柜绑定服务端报价，价格漂移零副作用且丢失响�
         sourceType: "system"
       });
     }
+    const stockBefore = store.getAvailableStock(device.deviceCode, goods.goodsId);
     user.quota = {
       dailyLimit: 0,
       categoryLimit: { [goods.category]: 0 }
     };
     store.specialAccessPolicies.splice(0, store.specialAccessPolicies.length, {
-      id: "policy-cabinet-quote",
-      name: "报价核销测试",
+      id: "policy-cabinet-free-only",
+      name: "公益免费边界测试",
       weekdays: [0, 1, 2, 3, 4, 5, 6],
       startHour: 0,
       endHour: 24,
@@ -232,15 +231,11 @@ test("真实开柜绑定服务端报价，价格漂移零副作用且丢失响�
     });
 
     let gatewayCalls = 0;
-    let gatewayMode: "success" | "unknown" = "success";
     const gateway = {
       async openDoor() {
         gatewayCalls += 1;
-        if (gatewayMode === "unknown") {
-          throw new Error("upstream response lost");
-        }
         return {
-          orderNo: `order-quote-${gatewayCalls}`,
+          orderNo: `order-free-only-${gatewayCalls}`,
           smartVmExchange: undefined
         };
       },
@@ -252,18 +247,16 @@ test("真实开柜绑定服务端报价，价格漂移零副作用且丢失响�
       }
     } as unknown as SmartVmGateway;
     const accessRules = new AccessRulesService(store);
-    const reservations = new ReservationsService(store, accessRules);
-    const quotes = new CabinetOpenQuoteService();
     const service = new CabinetEventsService(
       store,
       accessRules,
       gateway,
       {} as InventoryOrdersService,
       new AlertsService(store),
-      reservations,
+      new ReservationsService(store, accessRules),
       new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "false" }),
       undefined,
-      quotes
+      new CabinetOpenQuoteService()
     );
     const payload = {
       phone: user.phone,
@@ -278,97 +271,21 @@ test("真实开柜绑定服务端报价，价格漂移零副作用且丢失响�
         }
       ]
     };
+    const isFreeOnlyRejection = (error: unknown) =>
+      error instanceof BadRequestException &&
+      /只支持免费领取|不能进入支付流程/.test(error.message);
 
+    assert.throws(
+      () => service.previewOpenSettlement(payload, { id: user.id, role: "special" }),
+      isFreeOnlyRejection
+    );
     await assert.rejects(
       () => service.openCabinet(payload, { id: user.id, role: "special" }),
-      ConflictException
+      isFreeOnlyRejection
     );
     assert.equal(gatewayCalls, 0);
     assert.equal(store.events.length, 0);
-
-    const stalePreview = service.previewOpenSettlement(payload, {
-      id: user.id,
-      role: "special"
-    });
-    assert.ok(stalePreview.quoteId);
-    assert.equal(stalePreview.preSettlement?.payableAmount, 500);
-    goods.price = 600;
-    await assert.rejects(
-      () =>
-        service.openCabinet(
-          { ...payload, quoteId: stalePreview.quoteId },
-          { id: user.id, role: "special" }
-        ),
-      ConflictException
-    );
-    assert.equal(gatewayCalls, 0);
-    assert.equal(store.events.length, 0);
-
-    const currentPreview = service.previewOpenSettlement(payload, {
-      id: user.id,
-      role: "special"
-    });
-    assert.ok(currentPreview.quoteId);
-    const opened = await service.openCabinet(
-      { ...payload, quoteId: currentPreview.quoteId },
-      { id: user.id, role: "special" }
-    );
-    assert.equal(opened.orderNo, "order-quote-1");
-    assert.equal(gatewayCalls, 1);
-    const event = store.events.find((entry) => entry.eventId === opened.eventId);
-    assert.ok(event);
-    assert.equal(
-      event.openQuoteHash,
-      createHash("sha256").update(currentPreview.quoteId).digest("hex")
-    );
-    assert.equal(JSON.stringify(event).includes(currentPreview.quoteId), false);
-    const persistedState = readFileSync(dataFile, "utf8");
-    assert.equal(persistedState.includes(currentPreview.quoteId), false);
-    assert.equal(persistedState.includes(event.openQuoteHash), true);
-
-    const replayedSuccess = await service.openCabinet(
-      { ...payload, quoteId: currentPreview.quoteId },
-      { id: user.id, role: "special" }
-    );
-    assert.equal(replayedSuccess.eventId, opened.eventId);
-    assert.equal(replayedSuccess.orderNo, opened.orderNo);
-    assert.equal(gatewayCalls, 1);
-    assert.equal(store.events.length, 1);
-
-    event.status = "failed";
-    event.physicalDoorState = "closed";
-
-    const unknownPreview = service.previewOpenSettlement(payload, {
-      id: user.id,
-      role: "special"
-    });
-    assert.ok(unknownPreview.quoteId);
-    const unknownQuoteId = unknownPreview.quoteId;
-    gatewayMode = "unknown";
-    await assert.rejects(
-      () =>
-        service.openCabinet(
-          { ...payload, quoteId: unknownQuoteId },
-          { id: user.id, role: "special" }
-        )
-    );
-    assert.equal(gatewayCalls, 2);
-    assert.equal(store.events.length, 2);
-    const pendingEvent = store.events.find(
-      (entry) =>
-        entry.openQuoteHash ===
-        createHash("sha256").update(unknownQuoteId).digest("hex")
-    );
-    assert.ok(pendingEvent);
-
-    const replayedUnknown = await service.openCabinet(
-      { ...payload, quoteId: unknownQuoteId },
-      { id: user.id, role: "special" }
-    );
-    assert.equal(replayedUnknown.eventId, pendingEvent.eventId);
-    assert.equal(replayedUnknown.orderNo, pendingEvent.orderNo);
-    assert.equal(gatewayCalls, 2);
-    assert.equal(store.events.length, 2);
+    assert.equal(store.getAvailableStock(device.deviceCode, goods.goodsId), stockBefore);
   } finally {
     if (previousDataFile === undefined) {
       delete process.env.API_DATA_FILE;

@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 
 import { resolveFullSimulationExternalMode } from "./common/config/full-simulation-mode";
 import { isProductionReady } from "./common/config/production-safety";
+import { resolveRuntimeDataPlane } from "./common/config/runtime-data-plane";
 import { ok } from "./common/dto/api-response";
 import { InMemoryStoreService } from "./common/store/in-memory-store.service";
 import { SystemAuditLogService } from "./common/store/system-audit-log.service";
@@ -47,6 +48,9 @@ export class AppController {
     const useMockMap = fullSimulationMapMode === "mock";
 
     return ok({
+      runtimeDataPlane: resolveRuntimeDataPlane({
+        VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE")
+      }),
       amapRuntimeMode: useMockMap ? "mock" : "real",
       amapWebKey: useMockMap ? "" : this.configService.get<string>("AMAP_WEB_KEY") ?? "",
       amapSecurityJsCode: useMockMap

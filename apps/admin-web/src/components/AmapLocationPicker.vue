@@ -455,6 +455,9 @@ watch(
       v-if="searchFeedbackMessage"
       class="amap-picker__search-feedback"
       :class="`amap-picker__search-feedback--${searchFeedbackTone}`"
+      :role="searchFeedbackTone === 'danger' ? 'alert' : 'status'"
+      :aria-live="searchFeedbackTone === 'danger' ? 'assertive' : 'polite'"
+      aria-atomic="true"
     >
       {{ searchFeedbackMessage }}
     </div>
@@ -483,7 +486,13 @@ watch(
       <div v-if="loading" class="amap-picker__overlay admin-empty">
         <div class="admin-empty__title">正在加载地图</div>
       </div>
-      <div v-else-if="mapErrorMessage" class="amap-picker__overlay admin-empty">
+      <div
+        v-else-if="mapErrorMessage"
+        class="amap-picker__overlay admin-empty"
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+      >
         <div class="admin-empty__title">地图不可用</div>
         <div class="admin-empty__body">{{ mapErrorMessage }}</div>
       </div>

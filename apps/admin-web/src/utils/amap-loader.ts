@@ -1,4 +1,4 @@
-import { adminApiBaseUrl } from "../api/client";
+import { loadPublicRuntimeConfig } from "./public-config";
 
 declare global {
   interface Window {
@@ -9,26 +9,6 @@ declare global {
     };
   }
 }
-
-const loadPublicConfig = async () => {
-  const response = await fetch(`${adminApiBaseUrl}/public-config`);
-
-  const parsed = (await response.json()) as {
-    code: number;
-    message: string;
-    data?: {
-      amapRuntimeMode?: "mock" | "real";
-      amapWebKey?: string;
-      amapSecurityJsCode?: string;
-    };
-  };
-
-  if (!response.ok || parsed.code !== 200) {
-    throw new Error(parsed.message || "读取地图配置失败");
-  }
-
-  return parsed.data ?? {};
-};
 
 export const loadAmap = () => {
   if (typeof window === "undefined") {
@@ -43,12 +23,18 @@ export const loadAmap = () => {
     return window.__vmAmapLoaderPromise__;
   }
 
-  window.__vmAmapLoaderPromise__ = loadPublicConfig()
+  window.__vmAmapLoaderPromise__ = loadPublicRuntimeConfig()
     .then(
       ({ amapRuntimeMode, amapWebKey, amapSecurityJsCode }) =>
         new Promise((resolve, reject) => {
           if (amapRuntimeMode === "mock") {
-            reject(new Error("当前为全真模拟地图：未加载高德脚本，请手工录入坐标。"));
+            reject(
+              new Error(
+                "当前实例地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求。" +
+                  "请将 VM_FULL_SIMULATION_MAP_MODE 设为 real，并为 API 进程配置有效的 " +
+                  "AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 后重启；在此之前可手工录入坐标。"
+              )
+            );
             return;
           }
 

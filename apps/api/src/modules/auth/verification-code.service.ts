@@ -227,6 +227,30 @@ export class VerificationCodeService {
         ),
         VERIFICATION_CODE_MANUAL_VALUE: this.configService.get<string>(
           "VERIFICATION_CODE_MANUAL_VALUE"
+        ),
+        ALIYUN_PNVS_ACCESS_KEY_ID: this.configService.get<string>(
+          "ALIYUN_PNVS_ACCESS_KEY_ID"
+        ),
+        ALIYUN_PNVS_ACCESS_KEY_SECRET: this.configService.get<string>(
+          "ALIYUN_PNVS_ACCESS_KEY_SECRET"
+        ),
+        ALIYUN_PNVS_SIGN_NAME: this.configService.get<string>(
+          "ALIYUN_PNVS_SIGN_NAME"
+        ),
+        ALIYUN_PNVS_TEMPLATE_CODE: this.configService.get<string>(
+          "ALIYUN_PNVS_TEMPLATE_CODE"
+        ),
+        ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: this.configService.get<string>(
+          "ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN"
+        ),
+        ALIYUN_PNVS_SCHEME_NAME_REGISTER: this.configService.get<string>(
+          "ALIYUN_PNVS_SCHEME_NAME_REGISTER"
+        ),
+        ALIYUN_PNVS_SCHEME_NAME_GENERAL: this.configService.get<string>(
+          "ALIYUN_PNVS_SCHEME_NAME_GENERAL"
+        ),
+        ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: this.configService.get<string>(
+          "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET"
         )
       });
     } catch (error) {

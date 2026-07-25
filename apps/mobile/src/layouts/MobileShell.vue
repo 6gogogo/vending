@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, useSlots } from "vue";
+import { computed, onMounted, ref, useSlots } from "vue";
 
+import { loadMobileRuntimeConfig } from "../api/runtime-config";
 import { useSessionStore } from "../stores/session";
 import { useUiPreferencesStore } from "../stores/ui-preferences";
 
@@ -38,8 +39,21 @@ const resolvedMode = computed<ShellMode>(() => {
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
 const slots = useSlots();
+const runtimeDataPlane = ref<"simulation" | "live" | "unknown">("unknown");
 
 uiPreferencesStore.hydrate();
+
+onMounted(async () => {
+  try {
+    const publicConfig = await loadMobileRuntimeConfig();
+    runtimeDataPlane.value =
+      publicConfig.runtimeDataPlane === "simulation" || publicConfig.runtimeDataPlane === "live"
+        ? publicConfig.runtimeDataPlane
+        : "unknown";
+  } catch {
+    runtimeDataPlane.value = "unknown";
+  }
+});
 
 const isGuestPage = computed(() => {
   const currentPage = getCurrentPages().at(-1);
@@ -61,6 +75,14 @@ const showUtilityBar = computed(
     Boolean(slots["header-left"]) ||
     (props.headerStyle === "panel" && Boolean(slots["header-right"]))
 );
+
+const runtimeBadgeLabel = computed(() => {
+  if (runtimeDataPlane.value === "simulation") {
+    return "验收模拟实例";
+  }
+
+  return runtimeDataPlane.value === "unknown" ? "运行环境未确认" : "";
+});
 </script>
 
 <template>
@@ -68,6 +90,15 @@ const showUtilityBar = computed(
     class="vm-page shell"
     :class="[`shell--${resolvedMode}`, { 'vm-page--accessible': accessibilityEnabled, 'shell--accessible': accessibilityEnabled }]"
   >
+    <view
+      v-if="runtimeBadgeLabel"
+      class="shell__runtime-badge"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <text>{{ runtimeBadgeLabel }}</text>
+    </view>
     <view class="shell__garden shell__garden--left" aria-hidden="true" />
     <view class="shell__garden shell__garden--right" aria-hidden="true" />
     <view class="shell__body">
@@ -144,6 +175,25 @@ const showUtilityBar = computed(
     linear-gradient(180deg, rgba(255, 250, 242, 0.96) 0, rgba(255, 250, 242, 0) 330rpx),
     linear-gradient(135deg, rgba(46, 125, 70, 0.08), rgba(255, 138, 43, 0.06) 42%, rgba(255, 255, 255, 0) 72%),
     var(--vm-page-gradient);
+}
+
+.shell__runtime-badge {
+  position: fixed;
+  z-index: 30;
+  top: calc(env(safe-area-inset-top) + 104rpx);
+  right: 16rpx;
+  max-width: 260rpx;
+  padding: 10rpx 18rpx;
+  border: 1rpx solid rgba(154, 79, 0, 0.24);
+  border-radius: 999rpx;
+  background: rgba(255, 246, 225, 0.96);
+  box-shadow: 0 8rpx 22rpx rgba(88, 61, 30, 0.12);
+  color: #7f4000;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
 }
 
 .shell--care {

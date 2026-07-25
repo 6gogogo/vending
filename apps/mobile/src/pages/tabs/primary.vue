@@ -115,7 +115,7 @@ const todayStatus = computed(() => {
     return "暂未开放";
   }
 
-  return remainingTotal.value > 0 ? "今日可领取" : "免费额度已用完";
+  return remainingTotal.value > 0 ? "今日可领取" : "今日额度已用完";
 });
 const todayStatusClass = computed(() =>
   !loadError.value && activeWindows.value.length && remainingTotal.value > 0
@@ -132,7 +132,7 @@ const todaySuggestion = computed(() => {
   }
 
   if (remainingTotal.value <= 0) {
-    return "今天免费额度已用完，仍可选择柜机，超出部分会按商品价格结算。";
+    return "今天免费领取额度已用完，请等待额度刷新或联系工作人员；当前公益物资不会转为付费领取。";
   }
 
   return "可先查看附近柜机，也可以到柜机前扫码开门。";
@@ -754,7 +754,7 @@ onShow(() => {
             <text class="vm-status vm-status--success">剩余 {{ item.quantity }} 件</text>
           </view>
         </view>
-        <EmptyState v-else title="当前没有免费额度" description="仍可选择柜机，超出免费额度的部分会按商品价格结算。" />
+        <EmptyState v-else title="当前没有可领取额度" description="可继续查看附近柜机；领取额度刷新前不能开柜，当前公益物资不会转为付费领取。" />
         </template>
         <EmptyState
           v-else
@@ -762,8 +762,8 @@ onShow(() => {
           description="同步失败不代表没有额度；重新同步成功后才会恢复开柜入口。"
         />
         <view class="action-grid">
-          <button class="vm-button vm-button--warning" :disabled="Boolean(loadError)" @tap="goScanPickup">
-            {{ loadError ? "扫码开柜（待同步）" : "扫码开柜" }}
+          <button class="vm-button vm-button--warning" :disabled="Boolean(loadError) || remainingTotal <= 0" @tap="goScanPickup">
+            {{ loadError ? "扫码开柜（待同步）" : remainingTotal <= 0 ? "扫码开柜（额度已用完）" : "扫码开柜" }}
           </button>
           <button class="vm-button vm-button--ghost" :disabled="Boolean(loadError)" @tap="goNearby">
             {{ loadError ? "附近柜机（待同步）" : "附近柜机" }}

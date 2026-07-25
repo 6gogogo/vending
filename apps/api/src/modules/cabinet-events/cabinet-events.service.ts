@@ -2085,8 +2085,12 @@ export class CabinetEventsService {
         ? this.buildPreSettlement(payload.deviceCode, doorNum, intentItems, quotaSummary)
         : undefined;
 
-    if (this.isReservationOnlyPickup() && user.role === "special" && preSettlement?.chargeRequired) {
-      throw new BadRequestException("预约物资已超出当前可领取额度，不能进入支付流程。");
+    if (user.role === "special" && preSettlement?.chargeRequired) {
+      throw new BadRequestException(
+        this.isReservationOnlyPickup()
+          ? "预约物资已超出当前可领取额度，不能进入支付流程。"
+          : "所选物资已超出当前可领取范围。当前公益物资只支持免费领取，不能进入支付流程。"
+      );
     }
 
     return {

@@ -248,7 +248,7 @@ test("特殊用户已有待结算或物理状态未决开柜时阻止再次占�
   assert.doesNotThrow(() => reservations.assertUserCanUseRelatedFeatures(user.id));
 });
 
-test("服务时段内免费额度用尽后仍进入全额付费预结算", () => {
+test("服务时段内免费额度用尽后拒绝普通用户继续领取，不进入付费预结算", () => {
   const store = createIsolatedStore();
   store.events.splice(0, store.events.length);
   store.reservations.splice(0, store.reservations.length);
@@ -320,27 +320,26 @@ test("服务时段内免费额度用尽后仍进入全额付费预结算", () =>
     reservations,
     new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "false" })
   );
-  const preview = cabinetEvents.previewOpenSettlement(
-    {
-      phone: user.phone,
-      deviceCode: device.deviceCode,
-      doorNum: door.doorNum,
-      intentItems: [
+  assert.throws(
+    () =>
+      cabinetEvents.previewOpenSettlement(
         {
-          goodsId: goods.goodsId,
-          goodsName: goods.name,
-          category: goods.category,
-          quantity: 1
-        }
-      ]
-    },
-    { id: user.id, role: "special" }
+          phone: user.phone,
+          deviceCode: device.deviceCode,
+          doorNum: door.doorNum,
+          intentItems: [
+            {
+              goodsId: goods.goodsId,
+              goodsName: goods.name,
+              category: goods.category,
+              quantity: 1
+            }
+          ]
+        },
+        { id: user.id, role: "special" }
+      ),
+    /当前公益物资只支持免费领取，不能进入支付流程/
   );
-
-  assert.equal(preview.preSettlement?.freeQuantity, 0);
-  assert.equal(preview.preSettlement?.paidQuantity, 1);
-  assert.equal(preview.preSettlement?.payableAmount, 500);
-  assert.equal(preview.preSettlement?.chargeRequired, true);
 });
 
 test("预约取货模式要求先预约，且未履约预约会共同占用免费额度", async () => {
@@ -986,6 +985,32 @@ test("旧退款入口仅在全额退款时释放额度，并按退款标识幂�
   assert.deepEqual(store.inventory, rollbackBefore.inventory);
   assert.deepEqual(store.logs, rollbackBefore.logs);
   assert.deepEqual(store.alerts, rollbackBefore.alerts);
+});
+
+test("管理员解决用户反馈后，处理结果只回流给反馈发起人", () => {
+  const store = createIsolatedStore();
+  store.alerts.splice(0, store.alerts.length);
+  const alerts = new AlertsService(store);
+  const user = store.users.find((entry) => entry.role === "special");
+  const admin = store.users.find((entry) => entry.role === "admin");
+  assert.ok(user);
+  assert.ok(admin);
+
+  const feedback = alerts.createFeedbackTask({
+    detail: "柜门关闭后页面仍显示处理中，请协助核查。",
+    feedbackType: "机器故障",
+    targetUserId: user.id,
+    sourceKey: user.id
+  });
+  const resolved = alerts.resolve(feedback.id, admin.id, "已核对柜门事件，状态已恢复。");
+
+  assert.equal(resolved.status, "resolved");
+  assert.equal(resolved.targetUserId, user.id);
+  assert.equal(resolved.userNoticeStatus, "pending");
+  assert.equal(resolved.userNoticeTitle, "反馈处理结果");
+  assert.match(resolved.userNoticeContent ?? "", /已核对柜门事件，状态已恢复/);
+  assert.ok(alerts.list(undefined, user.id).some((entry) => entry.id === feedback.id));
+  assert.ok(!alerts.list(undefined, "unrelated-user").some((entry) => entry.id === feedback.id));
 });
 
 test("柜机详情在刷新后返回待确认退款恢复摘要且不泄露渠道原始报文", () => {

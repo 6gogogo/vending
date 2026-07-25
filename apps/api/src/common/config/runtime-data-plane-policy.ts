@@ -25,6 +25,16 @@ export const runtimeDataPlaneExternalIntegrationKeys = [
   "VERIFICATION_CODE_PROVIDER",
   "VERIFICATION_CODE_PREVIEW_ENABLED",
   "VERIFICATION_CODE_MANUAL_VALUE",
+  "ALIYUN_PNVS_ACCESS_KEY_ID",
+  "ALIYUN_PNVS_ACCESS_KEY_SECRET",
+  "ALIYUN_PNVS_SIGN_NAME",
+  "ALIYUN_PNVS_TEMPLATE_CODE",
+  "ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN",
+  "ALIYUN_PNVS_SCHEME_NAME_REGISTER",
+  "ALIYUN_PNVS_SCHEME_NAME_GENERAL",
+  "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET",
+  "AMAP_WEB_KEY",
+  "AMAP_SECURITY_JS_CODE",
   "OPENAI_API_KEY",
   "ENABLE_LOCAL_MOCK_DEVICE_API",
   "ENABLE_TEST_DEVICE_BOOTSTRAP",
@@ -56,11 +66,37 @@ export class RuntimeDataPlanePolicyError extends Error {
 
 const truthyValues = new Set(["1", "true", "yes", "on"]);
 const manualVerificationCodePattern = /^\d{4,8}$/;
+const aliyunPnvsRequiredKeys = [
+  "ALIYUN_PNVS_ACCESS_KEY_ID",
+  "ALIYUN_PNVS_ACCESS_KEY_SECRET",
+  "ALIYUN_PNVS_SIGN_NAME",
+  "ALIYUN_PNVS_TEMPLATE_CODE",
+  "ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN",
+  "ALIYUN_PNVS_SCHEME_NAME_REGISTER",
+  "ALIYUN_PNVS_SCHEME_NAME_GENERAL",
+  "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET"
+] as const;
+const amapRequiredKeys = ["AMAP_WEB_KEY", "AMAP_SECURITY_JS_CODE"] as const;
 
 const normalize = (value?: string) => value?.trim().toLowerCase();
 
 const isTruthy = (value?: string) =>
   truthyValues.has(normalize(value) ?? "");
+
+const requireAliyunPnvsConfiguration = (
+  settings: RuntimeDataPlaneExternalIntegrationSettings,
+  context: string
+) => {
+  const missingKeys = aliyunPnvsRequiredKeys.filter(
+    (key) => !settings[key]?.trim()
+  );
+
+  if (missingKeys.length > 0) {
+    throw new RuntimeDataPlanePolicyError(
+      `${context} 时必须配置：${missingKeys.join("、")}。`
+    );
+  }
+};
 
 const resolveDataPlane = (
   settings: RuntimeDataPlaneExternalIntegrationSettings
@@ -110,6 +146,16 @@ const requireVerificationPolicy = (
       }
     }
 
+    if (mode === "real") {
+      requireAliyunPnvsConfiguration(settings, "全真模拟启用真实 PNVS");
+
+      if (isTruthy(previewEnabled)) {
+        throw new RuntimeDataPlanePolicyError(
+          "全真模拟启用真实 PNVS 时必须关闭 VERIFICATION_CODE_PREVIEW_ENABLED。"
+        );
+      }
+    }
+
     return;
   }
 
@@ -141,6 +187,8 @@ const requireVerificationPolicy = (
       "真实数据平面必须关闭 VERIFICATION_CODE_PREVIEW_ENABLED。"
     );
   }
+
+  requireAliyunPnvsConfiguration(settings, "真实数据平面启用 PNVS");
 };
 
 /**
@@ -160,6 +208,35 @@ const requireAiPolicy = (
   if (dataPlane === "simulation" && normalize(apiKey)) {
     throw new RuntimeDataPlanePolicyError(
       "模拟数据平面不能配置 OPENAI_API_KEY 或启用外部 AI 服务。"
+    );
+  }
+};
+
+const requireMapPolicy = (
+  settings: RuntimeDataPlaneExternalIntegrationSettings
+) => {
+  const dataPlane = resolveDataPlane(settings);
+  const isRealFullSimulationMap =
+    isFullSimulationProfile(settings) &&
+    resolveFullSimulationExternalMode("map", settings) === "real";
+  const context =
+    dataPlane === "live"
+      ? "真实数据平面启用高德地图"
+      : isRealFullSimulationMap
+        ? "全真模拟启用真实高德地图"
+        : "";
+
+  if (!context) {
+    return;
+  }
+
+  const missingKeys = amapRequiredKeys.filter(
+    (key) => !settings[key]?.trim()
+  );
+
+  if (missingKeys.length > 0) {
+    throw new RuntimeDataPlanePolicyError(
+      `${context}时必须配置：${missingKeys.join("、")}。`
     );
   }
 };
@@ -282,6 +359,7 @@ export const assertRuntimeDataPlaneExternalIntegrationPolicy = (
     settings.VERIFICATION_CODE_PREVIEW_ENABLED,
     settings
   );
+  requireMapPolicy(settings);
   requireAiPolicy(dataPlane, settings.OPENAI_API_KEY, settings);
   requireDevicePolicy(
     dataPlane,

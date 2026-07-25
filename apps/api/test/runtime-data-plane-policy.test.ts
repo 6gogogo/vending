@@ -32,6 +32,16 @@ const liveSettings = {
   PAYMENT_MODE: "real",
   VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
   VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+  ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key-id",
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-key-secret",
+  ALIYUN_PNVS_SIGN_NAME: "test-sign-name",
+  ALIYUN_PNVS_TEMPLATE_CODE: "test-template-code",
+  ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: "test-app-login",
+  ALIYUN_PNVS_SCHEME_NAME_REGISTER: "test-register",
+  ALIYUN_PNVS_SCHEME_NAME_GENERAL: "test-general",
+  ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: "test-password-reset",
+  AMAP_WEB_KEY: "test-web-key",
+  AMAP_SECURITY_JS_CODE: "test-security-js-code",
   ENABLE_LOCAL_MOCK_DEVICE_API: "false",
   ENABLE_TEST_DEVICE_BOOTSTRAP: "false",
   SMARTVM_BASE_URL: "https://smartvm.example.test",
@@ -194,7 +204,16 @@ test("全真模拟使用独立模拟数据，并可逐模块选择真实或 mock
   const verification = new VerificationCodeService(
     new ConfigService({
       ...fullSimulationSettings,
-      VM_FULL_SIMULATION_VERIFICATION_MODE: "real"
+      VM_FULL_SIMULATION_VERIFICATION_MODE: "real",
+      VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+      ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key-id",
+      ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-key-secret",
+      ALIYUN_PNVS_SIGN_NAME: "test-sign-name",
+      ALIYUN_PNVS_TEMPLATE_CODE: "test-template-code",
+      ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: "test-app-login",
+      ALIYUN_PNVS_SCHEME_NAME_REGISTER: "test-register",
+      ALIYUN_PNVS_SCHEME_NAME_GENERAL: "test-general",
+      ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: "test-password-reset"
     }),
     {} as InMemoryStoreService
   );
@@ -224,6 +243,47 @@ test("全真模拟使用独立模拟数据，并可逐模块选择真实或 mock
   const ai = new OpenAiCompatibleService(new ConfigService(fullSimulationSettings));
   assert.equal(ai.getStatus().enabled, true);
   assert.equal((await ai.testConnection()).model, "full-simulation-mock");
+});
+
+test("全真模拟启用真实 PNVS 时必须在保存或启动前发现缺失配置", () => {
+  assert.throws(
+    () =>
+      assertRuntimeDataPlaneExternalIntegrationPolicy({
+        ...fullSimulationSettings,
+        VM_FULL_SIMULATION_VERIFICATION_MODE: "real"
+      }),
+    /全真模拟启用真实 PNVS 时必须配置/
+  );
+});
+
+test("全真模拟启用真实地图时必须成组配置 Web Key 与安全密钥", () => {
+  assert.throws(
+    () =>
+      assertRuntimeDataPlaneExternalIntegrationPolicy({
+        ...fullSimulationSettings,
+        VM_FULL_SIMULATION_MAP_MODE: "real"
+      }),
+    /全真模拟启用真实高德地图时必须配置：AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE/
+  );
+  assert.doesNotThrow(() =>
+    assertRuntimeDataPlaneExternalIntegrationPolicy({
+      ...fullSimulationSettings,
+      VM_FULL_SIMULATION_MAP_MODE: "real",
+      AMAP_WEB_KEY: "test-web-key",
+      AMAP_SECURITY_JS_CODE: "test-security-js-code"
+    })
+  );
+});
+
+test("真实数据平面启动前必须具备高德 Web Key 与安全密钥", () => {
+  assert.throws(
+    () =>
+      assertRuntimeDataPlaneExternalIntegrationPolicy({
+        ...liveSettings,
+        AMAP_SECURITY_JS_CODE: ""
+      }),
+    /真实数据平面启用高德地图时必须配置：AMAP_SECURITY_JS_CODE/
+  );
 });
 
 test("服务层复核阻止模拟入口使用真实支付或短信配置", () => {

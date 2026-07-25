@@ -24,7 +24,7 @@ const loginState = ref<AppLoginResult | null>(null);
 const rejectedReason = ref("");
 const hasAcceptedDisclaimer = ref(false);
 const showDisclaimer = ref(false);
-const disclaimerReadToEnd = ref(false);
+const disclaimerValidationMessage = ref("");
 const disclaimerDialog = ref<HTMLElement | { $el?: HTMLElement }>();
 let disclaimerPreviousFocus: HTMLElement | undefined;
 const showVerificationPreview =
@@ -144,11 +144,7 @@ const sendCode = async () => {
 };
 
 const submit = async () => {
-  if (!validatePhone() || !validateCode()) {
-    return;
-  }
-
-  if (!ensureDisclaimerAccepted()) {
+  if (!ensureDisclaimerAccepted() || !validatePhone() || !validateCode()) {
     return;
   }
 
@@ -212,17 +208,24 @@ const goFeedback = () => {
 
 const ensureDisclaimerAccepted = () => {
   if (hasAcceptedDisclaimer.value) {
+    disclaimerValidationMessage.value = "";
     return true;
   }
 
-  void openDisclaimer();
-  uni.showModal({
-    title: "请先确认使用须知",
-    content: "领取和开柜会涉及身份校验、柜机识别和可能的支付结算。请阅读并同意免责声明后再获取验证码。",
-    confirmText: "去阅读",
-    showCancel: false
+  disclaimerValidationMessage.value = "请先勾选同意《智能货柜用户免责声明》。";
+  uni.showToast({
+    title: "请先勾选同意免责声明",
+    icon: "none"
   });
   return false;
+};
+
+const handleDisclaimerAgreementChange = (event: { detail?: { value?: string[] } }) => {
+  hasAcceptedDisclaimer.value = event.detail?.value?.includes("accepted") ?? false;
+
+  if (hasAcceptedDisclaimer.value) {
+    disclaimerValidationMessage.value = "";
+  }
 };
 
 const resolveDisclaimerElement = () => {
@@ -254,34 +257,6 @@ const openDisclaimer = async () => {
   showDisclaimer.value = true;
   await nextTick();
   resolveDisclaimerElement()?.focus();
-};
-
-const markDisclaimerRead = () => {
-  disclaimerReadToEnd.value = true;
-};
-
-const acceptDisclaimer = async () => {
-  if (!disclaimerReadToEnd.value) {
-    uni.showToast({
-      title: "请先阅读到声明末尾",
-      icon: "none"
-    });
-    return;
-  }
-
-  hasAcceptedDisclaimer.value = true;
-  showDisclaimer.value = false;
-  await restoreDisclaimerFocus();
-};
-
-const rejectDisclaimer = () => {
-  showDisclaimer.value = false;
-  disclaimerPreviousFocus = undefined;
-  uni.navigateBack({
-    fail: () => {
-      uni.redirectTo({ url: "/pages/common/login" });
-    }
-  });
 };
 
 const closeDisclaimer = async () => {
@@ -350,7 +325,7 @@ onMounted(() => {
         <view class="vm-field">
           <view class="field-header">
             <text id="app-login-code-label" class="vm-field__label">验证码</text>
-            <text class="vm-field__helper">先同意免责声明再发送</text>
+            <text class="vm-field__helper">勾选下方协议后发送</text>
           </view>
           <view class="vm-field-shell vm-field-shell--stacked-action">
             <MenuIcon name="code" size="sm" tone="neutral" />
@@ -378,14 +353,39 @@ onMounted(() => {
           </view>
         </view>
 
+        <view
+          class="disclaimer-agreement"
+          :class="{ 'disclaimer-agreement--invalid': Boolean(disclaimerValidationMessage) }"
+          :aria-invalid="String(Boolean(disclaimerValidationMessage))"
+        >
+          <checkbox-group @change="handleDisclaimerAgreementChange">
+            <label class="disclaimer-agreement__label">
+              <checkbox
+                value="accepted"
+                :checked="hasAcceptedDisclaimer"
+                color="#167a67"
+              />
+              <text class="disclaimer-agreement__copy">我已阅读并同意</text>
+              <text class="disclaimer-link" @tap.stop="openDisclaimer">
+                《智能货柜用户免责声明》
+              </text>
+            </label>
+          </checkbox-group>
+          <text
+            v-if="disclaimerValidationMessage"
+            class="disclaimer-agreement__error"
+            role="alert"
+            aria-live="assertive"
+          >
+            {{ disclaimerValidationMessage }}
+          </text>
+        </view>
+
         <view class="entry-actions">
           <button class="vm-button" :loading="submitting" @tap="submit">登录 / 身份识别</button>
         </view>
 
         <view class="login-footnote">
-          <text class="disclaimer-link" @tap="openDisclaimer">
-            {{ hasAcceptedDisclaimer ? "已同意《智能货柜用户免责声明》" : "阅读并同意免责声明" }}
-          </text>
           <text class="register-link" @tap="goRegister">首次使用？去注册</text>
         </view>
 
@@ -431,15 +431,13 @@ onMounted(() => {
       >
         <view class="disclaimer-dialog__header">
           <text id="disclaimer-dialog-title" class="disclaimer-dialog__title">智能货柜用户免责声明</text>
-          <text id="disclaimer-dialog-hint" class="disclaimer-dialog__hint">请阅读完整内容后继续使用</text>
+          <text id="disclaimer-dialog-hint" class="disclaimer-dialog__hint">请阅读内容；是否同意请回到登录页勾选</text>
         </view>
 
         <scroll-view
           class="disclaimer-dialog__body"
           scroll-y
-          :lower-threshold="24"
           aria-label="免责声明正文"
-          @scrolltolower="markDisclaimerRead"
         >
           <text
             v-for="(line, index) in disclaimerLines"
@@ -454,19 +452,8 @@ onMounted(() => {
           </text>
         </scroll-view>
 
-        <text id="disclaimer-dialog-progress" class="disclaimer-dialog__progress" aria-live="polite">
-          {{ disclaimerReadToEnd ? "已阅读到声明末尾，可以选择同意并继续" : "请继续向下阅读，读到末尾后才能同意" }}
-        </text>
-        <view class="disclaimer-dialog__actions">
-          <button class="vm-button vm-button--ghost" @tap="rejectDisclaimer">不同意</button>
-          <button
-            class="vm-button"
-            :disabled="!disclaimerReadToEnd"
-            :aria-disabled="String(!disclaimerReadToEnd)"
-            @tap="acceptDisclaimer"
-          >
-            {{ disclaimerReadToEnd ? "同意并继续" : "请先读完" }}
-          </button>
+        <view class="disclaimer-dialog__actions disclaimer-dialog__actions--single">
+          <button class="vm-button" @tap="closeDisclaimer">关闭并返回登录</button>
         </view>
       </view>
     </view>
@@ -562,8 +549,7 @@ onMounted(() => {
 }
 
 .disclaimer-link {
-  width: fit-content;
-  padding: 6rpx 0;
+  padding: 4rpx 0;
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -571,6 +557,46 @@ onMounted(() => {
   font-size: 24rpx;
   line-height: 1.6;
   text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 4rpx;
+}
+
+.disclaimer-agreement {
+  display: grid;
+  gap: 10rpx;
+  padding: 18rpx 20rpx;
+  border: 2rpx solid var(--vm-line);
+  border-radius: 20rpx;
+  background: var(--vm-surface-soft);
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.disclaimer-agreement--invalid {
+  border-color: var(--vm-warning);
+  background: color-mix(in srgb, var(--vm-warning) 8%, var(--vm-surface-soft));
+  box-shadow: 0 0 0 4rpx color-mix(in srgb, var(--vm-warning) 14%, transparent);
+}
+
+.disclaimer-agreement__label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10rpx;
+  min-width: 0;
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--vm-text);
+}
+
+.disclaimer-agreement__copy {
+  flex: 0 0 auto;
+}
+
+.disclaimer-agreement__error {
+  display: block;
+  color: var(--vm-warning);
+  font-size: 23rpx;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .register-link {
@@ -685,12 +711,8 @@ onMounted(() => {
   background: var(--vm-surface-soft);
 }
 
-.disclaimer-dialog__progress {
-  display: block;
-  padding: 14rpx 30rpx 0;
-  color: var(--vm-muted);
-  font-size: 22rpx;
-  line-height: 1.5;
+.disclaimer-dialog__actions--single {
+  grid-template-columns: 1fr;
 }
 </style>
 
