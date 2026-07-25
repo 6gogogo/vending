@@ -91,8 +91,10 @@ assert.match(resultSource, /不要重复发起开柜/, "开门待确认结果必
 
 const adminDeviceSource = readSource("apps/admin-web/src/pages/DeviceDetailPage.vue");
 const adminAppSource = readSource("apps/admin-web/src/App.vue");
+const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
 assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
-assert.match(adminAppSource, /验收模拟实例/, "管理后台必须持续标明模拟实例");
+assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟实例");
+assert.match(adminCopySource, /验收模拟实例/, "管理后台模拟实例文案必须集中维护");
 assert.match(
   adminAppSource,
   /role="status"[\s\S]+aria-live="polite"/,
@@ -101,14 +103,24 @@ assert.match(
 const amapLoaderSource = readSource("apps/admin-web/src/utils/amap-loader.ts");
 const amapPickerSource = readSource("apps/admin-web/src/components/AmapLocationPicker.vue");
 assert.match(
-  amapLoaderSource,
+  adminCopySource,
   /地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求/,
   "地图模拟模式必须明确说明脚本与地点搜索请求均未发生"
 );
 assert.match(
-  amapLoaderSource,
+  adminCopySource,
   /VM_FULL_SIMULATION_MAP_MODE[\s\S]+AMAP_WEB_KEY[\s\S]+AMAP_SECURITY_JS_CODE/,
   "地图模拟模式提示必须给出可执行的最小配置条件"
+);
+assert.match(
+  amapLoaderSource,
+  /querySelector<HTMLScriptElement>[\s\S]+\.remove\(\)/,
+  "地图脚本加载失败后的重试必须先移除残留脚本"
+);
+assert.match(
+  amapLoaderSource,
+  /const rejectScriptLoad[\s\S]+script\.remove\(\)/,
+  "地图脚本加载失败时必须清理失败节点"
 );
 assert.match(
   amapPickerSource,
@@ -382,17 +394,22 @@ for (const [name, source, clearMarker] of [
   assert.match(logoutSource, /finally\s*\{/, `${name}退出必须在 finally 中清理本地会话`);
 }
 
-const paymentSource = readSource("apps/mobile/src/pages/common/door-closed.vue");
-assert.match(paymentSource, /\| "confirming"/, "支付状态必须包含服务端确认中");
-assert.match(paymentSource, /\| "confirmation_timeout"/, "支付确认必须提供超时恢复状态");
-assert.match(paymentSource, /cabinetEventId:\s*event\.value\.eventId/, "入柜登记必须携带柜门事件编号");
-assert.match(paymentSource, /settlementPaymentCompleted/, "刷新后必须按服务端结果识别已完成支付");
-assert.match(paymentSource, /支付已由服务端确认/, "已付款事件不得误显示为免费结算");
-assert.equal(
-  [...paymentSource.matchAll(/paymentUiState\.value\s*=\s*"paid"/g)].length,
-  1,
-  "只有服务端事件确认分支可以把支付标记为已完成"
-);
+const doorClosedSource = readSource("apps/mobile/src/pages/common/door-closed.vue");
+assert.match(doorClosedSource, /cabinetEventId:\s*event\.value\.eventId/, "入柜登记必须携带柜门事件编号");
+assert.match(doorClosedSource, /hasUnexpectedCharge/, "闭门页必须识别公益领取中的异常金额");
+assert.match(doorClosedSource, /appCopy\.freeOnly\.unexpectedCharge/, "异常金额必须显示集中维护的免费领取提示");
+assert.match(doorClosedSource, /goFeedback/, "异常金额必须提供反馈入口");
+for (const forbiddenPaymentEntry of [
+  "createPaymentOrder",
+  "mockPaymentPaid",
+  "requestPayment",
+  "paySettlement"
+]) {
+  assert.ok(
+    !doorClosedSource.includes(forbiddenPaymentEntry),
+    `公益领取闭门页不得保留用户支付入口：${forbiddenPaymentEntry}`
+  );
+}
 
 const nearbySource = readSource("apps/mobile/src/pages/tabs/nearby.vue");
 const mobileErrorMessageSource = readSource("apps/mobile/src/utils/error-message.ts");
@@ -575,9 +592,11 @@ const relativeLuminance = (hex) => {
 const contrastAgainstWhite = (hex) => 1.05 / (relativeLuminance(hex) + 0.05);
 const themeSource = readSource("apps/mobile/src/styles/theme.css");
 const mobileShellSource = readSource("apps/mobile/src/layouts/MobileShell.vue");
+const mobileCopySource = readSource("apps/mobile/src/constants/copy.ts");
 const specialHomeSource = readSource("apps/mobile/src/pages/special/home.vue");
 assert.match(mobileShellSource, /runtimeDataPlane/, "移动端全局壳层必须读取公开运行数据平面");
-assert.match(mobileShellSource, /验收模拟实例/, "移动端必须持续标明模拟实例");
+assert.match(mobileShellSource, /appCopy\.runtime\.simulationBadge/, "移动端必须持续标明模拟实例");
+assert.match(mobileCopySource, /验收模拟实例/, "移动端模拟实例文案必须集中维护");
 assert.match(
   mobileShellSource,
   /role="status"[\s\S]+aria-live="polite"/,

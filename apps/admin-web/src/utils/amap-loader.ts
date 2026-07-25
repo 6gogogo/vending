@@ -1,3 +1,4 @@
+import { adminCopy } from "../constants/copy";
 import { loadPublicRuntimeConfig } from "./public-config";
 
 declare global {
@@ -12,7 +13,7 @@ declare global {
 
 export const loadAmap = () => {
   if (typeof window === "undefined") {
-    return Promise.reject(new Error("当前环境不支持地图加载"));
+    return Promise.reject(new Error(adminCopy.map.unsupported));
   }
 
   if (window.AMap) {
@@ -28,18 +29,12 @@ export const loadAmap = () => {
       ({ amapRuntimeMode, amapWebKey, amapSecurityJsCode }) =>
         new Promise((resolve, reject) => {
           if (amapRuntimeMode === "mock") {
-            reject(
-              new Error(
-                "当前实例地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求。" +
-                  "请将 VM_FULL_SIMULATION_MAP_MODE 设为 real，并为 API 进程配置有效的 " +
-                  "AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 后重启；在此之前可手工录入坐标。"
-              )
-            );
+            reject(new Error(adminCopy.map.mockMode));
             return;
           }
 
           if (!amapWebKey) {
-            reject(new Error("后端未配置 AMAP_WEB_KEY"));
+            reject(new Error(adminCopy.map.missingWebKey));
             return;
           }
 
@@ -49,24 +44,28 @@ export const loadAmap = () => {
             };
           }
 
-          const existing = document.querySelector<HTMLScriptElement>("script[data-vm-amap='true']");
-
-          if (existing) {
-            existing.addEventListener("load", () => resolve(window.AMap));
-            existing.addEventListener("error", () =>
-              reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单"))
-            );
-            return;
-          }
+          document
+            .querySelector<HTMLScriptElement>("script[data-vm-amap='true']")
+            ?.remove();
 
           const script = document.createElement("script");
           script.src = `https://webapi.amap.com/maps?v=2.0&key=${amapWebKey}&plugin=AMap.PlaceSearch,AMap.AutoComplete,AMap.Geocoder`;
           script.async = true;
           script.defer = true;
           script.dataset.vmAmap = "true";
-          script.onload = () => resolve(window.AMap);
-          script.onerror = () =>
-            reject(new Error("高德地图脚本加载失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单"));
+          const rejectScriptLoad = () => {
+            script.remove();
+            reject(new Error(adminCopy.map.scriptLoadFailed));
+          };
+          script.onload = () => {
+            if (!window.AMap) {
+              rejectScriptLoad();
+              return;
+            }
+
+            resolve(window.AMap);
+          };
+          script.onerror = rejectScriptLoad;
           document.head.appendChild(script);
         })
     )

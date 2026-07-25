@@ -248,7 +248,7 @@ test("特殊用户已有待结算或物理状态未决开柜时阻止再次占�
   assert.doesNotThrow(() => reservations.assertUserCanUseRelatedFeatures(user.id));
 });
 
-test("服务时段内免费额度用尽后拒绝普通用户继续领取，不进入付费预结算", () => {
+test("服务时段内免费额度用尽后拒绝特殊群体继续领取，不进入付费预结算", () => {
   const store = createIsolatedStore();
   store.events.splice(0, store.events.length);
   store.reservations.splice(0, store.reservations.length);

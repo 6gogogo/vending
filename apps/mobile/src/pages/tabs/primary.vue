@@ -16,6 +16,7 @@ import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import ServiceMetric from "../../components/ui/ServiceMetric.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { appCopy } from "../../constants/copy";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { formatBeijingDateTime } from "../../utils/datetime";
@@ -132,7 +133,7 @@ const todaySuggestion = computed(() => {
   }
 
   if (remainingTotal.value <= 0) {
-    return "今天免费领取额度已用完，请等待额度刷新或联系工作人员；当前公益物资不会转为付费领取。";
+    return appCopy.freeOnly.quotaExhausted;
   }
 
   return "可先查看附近柜机，也可以到柜机前扫码开门。";
@@ -754,7 +755,7 @@ onShow(() => {
             <text class="vm-status vm-status--success">剩余 {{ item.quantity }} 件</text>
           </view>
         </view>
-        <EmptyState v-else title="当前没有可领取额度" description="可继续查看附近柜机；领取额度刷新前不能开柜，当前公益物资不会转为付费领取。" />
+        <EmptyState v-else title="当前没有可领取额度" :description="appCopy.freeOnly.quotaEmptyDescription" />
         </template>
         <EmptyState
           v-else

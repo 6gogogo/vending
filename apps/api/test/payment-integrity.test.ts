@@ -42,6 +42,41 @@ const createEvent = (overrides: Partial<CabinetEventRecord> = {}): CabinetEventR
   ...overrides
 });
 
+const createFreeOnlyPreSettlement = (
+  overrides: Partial<NonNullable<CabinetEventRecord["preSettlement"]>> = {}
+): NonNullable<CabinetEventRecord["preSettlement"]> => {
+  const now = new Date().toISOString();
+
+  return {
+    deviceCode: "CAB-PAYMENT-1",
+    doorNum: "1",
+    createdAt: now,
+    totalQuantity: 1,
+    freeQuantity: 1,
+    paidQuantity: 0,
+    originalAmount: 500,
+    freeAmount: 500,
+    payableAmount: 0,
+    chargeRequired: false,
+    summary: "本次选择均在可领取范围内",
+    items: [
+      {
+        goodsId: "goods-1",
+        goodsName: "测试商品",
+        category: "daily",
+        quantity: 1,
+        freeQuantity: 1,
+        paidQuantity: 0,
+        unitPrice: 500,
+        originalAmount: 500,
+        freeAmount: 500,
+        paidAmount: 0
+      }
+    ],
+    ...overrides
+  };
+};
+
 const completeRealWechatConfig = {
   PAYMENT_MODE: "real",
   WECHAT_PAY_APP_ID: "app-id",
@@ -232,6 +267,30 @@ describe("支付单金额与幂等", () => {
     assert.equal(created.order.amount, harness.event.amount);
     assert.equal(created.order.eventId, harness.event.eventId);
     assert.equal(created.order.orderNo, harness.event.orderNo);
+  });
+
+  test("当前公益领取事件即使出现异常金额也不能创建用户支付单", async () => {
+    const event = createEvent({
+      amount: 500,
+      preSettlement: createFreeOnlyPreSettlement()
+    });
+    const harness = createPaymentHarness({ event });
+
+    await assert.rejects(
+      harness.service.createOrder(
+        defaultCreatePayload(event),
+        { id: event.userId, role: "special" }
+      ),
+      /当前公益物资只支持免费领取/
+    );
+    await assert.rejects(
+      harness.service.createOrder(
+        defaultCreatePayload(event),
+        { id: "admin-payment-test", role: "admin" }
+      ),
+      /当前公益物资只支持免费领取/
+    );
+    assert.equal(harness.store.paymentOrders.length, 0);
   });
 
   test("补扣金额只能取事件内关联补扣单金额", async () => {
@@ -4679,6 +4738,54 @@ describe("SmartVM 回调完整性", () => {
     assert.equal(harness.paymentNotifyCalls, 1);
   });
 
+  test("当前公益领取把平台非零结算归零并自动回写领取完成状态", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "closed",
+        role: "special",
+        amount: 0,
+        intentItems: [
+          {
+            goodsId: "goods-1",
+            goodsName: "测试商品",
+            category: "daily",
+            quantity: 1
+          }
+        ],
+        preSettlement: createFreeOnlyPreSettlement()
+      })
+    });
+
+    harness.service.handleSettlement({
+      orderNo: harness.event.orderNo,
+      eventId: harness.event.eventId,
+      phone: harness.event.phone,
+      deviceCode: harness.event.deviceCode,
+      amount: 500,
+      notifyUrl: "http://127.0.0.1/mock-payment-notify",
+      detail: [
+        {
+          goodsId: "goods-1",
+          goodsName: "测试商品",
+          quantity: 1,
+          unitPrice: 500
+        }
+      ],
+      clientId: "smartvm-client",
+      nonceStr: "free-only-settlement",
+      timestamp: Math.floor(Date.now() / 1000),
+      sign: "verified"
+    });
+
+    assert.equal(harness.event.platformAmount, 500);
+    assert.equal(harness.event.amount, 0);
+    assert.equal(harness.event.billingStatus, "free");
+    assert.equal(harness.event.billingDeltaType, "none");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(harness.paymentNotifyCalls, 1);
+    assert.match(harness.event.paymentNotifyMessage ?? "", /公益领取完成状态/);
+  });
+
   test("历史预约支付事件不因当前切换预约取货模式而被改写", async () => {
     const now = new Date().toISOString();
     const harness = createCabinetHarness({
@@ -4813,5 +4920,61 @@ describe("SmartVM 回调完整性", () => {
     assert.equal(harness.paymentNotifyCalls, 1);
     assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
     assert.match(harness.event.adjustments?.[0]?.paymentNotifyMessage ?? "", /预约取货完成状态/);
+  });
+
+  test("当前公益领取的非零补充回调只进入管理员核对且不生成支付", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "settled",
+        role: "special",
+        amount: 0,
+        billingStatus: "free",
+        preSettlement: createFreeOnlyPreSettlement()
+      })
+    });
+    const callback = {
+      orgOrderNo: harness.event.orderNo,
+      orderNo: "free-only-adjustment-order",
+      eventId: harness.event.eventId,
+      phone: harness.event.phone,
+      deviceCode: harness.event.deviceCode,
+      amount: 200,
+      noticeUrl: "http://127.0.0.1/mock-adjustment-notify",
+      detail: [],
+      clientId: "smartvm-client",
+      nonceStr: "free-only-adjustment",
+      timestamp: Math.floor(Date.now() / 1000),
+      sign: "verified"
+    };
+
+    const result = harness.service.handleAdjustment(callback);
+    assert.match(result.message, /等待管理员核对/);
+    assert.equal(harness.event.amount, 0);
+    assert.equal(harness.event.billingStatus, "mismatch");
+    assert.equal(harness.event.adjustments?.[0]?.amount, 200);
+    assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "pending");
+    assert.equal(harness.paymentNotifyCalls, 0);
+
+    await assert.rejects(
+      harness.service.notifyPaymentSuccess(
+        {
+          orderNo: callback.orderNo,
+          eventId: callback.eventId,
+          transactionId: "forbidden-free-only-payment",
+          deviceCode: callback.deviceCode,
+          amount: 0
+        },
+        "admin-1"
+      ),
+      /不能手工回写付款成功/
+    );
+
+    harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
+      note: "已核对公益领取差异"
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(harness.paymentNotifyCalls, 1);
+    assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
+    assert.match(harness.event.adjustments?.[0]?.paymentNotifyMessage ?? "", /公益领取完成状态/);
   });
 });

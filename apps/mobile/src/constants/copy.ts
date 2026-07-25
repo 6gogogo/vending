@@ -6,6 +6,34 @@ export const appCopy = {
   loginBody:
     "请使用手机号验证码登录。首次使用可直接提交身份资料，审核通过后自动进入对应角色页面。",
   loginSupport: "若手机号已预先导入系统，首次登录仍需补齐基础资料；新账号提交后会进入审核流程。",
+  runtime: {
+    simulationBadge: "验收模拟实例",
+    unknownBadge: "运行环境未确认"
+  },
+  disclaimer: {
+    title: "公益智助柜用户免责声明",
+    loginGuide: "输入手机号并同意免责声明",
+    agreementCopy: "我已阅读并同意",
+    validationMessage: "请先勾选同意《公益智助柜用户免责声明》。",
+    validationToast: "请先勾选同意免责声明",
+    dialogHint: "请阅读内容；是否同意请回到登录页勾选",
+    bodyAriaLabel: "免责声明正文"
+  },
+  freeOnly: {
+    quotaExhausted:
+      "今天免费领取额度已用完，请等待额度刷新或联系工作人员；当前公益物资不会转为付费领取。",
+    quotaEmptyDescription:
+      "可继续查看附近柜机；领取额度刷新前不能开柜，当前公益物资不会转为付费领取。",
+    amountLabel: "公益物资免费领取",
+    historicalResolvedLabel: "历史状态已处理，本页不会发起支付",
+    completedHint: "平台已完成领取核对，本次公益物资免费，不会发起支付。",
+    unexpectedChargeTitle: "费用异常待核对",
+    unexpectedChargeHint:
+      "当前公益物资全部免费，系统检测到异常金额并已停止支付入口；请返回首页或提交反馈，由管理员核对。",
+    unexpectedChargeBody:
+      "请勿通过任何渠道付款。异常金额不会在本页发起支付，管理员核对后会回流处理结果。",
+    feedbackAction: "提交费用异常反馈"
+  },
   specialWelcome: "先看附近柜机、库存与今日可用额度，再选择意向物资发起取货。",
   merchantWelcome: "围绕柜机选择、补货登记、批次追踪与异常反馈组织每日动作。",
   historyIntro: "按时间查看本人服务记录，方便核对领取和处理结果。",

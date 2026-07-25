@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, useSlots } from "vue";
 
 import { loadMobileRuntimeConfig } from "../api/runtime-config";
+import { appCopy } from "../constants/copy";
 import { useSessionStore } from "../stores/session";
 import { useUiPreferencesStore } from "../stores/ui-preferences";
 
@@ -78,10 +79,10 @@ const showUtilityBar = computed(
 
 const runtimeBadgeLabel = computed(() => {
   if (runtimeDataPlane.value === "simulation") {
-    return "验收模拟实例";
+    return appCopy.runtime.simulationBadge;
   }
 
-  return runtimeDataPlane.value === "unknown" ? "运行环境未确认" : "";
+  return runtimeDataPlane.value === "unknown" ? appCopy.runtime.unknownBadge : "";
 });
 </script>
 

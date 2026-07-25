@@ -7,6 +7,7 @@ import type { AppLoginResult } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
+import { appCopy } from "../../constants/copy";
 import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?raw";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
@@ -212,9 +213,9 @@ const ensureDisclaimerAccepted = () => {
     return true;
   }
 
-  disclaimerValidationMessage.value = "请先勾选同意《智能货柜用户免责声明》。";
+  disclaimerValidationMessage.value = appCopy.disclaimer.validationMessage;
   uni.showToast({
-    title: "请先勾选同意免责声明",
+    title: appCopy.disclaimer.validationToast,
     icon: "none"
   });
   return false;
@@ -291,7 +292,7 @@ onMounted(() => {
         <view class="login-guide">
           <view class="login-guide__item">
             <text class="login-guide__index">1</text>
-            <text>输入手机号并同意免责声明</text>
+            <text>{{ appCopy.disclaimer.loginGuide }}</text>
           </view>
           <view class="login-guide__item">
             <text class="login-guide__index">2</text>
@@ -365,9 +366,9 @@ onMounted(() => {
                 :checked="hasAcceptedDisclaimer"
                 color="#167a67"
               />
-              <text class="disclaimer-agreement__copy">我已阅读并同意</text>
+              <text class="disclaimer-agreement__copy">{{ appCopy.disclaimer.agreementCopy }}</text>
               <text class="disclaimer-link" @tap.stop="openDisclaimer">
-                《智能货柜用户免责声明》
+                《{{ appCopy.disclaimer.title }}》
               </text>
             </label>
           </checkbox-group>
@@ -430,14 +431,14 @@ onMounted(() => {
         @keydown.esc.stop.prevent="closeDisclaimer"
       >
         <view class="disclaimer-dialog__header">
-          <text id="disclaimer-dialog-title" class="disclaimer-dialog__title">智能货柜用户免责声明</text>
-          <text id="disclaimer-dialog-hint" class="disclaimer-dialog__hint">请阅读内容；是否同意请回到登录页勾选</text>
+          <text id="disclaimer-dialog-title" class="disclaimer-dialog__title">{{ appCopy.disclaimer.title }}</text>
+          <text id="disclaimer-dialog-hint" class="disclaimer-dialog__hint">{{ appCopy.disclaimer.dialogHint }}</text>
         </view>
 
         <scroll-view
           class="disclaimer-dialog__body"
           scroll-y
-          aria-label="免责声明正文"
+          :aria-label="appCopy.disclaimer.bodyAriaLabel"
         >
           <text
             v-for="(line, index) in disclaimerLines"

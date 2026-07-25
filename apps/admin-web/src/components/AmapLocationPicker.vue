@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
+import { adminCopy } from "../constants/copy";
 import { loadAmap } from "../utils/amap-loader";
 
 const props = defineProps<{
@@ -249,14 +250,10 @@ const buildPlaceSearchErrorMessage = (result: any) => {
     (typeof result === "string" ? result : result?.info || result?.message || "").trim();
 
   if (/USERKEY_PLAT_NOMATCH|INVALID_USER_KEY|INVALID_USER_SCODE/i.test(info)) {
-    return `高德搜索失败（${info}），请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单。`;
+    return adminCopy.map.searchInvalidCredential(info);
   }
 
-  if (info) {
-    return `高德搜索失败（${info}），请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE、域名白名单或控制台配额。`;
-  }
-
-  return "高德搜索失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE、域名白名单或控制台配额。";
+  return adminCopy.map.searchFailed(info || undefined);
 };
 
 const searchPlaces = async () => {
@@ -274,7 +271,7 @@ const searchPlaces = async () => {
     searching.value = false;
     searchFeedbackTone.value = "danger";
     searchFeedbackMessage.value =
-      mapErrorMessage.value || "地图尚未初始化，无法搜索地点。请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与域名白名单。";
+      mapErrorMessage.value || adminCopy.map.searchUnavailable;
     return;
   }
 
@@ -292,7 +289,7 @@ const searchPlaces = async () => {
         searchResults.value = normalized;
         if (!normalized.length) {
           searchFeedbackTone.value = "warning";
-          searchFeedbackMessage.value = "未找到地点，请尝试更具体的关键词。";
+          searchFeedbackMessage.value = adminCopy.map.searchNoResult;
         } else {
           searchFeedbackMessage.value = "";
         }
@@ -303,7 +300,7 @@ const searchPlaces = async () => {
       searchResults.value = [];
       if (status === "no_data") {
         searchFeedbackTone.value = "warning";
-        searchFeedbackMessage.value = "未找到地点，请尝试更具体的关键词。";
+        searchFeedbackMessage.value = adminCopy.map.searchNoResult;
       } else {
         searchFeedbackTone.value = "danger";
         searchFeedbackMessage.value = buildPlaceSearchErrorMessage(result);

@@ -1,31 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import { adminCopy } from "./constants/copy";
 import { loadPublicRuntimeConfig } from "./utils/public-config";
 
 const runtimeDataPlane = ref<"simulation" | "live" | "unknown">("unknown");
-const runtimeConfigLoaded = ref(false);
 
 const runtimeBadgeLabel = computed(() => {
   if (runtimeDataPlane.value === "simulation") {
-    return "验收模拟实例";
+    return adminCopy.runtime.simulationBadge;
   }
 
-  if (runtimeConfigLoaded.value && runtimeDataPlane.value === "unknown") {
-    return "运行环境未确认";
-  }
-
-  return "";
+  return runtimeDataPlane.value === "unknown" ? adminCopy.runtime.unknownBadge : "";
 });
 
 onMounted(async () => {
   try {
     const config = await loadPublicRuntimeConfig();
-    runtimeDataPlane.value = config.runtimeDataPlane ?? "unknown";
+    runtimeDataPlane.value =
+      config.runtimeDataPlane === "simulation" || config.runtimeDataPlane === "live"
+        ? config.runtimeDataPlane
+        : "unknown";
   } catch {
     runtimeDataPlane.value = "unknown";
-  } finally {
-    runtimeConfigLoaded.value = true;
   }
 });
 </script>

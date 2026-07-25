@@ -4305,6 +4305,18 @@ export class PaymentsService {
       throw new UnauthorizedException("当前登录态已失效，请重新登录。");
     }
 
+    if (
+      event.role === "special" &&
+      (
+        event.reservationOnlyPickup === true ||
+        event.preSettlement?.chargeRequired === false
+      )
+    ) {
+      throw new BadRequestException(
+        "当前公益物资只支持免费领取，不创建用户支付单。"
+      );
+    }
+
     if (actor.role === "admin") {
       return;
     }
