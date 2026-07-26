@@ -374,6 +374,7 @@ const nativeInputAccessibilitySource = readSource("apps/mobile/src/utils/native-
 const appLoginSource = readSource("apps/mobile/src/pages/common/app-login.vue");
 const mobileAuthFlowSource = readSource("apps/mobile/src/composables/useAuthFlow.ts");
 const mobileRegisterSource = readSource("apps/mobile/src/pages/common/register.vue");
+const publicWebServerSource = readSource("scripts/serve-public-web.mjs");
 const mobileViteConfigSource = readSource("apps/mobile/vite.config.ts");
 const mobileH5PublicBaseSource = readSource("apps/mobile/src/config/h5-public-base.ts");
 const mobileH5DeploymentBuildSource = readSource("apps/mobile/scripts/build-h5-deployment.mjs");
@@ -414,6 +415,26 @@ assert.doesNotMatch(
   mobileProductionEnvSource,
   /^VITE_SHOW_VERIFICATION_PREVIEW\s*=\s*true\s*$/m,
   "移动端生产配置不得启用验证码预览"
+);
+assert.match(
+  publicWebServerSource,
+  /method !== "GET" && method !== "HEAD"/,
+  "公网静态服务必须拒绝除 GET 和 HEAD 外的请求"
+);
+assert.match(
+  publicWebServerSource,
+  /segment === "\." \|\| segment === "\.\."/,
+  "公网静态服务必须拒绝路径穿越片段"
+);
+assert.match(
+  publicWebServerSource,
+  /pathname\.startsWith\("\/mobile\/"\)[\s\S]{0,120}404/,
+  "移动端命名空间中的未知路径不得回退到后台 SPA"
+);
+assert.match(
+  publicWebServerSource,
+  /extname\(filePath\)[\s\S]{0,160}"no-store"/,
+  "公网静态服务必须禁止缓存 HTML"
 );
 assert.match(nativeInputAccessibilitySource, /querySelector\("input"\)/, "uni-app H5 必须将可访问名同步到真正获取焦点的 input");
 assert.match(nativeInputAccessibilitySource, /setAttribute\("aria-labelledby", options\.labelId\)/, "H5 原生输入必须关联可见标签");

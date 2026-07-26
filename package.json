@@ -50,6 +50,8 @@
     "sandbox:sms:verify": "node sandbox/scripts/verify-sms-code.mjs",
     "sandbox:settlement": "node sandbox/scripts/simulate-settlement.mjs",
     "sandbox:sign": "node sandbox/scripts/generate-signature.mjs sandbox/fixtures/open-door.sample.json",
+    "start:public-web": "node scripts/serve-public-web.mjs",
+    "test:public-web": "node --test scripts/serve-public-web.test.mjs",
     "smoke:frontend-safety": "node scripts/smoke-frontend-safety.mjs",
     "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety",
     "check:local:full": "npm run check:local && npm run build && npm run build:mobile:weixin && npm run build:mobile:alipay && npm run build:mobile:app",
