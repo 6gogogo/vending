@@ -14,7 +14,8 @@ import {
   ALLOWED_BACKOFFICE_PERMISSIONS_KEY,
   ALLOWED_BACKOFFICE_ROLES_KEY,
   ALLOWED_BACKOFFICE_SESSION_PERMISSIONS_KEY,
-  ALLOWED_ROLES_KEY
+  ALLOWED_ROLES_KEY,
+  TENANT_SCOPED_BACKOFFICE_ROUTE_KEY
 } from "./allowed-roles.decorator";
 import { InMemoryStoreService } from "../store/in-memory-store.service";
 
@@ -45,6 +46,10 @@ export class RoleGuard implements CanActivate {
     );
     const backofficeSessionPermissions = this.reflector.getAllAndOverride<BackofficePermission[]>(
       ALLOWED_BACKOFFICE_SESSION_PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()]
+    );
+    const tenantScopedBackofficeRoute = this.reflector.getAllAndOverride<boolean>(
+      TENANT_SCOPED_BACKOFFICE_ROUTE_KEY,
       [context.getHandler(), context.getClass()]
     );
 
@@ -89,6 +94,15 @@ export class RoleGuard implements CanActivate {
         Boolean(requiredBackofficePermissions?.length);
       const backofficePermissions = this.store.getBackofficeSessionPermissions(session);
       const isBackofficeSession = Boolean(session?.backofficeRole);
+      const isNonDefaultTenantSession = Boolean(
+        session?.backofficeRole &&
+          session.tenantId &&
+          session.tenantId !== this.store.getDefaultTenantId()
+      );
+
+      if (isNonDefaultTenantSession && !tenantScopedBackofficeRoute) {
+        throw new ForbiddenException("当前客户实例暂未开放该业务域。");
+      }
 
       if (allowedRoles?.length && !allowedRoles.includes(sessionUser.role)) {
         throw new ForbiddenException("当前角色无权访问该接口。");

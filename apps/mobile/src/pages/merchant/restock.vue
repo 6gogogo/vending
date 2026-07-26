@@ -16,6 +16,7 @@ import { useSessionStore } from "../../stores/session";
 import { formatBeijingDate } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
 import { syncNativeInputAccessibility } from "../../utils/native-input-accessibility";
+import { isStockOperatorRole } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const templates = ref<MerchantGoodsTemplate[]>([]);
@@ -29,8 +30,12 @@ const batchNo = ref("");
 const note = ref("");
 const submitting = ref(false);
 const presetDeviceCode = ref("");
+const cabinetEventId = ref("");
 const loading = ref(false);
 const loadError = ref("");
+const canManageTemplates = computed(
+  () => sessionStore.user?.role === "merchant"
+);
 
 const syncRestockInputAccessibility = async () => {
   await nextTick();
@@ -131,8 +136,13 @@ const load = async () => {
 
   await sessionStore.bootstrap();
 
-  if (!sessionStore.user) {
+  if (!sessionStore.user || !isStockOperatorRole(sessionStore.user.role)) {
     uni.reLaunch({ url: "/pages/common/login" });
+    return;
+  }
+
+  if (!cabinetEventId.value) {
+    uni.switchTab({ url: "/pages/tabs/nearby" });
     return;
   }
 
@@ -217,6 +227,7 @@ const submit = async () => {
     await mobileApi.createMerchantRestock({
       templateId: selectedTemplateId.value,
       deviceCode: selectedDeviceCode.value,
+      cabinetEventId: cabinetEventId.value,
       quantity: quantity.value,
       productionDate: productionDate.value,
       note: [batchNo.value ? `批次号：${batchNo.value.trim()}` : "", note.value.trim()].filter(Boolean).join("；") || undefined,
@@ -248,6 +259,10 @@ onLoad((query) => {
   if (typeof query.deviceCode === "string" && query.deviceCode) {
     presetDeviceCode.value = query.deviceCode;
   }
+
+  if (typeof query.cabinetEventId === "string" && query.cabinetEventId) {
+    cabinetEventId.value = query.cabinetEventId;
+  }
 });
 
 onMounted(() => {
@@ -260,7 +275,13 @@ onMounted(() => {
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" :disabled="loading || Boolean(loadError)" @tap="submit" :loading="submitting">提交补货登记</button>
-        <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">常用商品</button>
+        <button
+          v-if="canManageTemplates"
+          class="vm-button vm-button--ghost"
+          @tap="navigate('/pages/merchant/templates')"
+        >
+          常用商品
+        </button>
       </view>
     </template>
 
@@ -383,7 +404,13 @@ onMounted(() => {
 
         <view class="action-grid">
           <button class="vm-button" :disabled="loading || Boolean(loadError)" :loading="submitting" @tap="submit">提交补货登记</button>
-          <button class="vm-button vm-button--ghost" @tap="navigate('/pages/merchant/templates')">维护常用商品</button>
+          <button
+            v-if="canManageTemplates"
+            class="vm-button vm-button--ghost"
+            @tap="navigate('/pages/merchant/templates')"
+          >
+            维护常用商品
+          </button>
         </view>
       </view>
     </GlassCard>
@@ -410,7 +437,7 @@ onMounted(() => {
         <EmptyState
           v-if="!loadError && !filteredTemplates.length"
           title="暂无可选常用商品"
-          description="请先维护常用商品，再回来登记本次补货。"
+          :description="canManageTemplates ? '请先维护常用商品，再回来登记本次补货。' : '请联系商家或管理员维护公共货品后再补货。'"
         />
 
         <view v-else-if="!loadError" class="template-list template-list--compact">

@@ -23,7 +23,7 @@ const defaultBackofficeRoutes: Array<{ permission: BackofficePermission; path: s
 
 interface AdminSessionUser {
   id: string;
-  role: "admin" | "merchant";
+  role: "admin" | "merchant" | "restocker";
   backofficeRole: BackofficeRole;
   scope: BackofficeScope;
   tenantId?: string;
@@ -76,6 +76,7 @@ export const useAdminSessionStore = defineStore("admin-session", {
     isProvider: (state) => state.user?.scope === "provider",
     isAdmin: (state) => state.user?.backofficeRole === "admin",
     isMerchant: (state) => state.user?.backofficeRole === "merchant",
+    isRestocker: (state) => state.user?.backofficeRole === "restocker",
     permissions: (state) =>
       state.user
         ? resolveBackofficePermissions(state.user.backofficeRole, state.user.permissions)

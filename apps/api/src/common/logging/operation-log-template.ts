@@ -6,6 +6,7 @@ type OperationLogDraft = Omit<OperationLogRecord, "description" | "detail"> &
 const roleLabelMap = {
   admin: "管理员",
   merchant: "商家",
+  restocker: "补货员",
   special: "用户",
   system: "系统"
 } as const;

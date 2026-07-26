@@ -50,8 +50,12 @@ export class InventoryOrdersService {
     @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
-  list(userId?: string, role?: "special" | "merchant" | "admin") {
+  list(userId?: string, role?: UserRole, tenantId?: string) {
     return this.store.inventory.filter((entry) => {
+      if (tenantId && !this.inventoryMovementBelongsToTenant(entry, tenantId)) {
+        return false;
+      }
+
       if (userId && entry.userId !== userId) {
         return false;
       }
@@ -65,8 +69,21 @@ export class InventoryOrdersService {
     });
   }
 
-  getMerchantSummary(userId: string) {
-    const records = this.store.inventory.filter((entry) => entry.userId === userId);
+  getMerchantSummary(userId: string, tenantId?: string) {
+    const user = this.store.users.find((entry) => entry.id === userId);
+
+    if (
+      !user ||
+      (tenantId && this.store.getUserTenantId(user) !== tenantId)
+    ) {
+      throw new NotFoundException("未找到对应人员。");
+    }
+
+    const records = this.store.inventory.filter(
+      (entry) =>
+        entry.userId === userId &&
+        (!tenantId || this.inventoryMovementBelongsToTenant(entry, tenantId))
+    );
     const donatedUnits = records
       .filter((entry) => entry.type === "donation")
       .reduce((sum, entry) => sum + entry.quantity, 0);
@@ -82,6 +99,27 @@ export class InventoryOrdersService {
       ).length,
       records
     };
+  }
+
+  private inventoryMovementBelongsToTenant(
+    entry: InventoryMovement,
+    tenantId: string
+  ) {
+    const tenantIds: string[] = [];
+    const user = this.store.users.find((candidate) => candidate.id === entry.userId);
+    const device = this.store.devices.find(
+      (candidate) => candidate.deviceCode === entry.deviceCode
+    );
+
+    if (user) {
+      tenantIds.push(this.store.getUserTenantId(user));
+    }
+
+    if (device) {
+      tenantIds.push(this.store.getDeviceTenantId(device));
+    }
+
+    return tenantIds.length > 0 && tenantIds.every((value) => value === tenantId);
   }
 
   validateSettlementPayload(event: CabinetEventRecord, payload: SmartVmSettlementPayload) {

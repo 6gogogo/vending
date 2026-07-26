@@ -20,6 +20,8 @@ import {
 const route = useRoute();
 const sessionStore = useAdminSessionStore();
 const canUndoLogs = computed(() => sessionStore.can("operation-logs:undo"));
+const canViewCallbackLogs = computed(() => sessionStore.can("operation-logs:view"));
+const canViewSystemAudit = computed(() => sessionStore.can("system-audit:view"));
 const log = ref<OperationLogRecord>();
 const loading = ref(false);
 const undoing = ref(false);
@@ -212,10 +214,17 @@ const load = async () => {
   loadError.value = "";
   try {
     log.value = await adminApi.logDetail(String(route.params.logId));
-    if (deviceCode.value && sessionStore.can("system-audit:view")) {
+    if (
+      deviceCode.value &&
+      (canViewSystemAudit.value || canViewCallbackLogs.value)
+    ) {
       const [auditLogs, callbackLogs] = await Promise.all([
-        adminApi.systemAuditLogs({ deviceCode: deviceCode.value, limit: 150 }),
-        adminApi.deviceCallbackLogs(deviceCode.value, 150)
+        canViewSystemAudit.value
+          ? adminApi.systemAuditLogs({ deviceCode: deviceCode.value, limit: 150 })
+          : Promise.resolve([]),
+        canViewCallbackLogs.value
+          ? adminApi.deviceCallbackLogs(deviceCode.value, 150)
+          : Promise.resolve([])
       ]);
 
       const matchesCurrentLog = (value: unknown) =>
@@ -372,7 +381,10 @@ onMounted(load);
           </div>
         </article>
 
-        <article v-if="embeddedLowLevelTraces.length || sessionStore.can('system-audit:view')" class="admin-panel admin-panel-block">
+        <article
+          v-if="embeddedLowLevelTraces.length || canViewSystemAudit || canViewCallbackLogs"
+          class="admin-panel admin-panel-block"
+        >
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">底层记录</span>
@@ -397,7 +409,7 @@ onMounted(load);
               </article>
             </div>
 
-            <div v-if="sessionStore.can('system-audit:view') && relatedAuditLogs.length" class="log-detail__trace-list">
+            <div v-if="canViewSystemAudit && relatedAuditLogs.length" class="log-detail__trace-list">
               <article v-for="entry in relatedAuditLogs" :key="`${entry.occurredAt}-${entry.path}`" class="log-detail__trace-card">
                 <div class="log-detail__trace-head">
                   <span class="admin-code">{{ formatDateTimeSeconds(entry.occurredAt) }}</span>
@@ -412,9 +424,9 @@ onMounted(load);
                 </div>
               </article>
             </div>
-            <span v-else-if="sessionStore.can('system-audit:view')" class="admin-table__subtext">暂无关联系统审计。</span>
+            <span v-else-if="canViewSystemAudit" class="admin-table__subtext">暂无关联系统审计。</span>
 
-            <div v-if="sessionStore.can('system-audit:view') && relatedCallbackLogs.length" class="log-detail__trace-list">
+            <div v-if="canViewCallbackLogs && relatedCallbackLogs.length" class="log-detail__trace-list">
               <article v-for="entry in relatedCallbackLogs" :key="entry.id" class="log-detail__trace-card">
                 <div class="log-detail__trace-head">
                   <span class="admin-code">{{ formatDateTimeSeconds(entry.receivedAt) }}</span>
@@ -424,7 +436,7 @@ onMounted(load);
                 <pre class="log-detail__pre">{{ formatJsonBlock(entry.payload) }}</pre>
               </article>
             </div>
-            <span v-else-if="sessionStore.can('system-audit:view')" class="admin-table__subtext">暂无关联平台回调。</span>
+            <span v-else-if="canViewCallbackLogs" class="admin-table__subtext">暂无关联平台回调。</span>
           </div>
         </article>
 

@@ -5,6 +5,7 @@ import {
   GoneException,
   Inject,
   Injectable,
+  NotFoundException,
   Optional,
   UnauthorizedException
 } from "@nestjs/common";
@@ -29,7 +30,8 @@ import type {
   SmartVmDoorStatusPayload,
   SmartVmPaymentPayload,
   SmartVmSettlementPayload,
-  UserRecord
+  UserRecord,
+  UserRole
 } from "@vm/shared-types";
 
 import {
@@ -56,7 +58,9 @@ type CallbackBilling = Pick<
   items: CabinetPreSettlementItem[];
 };
 
-type AuthActor = { id: string; role: "admin" | "merchant" | "special" } | undefined;
+type AuthActor =
+  | { id: string; role: UserRole; tenantId?: string }
+  | undefined;
 
 @Injectable()
 export class CabinetEventsService {
@@ -389,29 +393,61 @@ export class CabinetEventsService {
       throw new UnauthorizedException("当前登录态已失效，请重新登录。");
     }
 
+    const visibleEvents = actor.tenantId
+      ? this.store.events.filter((entry) =>
+          this.eventBelongsToTenant(entry, actor.tenantId!)
+        )
+      : this.store.events;
+
     if (actor.role !== "admin") {
-      return this.store.events.filter((entry) => entry.userId === actor.id);
+      return visibleEvents.filter((entry) => entry.userId === actor.id);
     }
 
     if (!userId) {
-      return this.store.events;
+      return visibleEvents;
     }
 
-    return this.store.events.filter((entry) => entry.userId === userId);
+    return visibleEvents.filter((entry) => entry.userId === userId);
   }
 
-  getDetail(eventId: string, actor?: { id: string; role: CabinetEventRecord["role"] }) {
+  getDetail(eventId: string, actor?: AuthActor) {
+    if (!actor) {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
     const event = this.store.events.find((entry) => entry.eventId === eventId);
 
     if (!event) {
       throw new BadRequestException("未找到对应开柜事件。");
     }
 
-    if (actor && actor.role !== "admin" && actor.id !== event.userId) {
+    if (actor.tenantId && !this.eventBelongsToTenant(event, actor.tenantId)) {
+      throw new NotFoundException("未找到对应开柜事件。");
+    }
+
+    if (actor.role !== "admin" && actor.id !== event.userId) {
       throw new ForbiddenException("当前账号无权查看该开柜事件。");
     }
 
     return this.attachOwnPendingPaymentRecovery(event, actor);
+  }
+
+  private eventBelongsToTenant(event: CabinetEventRecord, tenantId: string) {
+    const tenantIds: string[] = [];
+    const user = this.store.users.find((entry) => entry.id === event.userId);
+    const device = this.store.devices.find(
+      (entry) => entry.deviceCode === event.deviceCode
+    );
+
+    if (user) {
+      tenantIds.push(this.store.getUserTenantId(user));
+    }
+
+    if (device) {
+      tenantIds.push(this.store.getDeviceTenantId(device));
+    }
+
+    return tenantIds.length > 0 && tenantIds.every((value) => value === tenantId);
   }
 
   /**
@@ -474,20 +510,28 @@ export class CabinetEventsService {
     };
   }
 
-  listCallbackLogs(limit = 20, deviceCode?: string) {
-    const resolvedLimit = Math.max(1, limit);
-    const normalizedDeviceCode = deviceCode?.trim();
-
-    if (!normalizedDeviceCode) {
-      return this.store.callbackLog.slice(0, resolvedLimit).map((entry) => this.toCallbackLogView(entry));
+  listCallbackLogs(limit = 20, deviceCode?: string, tenantId?: string) {
+    if (!tenantId) {
+      throw new ForbiddenException("当前会话未进入客户实例。");
     }
 
+    const resolvedLimit = Math.max(1, limit);
+    const normalizedDeviceCode = deviceCode?.trim();
     const matches: ReturnType<typeof this.toCallbackLogView>[] = [];
 
     for (const entry of this.store.callbackLog) {
-      if (entry.payload.deviceCode === normalizedDeviceCode) {
-        matches.push(this.toCallbackLogView(entry));
+      if (!this.callbackLogBelongsToTenant(entry, tenantId)) {
+        continue;
       }
+
+      if (
+        normalizedDeviceCode &&
+        entry.payload.deviceCode !== normalizedDeviceCode
+      ) {
+        continue;
+      }
+
+      matches.push(this.toCallbackLogView(entry));
 
       if (matches.length >= resolvedLimit) {
         break;
@@ -495,6 +539,38 @@ export class CabinetEventsService {
     }
 
     return matches;
+  }
+
+  private callbackLogBelongsToTenant(
+    entry: (typeof this.store.callbackLog)[number],
+    tenantId: string
+  ) {
+    const device = entry.payload.deviceCode
+      ? this.store.devices.find(
+          (candidate) => candidate.deviceCode === entry.payload.deviceCode
+        )
+      : undefined;
+    const event = entry.payload.eventId
+      ? this.store.events.find(
+          (candidate) => candidate.eventId === entry.payload.eventId
+        )
+      : undefined;
+
+    if (
+      entry.payload.deviceCode &&
+      (!device || this.store.getDeviceTenantId(device) !== tenantId)
+    ) {
+      return false;
+    }
+
+    if (
+      entry.payload.eventId &&
+      (!event || !this.eventBelongsToTenant(event, tenantId))
+    ) {
+      return false;
+    }
+
+    return Boolean(device || event);
   }
 
   handleDoorStatus(payload: SmartVmDoorStatusPayload & Record<string, unknown>) {
@@ -2045,8 +2121,30 @@ export class CabinetEventsService {
       throw new UnauthorizedException("当前用户未登记或已停用，无法开柜。");
     }
 
+    const device = this.store.devices.find(
+      (entry) => entry.deviceCode === payload.deviceCode
+    );
+
+    if (
+      actor.tenantId &&
+      (!device ||
+        this.store.getDeviceTenantId(device) !== actor.tenantId ||
+        this.store.getUserTenantId(user) !== actor.tenantId)
+    ) {
+      throw new ForbiddenException("当前账号无权操作其他实例的柜机。");
+    }
+
     if (payload.phone && payload.phone !== user.phone) {
       throw new ForbiddenException("不能使用其他手机号发起开柜。");
+    }
+
+    if (user.role === "merchant" || user.role === "restocker") {
+      const assignedDeviceCodes =
+        user.assignedDeviceCodes ?? user.merchantProfile?.defaultDeviceCodes ?? [];
+
+      if (!assignedDeviceCodes.includes(payload.deviceCode)) {
+        throw new ForbiddenException("当前账号未被分配该柜机。");
+      }
     }
 
     const doorNum = String(payload.doorNum ?? "1").trim();

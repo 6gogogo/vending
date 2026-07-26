@@ -14,6 +14,10 @@ import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
 import { syncNativeInputAccessibility } from "../../utils/native-input-accessibility";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
+import {
+  isVerificationCode,
+  normalizeVerificationCode
+} from "../../utils/verification-code";
 
 const sessionStore = useSessionStore();
 const phone = ref("");
@@ -65,7 +69,7 @@ const validatePhone = () => {
 };
 
 const validateCode = () => {
-  if (/^\d{4,8}$/.test(code.value.trim())) {
+  if (isVerificationCode(code.value)) {
     return true;
   }
 
@@ -154,7 +158,10 @@ const submit = async () => {
   rejectedReason.value = "";
 
   try {
-    const response = await mobileApi.appLogin(normalizedPhone(), code.value.trim());
+    const response = await mobileApi.appLogin(
+      normalizedPhone(),
+      normalizeVerificationCode(code.value)
+    );
     loginState.value = response;
 
     if (response.state === "approved") {
@@ -336,7 +343,7 @@ onMounted(() => {
               class="vm-field-shell__input"
               type="tel"
               inputmode="numeric"
-              maxlength="6"
+              maxlength="8"
               name="verification-code"
               autocomplete="one-time-code"
               aria-label="验证码"

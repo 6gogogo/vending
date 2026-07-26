@@ -1,5 +1,7 @@
 import type { UserRole } from "@vm/shared-types";
 
+import { isStockOperatorRole } from "./role-routing";
+
 export interface SupportGuideFaq {
   question: string;
   answer: string;
@@ -223,7 +225,7 @@ export const getSupportGuideTopics = (role: UserRole) => {
     return adminTopics;
   }
 
-  if (role === "merchant") {
+  if (isStockOperatorRole(role)) {
     return merchantTopics;
   }
 

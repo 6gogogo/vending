@@ -147,17 +147,8 @@ test("全真模拟使用独立模拟数据，并可逐模块选择真实或 mock
   assert.doesNotThrow(() =>
     assertRuntimeDataPlaneExternalIntegrationPolicy({
       ...fullSimulationSettings,
-      VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
-      VERIFICATION_CODE_MANUAL_VALUE: "246810"
+      VM_FULL_SIMULATION_VERIFICATION_MODE: "manual"
     })
-  );
-  assert.throws(
-    () =>
-      assertRuntimeDataPlaneExternalIntegrationPolicy({
-        ...fullSimulationSettings,
-        VM_FULL_SIMULATION_VERIFICATION_MODE: "manual"
-      }),
-    /VERIFICATION_CODE_MANUAL_VALUE/
   );
   assert.throws(
     () =>

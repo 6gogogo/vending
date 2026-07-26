@@ -10,6 +10,7 @@ export const sharedTabPaths = [
 export const roleTabLabels: Record<UserRole, [string, string, string, string]> = {
   special: ["首页", "附近柜机", "记录", "我的"],
   merchant: ["首页", "补货", "记录", "我的"],
+  restocker: ["首页", "补货", "记录", "我的"],
   admin: ["首页", "柜机", "记录", "我的"]
 };
 
@@ -26,6 +27,12 @@ const roleTabIcons: Record<UserRole, Array<{ iconPath: string; selectedIconPath:
     { iconPath: "/static/tabs/records.png", selectedIconPath: "/static/tabs/records-active.png" },
     { iconPath: "/static/tabs/settings-tab.png", selectedIconPath: "/static/tabs/settings-tab-active.png" }
   ],
+  restocker: [
+    { iconPath: "/static/tabs/home.png", selectedIconPath: "/static/tabs/home-active.png" },
+    { iconPath: "/static/tabs/restock.png", selectedIconPath: "/static/tabs/restock-active.png" },
+    { iconPath: "/static/tabs/records.png", selectedIconPath: "/static/tabs/records-active.png" },
+    { iconPath: "/static/tabs/settings-tab.png", selectedIconPath: "/static/tabs/settings-tab-active.png" }
+  ],
   admin: [
     { iconPath: "/static/tabs/home.png", selectedIconPath: "/static/tabs/home-active.png" },
     { iconPath: "/static/tabs/device.png", selectedIconPath: "/static/tabs/device-active.png" },
@@ -37,8 +44,14 @@ const roleTabIcons: Record<UserRole, Array<{ iconPath: string; selectedIconPath:
 const roleTabSelectedColor: Record<UserRole, string> = {
   special: "#2E7D46",
   merchant: "#FF8A2B",
+  restocker: "#FF8A2B",
   admin: "#2E7D46"
 };
+
+export const isStockOperatorRole = (
+  role?: UserRole
+): role is Extract<UserRole, "merchant" | "restocker"> =>
+  role === "merchant" || role === "restocker";
 
 export const resolveHomePath = (_role?: UserRole) => sharedTabPaths[0];
 

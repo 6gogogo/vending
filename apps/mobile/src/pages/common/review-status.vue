@@ -42,6 +42,10 @@ const accountRoleLabel = computed(() => {
     return "商家";
   }
 
+  if (role === "restocker") {
+    return "补货员";
+  }
+
   if (role === "admin") {
     return "管理员";
   }

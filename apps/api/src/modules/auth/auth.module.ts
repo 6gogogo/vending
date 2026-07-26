@@ -10,6 +10,7 @@ import { VerificationCodeModule } from "./verification-code.module";
 @Module({
   imports: [UsersModule, AccessRulesModule, RegistrationApplicationsModule, VerificationCodeModule],
   controllers: [AuthController],
-  providers: [AuthService]
+  providers: [AuthService],
+  exports: [AuthService]
 })
 export class AuthModule {}

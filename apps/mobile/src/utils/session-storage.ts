@@ -1,16 +1,18 @@
+import type { UserRole } from "@vm/shared-types";
+
 export const MOBILE_SESSION_STORAGE_KEY = "vm-mobile-session";
 
 export interface StoredMobileSessionState {
   token?: string;
   user?: {
     id: string;
-    role: "admin" | "merchant" | "special";
+    role: UserRole;
     name: string;
     phone: string;
     tags: string[];
   };
   quota?: {
-    role?: "admin" | "merchant" | "special";
+    role?: UserRole;
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
     usedCount?: number;
@@ -34,7 +36,7 @@ export interface StoredMobileSessionState {
   draft?: {
     token: string;
     phone: string;
-    requestedRole?: "admin" | "merchant" | "special";
+    requestedRole?: UserRole;
     linkedUserId?: string;
     applicationId?: string;
   };

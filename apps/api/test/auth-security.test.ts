@@ -69,7 +69,8 @@ const createAuthService = (
       getQuotaSummaryForUser: () => undefined
     } as never,
     {
-      findLatestByPhone: () => undefined
+      findLatestByPhone: () => undefined,
+      resolvePublicTenantId: () => store.getDefaultTenantId()
     } as never,
     store,
     verificationCodeService as never,
@@ -308,7 +309,10 @@ test("登录态和资料草稿使用高熵 token，并由服务端拒绝过期�
   assert.equal(store.sessions.has(inactiveToken), false);
   user.status = "active";
 
-  const draftToken = store.createDraftSession({ phone: user.phone });
+  const draftToken = store.createDraftSession({
+    tenantId: store.getUserTenantId(user),
+    phone: user.phone
+  });
   const draft = store.draftSessions.get(draftToken) as { expiresAt?: string } | undefined;
   assert.ok(draftToken.length >= 40);
   assert.ok(draft?.expiresAt);
@@ -498,13 +502,26 @@ test("新设和修改后台密码至少八位，既有短密码仍可登录后�
     () =>
       authService.resetBackofficePasswordAsSuperAdmin(superAdmin.token, {
         ...credentialPayload,
+        newPassword: "12345678",
+        reason: "平台全局态越权测试"
+      }),
+    /请先进入目标客户实例/
+  );
+  const scopedSuperAdmin = authService.enterPlatformTenant(
+    superAdmin.token,
+    store.getDefaultTenantId()
+  );
+  assert.throws(
+    () =>
+      authService.resetBackofficePasswordAsSuperAdmin(scopedSuperAdmin.token, {
+        ...credentialPayload,
         newPassword: "1234567",
         reason: "密码长度测试"
       }),
     /至少需要 8 位/
   );
   assert.doesNotThrow(() =>
-    authService.resetBackofficePasswordAsSuperAdmin(superAdmin.token, {
+    authService.resetBackofficePasswordAsSuperAdmin(scopedSuperAdmin.token, {
       ...credentialPayload,
       newPassword: "12345678",
       reason: "密码长度测试"
@@ -559,6 +576,7 @@ test("停用用户时，单个更新和批量更新都会立即撤销其已有�
 
   const specialToken = store.createSession(specialUser);
   const specialDraftToken = store.createDraftSession({
+    tenantId: store.getUserTenantId(specialUser),
     phone: specialUser.phone,
     linkedUserId: specialUser.id,
     requestedRole: specialUser.role
@@ -579,11 +597,15 @@ test("超级管理员重置其他后台账号密码时，目标账号旧会话�
   const store = createIsolatedStore();
   const authService = createAuthService(store);
   const superAdmin = await authService.backofficeLogin("super", "super123");
+  const scopedSuperAdmin = authService.enterPlatformTenant(
+    superAdmin.token,
+    store.getDefaultTenantId()
+  );
   const merchant = await authService.backofficeLogin("merchant", "merchant123");
   const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
   assert.ok(merchantCredential);
 
-  authService.resetBackofficePasswordAsSuperAdmin(superAdmin.token, {
+  authService.resetBackofficePasswordAsSuperAdmin(scopedSuperAdmin.token, {
     userId: merchantCredential.userId,
     role: merchantCredential.role,
     newPassword: "merchant-new-password",
@@ -654,6 +676,7 @@ test("删除用户时立即撤销关联会话和资料草稿", () => {
   assert.ok(user);
   const token = store.createSession(user);
   const draftToken = store.createDraftSession({
+    tenantId: store.getUserTenantId(user),
     phone: user.phone,
     linkedUserId: user.id,
     requestedRole: user.role
@@ -713,7 +736,7 @@ test("API 显式监听非回环地址时，即使是 mock 提供方也不返回�
   assert.equal(issued.previewCode, undefined);
 });
 
-test("全真模拟可使用手动设置的验证码，且仍受一次性校验保护", async () => {
+test("全真模拟 manual 模式只接受后台签发短期码，不接受静态通用验证码", async () => {
   const store = createIsolatedStore();
   const service = new VerificationCodeService(
     {
@@ -722,40 +745,64 @@ test("全真模拟可使用手动设置的验证码，且仍受一次性校验�
           VM_DATA_PLANE: "simulation",
           VM_SIMULATION_PROFILE: "full",
           VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
-          VERIFICATION_CODE_PROVIDER: "mock",
-          VERIFICATION_CODE_MANUAL_VALUE: "246810"
+          VERIFICATION_CODE_PROVIDER: "mock"
         })[key]
     } as never,
     store
   );
 
-  const issued = await service.requestCode("13812345684", "app-login");
+  await assert.rejects(
+    () => service.requestCode("13812345684", "app-login"),
+    /后台签发/
+  );
+  assert.equal(
+    await service.verifyCode("13812345684", "246810", "app-login"),
+    false
+  );
+  assert.equal(store.getVerificationRecord("13812345684", "app-login"), undefined);
 
-  assert.equal(issued.provider, "manual");
-  assert.equal(issued.previewCode, undefined);
-  assert.equal(await service.verifyCode("13812345684", "000000", "app-login"), false);
-  assert.equal(await service.verifyCode("13812345684", "246810", "app-login"), true);
-  assert.equal(await service.verifyCode("13812345684", "246810", "app-login"), false);
+  const targetUser = store.users.find((entry) => entry.status === "active");
+  assert.ok(targetUser);
+  store.issueManualVerificationGrant({
+    phone: targetUser.phone,
+    purpose: "app-login",
+    code: "654321",
+    issuerUserId: "manual-mode-test-issuer",
+    targetUserId: targetUser.id,
+    tenantId: store.getUserTenantId(targetUser),
+    expiresInSeconds: 300
+  });
+  assert.equal(
+    await service.verifyCode(targetUser.phone, "654321", "app-login"),
+    true
+  );
+});
+
+test("历史脏数据出现重复手机号时，公共登录必须失败关闭而不能选取首个租户账号", async () => {
+  const store = createIsolatedStore();
+  const original = store.users.find((entry) => entry.status === "active");
+  assert.ok(original);
+  store.users.push({
+    ...structuredClone(original),
+    id: `${original.id}-duplicate`,
+    tenantId: "tenant-duplicate"
+  });
+  const authService = createAuthService(store);
+
+  await assert.rejects(
+    () => authService.appLogin(original.phone, "123456"),
+    /账号身份异常|验证码不正确/
+  );
+  await assert.rejects(
+    () => authService.mobileLogin(original.phone, "123456"),
+    /账号身份异常|手机号或验证码不正确/
+  );
 });
 
 test("PNVS 只校验由本应用 PNVS 发码创建的挑战", async () => {
   const store = createIsolatedStore();
   const phone = "13812345685";
-  const manualService = new VerificationCodeService(
-    {
-      get: (key: string) =>
-        ({
-          VM_DATA_PLANE: "simulation",
-          VM_SIMULATION_PROFILE: "full",
-          VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
-          VERIFICATION_CODE_PROVIDER: "mock",
-          VERIFICATION_CODE_MANUAL_VALUE: "246810"
-        })[key]
-    } as never,
-    store
-  );
-
-  await manualService.requestCode(phone, "app-login");
+  store.issueVerificationCode(phone, "app-login");
 
   const pnvsService = new VerificationCodeService(
     {

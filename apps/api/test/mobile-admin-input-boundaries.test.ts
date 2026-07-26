@@ -141,7 +141,7 @@ test("POST /api/users 拒绝未定义角色且不落库", async () => {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        role: "restocker",
+        role: "auditor",
         phone: "19900000000",
         name: "非法角色测试用户"
       })

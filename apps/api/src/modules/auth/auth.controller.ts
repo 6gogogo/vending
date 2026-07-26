@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Headers, Inject, Patch, Post, Req } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Req
+} from "@nestjs/common";
 
 import type {
   BackofficePermission,
@@ -26,13 +36,32 @@ export class AuthController {
   }
 
   @Post("mobile-login")
-  async mobileLogin(@Body() body: { phone: string; code: string; requestedRole?: UserRole }) {
-    return ok(await this.authService.mobileLogin(body.phone, body.code, body.requestedRole));
+  async mobileLogin(
+    @Body() body: { phone: string; code: string; requestedRole?: UserRole },
+    @Req() request?: { hostname?: string }
+  ) {
+    return ok(
+      await this.authService.mobileLogin(
+        body.phone,
+        body.code,
+        body.requestedRole,
+        request?.hostname
+      )
+    );
   }
 
   @Post("app-login")
-  async appLogin(@Body() body: { phone: string; code: string }) {
-    return ok(await this.authService.appLogin(body.phone, body.code));
+  async appLogin(
+    @Body() body: { phone: string; code: string },
+    @Req() request?: { hostname?: string }
+  ) {
+    return ok(
+      await this.authService.appLogin(
+        body.phone,
+        body.code,
+        request?.hostname
+      )
+    );
   }
 
   @Post("mobile-profile")
@@ -42,9 +71,12 @@ export class AuthController {
       draftToken: string;
       requestedRole?: UserRole;
       profile: RegistrationApplicationProfile;
-    }
+    },
+    @Req() request?: { hostname?: string }
   ) {
-    return ok(this.authService.submitMobileProfile(body));
+    return ok(
+      this.authService.submitMobileProfile(body, request?.hostname)
+    );
   }
 
   @Post("login")
@@ -149,6 +181,53 @@ export class AuthController {
     return ok(
       this.authService.createBackofficeCredential(this.extractBearerToken(authorization), body),
       "后台账号已保存。"
+    );
+  }
+
+  @Post("manual-verification-codes")
+  issueManualVerificationCode(
+    @Headers("authorization") authorization: string | undefined,
+    @Body()
+    body: {
+      userId: string;
+      purpose: "app-login" | "password-reset";
+      code: string;
+      expiresInSeconds?: number;
+    }
+  ) {
+    return ok(
+      this.authService.issueManualVerificationCode(
+        this.extractBearerToken(authorization),
+        body
+      ),
+      "一次性人工验证码已签发。"
+    );
+  }
+
+  @Get("manual-verification-codes")
+  manualVerificationCodes(
+    @Headers("authorization") authorization?: string
+  ) {
+    return ok(
+      this.authService.listManualVerificationCodes(
+        this.extractBearerToken(authorization)
+      )
+    );
+  }
+
+  @Post("manual-verification-codes/:grantId/revoke")
+  revokeManualVerificationCode(
+    @Param("grantId") grantId: string,
+    @Headers("authorization") authorization: string | undefined,
+    @Body() body: { reason: string }
+  ) {
+    return ok(
+      this.authService.revokeManualVerificationCode(
+        this.extractBearerToken(authorization),
+        grantId,
+        body.reason
+      ),
+      "人工验证码已撤销。"
     );
   }
 

@@ -12,7 +12,10 @@ import { operationLogStatusLabelMap, roleLabelMap } from "../../constants/labels
 import { useSessionStore } from "../../stores/session";
 import { formatBeijingDate, formatBeijingDateTime } from "../../utils/datetime";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
-import { syncRoleTabBar } from "../../utils/role-routing";
+import {
+  isStockOperatorRole,
+  syncRoleTabBar
+} from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
@@ -38,6 +41,9 @@ const merchantDailySummary = ref<Array<{
   cumulativeHelpTimes: number;
 }>>([]);
 const merchantCumulativeHelpTimes = ref(0);
+const isStockOperator = computed(() =>
+  isStockOperatorRole(sessionStore.user?.role)
+);
 const adminUsers = ref<UserRecord[]>([]);
 const pendingApplications = ref<RegistrationApplication[]>([]);
 const adminLogs = ref<OperationLogRecord[]>([]);
@@ -71,7 +77,7 @@ const title = computed(() => {
     return "领取记录";
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     return "补货记录";
   }
 
@@ -83,7 +89,7 @@ const subtitle = computed(() => {
     return "查看本人在哪些柜机领取过什么物资。";
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     return "按日查看物资被领取的件数、服务人数和累计服务人次。";
   }
 
@@ -108,7 +114,7 @@ const load = async () => {
       return;
     }
 
-    if (sessionStore.user.role === "merchant") {
+    if (isStockOperatorRole(sessionStore.user.role)) {
       const traces = await mobileApi.merchantRestockTraces();
       merchantBatches.value = traces.batches;
       merchantLogs.value = traces.logs;
@@ -253,7 +259,7 @@ onShow(() => {
         <EmptyState v-else :title="loading ? '正在加载记录' : '当前还没有领取记录'" description="完成首次领取后，这里会自动展示明细。" />
       </view>
 
-      <view v-else-if="sessionStore.user?.role === 'merchant'" class="vm-stack">
+      <view v-else-if="isStockOperator" class="vm-stack">
         <view v-if="merchantDailySummary.length" class="summary-list">
           <view v-for="item in merchantDailySummary" :key="item.dateKey" class="summary-card">
             <text class="summary-card__title">{{ item.dateKey }}</text>
@@ -304,7 +310,7 @@ onShow(() => {
           <view v-if="pendingApplications.length" class="simple-list">
             <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
               <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
-              <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }}</text>
+              <text class="simple-card__meta">{{ item.phone }} · {{ roleLabelMap[item.requestedRole] }}</text>
               <input v-model="rejectReasons[item.id]" :aria-label="`${item.profile.name || item.phone} 的驳回原因`" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
               <view class="action-row">
                 <button class="vm-button" :disabled="Boolean(reviewingApplicationId)" :loading="reviewingApplicationId === item.id" @tap="reviewApplication(item.id, 'approved')">通过</button>

@@ -27,6 +27,7 @@ const roleFilterLabelMap: Record<UserRecord["role"] | "all", string> = {
   all: "全部人员",
   special: "普通用户",
   merchant: "商家",
+  restocker: "补货员",
   admin: "管理员"
 };
 
@@ -247,6 +248,7 @@ onShow(() => {
           <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'all' }" :aria-pressed="selectedRole === 'all'" aria-label="筛选全部人员" @tap="setRoleFilter('all')">全部</button>
           <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'special' }" :aria-pressed="selectedRole === 'special'" aria-label="筛选普通用户" @tap="setRoleFilter('special')">普通用户</button>
           <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'merchant' }" :aria-pressed="selectedRole === 'merchant'" aria-label="筛选商家" @tap="setRoleFilter('merchant')">商家</button>
+          <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'restocker' }" :aria-pressed="selectedRole === 'restocker'" aria-label="筛选补货员" @tap="setRoleFilter('restocker')">补货员</button>
           <button class="filter-chip" :class="{ 'filter-chip--active': selectedRole === 'admin' }" :aria-pressed="selectedRole === 'admin'" aria-label="筛选管理员" @tap="setRoleFilter('admin')">管理员</button>
         </view>
 

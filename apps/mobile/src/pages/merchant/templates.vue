@@ -82,7 +82,7 @@ const resetForm = () => {
 const load = async () => {
   await sessionStore.bootstrap();
 
-  if (!sessionStore.user) {
+  if (!sessionStore.user || sessionStore.user.role !== "merchant") {
     uni.reLaunch({ url: "/pages/common/login" });
     return;
   }

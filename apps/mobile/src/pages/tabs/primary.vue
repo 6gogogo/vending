@@ -22,7 +22,10 @@ import { useSessionStore } from "../../stores/session";
 import { formatBeijingDateTime } from "../../utils/datetime";
 import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
-import { syncRoleTabBar } from "../../utils/role-routing";
+import {
+  isStockOperatorRole,
+  syncRoleTabBar
+} from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
 
 type AdminTaskFilter = "all" | "expiry" | "feedback" | "system";
@@ -50,6 +53,9 @@ const merchantSummary = ref({
   expiredUnits: 0,
   pendingAlerts: 0
 });
+const isStockOperator = computed(() =>
+  isStockOperatorRole(sessionStore.user?.role)
+);
 
 const adminTaskLabelMap: Record<Exclude<AdminTaskFilter, "all">, string> = {
   expiry: "临期",
@@ -206,7 +212,7 @@ const pageSubtitle = computed(() => {
     return "可以先看今日资格，再选择附近柜机；首次使用时按页面提示一步步操作即可。";
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     return "先选柜机，再登记商品、数量、保质期和批次。";
   }
 
@@ -254,11 +260,11 @@ const heroSupport = computed(() => {
     };
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     return {
       title: "补货提示",
       lines: [
-        `当前已维护常用商品 ${templates.value.length} 个，累计补货 ${merchantSummary.value.donatedUnits} 件。`,
+        `当前可用补货商品 ${templates.value.length} 个，累计补货 ${merchantSummary.value.donatedUnits} 件。`,
         "补货前先确认柜机在线，再登记商品、数量、生产日期和批次；柜机现场异常请从异常上报进入。"
       ]
     };
@@ -406,7 +412,7 @@ const load = async () => {
       return;
     }
 
-    if (user.role === "merchant") {
+    if (isStockOperatorRole(user.role)) {
       adminAiReport.value = null;
       adminAiError.value = "";
       adminAiLoading.value = false;
@@ -677,17 +683,27 @@ onShow(() => {
             </view>
           </button>
         </template>
-        <template v-else-if="sessionStore.user?.role === 'merchant'">
+        <template v-else-if="isStockOperator">
           <button class="vm-button action-button" @tap="goNearby">
             <view class="action-button__content">
               <MenuIcon name="device" size="sm" tone="contrast" />
               <text>选择柜机补货</text>
             </view>
           </button>
-          <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/merchant/templates')">
+          <button
+            v-if="sessionStore.user?.role === 'merchant'"
+            class="vm-button vm-button--ghost action-button"
+            @tap="navigate('/pages/merchant/templates')"
+          >
             <view class="action-button__content">
               <MenuIcon name="template" size="sm" tone="neutral" />
               <text>常用商品</text>
+            </view>
+          </button>
+          <button v-else class="vm-button vm-button--ghost action-button" @tap="goRecords">
+            <view class="action-button__content">
+              <MenuIcon name="trace" size="sm" tone="neutral" />
+              <text>我的补货记录</text>
             </view>
           </button>
         </template>
@@ -774,11 +790,13 @@ onShow(() => {
       </view>
     </GlassCard>
 
-    <GlassCard tone="accent" v-else-if="sessionStore.user?.role === 'merchant'">
+    <GlassCard tone="accent" v-else-if="isStockOperator">
       <view class="vm-stack">
         <view class="section-heading">
           <view class="section-heading__row">
-            <text class="section-heading__title">商家工作台</text>
+            <text class="section-heading__title">
+              {{ sessionStore.user?.role === "restocker" ? "补货员工作台" : "商家工作台" }}
+            </text>
             <text class="vm-status vm-status--certified">已认证</text>
           </view>
           <text class="vm-subtitle">先选择柜机，再完成补货登记。</text>
@@ -787,7 +805,11 @@ onShow(() => {
         <view class="metric-grid">
           <ServiceMetric label="总库存" :value="merchantSummary.donatedUnits" hint="累计补货件数" tone="accent" />
           <ServiceMetric label="需补货" :value="merchantSummary.pendingAlerts" hint="低库存或异常提醒" tone="warning" />
-          <ServiceMetric label="常用商品" :value="templates.length" hint="补货登记可直接选用" />
+          <ServiceMetric
+            :label="sessionStore.user?.role === 'restocker' ? '可补货商品' : '常用商品'"
+            :value="templates.length"
+            hint="补货登记可直接选用"
+          />
         </view>
 
         <view class="merchant-action-grid">
@@ -798,7 +820,7 @@ onShow(() => {
               <text class="merchant-action-card__body">先选点位再补货</text>
             </view>
           </button>
-          <button class="merchant-action-card" @tap="navigate('/pages/merchant/restock')">
+          <button class="merchant-action-card" @tap="goNearby">
             <MenuIcon name="template" size="lg" tone="accent" />
             <view class="merchant-action-card__copy">
               <text class="merchant-action-card__title">补货登记</text>
@@ -929,7 +951,7 @@ onShow(() => {
             <view class="simple-list">
               <view v-for="item in pendingApplications" :key="item.id" class="simple-card">
                 <text class="simple-card__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</text>
-                <text class="simple-card__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }}</text>
+                <text class="simple-card__meta">{{ item.phone }} · {{ roleLabelMap[item.requestedRole] }}</text>
                 <input v-model="rejectReasons[item.id]" :aria-label="`${item.profile.name || item.phone} 的驳回原因`" class="vm-field__input" placeholder="驳回时填写原因（选填）" />
                 <view class="action-grid">
                   <button
@@ -960,12 +982,12 @@ onShow(() => {
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view class="section-heading">
-          <text class="section-heading__title">{{ sessionStore.user?.role === "special" ? "最近领取记录" : sessionStore.user?.role === "merchant" ? "最近货品流转" : "常用入口" }}</text>
+          <text class="section-heading__title">{{ sessionStore.user?.role === "special" ? "最近领取记录" : isStockOperator ? "最近货品流转" : "常用入口" }}</text>
           <text class="vm-subtitle">
             {{
               sessionStore.user?.role === "special"
                 ? "最近三次领取会展示在这里。"
-                : sessionStore.user?.role === "merchant"
+                : isStockOperator
                   ? "补货、调拨和去向记录会同步到这里。"
                   : "可继续进入柜机列表、人员日志和设置页。"
             }}

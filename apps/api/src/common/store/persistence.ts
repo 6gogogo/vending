@@ -70,6 +70,36 @@ export interface VerificationRecord {
   externalChallenge?: boolean;
   externalProvider?: ExternalVerificationProvider;
   externalChallengeId?: string;
+  manualGrant?: boolean;
+  manualGrantId?: string;
+  issuerUserId?: string;
+  targetUserId?: string;
+  tenantId?: string;
+  phoneHash?: string;
+  codeSalt?: string;
+  codeHash?: string;
+  revokedAt?: string;
+}
+
+export interface ManualVerificationGrantRecord {
+  manualGrantId: string;
+  challengeKey: string;
+  purpose: Extract<VerificationPurpose, "app-login" | "password-reset">;
+  issuerUserId: string;
+  targetUserId: string;
+  tenantId: string;
+  phoneHash: string;
+  codeSalt?: string;
+  codeHash?: string;
+  expiresAt: string;
+  requestedAt: string;
+  failedAttempts: number;
+  consumedAt?: string;
+  revokedAt?: string;
+  lockedAt?: string;
+  expiredAt?: string;
+  supersededAt?: string;
+  supersededByGrantId?: string;
 }
 
 export interface SessionRecord {
@@ -86,6 +116,7 @@ export interface SessionRecord {
 
 export interface DraftSessionRecord {
   token: string;
+  tenantId?: string;
   phone: string;
   requestedRole?: UserRole;
   linkedUserId?: string;
@@ -153,6 +184,7 @@ export interface PersistedStoreState {
   /** 平台租户是业务数据归属的一部分；真实平面只允许一个受控当前实例。 */
   platformTenants: PlatformTenantRecord[];
   verificationCodes: Array<[string, VerificationRecord]>;
+  manualVerificationGrants: ManualVerificationGrantRecord[];
   sessions: Array<[string, SessionRecord]>;
   draftSessions: Array<[string, DraftSessionRecord]>;
   adminCredentials: AdminCredentialRecord[];
@@ -454,6 +486,7 @@ export const createSeededPersistedState = (
     ...seed,
     platformTenants: [createSimulationPlatformTenant()],
     verificationCodes: [],
+    manualVerificationGrants: [],
     sessions: [],
     draftSessions: [],
     adminCredentials: [],
@@ -546,6 +579,7 @@ export const createEmptyPersistedState = (
     logs: [],
     platformTenants,
     verificationCodes: [],
+    manualVerificationGrants: [],
     sessions: [],
     draftSessions: [],
     adminCredentials: [],
@@ -627,6 +661,8 @@ const normalizePersistedState = (
     })),
     platformTenants: raw.platformTenants ?? fallbackState.platformTenants,
     verificationCodes: raw.verificationCodes ?? fallbackState.verificationCodes,
+    manualVerificationGrants:
+      raw.manualVerificationGrants ?? fallbackState.manualVerificationGrants,
     sessions: raw.sessions ?? fallbackState.sessions,
     draftSessions: raw.draftSessions ?? fallbackState.draftSessions,
     adminCredentials: raw.adminCredentials ?? fallbackState.adminCredentials,

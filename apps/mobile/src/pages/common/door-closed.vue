@@ -16,7 +16,11 @@ import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
 import { formatBeijingDate } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
-import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
+import {
+  isStockOperatorRole,
+  resolveHomePath,
+  syncRoleTabBar
+} from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const eventId = ref("");
@@ -43,7 +47,9 @@ let settlementConfirmationShown = false;
 let refundNotified = false;
 
 const isOperationalEvent = computed(
-  () => event.value?.role === "merchant" || event.value?.role === "admin"
+  () =>
+    isStockOperatorRole(event.value?.role) ||
+    event.value?.role === "admin"
 );
 const isInboundOperation = computed(
   () => isOperationalEvent.value && event.value?.hasInboundGoods === true
@@ -442,7 +448,7 @@ const applyEvent = (nextEvent: CabinetEventRecord) => {
 
   if (
     nextEvent.hasInboundGoods === true &&
-    (nextEvent.role === "merchant" || nextEvent.role === "admin") &&
+    (isStockOperatorRole(nextEvent.role) || nextEvent.role === "admin") &&
     (nextEvent.status === "closed" || nextEvent.status === "settled" || nextEvent.status === "refunded")
   ) {
     statusText.value = restockSubmitted.value ? "入柜登记完成" : "待提交入柜登记";
@@ -462,7 +468,7 @@ const applyEvent = (nextEvent: CabinetEventRecord) => {
 
   if (
     nextEvent.hasInboundGoods === false &&
-    (nextEvent.role === "merchant" || nextEvent.role === "admin") &&
+    (isStockOperatorRole(nextEvent.role) || nextEvent.role === "admin") &&
     (nextEvent.status === "settled" || nextEvent.status === "refunded")
   ) {
     statusText.value = "运营开门完成";

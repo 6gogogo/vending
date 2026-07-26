@@ -6,7 +6,8 @@ import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { RegistrationApplicationsService } from "./registration-applications.service";
@@ -22,21 +23,35 @@ export class RegistrationApplicationsController {
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   @AllowedBackofficeSessionPermissions("users:view")
-  list(@Query("status") status?: RegistrationStatus) {
-    return ok(this.registrationApplicationsService.list(status));
+  @TenantScopedBackofficeRoute()
+  list(
+    @Query("status") status: RegistrationStatus | undefined,
+    @Req() request?: { authUser?: { tenantId?: string } }
+  ) {
+    return ok(
+      this.registrationApplicationsService.list(
+        status,
+        request?.authUser?.tenantId
+      )
+    );
   }
 
   @Get("by-phone")
   async byPhone(
     @Query("phone") phone: string,
     @Query("code") code?: string,
-    @Req() request?: { ip?: string }
+    @Req() request?: { ip?: string; hostname?: string }
   ) {
+    const tenantId =
+      this.registrationApplicationsService.resolvePublicTenantId(
+        request?.hostname
+      );
     return ok(
       await this.registrationApplicationsService.lookupByPhone(
         phone,
         code,
-        request?.ip ?? "anonymous"
+        request?.ip ?? "anonymous",
+        tenantId
       )
     );
   }
@@ -45,8 +60,17 @@ export class RegistrationApplicationsController {
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   @AllowedBackofficePermissions("users:view")
-  detail(@Param("id") id: string) {
-    return ok(this.registrationApplicationsService.detail(id));
+  @TenantScopedBackofficeRoute()
+  detail(
+    @Param("id") id: string,
+    @Req() request: { authUser?: { tenantId?: string } }
+  ) {
+    return ok(
+      this.registrationApplicationsService.detail(
+        id,
+        request.authUser?.tenantId
+      )
+    );
   }
 
   @Post()
@@ -68,10 +92,18 @@ export class RegistrationApplicationsController {
         organization?: string;
         title?: string;
       };
-    }
+    },
+    @Req() request?: { hostname?: string }
   ) {
+    const tenantId =
+      this.registrationApplicationsService.resolvePublicTenantId(
+        request?.hostname
+      );
     return ok(
-      await this.registrationApplicationsService.createOrUpdateByPhone(body),
+      await this.registrationApplicationsService.createOrUpdateByPhone(
+        body,
+        tenantId
+      ),
       "操作成功"
     );
   }
@@ -96,10 +128,19 @@ export class RegistrationApplicationsController {
         organization?: string;
         title?: string;
       };
-    }
+    },
+    @Req() request?: { hostname?: string }
   ) {
+    const tenantId =
+      this.registrationApplicationsService.resolvePublicTenantId(
+        request?.hostname
+      );
     return ok(
-      await this.registrationApplicationsService.updatePendingApplication(id, body),
+      await this.registrationApplicationsService.updatePendingApplication(
+        id,
+        body,
+        tenantId
+      ),
       "操作成功"
     );
   }
@@ -108,6 +149,7 @@ export class RegistrationApplicationsController {
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   @AllowedBackofficeSessionPermissions("users:review")
+  @TenantScopedBackofficeRoute()
   review(
     @Param("id") id: string,
     @Body()
@@ -115,10 +157,15 @@ export class RegistrationApplicationsController {
       decision: "approved" | "rejected";
       reason?: string;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
     return ok(
-      this.registrationApplicationsService.review(id, body, request.authUser?.id),
+      this.registrationApplicationsService.review(
+        id,
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }

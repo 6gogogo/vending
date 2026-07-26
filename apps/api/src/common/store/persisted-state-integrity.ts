@@ -26,6 +26,7 @@ const REQUIRED_ARRAY_KEYS = [
   "alerts",
   "logs",
   "platformTenants",
+  "manualVerificationGrants",
   "adminCredentials",
   "backofficeCredentials",
   "callbackLog"
@@ -571,10 +572,32 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateUniqueField(parsed, "alerts", "id", result);
   validateUniqueField(parsed, "logs", "id", result);
   validateUniqueField(parsed, "platformTenants", "id", result);
+  validateUniqueField(
+    parsed,
+    "manualVerificationGrants",
+    "manualGrantId",
+    result
+  );
   validateUniqueField(parsed, "callbackLog", "id", result);
   validateUniqueField(parsed, "adminCredentials", "username", result, (value) => value.toLowerCase());
   validateUniqueField(parsed, "backofficeCredentials", "username", result, (value) => value.toLowerCase());
   validateRequiredStringFields(parsed, "users", ["id", "phone", "name", "role", "status"], result);
+  validateRequiredStringFields(
+    parsed,
+    "manualVerificationGrants",
+    [
+      "manualGrantId",
+      "challengeKey",
+      "purpose",
+      "issuerUserId",
+      "targetUserId",
+      "tenantId",
+      "phoneHash",
+      "expiresAt",
+      "requestedAt"
+    ],
+    result
+  );
   validateRequiredStringFields(parsed, "devices", ["deviceCode", "name", "status"], result);
   validateRequiredStringFields(parsed, "goodsCatalog", ["goodsId", "goodsCode", "name", "category"], result);
   validateRequiredStringFields(parsed, "goodsBatches", ["batchId", "goodsId", "deviceCode", "sourceType"], result);
@@ -679,12 +702,22 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
 
   const catalogGoodsIds = recordIdentifierSet(parsed, "goodsCatalog", "goodsId");
   const userIds = recordIdentifierSet(parsed, "users", "id");
+  const platformTenantIds = recordIdentifierSet(parsed, "platformTenants", "id");
   const paymentOrderIds = recordIdentifierSet(parsed, "paymentOrders", "id");
   const eventIds = recordIdentifierSet(parsed, "events", "eventId");
 
   validateReferenceField(parsed, "inventory", "goodsId", catalogGoodsIds, "货品", result);
   validateReferenceField(parsed, "merchantGoodsTemplates", "goodsId", catalogGoodsIds, "货品", result, true);
   validateReferenceField(parsed, "registrationApplications", "linkedUserId", userIds, "用户", result, true);
+  validateReferenceField(
+    parsed,
+    "registrationApplications",
+    "tenantId",
+    platformTenantIds,
+    "平台租户",
+    result,
+    true
+  );
   validateReferenceField(parsed, "adminCredentials", "userId", userIds, "用户", result);
   validateReferenceField(parsed, "backofficeCredentials", "userId", userIds, "用户", result);
   validateReferenceField(parsed, "paymentRefunds", "paymentOrderId", paymentOrderIds, "支付单", result);

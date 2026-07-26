@@ -9,6 +9,7 @@ import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { isStockOperatorRole } from "../../utils/role-routing";
 
 const eventId = ref("");
 const deviceCode = ref("");
@@ -20,7 +21,9 @@ const hintText = ref("请保持在柜机旁，系统会根据门状态自动推�
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 
 const isOperationalEvent = computed(
-  () => event.value?.role === "merchant" || event.value?.role === "admin"
+  () =>
+    isStockOperatorRole(event.value?.role) ||
+    event.value?.role === "admin"
 );
 const operationLabel = computed(() => {
   if (event.value?.hasInboundGoods === true) {

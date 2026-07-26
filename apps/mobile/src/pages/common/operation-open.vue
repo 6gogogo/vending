@@ -14,6 +14,7 @@ import { useSessionStore } from "../../stores/session";
 import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 import { isOpenOutcomeUncertain } from "../../utils/open-outcome";
+import { isStockOperatorRole } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const deviceCode = ref("");
@@ -156,7 +157,12 @@ const operationSteps = computed(() => [
 const load = async () => {
   await sessionStore.bootstrap();
 
-  if (!sessionStore.user || !["merchant", "admin"].includes(sessionStore.user.role) || !deviceCode.value) {
+  if (
+    !sessionStore.user ||
+    (!isStockOperatorRole(sessionStore.user.role) &&
+      sessionStore.user.role !== "admin") ||
+    !deviceCode.value
+  ) {
     uni.reLaunch({ url: "/pages/common/login" });
     return;
   }

@@ -229,6 +229,53 @@ test("特殊用户货品查询回退时同步隐藏过期批次的到期时间",
   assert.equal(resultGoods?.expiresAt, availableExpiryAt);
 });
 
+test("只读货品查询不把远端返回写入全局目录或柜机本地配置", async () => {
+  const store = createIsolatedStore();
+  const batches = new InventoryBatchChangesService(store);
+  const device = store.devices[0];
+  const door = device?.doors[0];
+  const localGoods = door?.goods[0];
+  assert.ok(device);
+  assert.ok(door);
+  assert.ok(localGoods);
+  const beforeCatalog = structuredClone(store.goodsCatalog);
+  const beforeDevices = structuredClone(store.devices);
+  const devices = new DevicesService(
+    store,
+    batches,
+    {
+      async getGoodsInfo() {
+        return [
+          {
+            ...structuredClone(localGoods),
+            name: "远端临时名称",
+            price: localGoods.price + 100
+          },
+          {
+            goodsCode: "REMOTE-ONLY-001",
+            goodsId: "remote-only-001",
+            name: "仅远端存在的货品",
+            category: "daily",
+            price: 500,
+            imageUrl: "https://example.test/remote-only.png",
+            stock: 9
+          }
+        ];
+      }
+    } as never
+  );
+
+  const result = await devices.getGoods(
+    device.deviceCode,
+    door.doorNum,
+    "special"
+  );
+
+  assert.ok(result.some((entry) => entry.goodsId === localGoods.goodsId));
+  assert.deepEqual(store.goodsCatalog, beforeCatalog);
+  assert.deepEqual(store.devices, beforeDevices);
+});
+
 test("预约、预结算和正式开柜都拒绝只有过期批次的货品，无到期批次仍可预约", async () => {
   const store = createIsolatedStore();
   store.events.splice(0, store.events.length);

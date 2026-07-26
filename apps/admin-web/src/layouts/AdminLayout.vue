@@ -19,6 +19,7 @@ const sessionStore = useAdminSessionStore();
 const showPasswordPanel = ref(false);
 const passwordBusy = ref(false);
 const logoutBusy = ref(false);
+const exitInstanceBusy = ref(false);
 const passwordMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const passwordForm = reactive({
   currentPassword: "",
@@ -147,7 +148,17 @@ const currentGroup = computed(() =>
   typeof route.meta.group === "string" ? route.meta.group : "总览"
 );
 
+const isInsideProviderTenant = computed(
+  () =>
+    sessionStore.user?.backofficeRole === "super_admin" &&
+    sessionStore.user?.scope === "tenant"
+);
+
 const roleLabel = computed(() => {
+  if (sessionStore.user?.backofficeRole === "restocker") {
+    return "补货员";
+  }
+
   if (sessionStore.user?.backofficeRole === "merchant") {
     return "商家";
   }
@@ -156,7 +167,7 @@ const roleLabel = computed(() => {
     return "客户管理员";
   }
 
-  return "服务商";
+  return isInsideProviderTenant.value ? "服务商（实例内）" : "服务商";
 });
 const todayLabel = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
@@ -178,6 +189,23 @@ const logout = async () => {
     sessionStore.clearSession();
     await router.replace("/login");
     logoutBusy.value = false;
+  }
+};
+
+const exitPlatformInstance = async () => {
+  if (exitInstanceBusy.value || !isInsideProviderTenant.value) {
+    return;
+  }
+
+  exitInstanceBusy.value = true;
+  try {
+    const session = await adminApi.exitPlatformTenant();
+    sessionStore.setSession(session);
+    await router.replace("/platform");
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : "退出客户实例失败，请稍后重试。");
+  } finally {
+    exitInstanceBusy.value = false;
   }
 };
 
@@ -343,6 +371,14 @@ const isActive = (target: string) => {
         <div v-if="sessionStore.auth?.usesDefaultPassword" class="admin-note workbench__password-warning">
           当前仍在使用默认密码，建议立即修改。
         </div>
+        <button
+          v-if="isInsideProviderTenant"
+          class="admin-button"
+          :disabled="exitInstanceBusy"
+          @click="exitPlatformInstance"
+        >
+          {{ exitInstanceBusy ? "退出实例中..." : "退出当前实例" }}
+        </button>
         <button class="admin-button admin-button--ghost" @click="togglePasswordPanel">
           {{ showPasswordPanel ? "收起改密" : "修改密码" }}
         </button>
@@ -409,6 +445,9 @@ const isActive = (target: string) => {
         </div>
         <div class="workbench__topbar-actions">
           <span class="workbench__topbar-chip">业务日 {{ todayLabel }}</span>
+          <span v-if="sessionStore.user?.tenantName" class="workbench__topbar-chip">
+            {{ sessionStore.user.tenantName }}
+          </span>
           <span class="workbench__topbar-chip">{{ roleLabel }}</span>
           <RouterLink
             v-if="sessionStore.can('analytics:data-monitor:view')"

@@ -14,7 +14,10 @@ import { formatBeijingDateTime, formatBeijingMonthDay } from "../../utils/dateti
 import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { getErrorMessage } from "../../utils/error-message";
 import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils/receivable-goods";
-import { syncRoleTabBar } from "../../utils/role-routing";
+import {
+  isStockOperatorRole,
+  syncRoleTabBar
+} from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
 
 const DEFAULT_MARKER_ICON = "/static/tabs/device.png";
@@ -32,19 +35,22 @@ const selectedGoodsId = ref("");
 const highlightedDeviceCode = ref("");
 const currentLocation = ref<{ longitude: number; latitude: number }>();
 const locationMessage = ref("正在读取当前位置");
+const isStockOperator = computed(() =>
+  isStockOperatorRole(sessionStore.user?.role)
+);
 
 uiPreferencesStore.hydrate();
 
 const accessibilityEnabled = computed(() => uiPreferencesStore.isAccessibilityEnabled(sessionStore.user?.role));
 const isAccessibleSpecial = computed(() => sessionStore.user?.role === "special" && accessibilityEnabled.value);
-const pageEyebrow = computed(() => (sessionStore.user?.role === "merchant" ? "补货" : "附近柜机"));
+const pageEyebrow = computed(() => (isStockOperator.value ? "补货" : "附近柜机"));
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
     return isAccessibleSpecial.value ? "显示柜机名称、地点、距离、柜内数量和今日免费数量。" : "地图和列表都能查看，先确认可领取再开柜。";
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     return "选择在线柜机，开门补货或登记商品批次。";
   }
 
@@ -101,7 +107,7 @@ const selectedGoodsName = computed(
   () => goodsOptions.value.find((item) => item.goodsId === selectedGoodsId.value)?.goodsName ?? ""
 );
 const goodsSearchPlaceholder = computed(() =>
-  sessionStore.user?.role === "merchant" ? "请选择要查看的物资" : "请选择想领取的物资"
+  isStockOperator.value ? "请选择要查看的物资" : "请选择想领取的物资"
 );
 const nearestDeviceButtonText = computed(() =>
   distanceEnabled.value ? "定位最近柜机" : "选中推荐柜机"
@@ -118,7 +124,7 @@ const heroSupport = computed(() => {
     };
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     return {
       title: "开门提示",
       lines: [
@@ -143,7 +149,7 @@ const mapFocusStatusLabel = computed(() => {
     return getDeviceStatusPresentation(highlightedDevice.value).label;
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     return "可补货";
   }
 
@@ -333,7 +339,7 @@ const openDevice = (deviceCode: string) => {
     return;
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperator.value) {
     uni.navigateTo({
       url: `/pages/common/operation-open?deviceCode=${deviceCode}`
     });
@@ -679,7 +685,7 @@ onShow(() => {
                     ? "暂不可开柜"
                     : sessionStore.user?.role === "special"
                     ? "进入领取"
-                    : sessionStore.user?.role === "merchant"
+                    : isStockOperator
                       ? "补货 / 开门"
                   : "运营开门"
                 }}

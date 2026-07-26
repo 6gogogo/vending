@@ -583,13 +583,6 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "仅限本机联调。开启后，接口响应可能返回验证码；生产环境必须关闭。",
     inputType: "boolean"
   },
-  VERIFICATION_CODE_MANUAL_VALUE: {
-    label: "全真模拟手动验证码",
-    description: "仅在全真模拟的验证码模式选择 manual 时使用。填写 4 至 8 位数字；不会返回给客户端，也绝不能用于真实数据平面。",
-    inputType: "password",
-    sensitive: true,
-    restartRequired: true
-  },
   ALLOW_DEFAULT_BACKOFFICE_LOGIN: {
     label: "允许默认后台密码登录",
     description: "仅限本机初始化联调。关闭后，仍使用默认密码的后台账号不能登录。",

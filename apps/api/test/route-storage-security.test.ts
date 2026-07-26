@@ -11,7 +11,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 
-import { HttpException, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  HttpException,
+  UnauthorizedException
+} from "@nestjs/common";
 import type { StocktakeRecord, SystemAuditLogEntry } from "@vm/shared-types";
 
 import { resolveTrustProxySetting } from "../src/common/config/http-runtime";
@@ -170,16 +174,20 @@ test("公开申请更新必须绑定原手机号，不能用自己的验证码�
   );
 
   await assert.rejects(
-    service.updatePendingApplication(application.id, {
-      phone: "13800001002",
-      code: "123456",
-      requestedRole: "merchant",
-      profile: {
-        name: "攻击者资料",
-        regionId: region.id,
-        regionName: region.name
-      }
-    }),
+    service.updatePendingApplication(
+      application.id,
+      {
+        phone: "13800001002",
+        code: "123456",
+        requestedRole: "merchant",
+        profile: {
+          name: "攻击者资料",
+          regionId: region.id,
+          regionName: region.name
+        }
+      },
+      store.getDefaultTenantId()
+    ),
     UnauthorizedException
   );
 
@@ -187,6 +195,46 @@ test("公开申请更新必须绑定原手机号，不能用自己的验证码�
   assert.equal(application.phone, "13800001001");
   assert.equal(application.profile.name, "原申请人");
   assert.equal(application.requestedRole, "special");
+});
+
+test("补货员只能由后台创建，公开注册在消费验证码前拒绝伪造角色", async () => {
+  const store = createIsolatedStore();
+  const region = store.regions[0];
+  assert.ok(region);
+  let verificationCalls = 0;
+  const service = new RegistrationApplicationsService(
+    store,
+    {
+      verifyCode: async () => {
+        verificationCalls += 1;
+        return true;
+      }
+    } as never,
+    { get: () => "false" } as never
+  );
+  const beforeApplications = structuredClone(store.registrationApplications);
+  const beforeUsers = structuredClone(store.users);
+
+  await assert.rejects(
+    service.createOrUpdateByPhone(
+      {
+        phone: "13800001003",
+        code: "123456",
+        requestedRole: "restocker",
+        profile: {
+          name: "伪造补货员",
+          regionId: region.id,
+          regionName: region.name
+        }
+      },
+      store.getDefaultTenantId()
+    ),
+    BadRequestException
+  );
+
+  assert.equal(verificationCalls, 0);
+  assert.deepEqual(store.registrationApplications, beforeApplications);
+  assert.deepEqual(store.users, beforeUsers);
 });
 
 test("公开手机号状态查询有来源限流，注册资料字段有长度边界", async () => {
@@ -200,30 +248,54 @@ test("公开手机号状态查询有来源限流，注册资料字段有长度�
   );
   const knownPhone = store.registrationApplications[0]?.phone;
   assert.ok(knownPhone);
-  const knownPublicLookup = await service.lookupByPhone(knownPhone, undefined, "127.0.0.8");
-  const unknownPublicLookup = await service.lookupByPhone("13988888888", undefined, "127.0.0.8");
+  const tenantId = store.getDefaultTenantId();
+  const knownPublicLookup = await service.lookupByPhone(
+    knownPhone,
+    undefined,
+    "127.0.0.8",
+    tenantId
+  );
+  const unknownPublicLookup = await service.lookupByPhone(
+    "13988888888",
+    undefined,
+    "127.0.0.8",
+    tenantId
+  );
   assert.deepEqual(knownPublicLookup, { phone: knownPhone, state: "new" });
   assert.deepEqual(unknownPublicLookup, { phone: "13988888888", state: "new" });
 
   for (let index = 0; index < 30; index += 1) {
-    await service.lookupByPhone(`1390000${String(index).padStart(4, "0")}`, undefined, "127.0.0.9");
+    await service.lookupByPhone(
+      `1390000${String(index).padStart(4, "0")}`,
+      undefined,
+      "127.0.0.9",
+      tenantId
+    );
   }
 
   await assert.rejects(
-    service.lookupByPhone("13999999999", undefined, "127.0.0.9"),
+    service.lookupByPhone(
+      "13999999999",
+      undefined,
+      "127.0.0.9",
+      tenantId
+    ),
     (error: unknown) => error instanceof HttpException && error.getStatus() === 429
   );
 
   await assert.rejects(
-    service.createOrUpdateByPhone({
-      phone: "13800001003",
-      code: "123456",
-      profile: {
-        name: "名".repeat(101),
-        regionId: region.id,
-        regionName: region.name
-      }
-    }),
+    service.createOrUpdateByPhone(
+      {
+        phone: "13800001003",
+        code: "123456",
+        profile: {
+          name: "名".repeat(101),
+          regionId: region.id,
+          regionName: region.name
+        }
+      },
+      tenantId
+    ),
     /姓名不能超过 100 个字符/
   );
 });
@@ -402,8 +474,15 @@ test("反向代理默认不信任转发头，只接受明确的有限代理层�
   assert.equal(resolveTrustProxySetting(undefined), false);
   assert.equal(resolveTrustProxySetting(""), false);
   assert.equal(resolveTrustProxySetting("1"), 1);
+  assert.equal(resolveTrustProxySetting("1", "127.0.0.1"), 1);
+  assert.equal(resolveTrustProxySetting("1", "::1"), 1);
+  assert.equal(resolveTrustProxySetting(undefined, "0.0.0.0"), false);
   assert.throws(() => resolveTrustProxySetting("0"), /1 至 10/);
   assert.throws(() => resolveTrustProxySetting("all"), /1 至 10/);
+  assert.throws(
+    () => resolveTrustProxySetting("1", "0.0.0.0"),
+    /API_HOST 必须绑定回环地址/
+  );
 });
 
 const createAuthHarness = () => {
@@ -469,7 +548,10 @@ test("认证会话和资料草稿只保存在进程内，旧快照中的 token �
   assert.ok(admin);
 
   const sessionToken = store.createSession(admin);
-  const draftToken = store.createDraftSession({ phone: "13812345678" });
+  const draftToken = store.createDraftSession({
+    tenantId: store.getDefaultTenantId(),
+    phone: "13812345678"
+  });
   assert.ok(store.getSession(sessionToken));
   assert.ok(store.getDraftSession(draftToken));
 

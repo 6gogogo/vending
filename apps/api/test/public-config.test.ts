@@ -38,10 +38,9 @@ const assertSafePublicConfigShape = (data: Record<string, unknown>) => {
   ]);
 };
 
-test("公开配置标明模拟数据平面及手动验证码运行状态，且不泄露验证码配置", () => {
+test("公开配置标明后台签发人工码运行状态，且不暴露任何静态通用验证码", () => {
   const controller = createController({
     VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
-    VERIFICATION_CODE_MANUAL_VALUE: "123456",
     VERIFICATION_CODE_PREVIEW_ENABLED: "true"
   });
 
@@ -53,7 +52,10 @@ test("公开配置标明模拟数据平面及手动验证码运行状态，且�
   assert.equal(response.data.verificationProvider, "manual");
   assert.equal(response.data.verificationPreviewEnabled, false);
   assertSafePublicConfigShape(response.data);
-  assert.doesNotMatch(JSON.stringify(response.data), /123456/);
+  assert.doesNotMatch(
+    JSON.stringify(response.data),
+    /VERIFICATION_CODE_MANUAL_VALUE/
+  );
 });
 
 test("公开配置可观测 PNVS 提供方但不泄露供应商配置", () => {

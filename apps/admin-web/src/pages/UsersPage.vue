@@ -8,7 +8,10 @@ import {
   type BackofficeCredentialSnapshot,
   type BackofficePermission,
   type BackofficeRole,
+  type DeviceRecord,
   type GoodsCatalogItem,
+  type ManualVerificationGrantSnapshot,
+  type ManualVerificationPurpose,
   type RegionRecord,
   type RegistrationApplication,
   type ReservationSettings,
@@ -21,10 +24,22 @@ import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 import { adminCopy } from "../constants/copy";
 import { useAdminSessionStore } from "../stores/session";
+import {
+  isManualVerificationCode,
+  manualCodeFromRandomValue
+} from "../utils/backoffice-provisioning";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
-type DrawerMode = "" | "create-user" | "edit-user" | "create-policy" | "edit-policy" | "backoffice-account";
+type DrawerMode =
+  | ""
+  | "create-user"
+  | "edit-user"
+  | "create-policy"
+  | "edit-policy"
+  | "backoffice-account"
+  | "device-assignment"
+  | "manual-code";
 const weekdayOptions = [
   { label: "周一", value: 1 },
   { label: "周二", value: 2 },
@@ -66,6 +81,21 @@ interface BackofficeFormState {
   hasExistingCredential: boolean;
 }
 
+interface DeviceAssignmentFormState {
+  userId: string;
+  userName: string;
+  role: UserRecord["role"];
+  deviceCodes: string[];
+}
+
+interface ManualVerificationFormState {
+  userId: string;
+  userName: string;
+  purpose: ManualVerificationPurpose;
+  code: string;
+  expiresInSeconds: number;
+}
+
 interface ReservationFormState {
   enabled: boolean;
   holdMinutes: number;
@@ -75,12 +105,14 @@ interface ReservationFormState {
 const backofficeRoleLabels: Record<BackofficeRole, string> = {
   super_admin: "程序提供商",
   admin: "管理员",
-  merchant: "商家"
+  merchant: "商家",
+  restocker: "补货员"
 };
 
 const permissionLabels: Record<BackofficePermission, string> = {
   "platform-overview:view": "全局工作台",
   "platform-tenants:view": "客户实例列表",
+  "platform-tenants:manage": "客户实例开通",
   "merchant-workbench:view": "商家工作台",
   "merchant-workbench:manage": "商家补货管理",
   "dashboard:view": "运营主控台",
@@ -115,6 +147,7 @@ const permissionLabels: Record<BackofficePermission, string> = {
   "system-settings:secret:view": "查看敏感配置",
   "system-settings:update": "系统设置修改",
   "uploads:images": "图片上传",
+  "verification-codes:manage": "签发一次性人工验证码",
   "backoffice-credentials:manage": "后台账号权限配置"
 };
 
@@ -124,6 +157,7 @@ const permissionGroups: Array<{ title: string; permissions: BackofficePermission
     permissions: [
       "platform-overview:view",
       "platform-tenants:view",
+      "platform-tenants:manage",
       "dashboard:view",
       "merchant-workbench:view",
       "merchant-workbench:manage"
@@ -169,6 +203,7 @@ const permissionGroups: Array<{ title: string; permissions: BackofficePermission
       "uploads:images",
       "system-audit:view",
       "system-audit:export",
+      "verification-codes:manage",
       "backoffice-credentials:manage"
     ]
   }
@@ -184,9 +219,26 @@ const createEmptyBackofficeForm = (): BackofficeFormState => ({
   hasExistingCredential: false
 });
 
+const createEmptyDeviceAssignmentForm = (): DeviceAssignmentFormState => ({
+  userId: "",
+  userName: "",
+  role: "merchant",
+  deviceCodes: []
+});
+
+const createEmptyManualVerificationForm = (): ManualVerificationFormState => ({
+  userId: "",
+  userName: "",
+  purpose: "app-login",
+  code: "",
+  expiresInSeconds: 300
+});
+
 const sessionStore = useAdminSessionStore();
 const router = useRouter();
 const users = ref<UserRecord[]>([]);
+const devices = ref<DeviceRecord[]>([]);
+const manualVerificationGrants = ref<ManualVerificationGrantSnapshot[]>([]);
 const registrationApplications = ref<RegistrationApplication[]>([]);
 const policies = ref<SpecialAccessPolicy[]>([]);
 const goodsCatalog = ref<GoodsCatalogItem[]>([]);
@@ -197,6 +249,10 @@ const loading = ref(false);
 const registrationApplicationsError = ref("");
 const saving = ref(false);
 const reservationSaving = ref(false);
+const deviceAssignmentSaving = ref(false);
+const manualCodeSaving = ref(false);
+const revokingManualGrantId = ref("");
+const manualCodeIssued = ref(false);
 const reviewingApplicationId = ref("");
 const removingUserId = ref("");
 const removingSelectedUsers = ref(false);
@@ -222,6 +278,10 @@ const rejectReasons = ref<Record<string, string>>({});
 const userForm = ref<UserFormState>({ role: "special", phone: "", name: "", status: "active", regionId: "", regionName: "", tagsText: "" });
 const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: "", quantity: 1 }] });
 const backofficeForm = ref<BackofficeFormState>(createEmptyBackofficeForm());
+const deviceAssignmentForm = ref<DeviceAssignmentFormState>(createEmptyDeviceAssignmentForm());
+const manualVerificationForm = ref<ManualVerificationFormState>(
+  createEmptyManualVerificationForm()
+);
 const reservationForm = ref<ReservationFormState>({ enabled: false, holdMinutes: 15, maxTimeouts: 3 });
 const reservationMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
@@ -276,19 +336,48 @@ const currentDrawerTitle = computed(() =>
           ? "编辑每日物资模板"
           : drawerMode.value === "backoffice-account"
             ? "后台账号权限"
+            : drawerMode.value === "device-assignment"
+              ? "分配可管理柜机"
+              : drawerMode.value === "manual-code"
+                ? "签发一次性人工验证码"
             : ""
 );
-const isUserMutating = computed(() => saving.value || Boolean(removingUserId.value));
+const isUserMutating = computed(
+  () =>
+    saving.value ||
+    deviceAssignmentSaving.value ||
+    manualCodeSaving.value ||
+    Boolean(removingUserId.value)
+);
 const canManageBackofficeCredentials = computed(() => sessionStore.can("backoffice-credentials:manage"));
 const canUpdateReservationSettings = computed(() => sessionStore.user?.role === "admin" && sessionStore.can("reservations:manage"));
 const canManageUsers = computed(() => sessionStore.can("users:manage"));
 const canManageUserRules = computed(() => sessionStore.can("users:rules:manage"));
 const canReviewRegistrations = computed(() => sessionStore.can("users:review"));
+const canManageManualVerificationCodes = computed(
+  () => sessionStore.can("verification-codes:manage")
+);
+const showExtendedUserConfiguration = computed(
+  () =>
+    canReviewRegistrations.value ||
+    canManageUserRules.value ||
+    canUpdateReservationSettings.value ||
+    sessionStore.can("dashboard:view")
+);
 const isProviderBackoffice = computed(() => sessionStore.user?.backofficeRole === "super_admin");
 const allowedBackofficePermissions = computed(
   () => {
     if (backofficeForm.value.role === "super_admin") {
       return new Set(BACKOFFICE_ROLE_ALLOWED_PERMISSIONS.super_admin);
+    }
+
+    if (
+      backofficeForm.value.role === "restocker" &&
+      sessionStore.can("users:manage") &&
+      sessionStore.can("devices:manage") &&
+      sessionStore.can("backoffice-credentials:manage")
+    ) {
+      return new Set(BACKOFFICE_ROLE_ALLOWED_PERMISSIONS.restocker);
     }
 
     const actorPermissions = new Set(sessionStore.permissions);
@@ -341,11 +430,51 @@ const firstConfigTargetUser = computed(() =>
   users.value.find((user) => user.role === "special" && policySummary(user.id) === "未设置") ??
   users.value.find((user) => user.role === "special")
 );
+const visibleManualVerificationGrants = computed(() =>
+  [...manualVerificationGrants.value].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt)
+  )
+);
 
-const formatRole = (role: UserRecord["role"]) => role === "special" ? "特殊群体" : role === "merchant" ? "商家" : "管理员";
+const formatRole = (role: UserRecord["role"]) =>
+  role === "special"
+    ? "特殊群体"
+    : role === "merchant"
+      ? "商家"
+      : role === "restocker"
+        ? "补货员"
+        : "管理员";
 const formatLedgerStatus = (status?: UserLedgerStatus) => status === "unregistered" ? "未注册" : status === "quota_unclaimed" ? "物资未领取" : status === "quota_partial" ? "部分领取" : status === "quota_complete" ? "全部领取" : "已注册";
 const ledgerStatusTone = (status?: UserLedgerStatus) => status === "quota_complete" ? "admin-pill--success" : status === "quota_partial" || status === "unregistered" ? "admin-pill--warning" : "admin-pill--neutral";
 const registrationLabel = (user: UserRecord) => (user.ledgerStatus === "unregistered" ? "未注册" : "已注册");
+const isDeviceAssignableUser = (user: UserRecord) =>
+  user.role === "merchant" || user.role === "restocker";
+const assignedDeviceCodesForUser = (user: UserRecord) =>
+  user.assignedDeviceCodes ?? user.merchantProfile?.defaultDeviceCodes ?? [];
+const assignedDeviceSummary = (user: UserRecord) => {
+  if (!isDeviceAssignableUser(user)) {
+    return "不适用";
+  }
+
+  const codes = assignedDeviceCodesForUser(user);
+  return codes.length ? `${codes.length} 台：${codes.join("、")}` : "未分配";
+};
+const manualPurposeLabel = (purpose: ManualVerificationPurpose) =>
+  purpose === "app-login" ? "登录" : "重置密码";
+const manualGrantStatusLabel = (status: ManualVerificationGrantSnapshot["status"]) => {
+  if (status === "active") return "可使用";
+  if (status === "consumed") return "已使用";
+  if (status === "revoked") return "已撤销";
+  if (status === "expired") return "已过期";
+  if (status === "superseded") return "已被新码替换";
+  return "已锁定";
+};
+const manualGrantStatusTone = (status: ManualVerificationGrantSnapshot["status"]) =>
+  status === "active"
+    ? "admin-pill--success"
+    : status === "locked"
+      ? "admin-pill--warning"
+      : "admin-pill--neutral";
 const parseTags = (value: string) => value.split(/[，,]/).map((item) => item.trim()).filter(Boolean);
 const formatWeekdays = (weekdays: number[]) => weekdays.slice().sort((left, right) => (left === 0 ? 7 : left) - (right === 0 ? 7 : right)).map((value) => weekdayOptions.find((item) => item.value === value)?.label ?? String(value)).join("、");
 const policySummary = (userId: string) => {
@@ -364,6 +493,10 @@ const policySummary = (userId: string) => {
 function backofficeRolesForUser(user: UserRecord): BackofficeRole[] {
   if (user.role === "merchant") {
     return ["merchant"];
+  }
+
+  if (user.role === "restocker") {
+    return ["restocker"];
   }
 
   if (user.role !== "admin") {
@@ -407,9 +540,14 @@ const defaultBackofficeUsername = (user: UserRecord, role: BackofficeRole) =>
 const defaultPermissionsForRole = (role: BackofficeRole) =>
   role === "super_admin"
     ? [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS.super_admin]
-    : BACKOFFICE_ROLE_DEFAULT_PERMISSIONS[role].filter((permission) =>
-      sessionStore.permissions.includes(permission)
-    );
+    : role === "restocker" &&
+        sessionStore.can("users:manage") &&
+        sessionStore.can("devices:manage") &&
+        sessionStore.can("backoffice-credentials:manage")
+      ? [...BACKOFFICE_ROLE_DEFAULT_PERMISSIONS.restocker]
+      : BACKOFFICE_ROLE_DEFAULT_PERMISSIONS[role].filter((permission) =>
+          sessionStore.permissions.includes(permission)
+        );
 
 const fillBackofficeFormForRole = (user: UserRecord, role: BackofficeRole) => {
   const credential = backofficeCredentialForUser(user, role);
@@ -543,21 +681,37 @@ const load = async () => {
       goodsCatalogResponse,
       regionsResponse,
       backofficeCredentialsResponse,
-      reservationSettingsResponse
+      reservationSettingsResponse,
+      devicesResponse,
+      manualVerificationGrantsResponse
     ] = await Promise.all([
       adminApi.users(),
-      loadRegistrationApplications(),
-      adminApi.policies(),
-      adminApi.goodsCatalog(),
-      adminApi.regions(),
+      canReviewRegistrations.value
+        ? loadRegistrationApplications()
+        : Promise.resolve([] as RegistrationApplication[]),
+      canManageUserRules.value
+        ? adminApi.policies()
+        : Promise.resolve([] as SpecialAccessPolicy[]),
+      canManageUserRules.value
+        ? adminApi.goodsCatalog()
+        : Promise.resolve([] as GoodsCatalogItem[]),
+      showExtendedUserConfiguration.value
+        ? adminApi.regions()
+        : Promise.resolve([] as RegionRecord[]),
       canManageBackofficeCredentials.value ? adminApi.backofficeCredentials() : Promise.resolve([]),
-      adminApi.reservationSettings().catch((error) => {
-        reservationMessage.value = {
-          type: "error",
-          text: error instanceof Error ? `预约设置加载失败：${error.message}` : "预约设置加载失败"
-        };
-        return null;
-      })
+      canUpdateReservationSettings.value
+        ? adminApi.reservationSettings().catch((error) => {
+            reservationMessage.value = {
+              type: "error",
+              text: error instanceof Error ? `预约设置加载失败：${error.message}` : "预约设置加载失败"
+            };
+            return null;
+          })
+        : Promise.resolve(null),
+      adminApi.devices(),
+      canManageManualVerificationCodes.value
+        ? adminApi.manualVerificationCodes()
+        : Promise.resolve([] as ManualVerificationGrantSnapshot[])
     ]);
     users.value = usersResponse;
     if (applicationResponse) {
@@ -567,6 +721,8 @@ const load = async () => {
     goodsCatalog.value = goodsCatalogResponse;
     regions.value = regionsResponse;
     backofficeCredentials.value = backofficeCredentialsResponse;
+    devices.value = devicesResponse;
+    manualVerificationGrants.value = manualVerificationGrantsResponse;
     if (reservationSettingsResponse) applyReservationSettings(reservationSettingsResponse);
     if (!policyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) policyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
   } catch (error) {
@@ -670,6 +826,37 @@ const openBackofficeAccount = (user: UserRecord) => {
   drawerMode.value = "backoffice-account";
 };
 
+const openDeviceAssignment = (user: UserRecord) => {
+  if (!isDeviceAssignableUser(user)) {
+    return;
+  }
+
+  deviceAssignmentForm.value = {
+    userId: user.id,
+    userName: user.name,
+    role: user.role,
+    deviceCodes: [...assignedDeviceCodesForUser(user)]
+  };
+  drawerMode.value = "device-assignment";
+};
+
+const generateManualCode = () => {
+  const randomValues = new Uint32Array(1);
+  window.crypto.getRandomValues(randomValues);
+  manualVerificationForm.value.code = manualCodeFromRandomValue(randomValues[0] ?? 0);
+  manualCodeIssued.value = false;
+};
+
+const openManualVerificationCode = (user: UserRecord) => {
+  manualVerificationForm.value = {
+    ...createEmptyManualVerificationForm(),
+    userId: user.id,
+    userName: user.name
+  };
+  generateManualCode();
+  drawerMode.value = "manual-code";
+};
+
 const changeBackofficeRole = (role: BackofficeRole) => {
   const user = backofficeTargetUser.value;
   if (!user) {
@@ -683,6 +870,9 @@ const closeDrawer = () => {
   editingUserId.value = "";
   editingPolicyId.value = "";
   backofficeForm.value = createEmptyBackofficeForm();
+  deviceAssignmentForm.value = createEmptyDeviceAssignmentForm();
+  manualVerificationForm.value = createEmptyManualVerificationForm();
+  manualCodeIssued.value = false;
 };
 
 const submitUserForm = async (configureAccess = false) => {
@@ -847,6 +1037,94 @@ const removeSelectedUsers = async () => {
   }
 };
 
+const submitDeviceAssignment = async () => {
+  deviceAssignmentSaving.value = true;
+  actionMessage.value = null;
+
+  try {
+    const updated = await adminApi.assignUserDevices(
+      deviceAssignmentForm.value.userId,
+      deviceAssignmentForm.value.deviceCodes
+    );
+    users.value = users.value.map((user) => (user.id === updated.id ? updated : user));
+    const userName = deviceAssignmentForm.value.userName;
+    const count = deviceAssignmentForm.value.deviceCodes.length;
+    closeDrawer();
+    showActionMessage("success", `已为 ${userName} 分配 ${count} 台柜机。`);
+  } catch (error) {
+    showActionMessage("error", `柜机分配失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    deviceAssignmentSaving.value = false;
+  }
+};
+
+const submitManualVerificationCode = async () => {
+  const code = manualVerificationForm.value.code.trim();
+  const expiresInSeconds = manualVerificationForm.value.expiresInSeconds;
+
+  if (!isManualVerificationCode(code)) {
+    showActionMessage("error", "人工验证码必须是 6 位数字。");
+    return;
+  }
+
+  if (
+    !Number.isInteger(expiresInSeconds) ||
+    expiresInSeconds < 60 ||
+    expiresInSeconds > 600
+  ) {
+    showActionMessage("error", "人工验证码有效期必须在 60 至 600 秒之间。");
+    return;
+  }
+
+  manualCodeSaving.value = true;
+  actionMessage.value = null;
+  try {
+    const grant = await adminApi.issueManualVerificationCode({
+      userId: manualVerificationForm.value.userId,
+      purpose: manualVerificationForm.value.purpose,
+      code,
+      expiresInSeconds
+    });
+    manualVerificationGrants.value = [
+      grant,
+      ...manualVerificationGrants.value.filter((item) => item.id !== grant.id)
+    ];
+    manualCodeIssued.value = true;
+    showActionMessage(
+      "success",
+      `已为 ${manualVerificationForm.value.userName} 签发一次性${manualPurposeLabel(grant.purpose)}验证码。`
+    );
+  } catch (error) {
+    showActionMessage("error", `人工验证码签发失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    manualCodeSaving.value = false;
+  }
+};
+
+const revokeManualVerificationGrant = async (grant: ManualVerificationGrantSnapshot) => {
+  const reason = window.prompt(
+    `请输入撤销 ${grant.userName} 的${manualPurposeLabel(grant.purpose)}验证码原因：`
+  )?.trim();
+
+  if (!reason) {
+    return;
+  }
+
+  revokingManualGrantId.value = grant.id;
+  actionMessage.value = null;
+  try {
+    const revoked = await adminApi.revokeManualVerificationCode(grant.id, reason);
+    manualVerificationGrants.value = manualVerificationGrants.value.map((item) =>
+      item.id === revoked.id ? revoked : item
+    );
+    showActionMessage("success", `已撤销 ${grant.userName} 的一次性人工验证码。`);
+  } catch (error) {
+    showActionMessage("error", `人工验证码撤销失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    revokingManualGrantId.value = "";
+  }
+};
+
 const createRegionDirect = async () => {
   const name = regionDraftName.value.trim();
 
@@ -978,7 +1256,7 @@ onMounted(load);
 
 <template>
   <section class="admin-page">
-    <section class="admin-page__section users-setup-section">
+    <section v-if="showExtendedUserConfiguration" class="admin-page__section users-setup-section">
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">业务配置</p>
@@ -1099,6 +1377,46 @@ onMounted(load);
       </div>
     </section>
 
+    <section v-else class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">实例初始化</p>
+          <h3 class="admin-page__section-title">先创建角色，再分配柜机和登录方式</h3>
+        </div>
+        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">创建测试角色</button>
+      </div>
+      <article class="admin-panel admin-panel-block users-tenant-flow">
+        <div class="users-setup-step">
+          <span class="users-setup-step__index">1</span>
+          <div>
+            <span class="admin-table__strong">创建人员角色</span>
+            <span class="admin-table__subtext">先建立实例管理员、商家或补货员人员记录。</span>
+          </div>
+        </div>
+        <div class="users-setup-step">
+          <span class="users-setup-step__index">2</span>
+          <div>
+            <span class="admin-table__strong">分配柜机</span>
+            <span class="admin-table__subtext">商家与补货员只能看到被明确分配的柜机。</span>
+          </div>
+        </div>
+        <div class="users-setup-step">
+          <span class="users-setup-step__index">3</span>
+          <div>
+            <span class="admin-table__strong">开通后台账号</span>
+            <span class="admin-table__subtext">后台身份与人员角色保持一致，权限按最小集合发放。</span>
+          </div>
+        </div>
+        <div class="users-setup-step">
+          <span class="users-setup-step__index">4</span>
+          <div>
+            <span class="admin-table__strong">签发短期人工码</span>
+            <span class="admin-table__subtext">仅供已存在账号登录或重置密码，60–600 秒、单次使用。</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
     <div
       v-if="actionMessage"
       class="admin-alert users-action-message"
@@ -1110,7 +1428,68 @@ onMounted(load);
       {{ actionMessage.text }}
     </div>
 
-    <section class="admin-page__section">
+    <section v-if="canManageManualVerificationCodes" class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">一次性人工验证码</p>
+          <h3 class="admin-page__section-title">只为当前实例中的已启用账号签发</h3>
+        </div>
+        <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
+          {{ loading ? "刷新中" : "刷新记录" }}
+        </button>
+      </div>
+      <article class="admin-panel admin-panel-block users-manual-grants">
+        <div class="admin-note">
+          人工码是内部验证方式，不是第三种运营模式。验证码固定 6 位、有效期 60–600 秒，成功后立即失效，连续失败 5 次会锁定。
+        </div>
+        <table v-if="visibleManualVerificationGrants.length" class="admin-table">
+          <thead>
+            <tr>
+              <th>目标账号</th>
+              <th>用途</th>
+              <th>状态</th>
+              <th>有效期</th>
+              <th>失败次数</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="grant in visibleManualVerificationGrants" :key="grant.id">
+              <td>
+                <span class="admin-table__strong">{{ grant.userName }}</span>
+                <span class="admin-table__subtext">{{ grant.userId }}</span>
+              </td>
+              <td>{{ manualPurposeLabel(grant.purpose) }}</td>
+              <td>
+                <span class="admin-pill" :class="manualGrantStatusTone(grant.status)">
+                  {{ manualGrantStatusLabel(grant.status) }}
+                </span>
+              </td>
+              <td class="admin-code">{{ formatDateTime(grant.expiresAt) }}</td>
+              <td>{{ grant.failedAttempts }}/5</td>
+              <td>
+                <button
+                  v-if="grant.status === 'active'"
+                  class="admin-text-button"
+                  type="button"
+                  :disabled="Boolean(revokingManualGrantId)"
+                  @click="revokeManualVerificationGrant(grant)"
+                >
+                  {{ revokingManualGrantId === grant.id ? "撤销中" : "撤销" }}
+                </button>
+                <span v-else class="admin-table__subtext">不可再次使用</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="admin-empty">
+          <div class="admin-empty__title">还没有人工验证码记录</div>
+          <div class="admin-empty__body">在下方人员台账选择已启用账号并点击“签发人工码”。</div>
+        </div>
+      </article>
+    </section>
+
+    <section v-if="canReviewRegistrations" class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">注册审核</p>
@@ -1139,7 +1518,7 @@ onMounted(load);
           <div v-for="item in filteredApplications" :key="item.id" class="admin-list__row users-review-row">
             <div class="admin-list__main">
               <span class="admin-list__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</span>
-              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : "管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
+              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : item.requestedRole === "restocker" ? "补货员" : "管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
               <span class="admin-table__subtext">{{ item.requestedRole === "special" ? `${item.profile.regionName || "待补充区域"}${item.profile.note ? ` · ${item.profile.note}` : ""}` : item.requestedRole === "merchant" ? `${item.profile.contactName || "待补充联系人"} · ${item.profile.address || "待补充地址"}` : `${item.profile.organization || "待补充单位"} · ${item.profile.title || "待补充职务"}` }}</span>
               <span v-if="item.reviewReason" class="users-review-row__reason">驳回原因：{{ item.reviewReason }}</span>
             </div>
@@ -1180,10 +1559,11 @@ onMounted(load);
             <option value="all">全部</option>
             <option value="special">特殊群体</option>
             <option value="merchant">商家</option>
+            <option value="restocker">补货员</option>
             <option value="admin">管理员</option>
           </select>
         </label>
-        <label class="admin-field">
+        <label v-if="showExtendedUserConfiguration" class="admin-field">
           <span class="admin-field__label">按地区分类</span>
           <select v-model="regionFilter" class="admin-select">
             <option value="all">全部地区</option>
@@ -1196,7 +1576,7 @@ onMounted(load);
           <span class="admin-field__label">搜索</span>
           <input v-model="keyword" class="admin-input" placeholder="输入姓名、手机号、标签或区域" />
         </label>
-        <div v-if="canManageUsers" class="admin-field users-region-create-field">
+        <div v-if="showExtendedUserConfiguration && canManageUsers" class="admin-field users-region-create-field">
           <span class="admin-field__label">新增地区</span>
           <div class="users-region-create-card">
             <div class="users-region-form-grid">
@@ -1238,7 +1618,10 @@ onMounted(load);
       </div>
     </section>
 
-    <section class="admin-grid admin-grid--main-aside">
+    <section
+      class="admin-grid"
+      :class="{ 'admin-grid--main-aside': showExtendedUserConfiguration }"
+    >
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
@@ -1275,6 +1658,7 @@ onMounted(load);
                   <th>姓名</th>
                   <th>角色</th>
                   <th>后台权限</th>
+                  <th>柜机范围</th>
                   <th>手机号</th>
                   <th>台账状态</th>
                   <th>区域 / 标签</th>
@@ -1305,6 +1689,17 @@ onMounted(load);
                     </button>
                   </td>
                   <td>
+                    <span class="admin-table__strong">{{ assignedDeviceSummary(user) }}</span>
+                    <button
+                      v-if="canManageUsers && isDeviceAssignableUser(user)"
+                      class="admin-text-button"
+                      type="button"
+                      @click="openDeviceAssignment(user)"
+                    >
+                      分配柜机
+                    </button>
+                  </td>
+                  <td>
                     <span class="admin-code">{{ user.phone }}</span>
                     <span class="admin-table__subtext">{{ registrationLabel(user) }}</span>
                   </td>
@@ -1320,6 +1715,14 @@ onMounted(load);
                     <div class="admin-inline-links">
                       <RouterLink class="admin-link" :to="`/users/${user.id}`">详情</RouterLink>
                       <button v-if="canManageUsers" class="admin-text-button" @click="openEditUser(user)">编辑</button>
+                      <button
+                        v-if="canManageManualVerificationCodes && user.status === 'active'"
+                        class="admin-text-button"
+                        type="button"
+                        @click="openManualVerificationCode(user)"
+                      >
+                        签发人工码
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1333,7 +1736,7 @@ onMounted(load);
         </div>
       </article>
 
-      <aside class="admin-grid">
+      <aside v-if="showExtendedUserConfiguration" class="admin-grid">
         <article class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
@@ -1419,6 +1822,7 @@ onMounted(load);
             <select v-model="userForm.role" class="admin-select" :disabled="editingCurrentUser">
               <option value="special">特殊群体</option>
               <option value="merchant">商家</option>
+              <option value="restocker">补货员</option>
               <option value="admin">管理员</option>
             </select>
           </label>
@@ -1484,6 +1888,98 @@ onMounted(load);
           <div v-else-if="editingCurrentUser" class="admin-note">
             当前登录账号不能删除；如需调整，请由其他管理员处理。
           </div>
+        </div>
+
+        <div v-else-if="drawerMode === 'device-assignment'" class="users-drawer__body">
+          <div class="admin-note">
+            正在为 {{ deviceAssignmentForm.userName }}（{{ formatRole(deviceAssignmentForm.role) }}）配置柜机范围。未勾选的柜机不会出现在该账号列表中，也不能执行开柜预检。
+          </div>
+          <div class="admin-field">
+            <span class="admin-field__label">可管理柜机</span>
+            <div v-if="devices.length" class="users-device-checklist">
+              <label v-for="device in devices" :key="device.deviceCode" class="users-device-check">
+                <input
+                  v-model="deviceAssignmentForm.deviceCodes"
+                  type="checkbox"
+                  :value="device.deviceCode"
+                />
+                <span>
+                  <span class="admin-table__strong">{{ device.name }}</span>
+                  <span class="admin-table__subtext">{{ device.deviceCode }} · {{ device.location }}</span>
+                </span>
+              </label>
+            </div>
+            <div v-else class="admin-empty">
+              <div class="admin-empty__title">当前实例还没有柜机</div>
+              <div class="admin-empty__body">请先到柜机监控页创建柜机，再回来分配。</div>
+            </div>
+          </div>
+          <button
+            class="admin-button"
+            :disabled="deviceAssignmentSaving || !canManageUsers"
+            @click="submitDeviceAssignment"
+          >
+            {{ deviceAssignmentSaving ? "保存中" : "保存柜机范围" }}
+          </button>
+        </div>
+
+        <div v-else-if="drawerMode === 'manual-code'" class="users-drawer__body">
+          <div class="admin-note">
+            正在为 {{ manualVerificationForm.userName }} 签发短期人工码。只能用于当前实例中的这个已启用账号，不能自动创建人员或跨实例使用。
+          </div>
+          <label class="admin-field">
+            <span class="admin-field__label">用途</span>
+            <select
+              v-model="manualVerificationForm.purpose"
+              class="admin-select"
+              :disabled="manualCodeIssued"
+            >
+              <option value="app-login">APP / 小程序登录</option>
+              <option value="password-reset">后台密码重置</option>
+            </select>
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">6 位验证码</span>
+            <input
+              v-model.trim="manualVerificationForm.code"
+              class="admin-input admin-code"
+              inputmode="numeric"
+              maxlength="6"
+              autocomplete="off"
+              :disabled="manualCodeIssued"
+              placeholder="请输入 6 位数字"
+            />
+          </label>
+          <button
+            class="admin-button admin-button--ghost"
+            type="button"
+            :disabled="manualCodeSaving"
+            @click="generateManualCode"
+          >
+            {{ manualCodeIssued ? "生成另一条验证码" : "重新随机生成" }}
+          </button>
+          <label class="admin-field">
+            <span class="admin-field__label">有效期（秒）</span>
+            <input
+              v-model.number="manualVerificationForm.expiresInSeconds"
+              class="admin-input"
+              type="number"
+              min="60"
+              max="600"
+              step="30"
+              :disabled="manualCodeIssued"
+            />
+          </label>
+          <div v-if="manualCodeIssued" class="admin-note users-manual-code-success" role="status">
+            已签发。请仅通过受控渠道交付上方验证码；关闭面板后后台不会再次显示该码。
+          </div>
+          <button
+            class="admin-button"
+            :disabled="manualCodeSaving || manualCodeIssued || !isManualVerificationCode(manualVerificationForm.code)"
+            @click="submitManualVerificationCode"
+          >
+            {{ manualCodeSaving ? "签发中" : manualCodeIssued ? "已签发" : "签发一次性验证码" }}
+          </button>
         </div>
 
         <div v-else-if="drawerMode === 'create-policy' || drawerMode === 'edit-policy'" class="users-drawer__body">
@@ -1628,7 +2124,10 @@ onMounted(load);
 .users-policy-checklist,
 .users-weekdays,
 .users-region-form-grid,
-.users-region-group {
+.users-region-group,
+.users-tenant-flow,
+.users-manual-grants,
+.users-device-checklist {
   display: grid;
   gap: 10px;
 }
@@ -1709,10 +2208,35 @@ onMounted(load);
 .users-policy-check,
 .users-permission-check,
 .users-weekdays__item,
-.users-region-group__head {
+.users-region-group__head,
+.users-device-check {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.users-device-check {
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-panel-muted);
+}
+
+.users-device-check > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.users-manual-grants {
+  overflow-x: auto;
+}
+
+.users-manual-code-success {
+  border-color: #b6dfc4;
+  background: #f0fbf4;
+  color: #25673b;
 }
 
 .users-region-group__head {

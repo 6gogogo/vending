@@ -153,7 +153,11 @@ test("柜机回调只落盘安全摘要，后台读取不暴露原始敏感字�
 
   const persistedLog = JSON.stringify(store.callbackLog[0]);
   const operationLog = JSON.stringify(store.logs.find((entry) => entry.metadata?.callbackLogId));
-  const response = controller.callbackLogs("20", device.deviceCode);
+  const response = controller.callbackLogs("20", device.deviceCode, {
+    authUser: {
+      tenantId: store.getDeviceTenantId(device)
+    }
+  });
   const responseBody = JSON.stringify(response.data);
 
   store.persist();

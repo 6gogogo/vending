@@ -408,7 +408,7 @@ test("移动管理员会话在租户或任一登录凭证变化后动态失效",
   }
 });
 
-test("移动管理员租户校验不影响普通业务移动会话和超级管理员后台会话", () => {
+test("移动管理员租户校验不影响普通业务会话，服务商进入实例后才可访问业务路由", () => {
   const store = createIsolatedStore();
   const special = store.users.find((entry) => entry.role === "special" && entry.status === "active");
   const merchant = store.users.find((entry) => entry.role === "merchant" && entry.status === "active");
@@ -429,11 +429,26 @@ test("移动管理员租户校验不影响普通业务移动会话和超级管�
     superCredential.role,
     superCredential.tenantId
   );
+  assert.throws(
+    () =>
+      authorizeRoute(
+        store,
+        { controller: DevicesController, method: "monitoring", label: "柜机监控" },
+        superToken
+      ),
+    ForbiddenException
+  );
+
+  const tenantSuperToken = store.createBackofficeSession(
+    superAdmin,
+    superCredential.role,
+    store.getDefaultTenantId()
+  );
   assert.equal(
     authorizeRoute(
       store,
       { controller: DevicesController, method: "monitoring", label: "柜机监控" },
-      superToken
+      tenantSuperToken
     ).allowed,
     true
   );

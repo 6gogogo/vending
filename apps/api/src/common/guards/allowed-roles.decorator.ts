@@ -7,6 +7,7 @@ export const ALLOWED_BACKOFFICE_ROLES_KEY = "allowed_backoffice_roles";
 export const ALLOWED_BACKOFFICE_PERMISSIONS_KEY = "allowed_backoffice_permissions";
 export const ALLOWED_BACKOFFICE_ALL_PERMISSIONS_KEY = "allowed_backoffice_all_permissions";
 export const ALLOWED_BACKOFFICE_SESSION_PERMISSIONS_KEY = "allowed_backoffice_session_permissions";
+export const TENANT_SCOPED_BACKOFFICE_ROUTE_KEY = "tenant_scoped_backoffice_route";
 
 export const AllowedRoles = (...roles: UserRole[]) => SetMetadata(ALLOWED_ROLES_KEY, roles);
 export const AllowedBackofficeRoles = (...roles: BackofficeRole[]) =>
@@ -17,3 +18,5 @@ export const AllowedBackofficeAllPermissions = (...permissions: BackofficePermis
   SetMetadata(ALLOWED_BACKOFFICE_ALL_PERMISSIONS_KEY, permissions);
 export const AllowedBackofficeSessionPermissions = (...permissions: BackofficePermission[]) =>
   SetMetadata(ALLOWED_BACKOFFICE_SESSION_PERMISSIONS_KEY, permissions);
+export const TenantScopedBackofficeRoute = () =>
+  SetMetadata(TENANT_SCOPED_BACKOFFICE_ROUTE_KEY, true);

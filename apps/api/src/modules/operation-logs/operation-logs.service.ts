@@ -41,10 +41,18 @@ export class OperationLogsService {
       dateFrom?: string;
       dateTo?: string;
     },
-    viewerBackofficeRole?: BackofficeRole
+    viewerBackofficeRole?: BackofficeRole,
+    viewerTenantId?: string
   ) {
     return this.store.logs
       .filter((entry) => {
+        if (
+          viewerTenantId &&
+          !this.operationLogBelongsToTenant(entry, viewerTenantId)
+        ) {
+          return false;
+        }
+
         if (viewerBackofficeRole !== "super_admin" && this.involvesHiddenBackofficeUser(entry)) {
           return false;
         }
@@ -91,10 +99,20 @@ export class OperationLogsService {
       .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
   }
 
-  detail(id: string, viewerBackofficeRole?: BackofficeRole) {
+  detail(
+    id: string,
+    viewerBackofficeRole?: BackofficeRole,
+    viewerTenantId?: string
+  ) {
     const log = this.store.logs.find((entry) => entry.id === id);
 
-    if (!log || (viewerBackofficeRole !== "super_admin" && this.involvesHiddenBackofficeUser(log))) {
+    if (
+      !log ||
+      (viewerTenantId &&
+        !this.operationLogBelongsToTenant(log, viewerTenantId)) ||
+      (viewerBackofficeRole !== "super_admin" &&
+        this.involvesHiddenBackofficeUser(log))
+    ) {
       throw new NotFoundException("未找到对应日志。");
     }
 
@@ -110,9 +128,10 @@ export class OperationLogsService {
       dateFrom?: string;
       dateTo?: string;
     },
-    viewerBackofficeRole?: BackofficeRole
+    viewerBackofficeRole?: BackofficeRole,
+    viewerTenantId?: string
   ) {
-    const logs = this.list(filters, viewerBackofficeRole);
+    const logs = this.list(filters, viewerBackofficeRole, viewerTenantId);
     const rows = logs
       .map(
         (log) => `
@@ -303,6 +322,112 @@ export class OperationLogsService {
     }
   }
 
+  private operationLogBelongsToTenant(
+    log: OperationLogRecord,
+    tenantId: string
+  ) {
+    const explicitTenantIds = new Set<string>();
+    const addUserTenant = (userId?: string) => {
+      if (!userId) {
+        return;
+      }
+
+      const user = this.store.users.find((entry) => entry.id === userId);
+      if (user) {
+        explicitTenantIds.add(this.store.getUserTenantId(user));
+      }
+    };
+    const addDeviceTenant = (deviceCode?: string) => {
+      if (!deviceCode) {
+        return;
+      }
+
+      const device = this.store.devices.find(
+        (entry) => entry.deviceCode === deviceCode
+      );
+      if (device) {
+        explicitTenantIds.add(this.store.getDeviceTenantId(device));
+      }
+    };
+    const addEventTenant = (eventReference?: string) => {
+      if (!eventReference) {
+        return;
+      }
+
+      const event = this.store.events.find(
+        (entry) =>
+          entry.eventId === eventReference ||
+          entry.orderNo === eventReference
+      );
+      if (!event) {
+        return;
+      }
+
+      addUserTenant(event.userId);
+      addDeviceTenant(event.deviceCode);
+    };
+    const addSubjectTenant = (subject?: OperationLogSubject) => {
+      if (subject?.type === "user") {
+        addUserTenant(subject.id);
+      } else if (subject?.type === "device") {
+        addDeviceTenant(subject.id);
+      } else if (subject?.type === "event") {
+        addEventTenant(subject.id);
+      }
+    };
+    const readMetadataString = (key: string) => {
+      const value = log.metadata?.[key];
+      return typeof value === "string" && value.trim() ? value : undefined;
+    };
+
+    const metadataTenantId = readMetadataString("tenantId");
+    if (metadataTenantId) {
+      explicitTenantIds.add(metadataTenantId);
+    }
+
+    const targetTenantId = readMetadataString("targetTenantId");
+    if (targetTenantId) {
+      explicitTenantIds.add(targetTenantId);
+    }
+
+    addSubjectTenant(log.primarySubject);
+    addSubjectTenant(log.secondarySubject);
+    addEventTenant(log.relatedEventId);
+
+    for (const key of [
+      "userId",
+      "targetUserId",
+      "sourceUserId",
+      "ownerUserId",
+      "confirmedByUserId",
+      "undoneByUserId"
+    ]) {
+      addUserTenant(readMetadataString(key));
+    }
+
+    for (const key of ["deviceCode", "targetDeviceCode"]) {
+      addDeviceTenant(readMetadataString(key));
+    }
+
+    for (const key of ["eventId", "relatedEventId"]) {
+      addEventTenant(readMetadataString(key));
+    }
+
+    if (explicitTenantIds.size > 0) {
+      return [...explicitTenantIds].every(
+        (candidateTenantId) => candidateTenantId === tenantId
+      );
+    }
+
+    const actorUser = log.actor.id
+      ? this.store.users.find((entry) => entry.id === log.actor.id)
+      : undefined;
+
+    return actorUser
+      ? this.store.getUserTenantId(actorUser) === tenantId
+      : false;
+  }
+
   private involvesHiddenBackofficeUser(log: OperationLogRecord) {
     const possibleUserIds = [
       log.actor.id,
@@ -320,8 +445,13 @@ export class OperationLogsService {
     });
   }
 
-  undo(id: string, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
-    const log = this.detail(id, actorBackofficeRole);
+  undo(
+    id: string,
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
+  ) {
+    const log = this.detail(id, actorBackofficeRole, actorTenantId);
 
     if (log.metadata?.undoState !== "undoable") {
       throw new BadRequestException("该日志记录不支持撤销。");

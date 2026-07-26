@@ -6,29 +6,36 @@ import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { DevicesService } from "./devices.service";
 
 @Controller("devices")
+@TenantScopedBackofficeRoute()
 export class DevicesController {
   constructor(@Inject(DevicesService) private readonly devicesService: DevicesService) {}
 
   @Get()
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant", "special")
+  @AllowedRoles("admin", "merchant", "restocker", "special")
   @AllowedBackofficeSessionPermissions("devices:view")
   list(
     @Query("longitude") longitude?: string,
     @Query("latitude") latitude?: string,
-    @Req() request?: { authUser?: { role: UserRole } }
+    @Req() request?: {
+      authUser?: { id: string; role: UserRole; tenantId?: string };
+    }
   ) {
     return ok(
       this.devicesService.list({
         longitude: longitude ? Number(longitude) : undefined,
         latitude: latitude ? Number(latitude) : undefined
-      }, request?.authUser?.role)
+      },
+      request?.authUser?.role,
+      request?.authUser?.id,
+      request?.authUser?.tenantId)
     );
   }
 
@@ -48,20 +55,36 @@ export class DevicesController {
       doorNum?: string;
       doorLabel?: string;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(this.devicesService.upsertDevice(body, request.authUser?.id), "操作成功");
+    return ok(
+      this.devicesService.upsertDevice(
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Get(":deviceCode")
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant", "special")
+  @AllowedRoles("admin", "merchant", "restocker", "special")
   @AllowedBackofficeSessionPermissions("devices:view")
   detail(
     @Param("deviceCode") deviceCode: string,
-    @Req() request?: { authUser?: { role: UserRole } }
+    @Req() request?: {
+      authUser?: { id: string; role: UserRole; tenantId?: string };
+    }
   ) {
-    return ok(this.devicesService.getViewByCode(deviceCode, request?.authUser?.role));
+    return ok(
+      this.devicesService.getViewByCode(
+        deviceCode,
+        request?.authUser?.role,
+        request?.authUser?.id,
+        request?.authUser?.tenantId
+      )
+    );
   }
 
   @Delete(":deviceCode")
@@ -70,29 +93,54 @@ export class DevicesController {
   @AllowedBackofficePermissions("devices:manage")
   remove(
     @Param("deviceCode") deviceCode: string,
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(this.devicesService.removeDevice(deviceCode, request.authUser?.id), "操作成功");
+    return ok(
+      this.devicesService.removeDevice(
+        deviceCode,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Get(":deviceCode/monitoring")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   @AllowedBackofficeSessionPermissions("devices:view", "warehouse:view")
-  monitoring(@Param("deviceCode") deviceCode: string) {
-    return ok(this.devicesService.monitoringDetail(deviceCode));
+  monitoring(
+    @Param("deviceCode") deviceCode: string,
+    @Req() request: { authUser?: { tenantId?: string } }
+  ) {
+    return ok(
+      this.devicesService.monitoringDetail(
+        deviceCode,
+        request.authUser?.tenantId
+      )
+    );
   }
 
   @Post(":deviceCode/goods/query")
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant", "special")
+  @AllowedRoles("admin", "merchant", "restocker", "special")
   @AllowedBackofficeSessionPermissions("devices:view")
   async goods(
     @Param("deviceCode") deviceCode: string,
     @Query("doorNum") doorNum?: string,
-    @Req() request?: { authUser?: { role: UserRole } }
+    @Req() request?: {
+      authUser?: { id: string; role: UserRole; tenantId?: string };
+    }
   ) {
-    return ok(await this.devicesService.getGoods(deviceCode, doorNum, request?.authUser?.role));
+    return ok(
+      await this.devicesService.getGoods(
+        deviceCode,
+        doorNum,
+        request?.authUser?.role,
+        request?.authUser?.id,
+        request?.authUser?.tenantId
+      )
+    );
   }
 
   @Post(":deviceCode/refresh")
@@ -101,9 +149,16 @@ export class DevicesController {
   @AllowedBackofficeSessionPermissions("devices:operate")
   async refresh(
     @Param("deviceCode") deviceCode: string,
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(await this.devicesService.refreshDevice(deviceCode, request.authUser?.id), "操作成功");
+    return ok(
+      await this.devicesService.refreshDevice(
+        deviceCode,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Post(":deviceCode/remote-open")
@@ -112,14 +167,22 @@ export class DevicesController {
   @AllowedBackofficePermissions("devices:operate")
   async remoteOpen(
     @Param("deviceCode") deviceCode: string,
-    @Req() request: { authUser?: { id: string } },
+    @Req() request: { authUser?: { id: string; tenantId?: string } },
     @Body()
     body: {
       doorNum?: string;
       reason: string;
     }
   ) {
-    return ok(await this.devicesService.remoteOpen(deviceCode, body, request.authUser?.id), "操作成功");
+    return ok(
+      await this.devicesService.remoteOpen(
+        deviceCode,
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Post(":deviceCode/goods")
@@ -133,9 +196,17 @@ export class DevicesController {
       goodsId: string;
       doorNum?: string;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(this.devicesService.addGoodsToDevice(deviceCode, body, request.authUser?.id), "操作成功");
+    return ok(
+      this.devicesService.addGoodsToDevice(
+        deviceCode,
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Delete(":deviceCode/goods/:goodsId")
@@ -146,10 +217,16 @@ export class DevicesController {
     @Param("deviceCode") deviceCode: string,
     @Param("goodsId") goodsId: string,
     @Query("doorNum") doorNum: string | undefined,
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
     return ok(
-      this.devicesService.removeGoodsFromDevice(deviceCode, goodsId, { doorNum }, request.authUser?.id),
+      this.devicesService.removeGoodsFromDevice(
+        deviceCode,
+        goodsId,
+        { doorNum },
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
@@ -167,9 +244,17 @@ export class DevicesController {
       longitude?: number;
       latitude?: number;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(this.devicesService.updateLocation(deviceCode, body, request.authUser?.id), "操作成功");
+    return ok(
+      this.devicesService.updateLocation(
+        deviceCode,
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Post("mock/upsert")
@@ -198,8 +283,15 @@ export class DevicesController {
         expiresAt?: string;
       }>;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(this.devicesService.upsertMockDevice(body, request.authUser?.id), "操作成功");
+    return ok(
+      this.devicesService.upsertMockDevice(
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 }

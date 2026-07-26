@@ -11,6 +11,10 @@ import MenuIcon from "../../components/ui/MenuIcon.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
+import {
+  isVerificationCode,
+  normalizeVerificationCode
+} from "../../utils/verification-code";
 
 const sessionStore = useSessionStore();
 const phone = ref("");
@@ -187,7 +191,7 @@ const validateForm = () => {
     throw new Error("请输入 11 位手机号");
   }
 
-  if (code.value.trim().length < 4) {
+  if (!isVerificationCode(code.value)) {
     throw new Error("请输入验证码");
   }
 
@@ -245,7 +249,7 @@ const submit = async () => {
   try {
     const payload = {
       phone: phone.value.trim(),
-      code: code.value.trim(),
+      code: normalizeVerificationCode(code.value),
       requestedRole: effectiveRole.value,
       profile: {
         ...form,
@@ -367,7 +371,7 @@ onLoad(async (query) => {
                 class="vm-field-shell__input"
                 type="tel"
                 inputmode="numeric"
-                maxlength="6"
+                maxlength="8"
                 name="verification-code"
                 aria-label="验证码"
                 placeholder="请输入验证码"

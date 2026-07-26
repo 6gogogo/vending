@@ -42,9 +42,23 @@ export class DevicesService {
     this.deviceOperations = deviceOperations ?? new DeviceOperationCoordinator(store);
   }
 
-  list(origin?: { longitude?: number; latitude?: number }, viewerRole?: UserRole) {
-    this.store.syncDeviceStocksFromBatches();
-    const devices = this.store.devices.map((device) => {
+  list(
+    origin?: { longitude?: number; latitude?: number },
+    viewerRole?: UserRole,
+    viewerUserId?: string,
+    viewerTenantId?: string
+  ) {
+    const visibleDevices = this.store.devices.filter(
+      (device) =>
+        (!viewerTenantId ||
+          this.store.getDeviceTenantId(device) === viewerTenantId) &&
+        this.canViewerAccessDevice(device.deviceCode, viewerRole, viewerUserId)
+    );
+    visibleDevices.forEach((device) =>
+      this.store.syncDeviceStocksFromBatches(device.deviceCode)
+    );
+    const devices = visibleDevices
+      .map((device) => {
       const distanceMeters =
         origin?.longitude !== undefined &&
         origin?.latitude !== undefined &&
@@ -58,7 +72,7 @@ export class DevicesService {
         distanceMeters,
         runtime: this.store.getDeviceRuntime(device.deviceCode)
       };
-    });
+      });
 
     if (origin?.longitude === undefined || origin?.latitude === undefined) {
       return devices;
@@ -93,7 +107,38 @@ export class DevicesService {
     return device;
   }
 
-  getViewByCode(deviceCode: string, viewerRole?: UserRole) {
+  private getByCodeForTenant(deviceCode: string, tenantId?: string) {
+    const device = this.store.devices.find(
+      (entry) => entry.deviceCode === deviceCode
+    );
+
+    if (!device) {
+      throw new NotFoundException("未找到对应柜机。");
+    }
+
+    if (
+      tenantId &&
+      this.store.getDeviceTenantId(device) !== tenantId
+    ) {
+      throw new ForbiddenException("当前账号无权访问其他实例的柜机。");
+    }
+
+    this.store.syncDeviceStocksFromBatches(deviceCode);
+    return device;
+  }
+
+  getViewByCode(
+    deviceCode: string,
+    viewerRole?: UserRole,
+    viewerUserId?: string,
+    viewerTenantId?: string
+  ) {
+    this.assertViewerCanAccessDevice(
+      deviceCode,
+      viewerRole,
+      viewerUserId,
+      viewerTenantId
+    );
     const device = this.getByCode(deviceCode);
 
     return {
@@ -113,7 +158,8 @@ export class DevicesService {
       doorNum?: string;
       doorLabel?: string;
     },
-    actorUserId?: string
+    actorUserId?: string,
+    actorTenantId?: string
   ) {
     const deviceCode = payload.deviceCode.trim();
     const name = payload.name.trim();
@@ -146,6 +192,13 @@ export class DevicesService {
     const existing = this.store.devices.find((entry) => entry.deviceCode === deviceCode);
 
     if (existing) {
+      if (
+        actorTenantId &&
+        this.store.getDeviceTenantId(existing) !== actorTenantId
+      ) {
+        throw new ForbiddenException("当前账号不能管理其他实例的柜机。");
+      }
+
       existing.name = name;
       existing.location = location;
       existing.address = address;
@@ -185,6 +238,7 @@ export class DevicesService {
 
     const created: DeviceRecord = {
       deviceCode,
+      tenantId: actorTenantId ?? this.store.getDefaultTenantId(),
       name,
       location,
       address,
@@ -232,8 +286,12 @@ export class DevicesService {
     };
   }
 
-  removeDevice(deviceCode: string, actorUserId?: string) {
-    const existing = this.getByCode(deviceCode);
+  removeDevice(
+    deviceCode: string,
+    actorUserId?: string,
+    actorTenantId?: string
+  ) {
+    const existing = this.getByCodeForTenant(deviceCode, actorTenantId);
     const removed = this.store.removeActiveDeviceState(deviceCode);
 
     if (!removed) {
@@ -264,8 +322,11 @@ export class DevicesService {
     };
   }
 
-  monitoringDetail(deviceCode: string): DeviceMonitoringDetail {
-    const device = this.getByCode(deviceCode);
+  monitoringDetail(
+    deviceCode: string,
+    viewerTenantId?: string
+  ): DeviceMonitoringDetail {
+    const device = this.getByCodeForTenant(deviceCode, viewerTenantId);
     const businessDateKey = getBusinessDayKey(new Date());
     const recentEvents = this.store.events
       .filter((entry) => entry.deviceCode === deviceCode)
@@ -477,7 +538,19 @@ export class DevicesService {
     };
   }
 
-  async getGoods(deviceCode: string, doorNum?: string, viewerRole?: UserRole) {
+  async getGoods(
+    deviceCode: string,
+    doorNum?: string,
+    viewerRole?: UserRole,
+    viewerUserId?: string,
+    viewerTenantId?: string
+  ) {
+    this.assertViewerCanAccessDevice(
+      deviceCode,
+      viewerRole,
+      viewerUserId,
+      viewerTenantId
+    );
     const localDevice = this.getByCode(deviceCode);
 
     try {
@@ -487,38 +560,6 @@ export class DevicesService {
       });
 
       if (remoteGoods?.length) {
-        for (const remoteItem of remoteGoods) {
-          const localMatch = localDevice.doors
-            .flatMap((door) => door.goods)
-            .find((goods) => goods.goodsId === remoteItem.goodsId);
-          const category = localMatch?.category ?? "daily";
-
-          const catalogItem = this.store.ensureGoodsCatalogItem({
-            goodsCode: remoteItem.goodsCode,
-            goodsId: remoteItem.goodsId,
-            name: remoteItem.name,
-            fullName: remoteItem.name,
-            category,
-            price: remoteItem.price,
-            imageUrl: remoteItem.imageUrl,
-            status: "active"
-          });
-
-          this.store.ensureDeviceGoodsEntry(deviceCode, {
-            goodsCode: catalogItem.goodsCode,
-            goodsId: catalogItem.goodsId,
-            name: catalogItem.name,
-            fullName: catalogItem.fullName,
-            category: catalogItem.category,
-            categoryName: catalogItem.categoryName,
-            price: catalogItem.price,
-            imageUrl: catalogItem.imageUrl,
-            packageForm: catalogItem.packageForm,
-            specification: catalogItem.specification,
-            manufacturer: catalogItem.manufacturer
-          });
-        }
-
         return remoteGoods.map((remoteItem) => {
           const localMatch = localDevice.doors
             .flatMap((door) => door.goods)
@@ -560,8 +601,56 @@ export class DevicesService {
       : this.store.getCurrentStock(deviceCode, goodsId);
   }
 
-  async refreshDevice(deviceCode: string, actorUserId?: string) {
-    const device = this.getByCode(deviceCode);
+  private canViewerAccessDevice(
+    deviceCode: string,
+    viewerRole?: UserRole,
+    viewerUserId?: string
+  ) {
+    if (viewerRole !== "merchant" && viewerRole !== "restocker") {
+      return true;
+    }
+
+    const user = viewerUserId
+      ? this.store.users.find(
+          (entry) =>
+            entry.id === viewerUserId &&
+            entry.role === viewerRole &&
+            entry.status === "active"
+        )
+      : undefined;
+    const assignedDeviceCodes =
+      user?.assignedDeviceCodes ?? user?.merchantProfile?.defaultDeviceCodes ?? [];
+
+    return assignedDeviceCodes.includes(deviceCode);
+  }
+
+  private assertViewerCanAccessDevice(
+    deviceCode: string,
+    viewerRole?: UserRole,
+    viewerUserId?: string,
+    viewerTenantId?: string
+  ) {
+    const device = this.store.devices.find((entry) => entry.deviceCode === deviceCode);
+
+    if (
+      device &&
+      viewerTenantId &&
+      this.store.getDeviceTenantId(device) !== viewerTenantId
+    ) {
+      throw new ForbiddenException("当前账号无权访问其他实例的柜机。");
+    }
+
+    if (!this.canViewerAccessDevice(deviceCode, viewerRole, viewerUserId)) {
+      throw new ForbiddenException("当前账号未被分配该柜机。");
+    }
+  }
+
+  async refreshDevice(
+    deviceCode: string,
+    actorUserId?: string,
+    actorTenantId?: string
+  ) {
+    const device = this.getByCodeForTenant(deviceCode, actorTenantId);
     const now = new Date().toISOString();
     let remoteStatus: SmartVmRouterStatusResult | undefined;
     const runtimePatch: Partial<DeviceRuntimeState> = {
@@ -645,7 +734,7 @@ export class DevicesService {
       }
     });
 
-    return this.monitoringDetail(deviceCode);
+    return this.monitoringDetail(deviceCode, actorTenantId);
   }
 
   private reconcilePendingDoorEventsAfterTrustedClose(deviceCode: string, observedAt: string) {
@@ -717,7 +806,8 @@ export class DevicesService {
   async remoteOpen(
     deviceCode: string,
     payload: { doorNum?: string; reason: string },
-    actorUserId?: string
+    actorUserId?: string,
+    actorTenantId?: string
   ) {
     const reason = payload?.reason?.trim();
     const nonWhitespaceReasonLength = reason ? [...reason.replace(/\s/gu, "")].length : 0;
@@ -726,7 +816,7 @@ export class DevicesService {
       throw new BadRequestException("远程开门原因需包含至少 4 个非空字符，且总长度不能超过 200 个字符。");
     }
 
-    const device = this.getByCode(deviceCode);
+    const device = this.getByCodeForTenant(deviceCode, actorTenantId);
 
     if (device.status === "offline") {
       throw new BadRequestException("柜机当前离线，不能远程开门。");
@@ -949,9 +1039,10 @@ export class DevicesService {
       goodsId: string;
       doorNum?: string;
     },
-    actorUserId?: string
+    actorUserId?: string,
+    actorTenantId?: string
   ) {
-    const device = this.getByCode(deviceCode);
+    const device = this.getByCodeForTenant(deviceCode, actorTenantId);
     const goods = this.store.goodsCatalog.find(
       (entry) => entry.goodsId === payload.goodsId && entry.status !== "inactive"
     );
@@ -1002,16 +1093,17 @@ export class DevicesService {
       }
     });
 
-    return this.monitoringDetail(deviceCode);
+    return this.monitoringDetail(deviceCode, actorTenantId);
   }
 
   removeGoodsFromDevice(
     deviceCode: string,
     goodsId: string,
     payload?: { doorNum?: string },
-    actorUserId?: string
+    actorUserId?: string,
+    actorTenantId?: string
   ) {
-    const device = this.getByCode(deviceCode);
+    const device = this.getByCodeForTenant(deviceCode, actorTenantId);
     const currentStock = this.store.getCurrentStock(deviceCode, goodsId);
 
     if (currentStock > 0) {
@@ -1055,7 +1147,7 @@ export class DevicesService {
       }
     });
 
-    return this.monitoringDetail(deviceCode);
+    return this.monitoringDetail(deviceCode, actorTenantId);
   }
 
   updateLocation(
@@ -1066,9 +1158,10 @@ export class DevicesService {
       longitude?: number;
       latitude?: number;
     },
-    actorUserId?: string
+    actorUserId?: string,
+    actorTenantId?: string
   ) {
-    const device = this.getByCode(deviceCode);
+    const device = this.getByCodeForTenant(deviceCode, actorTenantId);
     if (payload.location !== undefined) {
       device.location = payload.location;
     }
@@ -1126,7 +1219,7 @@ export class DevicesService {
       imageUrl?: string;
       expiresAt?: string;
     }>;
-  }, actorUserId?: string) {
+  }, actorUserId?: string, actorTenantId?: string) {
     if (!this.isLocalMockDeviceApiEnabled()) {
       throw new ForbiddenException(
         "模拟柜机接口未启用，仅可在本机联调环境显式开启。"
@@ -1151,6 +1244,13 @@ export class DevicesService {
     const existing = this.store.devices.find((entry) => entry.deviceCode === payload.deviceCode);
 
     if (existing) {
+      if (
+        actorTenantId &&
+        this.store.getDeviceTenantId(existing) !== actorTenantId
+      ) {
+        throw new ForbiddenException("当前账号无权访问其他实例的柜机。");
+      }
+
       if (existing.isMock !== true) {
         throw new ForbiddenException("不能用模拟柜机接口覆盖真实设备档案。");
       }
@@ -1231,6 +1331,7 @@ export class DevicesService {
 
     const created: DeviceRecord = {
       deviceCode: payload.deviceCode,
+      tenantId: actorTenantId ?? this.store.getDefaultTenantId(),
       isMock: true,
       name: payload.name,
       location: payload.location,

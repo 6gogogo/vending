@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
 import { mobileApi } from "../../api/mobile";
@@ -11,6 +11,7 @@ import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
 import { formatBeijingDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
+import { isStockOperatorRole } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
@@ -21,11 +22,14 @@ const summary = ref({
 });
 const templateCount = ref(0);
 const recentLogs = ref<Array<{ id: string; description: string; occurredAt: string }>>([]);
+const canManageTemplates = computed(
+  () => sessionStore.user?.role === "merchant"
+);
 
 const load = async () => {
   await sessionStore.bootstrap();
 
-  if (!sessionStore.user) {
+  if (!sessionStore.user || !isStockOperatorRole(sessionStore.user.role)) {
     uni.reLaunch({
       url: "/pages/common/login"
     });
@@ -75,7 +79,11 @@ onShow(() => {
 </script>
 
 <template>
-  <MobileShell eyebrow="商家" :title="sessionStore.user?.name ?? '商家工作台'" :subtitle="appCopy.merchantWelcome">
+  <MobileShell
+    :eyebrow="sessionStore.user?.role === 'restocker' ? '补货员' : '商家'"
+    :title="sessionStore.user?.name ?? (sessionStore.user?.role === 'restocker' ? '补货员工作台' : '商家工作台')"
+    :subtitle="appCopy.merchantWelcome"
+  >
     <template #hero-actions>
       <view class="hero-action-grid">
         <button class="vm-button" @tap="goNearby">
@@ -145,7 +153,11 @@ onShow(() => {
         </view>
 
         <view class="menu-grid menu-grid--tiles">
-          <button class="menu-card" @tap="navigate('/pages/merchant/templates')">
+          <button
+            v-if="canManageTemplates"
+            class="menu-card"
+            @tap="navigate('/pages/merchant/templates')"
+          >
             <MenuIcon name="template" size="lg" />
             <text class="menu-card__title">常用商品</text>
             <text class="menu-card__desc">维护属性</text>

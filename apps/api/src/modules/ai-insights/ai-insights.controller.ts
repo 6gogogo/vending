@@ -10,6 +10,8 @@ import {
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AiInsightsService } from "./ai-insights.service";
 
+type SupportedAiRole = Exclude<UserRole, "restocker">;
+
 @Controller("ai-insights")
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
@@ -18,7 +20,7 @@ export class AiInsightsController {
 
   @Get("status")
   @AllowedRoles("admin", "merchant", "special")
-  status(@Req() request: { authUser?: { role: UserRole } }) {
+  status(@Req() request: { authUser?: { role: SupportedAiRole } }) {
     return ok(this.aiInsightsService.status(request.authUser?.role));
   }
 
@@ -90,8 +92,8 @@ export class AiInsightsController {
     },
     @Req()
     request: {
-      authUser?: { id: string; role: UserRole };
-      userRole?: UserRole;
+      authUser?: { id: string; role: SupportedAiRole };
+      userRole?: SupportedAiRole;
     }
   ) {
     return ok(

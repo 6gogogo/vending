@@ -53,18 +53,29 @@ export class UsersService {
     @Inject(DevicesService) private readonly devicesService: DevicesService
   ) {}
 
-  list(role?: UserRole, viewerBackofficeRole?: BackofficeRole) {
+  list(
+    role?: UserRole,
+    viewerBackofficeRole?: BackofficeRole,
+    viewerTenantId?: string
+  ) {
     const users = role
       ? this.store.users.filter((user) => user.role === role)
       : this.store.users;
 
     return users
-      .filter((user) => this.canViewUser(user, viewerBackofficeRole))
+      .filter(
+        (user) =>
+          (!viewerTenantId || this.store.getUserTenantId(user) === viewerTenantId) &&
+          this.canViewUser(user, viewerBackofficeRole, viewerTenantId)
+      )
       .map((user) => this.decorateUser(user));
   }
 
   findByPhone(phone: string) {
-    return this.store.users.find((user) => user.phone === phone && user.status === "active");
+    const matches = this.store.users.filter(
+      (user) => user.phone === phone && user.status === "active"
+    );
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   findById(userId: string) {
@@ -83,10 +94,11 @@ export class UsersService {
       monthKey?: string;
       dateKey?: string;
     },
-    viewerBackofficeRole?: BackofficeRole
+    viewerBackofficeRole?: BackofficeRole,
+    viewerTenantId?: string
   ): UserManagementDetail {
     const user = this.findById(userId);
-    this.assertCanViewUser(user, viewerBackofficeRole);
+    this.assertCanViewUser(user, viewerBackofficeRole, viewerTenantId);
     const recentRecords = this.store.inventory
       .filter((entry) => entry.userId === userId)
       .sort((left, right) => right.happenedAt.localeCompare(left.happenedAt))
@@ -242,20 +254,28 @@ export class UsersService {
     };
   }
 
-  createUser(payload: {
-    role: UserRole;
-    phone: string;
-    name: string;
-    status?: UserRecord["status"];
-    neighborhood?: string;
-    regionId?: string;
-    regionName?: string;
-    tags?: string[];
-    quota?: AccessQuota;
-  }, actorUserId?: string) {
+  createUser(
+    payload: {
+      role: UserRole;
+      phone: string;
+      name: string;
+      status?: UserRecord["status"];
+      neighborhood?: string;
+      regionId?: string;
+      regionName?: string;
+      tags?: string[];
+      quota?: AccessQuota;
+    },
+    actorUserId?: string,
+    actorTenantId?: string
+  ) {
+    const phone = String(payload.phone ?? "").trim();
+    this.assertPhoneAvailable(phone);
+
     if (
       payload.role !== "admin" &&
       payload.role !== "merchant" &&
+      payload.role !== "restocker" &&
       payload.role !== "special"
     ) {
       throw new BadRequestException("请选择有效的用户角色。");
@@ -271,8 +291,9 @@ export class UsersService {
     const region = this.resolveRegion(payload.regionId, payload.regionName ?? payload.neighborhood);
     const created: UserRecord = {
       id: this.store.createId(payload.role),
+      tenantId: actorTenantId ?? this.store.getDefaultTenantId(),
       role: payload.role,
-      phone: payload.phone,
+      phone,
       name: payload.name,
       status: payload.status ?? "active",
       neighborhood: region.regionName,
@@ -280,7 +301,9 @@ export class UsersService {
       regionName: region.regionName,
       tags: payload.tags ?? [],
       quota: payload.role === "special" ? payload.quota : undefined,
-      mobileProfileCompleted: false
+      assignedDeviceCodes: payload.role === "restocker" ? [] : undefined,
+      // 运营角色只能由后台建立；后台建档本身即完成角色审批。
+      mobileProfileCompleted: payload.role !== "special"
     };
 
     this.store.users.unshift(created);
@@ -302,6 +325,87 @@ export class UsersService {
     return created;
   }
 
+  assignDevices(
+    userId: string,
+    deviceCodes: string[],
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
+  ) {
+    if (!Array.isArray(deviceCodes)) {
+      throw new BadRequestException("柜机分配必须提交柜机编号列表。");
+    }
+
+    const normalizedDeviceCodes = Array.from(
+      new Set(
+        deviceCodes.map((value) => {
+          if (typeof value !== "string" || !value.trim()) {
+            throw new BadRequestException("柜机编号不能为空。");
+          }
+
+          return value.trim();
+        })
+      )
+    );
+
+    if (normalizedDeviceCodes.length > 100) {
+      throw new BadRequestException("单个账号最多分配 100 台柜机。");
+    }
+
+    const user = this.findById(userId);
+    this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
+
+    if (user.role !== "merchant" && user.role !== "restocker") {
+      throw new BadRequestException("只有商家或补货员可以分配柜机。");
+    }
+
+    const missingDeviceCodes = normalizedDeviceCodes.filter((deviceCode) => {
+      const device = this.store.devices.find(
+        (entry) => entry.deviceCode === deviceCode
+      );
+
+      return (
+        !device ||
+        (actorTenantId !== undefined &&
+          this.store.getDeviceTenantId(device) !== actorTenantId)
+      );
+    });
+
+    if (missingDeviceCodes.length > 0) {
+      throw new BadRequestException(`柜机不存在：${missingDeviceCodes.join("、")}。`);
+    }
+
+    const beforeDeviceCodes = this.getAssignedDeviceCodes(user);
+    user.assignedDeviceCodes = normalizedDeviceCodes;
+
+    if (user.role === "merchant") {
+      user.merchantProfile = user.merchantProfile ?? {
+        donationWindowDays: 2,
+        defaultDeviceCodes: []
+      };
+      user.merchantProfile.defaultDeviceCodes = [...normalizedDeviceCodes];
+    }
+
+    this.store.logOperation({
+      category: "user",
+      type: "assign-user-devices",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "user",
+        id: user.id,
+        label: user.name
+      },
+      metadata: {
+        beforeDeviceCodes,
+        deviceCodes: normalizedDeviceCodes,
+        undoState: "not_undoable"
+      }
+    });
+
+    return this.decorateUser(user);
+  }
+
   updateUser(
     userId: string,
     payload: {
@@ -316,11 +420,12 @@ export class UsersService {
       quota?: AccessQuota;
     },
     actorUserId?: string,
-    actorBackofficeRole?: BackofficeRole
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
   ) {
     this.assertUpdateUserPayload(payload);
     const user = this.findById(userId);
-    this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
     this.assertActorKeepsOwnAccess(
       [{ user, nextRole: payload.role, nextStatus: payload.status }],
       actorUserId
@@ -329,7 +434,9 @@ export class UsersService {
     const roleWillChange = payload.role !== undefined && payload.role !== user.role;
 
     if (payload.phone !== undefined) {
-      user.phone = payload.phone;
+      const phone = String(payload.phone).trim();
+      this.assertPhoneAvailable(phone, user.id);
+      user.phone = phone;
     }
 
     if (payload.role !== undefined && payload.role !== user.role) {
@@ -343,9 +450,15 @@ export class UsersService {
         user.merchantProfile = undefined;
       }
 
+      user.assignedDeviceCodes =
+        payload.role === "merchant" || payload.role === "restocker"
+          ? (user.assignedDeviceCodes ?? [])
+          : undefined;
+
       if (payload.role !== "special") {
         user.quota = undefined;
         user.accessPolicies = undefined;
+        user.mobileProfileCompleted = true;
       }
     }
 
@@ -396,15 +509,25 @@ export class UsersService {
     return user;
   }
 
-  removeUser(userId: string, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
+  removeUser(
+    userId: string,
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
+  ) {
     const user = this.findById(userId);
-    this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
     this.assertCanRemoveUsers([user], actorUserId);
 
     return this.removeUserRecord(user, actorUserId);
   }
 
-  batchRemove(payload: BatchRemovePayload, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
+  batchRemove(
+    payload: BatchRemovePayload,
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
+  ) {
     this.assertBatchRemovePayload(payload);
 
     if (new Set(payload.userIds).size !== payload.userIds.length) {
@@ -413,7 +536,7 @@ export class UsersService {
 
     const targetUsers = payload.userIds.map((userId) => {
       const user = this.findById(userId);
-      this.assertCanViewUser(user, actorBackofficeRole);
+      this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
       return user;
     });
     this.assertCanRemoveUsers(targetUsers, actorUserId);
@@ -512,20 +635,53 @@ export class UsersService {
     };
   }
 
-  importUsers(payload: ImportUsersPayload) {
-    const imported = payload.entries.map((entry) => {
-      const existing = this.store.users.find((user) => user.phone === entry.phone);
+  importUsers(payload: ImportUsersPayload, actorTenantId?: string) {
+    const tenantId = actorTenantId ?? this.store.getDefaultTenantId();
+    const normalizedEntries = payload.entries.map((entry) => ({
+      ...entry,
+      phone: String(entry.phone ?? "").trim()
+    }));
+    const incomingPhones = new Set<string>();
+
+    for (const entry of normalizedEntries) {
+      if (incomingPhones.has(entry.phone)) {
+        throw new BadRequestException("导入数据中存在重复手机号。");
+      }
+      incomingPhones.add(entry.phone);
+
+      const existing = this.store.users.find(
+        (user) => user.phone === entry.phone
+      );
+      if (
+        existing &&
+        this.store.getUserTenantId(existing) !== tenantId
+      ) {
+        throw new BadRequestException("该手机号已绑定其他实例账号。");
+      }
+    }
+
+    const imported = normalizedEntries.map((entry) => {
+      const existing = this.store.users.find(
+        (user) =>
+          user.phone === entry.phone &&
+          this.store.getUserTenantId(user) === tenantId
+      );
 
       if (existing) {
         Object.assign(existing, entry, {
           role: payload.role,
-          status: "active"
+          status: "active",
+          mobileProfileCompleted:
+            payload.role === "special"
+              ? existing.mobileProfileCompleted
+              : true
         });
         return existing;
       }
 
       const created: UserRecord = {
         id: this.store.createId(payload.role),
+        tenantId,
         role: payload.role,
         phone: entry.phone,
         name: entry.name,
@@ -536,7 +692,7 @@ export class UsersService {
         regionName: entry.regionName ?? entry.neighborhood,
         quota: entry.quota,
         merchantProfile: entry.merchantProfile,
-        mobileProfileCompleted: false
+        mobileProfileCompleted: payload.role !== "special"
       };
 
       this.store.users.push(created);
@@ -560,14 +716,29 @@ export class UsersService {
     };
   }
 
-  batchUpdate(payload: BatchUpdatePayload, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
+  private assertPhoneAvailable(phone: string, excludedUserId?: string) {
+    const existing = this.store.users.find(
+      (entry) => entry.phone === phone && entry.id !== excludedUserId
+    );
+
+    if (existing) {
+      throw new BadRequestException("该手机号已绑定账号，请勿重复使用。");
+    }
+  }
+
+  batchUpdate(
+    payload: BatchUpdatePayload,
+    actorUserId?: string,
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
+  ) {
     this.assertBatchUpdatePayload(payload);
     if (new Set(payload.userIds).size !== payload.userIds.length) {
       throw new BadRequestException("批量更新不能包含重复用户。");
     }
     const targetUsers = payload.userIds.map((userId) => {
       const user = this.findById(userId);
-      this.assertCanViewUser(user, actorBackofficeRole);
+      this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
       return user;
     });
     this.assertActorKeepsOwnAccess(
@@ -682,10 +853,11 @@ export class UsersService {
       sourcePolicyId?: string;
     },
     actorUserId?: string,
-    actorBackofficeRole?: BackofficeRole
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
   ) {
     const user = this.findById(userId);
-    this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
 
     if (user.role !== "special") {
       throw new BadRequestException("只有普通用户支持设置取货策略。");
@@ -806,10 +978,11 @@ export class UsersService {
     userId: string,
     policyId: string,
     actorUserId?: string,
-    actorBackofficeRole?: BackofficeRole
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
   ) {
     const user = this.findById(userId);
-    this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
 
     if (user.role !== "special") {
       throw new BadRequestException("只有普通用户支持删除取货策略。");
@@ -852,10 +1025,11 @@ export class UsersService {
     userId: string,
     policyId: string,
     actorUserId?: string,
-    actorBackofficeRole?: BackofficeRole
+    actorBackofficeRole?: BackofficeRole,
+    actorTenantId?: string
   ) {
     const user = this.findById(userId);
-    this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
 
     if (user.role !== "special") {
       throw new BadRequestException("只有普通用户支持立即生效。");
@@ -954,7 +1128,8 @@ export class UsersService {
     },
     actorUserId?: string,
     actorBackofficeRole?: BackofficeRole,
-    inputSource: "backoffice" | "mobile" = "backoffice"
+    inputSource: "backoffice" | "mobile" = "backoffice",
+    actorTenantId?: string
   ) {
     this.assertManualAdjustmentPayload(payload);
 
@@ -971,7 +1146,19 @@ export class UsersService {
     }
 
     const user = this.findById(userId);
-    this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
+    const device = this.store.devices.find(
+      (entry) => entry.deviceCode === payload.deviceCode
+    );
+
+    if (
+      !device ||
+      (actorTenantId &&
+        this.store.getDeviceTenantId(device) !== actorTenantId)
+    ) {
+      throw new NotFoundException("未找到对应柜机。");
+    }
+
     const localGoods = this.devicesService.findGoods(payload.deviceCode, payload.goodsId);
     const catalogGoods = this.store.goodsCatalog.find((entry) => entry.goodsId === payload.goodsId);
     const isMobileAdmin = inputSource === "mobile";
@@ -1102,12 +1289,34 @@ export class UsersService {
     return movement;
   }
 
-  private canViewUser(user: UserRecord, viewerBackofficeRole?: BackofficeRole) {
-    return viewerBackofficeRole === "super_admin" || !this.store.isHiddenBackofficeUser(user);
+  private canViewUser(
+    user: UserRecord,
+    viewerBackofficeRole?: BackofficeRole,
+    viewerTenantId?: string
+  ) {
+    if (viewerTenantId && this.store.isHiddenBackofficeUser(user)) {
+      return false;
+    }
+
+    if (
+      viewerTenantId &&
+      this.store.getUserTenantId(user) !== viewerTenantId
+    ) {
+      return false;
+    }
+
+    return (
+      viewerBackofficeRole === "super_admin" ||
+      !this.store.isHiddenBackofficeUser(user)
+    );
   }
 
-  private assertCanViewUser(user: UserRecord, viewerBackofficeRole?: BackofficeRole) {
-    if (!this.canViewUser(user, viewerBackofficeRole)) {
+  private assertCanViewUser(
+    user: UserRecord,
+    viewerBackofficeRole?: BackofficeRole,
+    viewerTenantId?: string
+  ) {
+    if (!this.canViewUser(user, viewerBackofficeRole, viewerTenantId)) {
       throw new NotFoundException("未找到对应用户。");
     }
   }
@@ -1151,6 +1360,7 @@ export class UsersService {
       body.role !== undefined &&
       body.role !== "admin" &&
       body.role !== "merchant" &&
+      body.role !== "restocker" &&
       body.role !== "special"
     ) {
       throw new BadRequestException("请选择有效的用户角色。");
@@ -1448,8 +1658,15 @@ export class UsersService {
       regionId: region.regionId,
       regionName: region.regionName,
       neighborhood: region.regionName,
+      assignedDeviceCodes: this.getAssignedDeviceCodes(user),
       ledgerStatus: this.getLedgerStatus(user)
     };
+  }
+
+  private getAssignedDeviceCodes(user: UserRecord) {
+    return [
+      ...(user.assignedDeviceCodes ?? user.merchantProfile?.defaultDeviceCodes ?? [])
+    ];
   }
 
   private getLedgerStatus(user: UserRecord): UserLedgerStatus {

@@ -66,11 +66,15 @@ const roleLabel = (role: RegistrationApplication["requestedRole"]) => {
     return "商家";
   }
 
+  if (role === "restocker") {
+    return "补货员";
+  }
+
   return "管理员";
 };
 
 const roleIcon = (role: RegistrationApplication["requestedRole"]): "users" | "device" | "review" => {
-  if (role === "merchant") {
+  if (role === "merchant" || role === "restocker") {
     return "device";
   }
 

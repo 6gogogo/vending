@@ -13,7 +13,7 @@ import type {
   BackofficeCredentialSnapshot,
   BackofficePermission,
   BackofficeRole,
-  BackofficeScope,
+  BackofficeSessionSnapshot,
   CallbackLogRecord,
   DataMonitorRange,
   DataMonitorSnapshot,
@@ -29,12 +29,16 @@ import type {
   GoodsOverviewSnapshot,
   InventoryMovement,
   MerchantGoodsTemplate,
+  ManualVerificationGrantSnapshot,
+  ManualVerificationPurpose,
   OperationLogCategory,
   OperationLogRecord,
   OperationLogStatus,
   PaymentDiagnosticsResult,
   PaymentRefundRecord,
   PlatformOverviewSnapshot,
+  PlatformTenantCreatePayload,
+  PlatformTenantProvisioningResult,
   PlatformTenantRecord,
   RegionRecord,
   RegistrationApplication,
@@ -54,26 +58,7 @@ import type {
 import { adminApiBaseUrl, adminClient } from "./client";
 import { useAdminSessionStore } from "../stores/session";
 
-interface AdminLoginResponse {
-  token: string;
-  user: {
-    id: string;
-    role: "admin" | "merchant";
-    backofficeRole: BackofficeRole;
-    scope: BackofficeScope;
-    tenantId?: string;
-    tenantName?: string;
-    permissions: BackofficePermission[];
-    name: string;
-    phone: string;
-    tags: string[];
-  };
-  auth: {
-    username: string;
-    usesDefaultPassword: boolean;
-    passwordUpdatedAt: string;
-  };
-}
+type AdminLoginResponse = BackofficeSessionSnapshot;
 
 const requireBackofficePermission = (permission: BackofficePermission) => {
   const sessionStore = useAdminSessionStore();
@@ -136,6 +121,31 @@ export const adminApi = {
     requireBackofficePermission("backoffice-credentials:manage");
     return adminClient.get<BackofficeCredentialSnapshot[]>("/auth/backoffice-credentials");
   },
+  issueManualVerificationCode(payload: {
+    userId: string;
+    purpose: ManualVerificationPurpose;
+    code: string;
+    expiresInSeconds?: number;
+  }) {
+    requireBackofficePermission("verification-codes:manage");
+    return adminClient.post<ManualVerificationGrantSnapshot>(
+      "/auth/manual-verification-codes",
+      payload
+    );
+  },
+  manualVerificationCodes() {
+    requireBackofficePermission("verification-codes:manage");
+    return adminClient.get<ManualVerificationGrantSnapshot[]>(
+      "/auth/manual-verification-codes"
+    );
+  },
+  revokeManualVerificationCode(grantId: string, reason: string) {
+    requireBackofficePermission("verification-codes:manage");
+    return adminClient.post<ManualVerificationGrantSnapshot>(
+      `/auth/manual-verification-codes/${encodeURIComponent(grantId)}/revoke`,
+      { reason }
+    );
+  },
   dashboard() {
     requireBackofficePermission("dashboard:view");
     return adminClient.get<DashboardSnapshot>("/analytics/dashboard");
@@ -147,6 +157,19 @@ export const adminApi = {
   platformTenants() {
     requireBackofficePermission("platform-tenants:view");
     return adminClient.get<PlatformTenantRecord[]>("/platform/tenants");
+  },
+  createPlatformTenant(payload: PlatformTenantCreatePayload) {
+    requireBackofficePermission("platform-tenants:manage");
+    return adminClient.post<PlatformTenantProvisioningResult>("/platform/tenants", payload);
+  },
+  enterPlatformTenant(tenantId: string) {
+    requireBackofficePermission("platform-tenants:view");
+    return adminClient.post<BackofficeSessionSnapshot>(
+      `/platform/tenants/${encodeURIComponent(tenantId)}/enter`
+    );
+  },
+  exitPlatformTenant() {
+    return adminClient.post<BackofficeSessionSnapshot>("/platform/exit-instance");
   },
   dataMonitor(query?: { month?: string; date?: string; range?: DataMonitorRange }) {
     requireBackofficePermission("analytics:data-monitor:view");
@@ -254,6 +277,13 @@ export const adminApi = {
   }) {
     requireBackofficePermission("users:manage");
     return adminClient.patch<{ count: number; updated: UserRecord[] }>("/users/batch", payload);
+  },
+  assignUserDevices(userId: string, deviceCodes: string[]) {
+    requireBackofficePermission("users:manage");
+    return adminClient.patch<UserRecord>(
+      `/users/${encodeURIComponent(userId)}/device-assignment`,
+      { deviceCodes }
+    );
   },
   manualAdjustUser(
     userId: string,
@@ -394,7 +424,7 @@ export const adminApi = {
     return adminClient.get<DeviceMonitoringDetail>(`/devices/${deviceCode}/monitoring`);
   },
   deviceCallbackLogs(deviceCode: string, limit = 20) {
-    requireBackofficePermission("system-audit:view");
+    requireBackofficePermission("operation-logs:view");
     return adminClient.get<CallbackLogRecord[]>("/cabinet-events/callback-logs", {
       query: { deviceCode, limit }
     });

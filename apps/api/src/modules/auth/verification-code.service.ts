@@ -6,7 +6,6 @@ import {
   ServiceUnavailableException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { timingSafeEqual } from "node:crypto";
 import Dypnsapi20170525Module, {
   CheckSmsVerifyCodeRequest,
   SendSmsVerifyCodeRequest
@@ -25,6 +24,13 @@ interface VerificationCodeResult {
   expiresInSeconds: number;
   provider: VerificationProvider;
   previewCode?: string;
+}
+
+export interface VerificationCodeCheckResult {
+  verified: boolean;
+  tenantId?: string;
+  targetUserId?: string;
+  manualGrantId?: string;
 }
 
 const mainlandPhonePattern = /^1\d{10}$/;
@@ -65,9 +71,15 @@ export class VerificationCodeService {
   ): Promise<VerificationCodeResult> {
     const normalizedPhone = this.normalizePhone(phone);
     const normalizedPurpose = this.normalizePurpose(purpose);
-    this.assertCanRequestCode(normalizedPhone, normalizedPurpose);
-
     const provider = this.getProvider();
+
+    if (provider === "manual") {
+      throw new BadRequestException(
+        "当前环境仅接受后台签发的短期人工验证码，无需获取短信验证码。"
+      );
+    }
+
+    this.assertCanRequestCode(normalizedPhone, normalizedPurpose);
 
     if (provider === "aliyun_pnvs") {
       await this.requestAliyunPnvsCode(normalizedPhone, normalizedPurpose);
@@ -80,15 +92,6 @@ export class VerificationCodeService {
         phone: normalizedPhone,
         expiresInSeconds: 300,
         provider: "aliyun_pnvs"
-      };
-    }
-
-    if (provider === "manual") {
-      this.store.rememberVerificationRequest(normalizedPhone, normalizedPurpose, "manual");
-      return {
-        phone: normalizedPhone,
-        expiresInSeconds: 300,
-        provider: "manual"
       };
     }
 
@@ -106,9 +109,31 @@ export class VerificationCodeService {
     code: string,
     purpose: VerificationPurpose = "general"
   ): Promise<boolean> {
+    return (await this.verifyCodeWithContext(phone, code, purpose)).verified;
+  }
+
+  async verifyCodeWithContext(
+    phone: string,
+    code: string,
+    purpose: VerificationPurpose = "general"
+  ): Promise<VerificationCodeCheckResult> {
     const normalizedPhone = this.normalizePhone(phone);
     const normalizedCode = this.normalizeVerificationCode(code);
     const normalizedPurpose = this.normalizePurpose(purpose);
+    const manualGrant = this.store.tryVerifyManualVerificationGrant(
+      normalizedPhone,
+      normalizedCode,
+      normalizedPurpose
+    );
+
+    if (manualGrant.handled) {
+      return {
+        verified: manualGrant.verified,
+        tenantId: manualGrant.tenantId,
+        targetUserId: manualGrant.targetUserId,
+        manualGrantId: manualGrant.grantId
+      };
+    }
 
     const provider = this.getProvider();
 
@@ -119,7 +144,7 @@ export class VerificationCodeService {
         "aliyun_pnvs"
       );
       if (!externalChallengeId) {
-        return false;
+        return { verified: false };
       }
 
       const verified = await this.verifyAliyunPnvsCode(
@@ -134,44 +159,30 @@ export class VerificationCodeService {
           normalizedPurpose,
           externalChallengeId
         );
-        return false;
+        return { verified: false };
       }
 
       // 本地挑战先绑定本应用发码，再以上游 PASS 和单次消费共同决定结果。
-      return this.store.consumeVerificationRequest(
-        normalizedPhone,
-        normalizedPurpose,
-        externalChallengeId
-      );
-    }
-
-    if (provider === "manual") {
-      const externalChallengeId = this.store.getExternalVerificationChallengeId(
-        normalizedPhone,
-        normalizedPurpose,
-        "manual"
-      );
-      if (!externalChallengeId) {
-        return false;
-      }
-
-      if (this.matchesManualVerificationCode(normalizedCode)) {
-        return this.store.consumeVerificationRequest(
+      return {
+        verified: this.store.consumeVerificationRequest(
           normalizedPhone,
           normalizedPurpose,
           externalChallengeId
-        );
-      }
-
-      this.store.recordVerificationFailure(
-        normalizedPhone,
-        normalizedPurpose,
-        externalChallengeId
-      );
-      return false;
+        )
+      };
     }
 
-    return this.store.verifyCode(normalizedPhone, normalizedCode, normalizedPurpose);
+    if (provider === "manual") {
+      return { verified: false };
+    }
+
+    return {
+      verified: this.store.verifyCode(
+        normalizedPhone,
+        normalizedCode,
+        normalizedPurpose
+      )
+    };
   }
 
   getRuntimeConfig() {
@@ -279,9 +290,6 @@ export class VerificationCodeService {
         VERIFICATION_CODE_PREVIEW_ENABLED: this.configService.get<string>(
           "VERIFICATION_CODE_PREVIEW_ENABLED"
         ),
-        VERIFICATION_CODE_MANUAL_VALUE: this.configService.get<string>(
-          "VERIFICATION_CODE_MANUAL_VALUE"
-        ),
         ALIYUN_PNVS_ACCESS_KEY_ID: this.configService.get<string>(
           "ALIYUN_PNVS_ACCESS_KEY_ID"
         ),
@@ -324,22 +332,6 @@ export class VerificationCodeService {
     }
 
     return this.configService.get<string>("VM_DATA_PLANE")?.trim().toLowerCase() === "live";
-  }
-
-  private matchesManualVerificationCode(code: string) {
-    const configuredCode =
-      this.configService.get<string>("VERIFICATION_CODE_MANUAL_VALUE")?.trim() ?? "";
-
-    if (!verificationCodePattern.test(configuredCode)) {
-      throw new InternalServerErrorException(
-        "全真模拟手动验证码必须通过 VERIFICATION_CODE_MANUAL_VALUE 设置为 4 至 8 位数字。"
-      );
-    }
-
-    const expected = Buffer.from(configuredCode, "utf8");
-    const received = Buffer.from(code, "utf8");
-
-    return expected.length === received.length && timingSafeEqual(expected, received);
   }
 
   private normalizePhone(phone: string) {

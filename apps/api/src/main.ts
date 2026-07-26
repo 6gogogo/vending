@@ -115,6 +115,11 @@ async function bootstrap() {
     app.enableShutdownHooks();
 
     const configuredCorsOrigins = parseCorsOrigins(configService.get<string>("CORS_ORIGINS"));
+    const host = configService.get<string>("API_HOST")?.trim() || "127.0.0.1";
+    const trustProxySetting = resolveTrustProxySetting(
+      configService.get<string>("TRUST_PROXY_HOPS"),
+      host
+    );
     const localCorsOrigins = [
       "http://127.0.0.1:5173",
       "http://localhost:5173",
@@ -129,8 +134,8 @@ async function bootstrap() {
           : localCorsOrigins,
       credentials: false
     });
-    // 仅在明确知道前方代理层数时信任转发头，避免公网直连时伪造 X-Forwarded-For 绕过限流。
-    app.set("trust proxy", resolveTrustProxySetting(configService.get<string>("TRUST_PROXY_HOPS")));
+    // 转发头只允许从本机反向代理进入；即使误开放 API 端口也不能伪造实例域名或来源地址。
+    app.set("trust proxy", trustProxySetting);
     app.use(setApiSecurityHeaders);
 
     const captureRawBody = (request: { rawBody?: string }, _response: unknown, buffer: Buffer) => {
@@ -154,7 +159,6 @@ async function bootstrap() {
     });
 
     const port = Number(process.env.PORT ?? 4000);
-    const host = configService.get<string>("API_HOST")?.trim() || (isProductionRuntime() ? "0.0.0.0" : "127.0.0.1");
     await app.listen(port, host);
     if (startupAuditOperation) {
       if (!resolvedSystemAuditLog.completeStartup(startupAuditOperation)) {

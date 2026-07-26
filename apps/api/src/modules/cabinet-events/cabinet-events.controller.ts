@@ -4,7 +4,8 @@ import type {
   SmartVmAdjustmentPayload,
   SmartVmDoorStatusPayload,
   SmartVmPaymentPayload,
-  SmartVmSettlementPayload
+  SmartVmSettlementPayload,
+  UserRole
 } from "@vm/shared-types";
 
 import { ack, ok } from "../../common/dto/api-response";
@@ -13,7 +14,8 @@ import {
   AllowedBackofficeAllPermissions,
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { CabinetEventsService } from "./cabinet-events.service";
@@ -24,22 +26,30 @@ export class CabinetEventsController {
 
   @Get()
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant", "special")
+  @AllowedRoles("admin", "merchant", "restocker", "special")
   @AllowedBackofficeSessionPermissions("operation-logs:view")
+  @TenantScopedBackofficeRoute()
   list(
     @Query("userId") userId?: string,
-    @Req() request?: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+    @Req()
+    request?: {
+      authUser?: { id: string; role: UserRole; tenantId?: string };
+    }
   ) {
     return ok(this.cabinetEventsService.list(userId, request?.authUser));
   }
 
   @Get("event/:eventId")
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant", "special")
+  @AllowedRoles("admin", "merchant", "restocker", "special")
   @AllowedBackofficeSessionPermissions("operation-logs:view")
+  @TenantScopedBackofficeRoute()
   detail(
     @Param("eventId") eventId: string,
-    @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+    @Req()
+    request: {
+      authUser?: { id: string; role: UserRole; tenantId?: string };
+    }
   ) {
     return ok(this.cabinetEventsService.getDetail(eventId, request.authUser));
   }
@@ -47,16 +57,19 @@ export class CabinetEventsController {
   @Get("callback-logs")
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
-  @AllowedBackofficePermissions("system-audit:view")
+  @AllowedBackofficePermissions("operation-logs:view")
+  @TenantScopedBackofficeRoute()
   callbackLogs(
     @Query("limit") limit?: string,
-    @Query("deviceCode") deviceCode?: string
+    @Query("deviceCode") deviceCode?: string,
+    @Req() request?: { authUser?: { tenantId?: string } }
   ) {
     const resolvedLimit = Number(limit ?? 20);
     return ok(
       this.cabinetEventsService.listCallbackLogs(
         Number.isNaN(resolvedLimit) ? 20 : resolvedLimit,
-        deviceCode
+        deviceCode,
+        request?.authUser?.tenantId
       )
     );
   }
@@ -64,11 +77,14 @@ export class CabinetEventsController {
   @Post("open")
   @HttpCode(200)
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant", "special")
+  @AllowedRoles("admin", "merchant", "restocker", "special")
   @AllowedBackofficeSessionPermissions("devices:operate")
+  @TenantScopedBackofficeRoute()
   async open(
     @Body() body: unknown,
-    @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+    @Req() request: {
+      authUser?: { id: string; role: UserRole; tenantId?: string };
+    }
   ) {
     return ok(
       await this.cabinetEventsService.openCabinet(
@@ -81,11 +97,14 @@ export class CabinetEventsController {
   @Post("open/pre-settlement")
   @HttpCode(200)
   @UseGuards(RoleGuard)
-  @AllowedRoles("admin", "merchant", "special")
+  @AllowedRoles("admin", "merchant", "restocker", "special")
   @AllowedBackofficeSessionPermissions("devices:operate")
+  @TenantScopedBackofficeRoute()
   preSettlement(
     @Body() body: unknown,
-    @Req() request: { authUser?: { id: string; role: "admin" | "merchant" | "special" } }
+    @Req() request: {
+      authUser?: { id: string; role: UserRole; tenantId?: string };
+    }
   ) {
     return ok(
       this.cabinetEventsService.previewOpenSettlement(

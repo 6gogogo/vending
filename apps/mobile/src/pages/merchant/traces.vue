@@ -9,6 +9,7 @@ import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { formatBeijingDate, formatBeijingDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
+import { isStockOperatorRole } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
@@ -28,7 +29,7 @@ const logs = ref<Array<{ id: string; description: string; occurredAt: string }>>
 const load = async () => {
   await sessionStore.bootstrap();
 
-  if (!sessionStore.user) {
+  if (!sessionStore.user || !isStockOperatorRole(sessionStore.user.role)) {
     uni.reLaunch({ url: "/pages/common/login" });
     return;
   }

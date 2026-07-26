@@ -6,7 +6,8 @@ import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { UsersService } from "./users.service";
@@ -14,6 +15,7 @@ import { UsersService } from "./users.service";
 @Controller("users")
 @UseGuards(RoleGuard)
 @AllowedRoles("admin")
+@TenantScopedBackofficeRoute()
 export class UsersController {
   constructor(@Inject(UsersService) private readonly usersService: UsersService) {}
 
@@ -35,18 +37,33 @@ export class UsersController {
         categoryLimit: Record<string, number>;
       };
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(this.usersService.createUser(body, request.authUser?.id), "操作成功");
+    return ok(
+      this.usersService.createUser(
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Get()
   @AllowedBackofficeSessionPermissions("users:view")
   list(
     @Query("role") role: UserRole | undefined,
-    @Req() request: { authUser?: { backofficeRole?: BackofficeRole } }
+    @Req() request: {
+      authUser?: { backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
-    return ok(this.usersService.list(role, request.authUser?.backofficeRole));
+    return ok(
+      this.usersService.list(
+        role,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      )
+    );
   }
 
   @Get(":userId")
@@ -55,13 +72,15 @@ export class UsersController {
     @Param("userId") userId: string,
     @Query("month") month: string | undefined,
     @Query("date") date: string | undefined,
-    @Req() request: { authUser?: { backofficeRole?: BackofficeRole } }
+    @Req() request: {
+      authUser?: { backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
     return ok(
       this.usersService.detail(userId, {
         monthKey: month,
         dateKey: date
-      }, request.authUser?.backofficeRole)
+      }, request.authUser?.backofficeRole, request.authUser?.tenantId)
     );
   }
 
@@ -83,7 +102,9 @@ export class UsersController {
         };
       };
     },
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req() request: {
+      authUser?: { id: string; backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
     this.assertRequestFields(body, ["userIds", "patch"], "批量更新");
     this.assertRequestFields(
@@ -94,8 +115,35 @@ export class UsersController {
     this.assertMobileRequestFields(body, ["userIds", "patch"], request.authUser?.backofficeRole);
     this.assertMobileRequestFields(body.patch, ["status"], request.authUser?.backofficeRole);
     return ok(
-      this.usersService.batchUpdate(body, request.authUser?.id, request.authUser?.backofficeRole),
+      this.usersService.batchUpdate(
+        body,
+        request.authUser?.id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      ),
       "操作成功"
+    );
+  }
+
+  @Patch(":userId/device-assignment")
+  @AllowedBackofficePermissions("users:manage")
+  assignDevices(
+    @Param("userId") userId: string,
+    @Body() body: { deviceCodes: string[] },
+    @Req() request: {
+      authUser?: { id: string; backofficeRole?: BackofficeRole; tenantId?: string };
+    }
+  ) {
+    this.assertRequestFields(body, ["deviceCodes"], "柜机分配");
+    return ok(
+      this.usersService.assignDevices(
+        userId,
+        body.deviceCodes,
+        request.authUser?.id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      ),
+      "柜机分配已更新。"
     );
   }
 
@@ -107,11 +155,18 @@ export class UsersController {
       userIds: string[];
       confirmedCount: number;
     },
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req() request: {
+      authUser?: { id: string; backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
     this.assertRequestFields(body, ["userIds", "confirmedCount"], "批量删除");
     return ok(
-      this.usersService.batchRemove(body, request.authUser?.id, request.authUser?.backofficeRole),
+      this.usersService.batchRemove(
+        body,
+        request.authUser?.id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
@@ -135,7 +190,9 @@ export class UsersController {
         categoryLimit: Record<string, number>;
       };
     },
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req() request: {
+      authUser?: { id: string; backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
     this.assertRequestFields(
       body,
@@ -148,7 +205,13 @@ export class UsersController {
       request.authUser?.backofficeRole
     );
     return ok(
-      this.usersService.updateUser(userId, body, request.authUser?.id, request.authUser?.backofficeRole),
+      this.usersService.updateUser(
+        userId,
+        body,
+        request.authUser?.id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
@@ -157,10 +220,17 @@ export class UsersController {
   @AllowedBackofficePermissions("users:manage")
   removeUser(
     @Param("userId") userId: string,
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req() request: {
+      authUser?: { id: string; backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
     return ok(
-      this.usersService.removeUser(userId, request.authUser?.id, request.authUser?.backofficeRole),
+      this.usersService.removeUser(
+        userId,
+        request.authUser?.id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
@@ -172,9 +242,10 @@ export class UsersController {
     body: {
       role: Extract<UserRole, "special" | "merchant">;
       entries: Array<Record<string, unknown> & { phone: string; name: string }>;
-    }
+    },
+    @Req() request: { authUser?: { tenantId?: string } }
   ) {
-    return ok(this.usersService.importUsers(body));
+    return ok(this.usersService.importUsers(body, request.authUser?.tenantId));
   }
 
   @Post(":userId/manual-adjustment")
@@ -199,7 +270,14 @@ export class UsersController {
         quantity: number;
       }>;
     },
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req()
+    request: {
+      authUser?: {
+        id: string;
+        backofficeRole?: BackofficeRole;
+        tenantId?: string;
+      };
+    }
   ) {
     this.assertRequestFields(
       body,
@@ -230,7 +308,8 @@ export class UsersController {
         body,
         request.authUser?.id,
         request.authUser?.backofficeRole,
-        request.authUser?.backofficeRole ? "backoffice" : "mobile"
+        request.authUser?.backofficeRole ? "backoffice" : "mobile",
+        request.authUser?.tenantId
       ),
       "操作成功"
     );
@@ -254,10 +333,23 @@ export class UsersController {
       status: "active" | "inactive";
       sourcePolicyId?: string;
     },
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req()
+    request: {
+      authUser?: {
+        id: string;
+        backofficeRole?: BackofficeRole;
+        tenantId?: string;
+      };
+    }
   ) {
     return ok(
-      this.usersService.saveAccessPolicy(userId, body, request.authUser?.id, request.authUser?.backofficeRole),
+      this.usersService.saveAccessPolicy(
+        userId,
+        body,
+        request.authUser?.id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
@@ -267,14 +359,22 @@ export class UsersController {
   deleteAccessPolicy(
     @Param("userId") userId: string,
     @Param("policyId") policyId: string,
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req()
+    request: {
+      authUser?: {
+        id: string;
+        backofficeRole?: BackofficeRole;
+        tenantId?: string;
+      };
+    }
   ) {
     return ok(
       this.usersService.deleteAccessPolicy(
         userId,
         policyId,
         request.authUser?.id,
-        request.authUser?.backofficeRole
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
       ),
       "操作成功"
     );
@@ -285,14 +385,22 @@ export class UsersController {
   applyAccessPolicyNow(
     @Param("userId") userId: string,
     @Param("policyId") policyId: string,
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req()
+    request: {
+      authUser?: {
+        id: string;
+        backofficeRole?: BackofficeRole;
+        tenantId?: string;
+      };
+    }
   ) {
     return ok(
       this.usersService.applyAccessPolicyNow(
         userId,
         policyId,
         request.authUser?.id,
-        request.authUser?.backofficeRole
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
       ),
       "操作成功"
     );

@@ -9,5 +9,6 @@ export const categoryLabelMap: Record<GoodsCategory, string> = {
 export const roleLabelMap: Record<UserRole, string> = {
   admin: "管理员",
   merchant: "商家",
+  restocker: "补货员",
   special: "用户"
 };

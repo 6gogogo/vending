@@ -34,6 +34,11 @@ const canManageDevice = computed(() => sessionStore.can("devices:manage"));
 const canManageGoods = computed(() => sessionStore.can("goods:manage"));
 const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
 const canRefundPayments = computed(() => sessionStore.can("payments:refund"));
+const canViewCallbackLogs = computed(() => sessionStore.can("operation-logs:view"));
+const canViewSystemAudit = computed(() => sessionStore.can("system-audit:view"));
+const canViewDebugPanel = computed(
+  () => canViewCallbackLogs.value || canViewSystemAudit.value
+);
 const canManualPaymentSuccess = computed(() =>
   canManuallyConfirmPayment(canOperateDevice.value, canRefundPayments.value)
 );
@@ -655,15 +660,20 @@ const load = async () => {
 };
 
 const loadDebugPanel = async () => {
-  if (!sessionStore.can("system-audit:view")) {
+  if (!canViewDebugPanel.value) {
     return;
   }
 
   debugLoading.value = true;
   try {
     const [callbackLogs, systemAuditLogs] = await Promise.all([
-      adminApi.deviceCallbackLogs(String(route.params.deviceCode), Number(debugCallbackLimit.value)),
-      sessionStore.can("system-audit:view")
+      canViewCallbackLogs.value
+        ? adminApi.deviceCallbackLogs(
+            String(route.params.deviceCode),
+            Number(debugCallbackLimit.value)
+          )
+        : Promise.resolve([]),
+      canViewSystemAudit.value
         ? adminApi.systemAuditLogs({
             deviceCode: String(route.params.deviceCode),
             limit: Number(debugAuditLimit.value)
@@ -1822,7 +1832,7 @@ onUnmounted(() => {
         </aside>
       </section>
 
-      <section v-if="sessionStore.can('system-audit:view')" class="admin-page__section">
+      <section v-if="canViewDebugPanel" class="admin-page__section">
         <div class="admin-page__section-head">
           <div>
             <p class="admin-kicker">底层调试</p>
@@ -1845,7 +1855,7 @@ onUnmounted(() => {
 
         <article v-if="debugPanelVisible" class="admin-panel admin-panel-block">
           <div class="debug-grid">
-            <section class="debug-panel">
+            <section v-if="canViewSystemAudit" class="debug-panel">
               <div class="debug-panel__head">
                 <h4 class="debug-panel__title">平台外呼与系统审计</h4>
                 <label class="admin-field admin-field--inline debug-panel__limit">
@@ -1893,9 +1903,9 @@ onUnmounted(() => {
               </div>
             </section>
 
-            <section class="debug-panel">
+            <section v-if="canViewCallbackLogs" class="debug-panel">
               <div class="debug-panel__head">
-                <h4 class="debug-panel__title">平台回调原始记录</h4>
+                <h4 class="debug-panel__title">平台回调安全摘要</h4>
                 <label class="admin-field admin-field--inline debug-panel__limit">
                   <span class="admin-field__label">显示条数</span>
                   <select v-model="debugCallbackLimit" class="admin-select" @change="loadDebugPanel">
@@ -1921,7 +1931,7 @@ onUnmounted(() => {
               </div>
               <div v-else class="admin-empty">
                 <div class="admin-empty__title">{{ debugLoading ? "正在加载回调记录" : "暂无相关回调" }}</div>
-                <div class="admin-empty__body">这里会保留门状态、结算、补扣、退款等平台回推的原始报文。</div>
+                <div class="admin-empty__body">这里仅显示门状态、结算、补扣、退款等平台回推的脱敏摘要。</div>
               </div>
             </section>
           </div>

@@ -17,6 +17,7 @@ import type {
   UserRole
 } from "@vm/shared-types";
 
+import { isProductionRuntime } from "../../common/config/runtime-environment";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { VerificationCodeService } from "../auth/verification-code.service";
 
@@ -31,26 +32,83 @@ export class RegistrationApplicationsService {
     @Inject(ConfigService) private readonly configService: ConfigService
   ) {}
 
-  list(status?: RegistrationApplication["status"]) {
+  resolvePublicTenantId(requestHostname?: string) {
+    const hostname = this.normalizeHostname(requestHostname);
+    const matchingTenants = hostname
+      ? this.store.platformTenants.filter(
+          (tenant) =>
+            tenant.status !== "paused" &&
+            this.readInstanceHostname(tenant.instanceUrl) === hostname
+        )
+      : [];
+
+    if (matchingTenants.length === 1) {
+      return matchingTenants[0].id;
+    }
+
+    if (matchingTenants.length > 1) {
+      throw new NotFoundException("当前访问入口未绑定唯一可用的客户实例。");
+    }
+
+    const publicBaseHostname = this.readInstanceHostname(
+      this.configService.get<string>("PUBLIC_BASE_URL")
+    );
+    const defaultTenant = this.store.findPlatformTenantById(
+      this.store.getDefaultTenantId()
+    );
+
+    if (
+      hostname &&
+      publicBaseHostname === hostname &&
+      defaultTenant &&
+      defaultTenant.status !== "paused"
+    ) {
+      return defaultTenant.id;
+    }
+
+    if (
+      !isProductionRuntime() &&
+      !this.store.isLiveDataPlane() &&
+      (!hostname || this.isLoopbackHostname(hostname))
+    ) {
+      return this.store.getDefaultTenantId();
+    }
+
+    throw new NotFoundException("当前访问入口未绑定可用的客户实例。");
+  }
+
+  list(status?: RegistrationApplication["status"], tenantId?: string) {
     return this.store.registrationApplications
-      .filter((entry) => (status ? entry.status === status : true))
+      .filter(
+        (entry) =>
+          (!tenantId ||
+            this.resolveApplicationTenantId(entry) === tenantId) &&
+          (status ? entry.status === status : true)
+      )
       .slice()
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  detail(id: string) {
+  detail(id: string, tenantId?: string) {
     const application = this.store.registrationApplications.find((entry) => entry.id === id);
 
-    if (!application) {
+    if (
+      !application ||
+      (tenantId && this.resolveApplicationTenantId(application) !== tenantId)
+    ) {
       throw new NotFoundException("未找到对应审核申请。");
     }
 
     return application;
   }
 
-  findLatestByPhone(phone: string) {
+  findLatestByPhone(phone: string, tenantId: string) {
     return this.store.registrationApplications
-      .filter((entry) => entry.phone === phone)
+      .filter(
+        (entry) =>
+          entry.phone === phone &&
+          this.resolveApplicationTenantId(entry) === tenantId
+      )
       .slice()
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   }
@@ -58,8 +116,12 @@ export class RegistrationApplicationsService {
   async lookupByPhone(
     phone: string,
     code?: string,
-    sourceKey = "anonymous"
+    sourceKey = "anonymous",
+    tenantId?: string
   ): Promise<RegistrationPhoneLookup> {
+    if (!tenantId) {
+      throw new NotFoundException("当前访问入口未绑定可用的客户实例。");
+    }
     const normalizedPhone = phone.trim();
     const includePrivateDetails = Boolean(code?.trim());
 
@@ -80,8 +142,11 @@ export class RegistrationApplicationsService {
       };
     }
 
-    const application = this.findLatestByPhone(normalizedPhone);
-    const linkedUser = this.store.users.find((entry) => entry.phone === normalizedPhone);
+    const application = this.findLatestByPhone(normalizedPhone, tenantId);
+    const linkedUser = this.findUserByPhoneInTenant(
+      normalizedPhone,
+      tenantId
+    );
 
     if (linkedUser?.mobileProfileCompleted) {
       return this.toPublicLookup({
@@ -166,18 +231,24 @@ export class RegistrationApplicationsService {
     this.publicLookupHistory.set(sourceKey, recent);
   }
 
-  async createOrUpdateByPhone(payload: {
-    phone: string;
-    code: string;
-    requestedRole?: UserRole;
-    profile: RegistrationApplicationProfile;
-  }) {
+  async createOrUpdateByPhone(
+    payload: {
+      phone: string;
+      code: string;
+      requestedRole?: UserRole;
+      profile: RegistrationApplicationProfile;
+    },
+    tenantId: string
+  ) {
     const phone = payload.phone.trim();
     const normalizedProfile = this.normalizeProfile(payload.profile);
+    const existingUser = this.findUserByPhoneInTenant(phone, tenantId);
+    const existingApplication = this.findLatestByPhone(phone, tenantId);
+    const requestedRole = this.resolvePublicRequestedRole(
+      payload.requestedRole ?? existingApplication?.requestedRole
+    );
     await this.ensureVerifiedCode(phone, payload.code);
-
-    const existingUser = this.store.users.find((entry) => entry.phone === phone);
-    const existingApplication = this.findLatestByPhone(phone);
+    this.assertNoForeignPhoneOwnership(phone, tenantId);
 
     if (existingUser?.mobileProfileCompleted || existingApplication?.status === "approved") {
       throw new BadRequestException("该手机号已通过审核，请直接登录。");
@@ -189,10 +260,9 @@ export class RegistrationApplicationsService {
 
     return this.upsertPendingApplication(existingApplication, {
       phone,
-      requestedRole: this.resolvePublicRequestedRole(
-        payload.requestedRole ?? existingApplication?.requestedRole
-      ),
-      profile: normalizedProfile
+      requestedRole,
+      profile: normalizedProfile,
+      tenantId
     });
   }
 
@@ -203,9 +273,10 @@ export class RegistrationApplicationsService {
       code: string;
       requestedRole?: UserRole;
       profile: RegistrationApplicationProfile;
-    }
+    },
+    tenantId: string
   ) {
-    const application = this.detail(id);
+    const application = this.detail(id, tenantId);
 
     if (!["pending", "rejected"].includes(application.status)) {
       throw new BadRequestException("当前申请已结束，不能继续修改。");
@@ -218,10 +289,14 @@ export class RegistrationApplicationsService {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
-    await this.ensureVerifiedCode(phone, payload.code);
     const normalizedProfile = this.normalizeProfile(payload.profile);
+    const requestedRole = this.resolvePublicRequestedRole(
+      payload.requestedRole ?? application.requestedRole
+    );
+    await this.ensureVerifiedCode(phone, payload.code);
+    this.assertNoForeignPhoneOwnership(phone, tenantId);
 
-    const existingUser = this.store.users.find((entry) => entry.phone === phone);
+    const existingUser = this.findUserByPhoneInTenant(phone, tenantId);
 
     if (existingUser?.mobileProfileCompleted) {
       throw new BadRequestException("该手机号已通过审核，请直接登录。");
@@ -233,8 +308,9 @@ export class RegistrationApplicationsService {
 
     return this.upsertPendingApplication(application, {
       phone,
-      requestedRole: this.resolvePublicRequestedRole(payload.requestedRole ?? application.requestedRole),
-      profile: normalizedProfile
+      requestedRole,
+      profile: normalizedProfile,
+      tenantId
     });
   }
 
@@ -255,16 +331,29 @@ export class RegistrationApplicationsService {
       throw new BadRequestException("已登记用户无需创建新的审核申请。");
     }
 
+    const tenantId = draft.tenantId;
+    if (!tenantId) {
+      throw new UnauthorizedException(
+        "当前资料草稿缺少实例归属，请重新获取验证码。"
+      );
+    }
+    this.assertNoForeignPhoneOwnership(draft.phone, tenantId);
     const normalizedProfile = this.normalizeProfile(payload.profile);
 
     const existing =
-      (draft.applicationId ? this.store.registrationApplications.find((entry) => entry.id === draft.applicationId) : undefined) ??
-      this.findLatestByPhone(draft.phone);
+      (draft.applicationId
+        ? this.store.registrationApplications.find(
+            (entry) =>
+              entry.id === draft.applicationId &&
+              this.resolveApplicationTenantId(entry) === tenantId
+          )
+        : undefined) ?? this.findLatestByPhone(draft.phone, tenantId);
 
     return this.upsertPendingApplication(existing, {
       phone: draft.phone,
       requestedRole: this.resolvePublicRequestedRole(payload.requestedRole ?? draft.requestedRole),
-      profile: normalizedProfile
+      profile: normalizedProfile,
+      tenantId
     });
   }
 
@@ -274,9 +363,11 @@ export class RegistrationApplicationsService {
       decision: "approved" | "rejected";
       reason?: string;
     },
-    actorUserId?: string
+    actorUserId?: string,
+    actorTenantId?: string
   ) {
-    const application = this.detail(id);
+    const application = this.detail(id, actorTenantId);
+    const applicationTenantId = this.resolveApplicationTenantId(application);
 
     if (application.status !== "pending") {
       throw new ConflictException("该注册申请已完成审核，不能重复或改写审核结果。");
@@ -296,6 +387,7 @@ export class RegistrationApplicationsService {
         detail: `管理员驳回了手机号 ${application.phone} 的注册申请。`,
         description: `管理员驳回了 ${application.phone} 的注册申请。`,
         metadata: {
+          tenantId: applicationTenantId,
           applicationId: application.id,
           phone: application.phone,
           requestedRole: application.requestedRole,
@@ -312,6 +404,14 @@ export class RegistrationApplicationsService {
       (application.linkedUserId
         ? this.store.users.find((entry) => entry.id === application.linkedUserId)
         : undefined) ?? this.store.users.find((entry) => entry.phone === application.phone);
+
+    if (
+      linkedUser &&
+      this.store.getUserTenantId(linkedUser) !== applicationTenantId
+    ) {
+      throw new ConflictException("注册申请关联账号的实例归属不一致，已拒绝审核。");
+    }
+
     const user = linkedUser ?? this.createUserFromApplication(application);
 
     this.applyProfileToUser(user, normalizedProfile, application.requestedRole);
@@ -335,6 +435,7 @@ export class RegistrationApplicationsService {
       detail: `管理员通过了 ${user.name} 的移动端注册申请。`,
       description: `管理员通过了 ${user.name} 的注册申请。`,
       metadata: {
+        tenantId: applicationTenantId,
         applicationId: application.id,
         phone: application.phone,
         requestedRole: application.requestedRole,
@@ -357,11 +458,13 @@ export class RegistrationApplicationsService {
     user.status = "active";
 
     const now = new Date().toISOString();
-    const existingApplication = this.findLatestByPhone(user.phone);
+    const tenantId = this.store.getUserTenantId(user);
+    const existingApplication = this.findLatestByPhone(user.phone, tenantId);
     const application =
       existingApplication ??
       ({
         id: this.store.createId("application"),
+        tenantId,
         phone: user.phone,
         requestedRole: user.role,
         profile,
@@ -371,6 +474,7 @@ export class RegistrationApplicationsService {
         updatedAt: now
       } satisfies RegistrationApplication);
 
+    application.tenantId = tenantId;
     application.phone = user.phone;
     application.requestedRole = user.role;
     application.profile = profile;
@@ -399,6 +503,7 @@ export class RegistrationApplicationsService {
       detail: `${user.name} 完成了移动端资料补全，账号可直接登录。`,
       description: `${user.name} 完成了移动端资料登记。`,
       metadata: {
+        tenantId,
         phone: user.phone,
         requestedRole: user.role,
         applicationId: application.id,
@@ -415,13 +520,18 @@ export class RegistrationApplicationsService {
       phone: string;
       requestedRole: UserRole;
       profile: RegistrationApplicationProfile;
+      tenantId: string;
     }
   ) {
     const now = new Date().toISOString();
 
     if (existing) {
+      if (this.resolveApplicationTenantId(existing) !== payload.tenantId) {
+        throw new ConflictException("注册申请的实例归属不一致，已拒绝覆盖。");
+      }
       // 重提申请时直接覆盖旧草稿，保证后台看到的是申请人当前最真实、最新的情况。
       existing.phone = payload.phone;
+      existing.tenantId = existing.tenantId ?? payload.tenantId;
       existing.requestedRole = payload.requestedRole;
       existing.profile = payload.profile;
       existing.status = "pending";
@@ -432,6 +542,7 @@ export class RegistrationApplicationsService {
 
     const created: RegistrationApplication = {
       id: this.store.createId("application"),
+      tenantId: payload.tenantId,
       phone: payload.phone,
       requestedRole: payload.requestedRole,
       profile: payload.profile,
@@ -444,14 +555,92 @@ export class RegistrationApplicationsService {
     return created;
   }
 
+  private resolveApplicationTenantId(application: RegistrationApplication) {
+    if (application.tenantId) {
+      return application.tenantId;
+    }
+
+    const linkedUser = application.linkedUserId
+      ? this.store.users.find((entry) => entry.id === application.linkedUserId)
+      : undefined;
+
+    return linkedUser
+      ? this.store.getUserTenantId(linkedUser)
+      : this.store.getDefaultTenantId();
+  }
+
+  private findUserByPhoneInTenant(phone: string, tenantId: string) {
+    return this.store.users.find(
+      (entry) =>
+        entry.phone === phone &&
+        this.store.getUserTenantId(entry) === tenantId
+    );
+  }
+
+  private assertNoForeignPhoneOwnership(phone: string, tenantId: string) {
+    const foreignUser = this.store.users.some(
+      (entry) =>
+        entry.phone === phone &&
+        this.store.getUserTenantId(entry) !== tenantId
+    );
+    const foreignApplication = this.store.registrationApplications.some(
+      (entry) =>
+        entry.phone === phone &&
+        this.resolveApplicationTenantId(entry) !== tenantId
+    );
+
+    if (foreignUser || foreignApplication) {
+      throw new BadRequestException(
+        "该手机号已归属其他客户实例，请联系实例管理员处理。"
+      );
+    }
+  }
+
+  private normalizeHostname(raw?: string) {
+    return raw
+      ?.trim()
+      .toLowerCase()
+      .replace(/^\[|\]$/g, "")
+      .replace(/\.$/, "");
+  }
+
+  private readInstanceHostname(raw?: string) {
+    if (!raw?.trim()) {
+      return undefined;
+    }
+
+    try {
+      return this.normalizeHostname(new URL(raw).hostname);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isLoopbackHostname(hostname: string) {
+    return (
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      hostname === "::1" ||
+      /^127(?:\.\d{1,3}){3}$/.test(hostname)
+    );
+  }
+
   private resolvePublicRequestedRole(role?: UserRole) {
     const resolvedRole = role ?? "special";
 
-    if (resolvedRole !== "admin" || this.isPublicAdminRegistrationEnabled()) {
+    if (resolvedRole === "special" || resolvedRole === "merchant") {
       return resolvedRole;
     }
 
-    throw new BadRequestException("管理员账号请由后台创建或由程序提供商分配。");
+    if (resolvedRole === "admin") {
+      if (this.isPublicAdminRegistrationEnabled()) {
+        return resolvedRole;
+      }
+
+      throw new BadRequestException("管理员账号请由后台创建或由程序提供商分配。");
+    }
+
+    throw new BadRequestException("补货员账号请由实例管理员在后台创建并分配柜机。");
   }
 
   private isPublicAdminRegistrationEnabled() {
@@ -467,6 +656,7 @@ export class RegistrationApplicationsService {
     const regionName = application.profile.regionName ?? application.profile.neighborhood;
     const created: UserRecord = {
       id: this.store.createId(application.requestedRole),
+      tenantId: this.resolveApplicationTenantId(application),
       role: application.requestedRole,
       phone: application.phone,
       name: this.resolveUserName(application.requestedRole, application.profile),

@@ -24,7 +24,6 @@ export const runtimeDataPlaneExternalIntegrationKeys = [
   "PAYMENT_MODE",
   "VERIFICATION_CODE_PROVIDER",
   "VERIFICATION_CODE_PREVIEW_ENABLED",
-  "VERIFICATION_CODE_MANUAL_VALUE",
   "ALIYUN_PNVS_ACCESS_KEY_ID",
   "ALIYUN_PNVS_ACCESS_KEY_SECRET",
   "ALIYUN_PNVS_SIGN_NAME",
@@ -65,7 +64,6 @@ export class RuntimeDataPlanePolicyError extends Error {
 }
 
 const truthyValues = new Set(["1", "true", "yes", "on"]);
-const manualVerificationCodePattern = /^\d{4,8}$/;
 const aliyunPnvsRequiredKeys = [
   "ALIYUN_PNVS_ACCESS_KEY_ID",
   "ALIYUN_PNVS_ACCESS_KEY_SECRET",
@@ -132,16 +130,6 @@ const requireVerificationPolicy = (
   if (isFullSimulationProfile(settings)) {
     const mode = resolveFullSimulationExternalMode("verification", settings);
 
-    if (mode === "manual") {
-      const manualCode = settings.VERIFICATION_CODE_MANUAL_VALUE?.trim();
-
-      if (!manualVerificationCodePattern.test(manualCode ?? "")) {
-        throw new RuntimeDataPlanePolicyError(
-          "全真模拟手动验证码必须通过 VERIFICATION_CODE_MANUAL_VALUE 设置为 4 至 8 位数字。"
-        );
-      }
-    }
-
     if (mode === "real") {
       requireAliyunPnvsConfiguration(settings, "全真模拟启用真实 PNVS");
 
@@ -164,12 +152,6 @@ const requireVerificationPolicy = (
       );
     }
     return;
-  }
-
-  if (settings.VERIFICATION_CODE_MANUAL_VALUE?.trim()) {
-    throw new RuntimeDataPlanePolicyError(
-      "真实数据平面不能配置 VERIFICATION_CODE_MANUAL_VALUE。"
-    );
   }
 
   if (normalizedProvider !== "aliyun_pnvs") {

@@ -4,6 +4,7 @@ import {
   HttpException,
   Inject,
   Injectable,
+  NotFoundException,
   UnauthorizedException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -14,6 +15,9 @@ import type {
   BackofficePermission,
   BackofficeRole,
   BackofficeSessionSnapshot,
+  ManualVerificationGrantSnapshot,
+  ManualVerificationGrantStatus,
+  ManualVerificationPurpose,
   MobileLoginResult,
   MobileSessionSnapshot,
   RegistrationApplicationProfile,
@@ -27,6 +31,7 @@ import {
 } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import type { ManualVerificationGrantRecord } from "../../common/store/persistence";
 import { AccessRulesService } from "../access-rules/access-rules.service";
 import { RegistrationApplicationsService } from "../registration-applications/registration-applications.service";
 import { UsersService } from "../users/users.service";
@@ -51,6 +56,7 @@ interface AdminSessionResult {
 
 type BackofficeSessionResult = BackofficeSessionSnapshot;
 const MIN_ADMIN_PASSWORD_LENGTH = 8;
+const MAX_MANUAL_VERIFICATION_FAILURES = 5;
 
 @Injectable()
 export class AuthService {
@@ -74,12 +80,50 @@ export class AuthService {
     return this.verificationCodeService.requestCode(phone, scene);
   }
 
-  async appLogin(phone: string, code: string): Promise<AppLoginResult> {
-    if (!(await this.verificationCodeService.verifyCode(phone, code, "app-login"))) {
+  async appLogin(
+    phone: string,
+    code: string,
+    requestHostname?: string
+  ): Promise<AppLoginResult> {
+    const tenantId =
+      this.registrationApplicationsService.resolvePublicTenantId(
+        requestHostname
+      );
+    const verification = await this.verifyCodeWithContext(
+      phone,
+      code,
+      "app-login"
+    );
+
+    if (!verification.verified) {
       throw new UnauthorizedException("验证码不正确或已失效，请重新获取。");
     }
 
-    const existingUser = this.store.users.find((entry) => entry.phone === phone && entry.status === "active");
+    const normalizedPhone = phone.trim();
+    if (verification.tenantId && verification.tenantId !== tenantId) {
+      throw new UnauthorizedException("验证码不正确或已失效，请重新获取。");
+    }
+    const uniqueActiveUser = verification.targetUserId
+      ? undefined
+      : this.findUniqueActiveUserByPhone(normalizedPhone);
+    const existingUser = verification.targetUserId
+      ? this.store.users.find(
+          (entry) =>
+            entry.id === verification.targetUserId &&
+            entry.phone === normalizedPhone &&
+            entry.status === "active" &&
+            this.store.getUserTenantId(entry) === tenantId &&
+            (!verification.tenantId ||
+              this.store.getUserTenantId(entry) === verification.tenantId)
+        )
+      : uniqueActiveUser &&
+          this.store.getUserTenantId(uniqueActiveUser) === tenantId
+        ? uniqueActiveUser
+        : undefined;
+
+    if (verification.targetUserId && !existingUser) {
+      throw new UnauthorizedException("验证码不正确或已失效，请重新获取。");
+    }
 
     if (existingUser?.mobileProfileCompleted) {
       return {
@@ -88,7 +132,12 @@ export class AuthService {
       };
     }
 
-    const existingApplication = this.registrationApplicationsService.findLatestByPhone(phone);
+    const existingApplication = verification.targetUserId
+      ? undefined
+      : this.registrationApplicationsService.findLatestByPhone(
+          phone,
+          tenantId
+        );
 
     if (existingApplication?.status === "pending") {
       return {
@@ -118,18 +167,30 @@ export class AuthService {
   async mobileLogin(
     phone: string,
     code: string,
-    requestedRole?: UserRole
+    requestedRole?: UserRole,
+    requestHostname?: string
   ): Promise<MobileLoginResult> {
+    const tenantId =
+      this.registrationApplicationsService.resolvePublicTenantId(
+        requestHostname
+      );
+
     if (!(await this.verificationCodeService.verifyCode(phone, code, "general"))) {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
-    const existingUser = this.store.users.find((entry) => entry.phone === phone && entry.status === "active");
+    const uniqueActiveUser = this.findUniqueActiveUserByPhone(phone.trim());
+    const existingUser =
+      uniqueActiveUser &&
+      this.store.getUserTenantId(uniqueActiveUser) === tenantId
+        ? uniqueActiveUser
+        : undefined;
 
     if (existingUser) {
       if (!existingUser.mobileProfileCompleted) {
         // 已预登记用户优先走续填流程，尽量不让需要帮助的人重复填写整套资料。
         const draftToken = this.store.createDraftSession({
+          tenantId,
           phone,
           linkedUserId: existingUser.id,
           requestedRole: existingUser.role
@@ -156,9 +217,11 @@ export class AuthService {
       };
     }
 
-    const existingApplication = this.registrationApplicationsService.findLatestByPhone(phone);
+    const existingApplication =
+      this.registrationApplicationsService.findLatestByPhone(phone, tenantId);
     const role = requestedRole ?? existingApplication?.requestedRole ?? "special";
     const draftToken = this.store.createDraftSession({
+      tenantId,
       phone,
       requestedRole: role,
       applicationId: existingApplication?.id
@@ -207,11 +270,19 @@ export class AuthService {
     draftToken: string;
     requestedRole?: UserRole;
     profile: RegistrationApplicationProfile;
-  }): MobileLoginResult {
+  }, requestHostname?: string): MobileLoginResult {
+    const tenantId =
+      this.registrationApplicationsService.resolvePublicTenantId(requestHostname);
     const draft = this.store.getDraftSession(payload.draftToken);
 
     if (!draft) {
       throw new UnauthorizedException("当前资料草稿已失效，请重新获取验证码。");
+    }
+
+    if (draft.tenantId !== tenantId) {
+      throw new UnauthorizedException(
+        "当前资料草稿与访问实例不一致，请重新获取验证码。"
+      );
     }
 
     if (draft.linkedUserId) {
@@ -465,6 +536,68 @@ export class AuthService {
     throw new UnauthorizedException("当前登录态已失效，请重新登录。");
   }
 
+  enterPlatformTenant(token: string | undefined, tenantId: string): BackofficeSessionResult {
+    const resolved = this.store.getBackofficeSessionUser(token);
+
+    if (!resolved || resolved.session.backofficeRole !== "super_admin") {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
+    if (resolved.session.tenantId) {
+      throw new BadRequestException("当前已进入客户实例，请先退出后再切换。");
+    }
+
+    const tenant = this.store.findPlatformTenantById(tenantId);
+
+    if (!tenant) {
+      throw new NotFoundException("未找到对应客户实例。");
+    }
+
+    if (tenant.status === "paused") {
+      throw new ForbiddenException("目标客户实例已暂停，暂不能进入。");
+    }
+
+    const nextToken = this.store.createBackofficeSession(
+      resolved.user,
+      "super_admin",
+      tenant.id
+    );
+    const snapshot = this.createBackofficeSessionSnapshot(
+      resolved.user,
+      "super_admin",
+      nextToken
+    );
+    this.store.revokeSession(token);
+
+    return snapshot;
+  }
+
+  exitPlatformTenant(token: string | undefined): BackofficeSessionResult {
+    const resolved = this.store.getBackofficeSessionUser(token);
+
+    if (
+      !resolved ||
+      resolved.session.backofficeRole !== "super_admin" ||
+      !resolved.session.tenantId
+    ) {
+      throw new UnauthorizedException("当前未进入客户实例。");
+    }
+
+    const nextToken = this.store.createBackofficeSession(
+      resolved.user,
+      "super_admin",
+      undefined
+    );
+    const snapshot = this.createBackofficeSessionSnapshot(
+      resolved.user,
+      "super_admin",
+      nextToken
+    );
+    this.store.revokeSession(token);
+
+    return snapshot;
+  }
+
   changeAdminPassword(token: string | undefined, currentPassword: string, newPassword: string): AdminSessionResult {
     if (this.store.isLiveDataPlane()) {
       throw new UnauthorizedException("真实数据平面不支持旧管理员密码入口。");
@@ -616,6 +749,162 @@ export class AuthService {
     );
   }
 
+  issueManualVerificationCode(
+    token: string | undefined,
+    payload: {
+      userId: string;
+      purpose: ManualVerificationPurpose;
+      code: string;
+      expiresInSeconds?: number;
+    }
+  ): ManualVerificationGrantSnapshot {
+    const actor = this.getBackofficeSession(token);
+    this.assertCanManageManualVerificationCodes(actor.user);
+    const tenantId =
+      actor.user.tenantId ?? this.store.getDefaultTenantId();
+    const targetUser = this.store.users.find(
+      (entry) =>
+        entry.id === payload.userId &&
+        entry.status === "active" &&
+        this.store.getUserTenantId(entry) === tenantId
+    );
+
+    if (!targetUser) {
+      throw new NotFoundException("未找到当前实例中的有效目标账号。");
+    }
+
+    if (
+      payload.purpose !== "app-login" &&
+      payload.purpose !== "password-reset"
+    ) {
+      throw new BadRequestException("人工验证码用途不受支持。");
+    }
+
+    const code = String(payload.code ?? "").trim();
+
+    if (!/^\d{6}$/u.test(code)) {
+      throw new BadRequestException("人工验证码必须是 6 位数字。");
+    }
+
+    const expiresInSeconds = payload.expiresInSeconds ?? 300;
+
+    if (
+      !Number.isInteger(expiresInSeconds) ||
+      expiresInSeconds < 60 ||
+      expiresInSeconds > 600
+    ) {
+      throw new BadRequestException("人工验证码有效期必须在 60 至 600 秒之间。");
+    }
+
+    const record = this.store.issueManualVerificationGrant({
+      phone: targetUser.phone,
+      purpose: payload.purpose,
+      code,
+      issuerUserId: actor.user.id,
+      targetUserId: targetUser.id,
+      tenantId,
+      expiresInSeconds
+    });
+
+    this.store.logOperation({
+      category: "admin",
+      type: "issue-manual-verification-code",
+      status: "success",
+      actor: {
+        type: actor.user.role,
+        id: actor.user.id,
+        name: actor.user.name,
+        role: actor.user.role
+      },
+      primarySubject: {
+        type: "user",
+        id: targetUser.id,
+        label: targetUser.name
+      },
+      metadata: {
+        manualGrantId: record.manualGrantId,
+        tenantId,
+        purpose: record.purpose,
+        phoneHash: record.phoneHash,
+        expiresAt: record.expiresAt,
+        undoState: "not_undoable"
+      }
+    });
+    this.store.persist();
+
+    return this.createManualVerificationGrantSnapshot(record);
+  }
+
+  listManualVerificationCodes(
+    token: string | undefined
+  ): ManualVerificationGrantSnapshot[] {
+    const actor = this.getBackofficeSession(token);
+    this.assertCanManageManualVerificationCodes(actor.user);
+    const tenantId =
+      actor.user.tenantId ?? this.store.getDefaultTenantId();
+
+    return this.store
+      .listManualVerificationGrants(tenantId)
+      .map((record) => this.createManualVerificationGrantSnapshot(record));
+  }
+
+  revokeManualVerificationCode(
+    token: string | undefined,
+    grantId: string,
+    reason: string
+  ): ManualVerificationGrantSnapshot {
+    const actor = this.getBackofficeSession(token);
+    this.assertCanManageManualVerificationCodes(actor.user);
+    const normalizedReason = String(reason ?? "").trim();
+
+    if (!normalizedReason || [...normalizedReason].length > 500) {
+      throw new BadRequestException("撤销原因不能为空且不能超过 500 个字符。");
+    }
+
+    const tenantId =
+      actor.user.tenantId ?? this.store.getDefaultTenantId();
+    const record = this.store.revokeManualVerificationGrant(
+      grantId,
+      tenantId
+    );
+
+    if (!record) {
+      throw new NotFoundException("未找到可撤销的人工验证码。");
+    }
+
+    const targetUser = record.targetUserId
+      ? this.store.users.find((entry) => entry.id === record.targetUserId)
+      : undefined;
+    this.store.logOperation({
+      category: "admin",
+      type: "revoke-manual-verification-code",
+      status: "success",
+      actor: {
+        type: actor.user.role,
+        id: actor.user.id,
+        name: actor.user.name,
+        role: actor.user.role
+      },
+      primarySubject: targetUser
+        ? {
+            type: "user",
+            id: targetUser.id,
+            label: targetUser.name
+          }
+        : undefined,
+      metadata: {
+        manualGrantId: record.manualGrantId,
+        tenantId,
+        purpose: record.purpose,
+        reason: normalizedReason,
+        undoState: "not_undoable"
+      }
+    });
+    this.store.persist();
+
+    return this.createManualVerificationGrantSnapshot(record);
+  }
+
   async resetOwnBackofficePassword(payload: {
     username: string;
     phone: string;
@@ -629,7 +918,7 @@ export class AuthService {
       throw new BadRequestException(`新密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
     }
 
-    const verified = await this.verificationCodeService.verifyCode(
+    const verification = await this.verifyCodeWithContext(
       payload.phone,
       payload.code,
       "password-reset"
@@ -641,11 +930,16 @@ export class AuthService {
       : undefined;
 
     if (
-      !verified ||
+      !verification.verified ||
       !credential ||
       !user ||
       user.status !== "active" ||
-      user.phone !== payload.phone.trim()
+      user.phone !== payload.phone.trim() ||
+      (verification.targetUserId !== undefined &&
+        verification.targetUserId !== user.id) ||
+      (verification.tenantId !== undefined &&
+        (credential.tenantId !== verification.tenantId ||
+          this.store.getUserTenantId(user) !== verification.tenantId))
     ) {
       throw new UnauthorizedException("账号、手机号或验证码不正确。");
     }
@@ -708,10 +1002,25 @@ export class AuthService {
     }
 
     const targetUser = this.store.users.find((entry) => entry.id === payload.userId);
-    const role = payload.role ?? (targetUser?.role === "merchant" ? "merchant" : "admin");
+    const role =
+      payload.role ??
+      (targetUser?.role === "merchant"
+        ? "merchant"
+        : targetUser?.role === "restocker"
+          ? "restocker"
+          : "admin");
 
     if (!targetUser || !this.store.isUserValidForBackofficeRole(targetUser, role)) {
       throw new BadRequestException("目标用户不能开通该后台角色。");
+    }
+
+    const actorTenantId = actor.user.tenantId;
+
+    if (
+      actorTenantId &&
+      this.store.getUserTenantId(targetUser) !== actorTenantId
+    ) {
+      throw new ForbiddenException("当前后台账号不能管理其他实例的后台账号。");
     }
 
     const existingCredential = this.store.findBackofficeCredentialByUserId(targetUser.id, role);
@@ -733,21 +1042,38 @@ export class AuthService {
     );
     let grantedPermissions = requestedPermissions;
 
-    if (actor.user.backofficeRole !== "super_admin") {
+    if (actor.user.backofficeRole !== "super_admin" || actorTenantId) {
       if (role === "super_admin") {
         throw new ForbiddenException("当前后台账号不能发放服务商账号。");
       }
 
-      const actorTenantId = actor.user.tenantId ?? this.store.getDefaultTenantId();
-      const requestedTenantId = payload.tenantId ?? actorTenantId;
+      const scopedActorTenantId =
+        actorTenantId ?? this.store.getDefaultTenantId();
+      const requestedTenantId = payload.tenantId ?? scopedActorTenantId;
 
-      if (requestedTenantId !== actorTenantId) {
+      if (requestedTenantId !== scopedActorTenantId) {
         throw new ForbiddenException("当前后台账号不能管理其他实例的后台账号。");
       }
 
       const actorPermissions = new Set(actor.user.permissions);
+      const canProvisionRestocker =
+        role === "restocker" &&
+        [
+          "users:manage",
+          "devices:manage",
+          "backoffice-credentials:manage"
+        ].every((permission) =>
+          actorPermissions.has(permission as BackofficePermission)
+        );
+      const delegablePermissions = new Set<BackofficePermission>(
+        canProvisionRestocker
+          ? BACKOFFICE_ROLE_ALLOWED_PERMISSIONS.restocker
+          : []
+      );
       const invalidPermissions = requestedPermissions.filter(
-        (permission) => !actorPermissions.has(permission)
+        (permission) =>
+          !actorPermissions.has(permission) &&
+          !delegablePermissions.has(permission)
       );
 
       if (existingCredential && !payload.permissions && invalidPermissions.length > 0) {
@@ -758,7 +1084,11 @@ export class AuthService {
         throw new ForbiddenException("不能发放当前账号自身没有的权限。");
       }
 
-      grantedPermissions = requestedPermissions.filter((permission) => actorPermissions.has(permission));
+      grantedPermissions = requestedPermissions.filter(
+        (permission) =>
+          actorPermissions.has(permission) ||
+          delegablePermissions.has(permission)
+      );
     }
 
     const tenantId =
@@ -865,6 +1195,16 @@ export class AuthService {
       throw new ForbiddenException("只有超级管理员可以重置后台账号密码。");
     }
 
+    const actorTenantId = actor.user.tenantId;
+
+    if (!actorTenantId) {
+      throw new ForbiddenException("请先进入目标客户实例后再重置账号密码。");
+    }
+
+    if (!actor.user.permissions.includes("backoffice-credentials:manage")) {
+      throw new ForbiddenException("当前后台账号不能管理后台登录权限。");
+    }
+
     const targetUser = this.store.users.find((entry) => entry.id === payload.userId);
     const credential = targetUser
       ? this.store.findBackofficeCredentialByUserId(targetUser.id, payload.role)
@@ -874,6 +1214,14 @@ export class AuthService {
 
     if (!targetUser || !credential || targetUser.status !== "active") {
       throw new BadRequestException("目标后台账号不存在或已停用。");
+    }
+
+    if (
+      payload.role === "super_admin" ||
+      credential.tenantId !== actorTenantId ||
+      this.store.getUserTenantId(targetUser) !== actorTenantId
+    ) {
+      throw new ForbiddenException("当前后台账号不能重置其他实例的账号密码。");
     }
 
     if (normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
@@ -932,17 +1280,126 @@ export class AuthService {
       throw new ForbiddenException("当前后台账号不能管理后台登录权限。");
     }
 
-    const actorTenantId = actor.user.tenantId ?? this.store.getDefaultTenantId();
+    const actorTenantId = actor.user.tenantId;
 
     return this.store.backofficeCredentials
       .filter((credential) => {
-        if (actor.user.backofficeRole === "super_admin") {
+        if (
+          actor.user.backofficeRole === "super_admin" &&
+          actorTenantId === undefined
+        ) {
           return true;
         }
 
-        return credential.role !== "super_admin" && credential.tenantId === actorTenantId;
+        return (
+          credential.role !== "super_admin" &&
+          credential.tenantId ===
+            (actorTenantId ?? this.store.getDefaultTenantId())
+        );
       })
       .map((credential) => this.createBackofficeCredentialSnapshot(credential));
+  }
+
+  private assertCanManageManualVerificationCodes(user: {
+    role: UserRole;
+    permissions: BackofficePermission[];
+  }) {
+    if (
+      user.role !== "admin" ||
+      !user.permissions.includes("verification-codes:manage")
+    ) {
+      throw new ForbiddenException("当前后台账号不能签发人工验证码。");
+    }
+  }
+
+  private findUniqueActiveUserByPhone(phone: string) {
+    const matches = this.store.users.filter(
+      (entry) => entry.phone === phone && entry.status === "active"
+    );
+
+    if (matches.length > 1) {
+      throw new UnauthorizedException(
+        "当前手机号对应的账号身份异常，请联系管理员处理。"
+      );
+    }
+
+    return matches[0];
+  }
+
+  private async verifyCodeWithContext(
+    phone: string,
+    code: string,
+    purpose: "app-login" | "password-reset"
+  ) {
+    const contextualService = this.verificationCodeService as unknown as {
+      verifyCodeWithContext?: (
+        targetPhone: string,
+        targetCode: string,
+        targetPurpose: "app-login" | "password-reset"
+      ) => Promise<{
+        verified: boolean;
+        tenantId?: string;
+        targetUserId?: string;
+        manualGrantId?: string;
+      }>;
+    };
+
+    if (typeof contextualService.verifyCodeWithContext === "function") {
+      return contextualService.verifyCodeWithContext(
+        phone,
+        code,
+        purpose
+      );
+    }
+
+    return {
+      verified: await this.verificationCodeService.verifyCode(
+        phone,
+        code,
+        purpose
+      )
+    };
+  }
+
+  private createManualVerificationGrantSnapshot(
+    record: ManualVerificationGrantRecord
+  ): ManualVerificationGrantSnapshot {
+    const targetUser = record.targetUserId
+      ? this.store.users.find((entry) => entry.id === record.targetUserId)
+      : undefined;
+    const status: ManualVerificationGrantStatus = record.supersededAt
+      ? "superseded"
+      : record.revokedAt
+        ? "revoked"
+        : record.consumedAt
+          ? "consumed"
+          : record.expiredAt ||
+              new Date(record.expiresAt).getTime() <= Date.now()
+            ? "expired"
+            : record.lockedAt ||
+                record.failedAttempts >= MAX_MANUAL_VERIFICATION_FAILURES
+              ? "locked"
+              : "active";
+
+    return {
+      id: record.manualGrantId!,
+      userId: record.targetUserId!,
+      userName: targetUser?.name ?? "已删除账号",
+      tenantId: record.tenantId!,
+      purpose: record.purpose as ManualVerificationPurpose,
+      status,
+      createdAt: record.requestedAt!,
+      expiresAt: record.expiresAt,
+      issuedByUserId: record.issuerUserId!,
+      failedAttempts: record.failedAttempts,
+      consumedAt: record.consumedAt,
+      revokedAt: record.revokedAt,
+      lockedAt: record.lockedAt,
+      expiredAt: record.expiredAt,
+      supersededAt: record.supersededAt,
+      supersededByGrantId: record.supersededByGrantId,
+      codeLength: 6
+    };
   }
 
   private createBackofficeCredentialSnapshot(credential: {
@@ -1011,19 +1468,29 @@ export class AuthService {
       throw new UnauthorizedException("当前账号不是商家，无法登录商家后台。");
     }
 
-    const tenant = this.store.findPlatformTenantById(credential.tenantId);
+    if (backofficeRole === "restocker" && user.role !== "restocker") {
+      throw new UnauthorizedException("当前账号不是补货员，无法登录补货后台。");
+    }
+
     const resolvedToken = token ?? this.store.createBackofficeSession(user, backofficeRole, credential.tenantId);
+    const session = this.store.getSession(resolvedToken);
+
+    if (!session) {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
+    const tenant = this.store.findPlatformTenantById(session.tenantId);
 
     return {
       token: resolvedToken,
       user: {
         id: user.id,
-        role: user.role as Extract<UserRole, "admin" | "merchant">,
+        role: user.role as Extract<UserRole, "admin" | "merchant" | "restocker">,
         backofficeRole,
-        scope: this.store.getBackofficeScope(backofficeRole),
-        tenantId: credential.tenantId,
+        scope: this.store.getBackofficeScope(backofficeRole, session.tenantId),
+        tenantId: session.tenantId,
         tenantName: tenant?.name,
-        permissions: this.store.getBackofficePermissions(user.id, backofficeRole),
+        permissions: this.store.getBackofficeSessionPermissions(session),
         name: user.name,
         phone: user.phone,
         tags: user.tags

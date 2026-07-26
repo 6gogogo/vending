@@ -1,5 +1,5 @@
-export type UserRole = "admin" | "merchant" | "special";
-export type BackofficeRole = "super_admin" | "admin" | "merchant";
+export type UserRole = "admin" | "merchant" | "restocker" | "special";
+export type BackofficeRole = "super_admin" | "admin" | "merchant" | "restocker";
 export type BackofficeScope = "provider" | "tenant";
 export type RuntimeDataPlane = "simulation" | "live";
 export type AmapRuntimeMode = "mock" | "real";
@@ -15,6 +15,7 @@ export interface PublicRuntimeConfig {
 export const BACKOFFICE_PERMISSIONS = [
   "platform-overview:view",
   "platform-tenants:view",
+  "platform-tenants:manage",
   "merchant-workbench:view",
   "merchant-workbench:manage",
   "dashboard:view",
@@ -49,23 +50,43 @@ export const BACKOFFICE_PERMISSIONS = [
   "system-settings:secret:view",
   "system-settings:update",
   "uploads:images",
+  "verification-codes:manage",
   "backoffice-credentials:manage"
 ] as const;
 export type BackofficePermission = (typeof BACKOFFICE_PERMISSIONS)[number];
 
 export const BACKOFFICE_PROVIDER_PERMISSIONS = [
   "platform-overview:view",
-  "platform-tenants:view"
+  "platform-tenants:view",
+  "platform-tenants:manage",
+  "system-audit:view",
+  "system-audit:export"
 ] as const satisfies readonly BackofficePermission[];
 
 export const BACKOFFICE_TENANT_PERMISSIONS = BACKOFFICE_PERMISSIONS.filter(
   (permission) => !(BACKOFFICE_PROVIDER_PERMISSIONS as readonly string[]).includes(permission)
 ) as BackofficePermission[];
 
+export const BACKOFFICE_TENANT_BOOTSTRAP_PERMISSIONS = [
+  "devices:view",
+  "devices:manage",
+  "devices:operate",
+  "users:view",
+  "users:manage",
+  "users:review",
+  "verification-codes:manage",
+  "backoffice-credentials:manage"
+] as const satisfies readonly BackofficePermission[];
+
 export const BACKOFFICE_ROLE_ALLOWED_PERMISSIONS = {
   super_admin: BACKOFFICE_PERMISSIONS,
   admin: BACKOFFICE_TENANT_PERMISSIONS,
-  merchant: BACKOFFICE_TENANT_PERMISSIONS
+  merchant: BACKOFFICE_TENANT_PERMISSIONS,
+  restocker: [
+    "goods:view",
+    "devices:view",
+    "devices:operate"
+  ]
 } satisfies Record<BackofficeRole, readonly BackofficePermission[]>;
 
 export const BACKOFFICE_ROLE_DEFAULT_PERMISSIONS = {
@@ -78,6 +99,11 @@ export const BACKOFFICE_ROLE_DEFAULT_PERMISSIONS = {
     "warehouse:view",
     "devices:view",
     "operation-logs:view"
+  ],
+  restocker: [
+    "goods:view",
+    "devices:view",
+    "devices:operate"
   ]
 } satisfies Record<BackofficeRole, readonly BackofficePermission[]>;
 
@@ -237,6 +263,7 @@ export interface AccessQuota {
 
 export interface UserRecord {
   id: string;
+  tenantId?: string;
   role: UserRole;
   phone: string;
   name: string;
@@ -259,6 +286,7 @@ export interface UserRecord {
     donationWindowDays: number;
     defaultDeviceCodes: string[];
   };
+  assignedDeviceCodes?: string[];
   accessPolicies?: UserAccessPolicy[];
   reservationTimeoutCount?: number;
   reservationDisabledAt?: string;
@@ -280,6 +308,7 @@ export interface RegistrationApplicationProfile {
 
 export interface RegistrationApplication {
   id: string;
+  tenantId?: string;
   phone: string;
   requestedRole: UserRole;
   profile: RegistrationApplicationProfile;
@@ -334,7 +363,7 @@ export interface BackofficeSessionSnapshot {
   token: string;
   user: {
     id: string;
-    role: Extract<UserRole, "admin" | "merchant">;
+    role: Extract<UserRole, "admin" | "merchant" | "restocker">;
     backofficeRole: BackofficeRole;
     scope: BackofficeScope;
     tenantId?: string;
@@ -362,6 +391,35 @@ export interface BackofficeCredentialSnapshot {
   passwordUpdatedAt: string;
 }
 
+export type ManualVerificationPurpose = "app-login" | "password-reset";
+export type ManualVerificationGrantStatus =
+  | "active"
+  | "consumed"
+  | "revoked"
+  | "expired"
+  | "locked"
+  | "superseded";
+
+export interface ManualVerificationGrantSnapshot {
+  id: string;
+  userId: string;
+  userName: string;
+  tenantId: string;
+  purpose: ManualVerificationPurpose;
+  status: ManualVerificationGrantStatus;
+  createdAt: string;
+  expiresAt: string;
+  issuedByUserId: string;
+  failedAttempts: number;
+  consumedAt?: string;
+  revokedAt?: string;
+  lockedAt?: string;
+  expiredAt?: string;
+  supersededAt?: string;
+  supersededByGrantId?: string;
+  codeLength: 6;
+}
+
 export type PlatformTenantStatus = "active" | "trial" | "paused";
 
 export interface PlatformTenantRecord {
@@ -374,6 +432,27 @@ export interface PlatformTenantRecord {
   contactPhone?: string;
   planName?: string;
   createdAt: string;
+}
+
+export interface PlatformTenantCreatePayload {
+  code: string;
+  name: string;
+  status?: PlatformTenantStatus;
+  instanceUrl?: string;
+  contactName?: string;
+  contactPhone?: string;
+  planName?: string;
+  firstAdmin: {
+    name: string;
+    phone: string;
+    username: string;
+    password: string;
+  };
+}
+
+export interface PlatformTenantProvisioningResult {
+  tenant: PlatformTenantRecord;
+  firstAdmin: BackofficeCredentialSnapshot;
 }
 
 export interface PlatformTenantUsageSummary {
@@ -772,6 +851,7 @@ export interface DeviceRuntimeState {
 
 export interface DeviceRecord {
   deviceCode: string;
+  tenantId?: string;
   /** 仅供本地联调夹具使用；真实设备不得通过模拟接口覆盖。 */
   isMock?: boolean;
   name: string;
@@ -1148,7 +1228,7 @@ export type OperationLogCategory =
 export type OperationLogStatus = "success" | "pending" | "warning" | "failed";
 
 export interface OperationLogActor {
-  type: "admin" | "merchant" | "special" | "system";
+  type: "admin" | "merchant" | "restocker" | "special" | "system";
   id?: string;
   name: string;
   role?: UserRole;

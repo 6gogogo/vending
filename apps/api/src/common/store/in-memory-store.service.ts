@@ -1,7 +1,17 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { createHash, randomBytes, randomInt } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomInt,
+  scryptSync,
+  timingSafeEqual
+} from "node:crypto";
 
 import {
+  BACKOFFICE_PROVIDER_PERMISSIONS,
+  BACKOFFICE_ROLE_ALLOWED_PERMISSIONS,
+  BACKOFFICE_TENANT_BOOTSTRAP_PERMISSIONS,
+  BACKOFFICE_TENANT_PERMISSIONS,
   cloneSeedState,
   resolveBackofficePermissions,
   type BatchConsumptionTrace,
@@ -54,6 +64,7 @@ import {
   type DraftSessionRecord,
   type ExternalVerificationProvider,
   isControlledLiveBootstrapProcess,
+  type ManualVerificationGrantRecord,
   type PersistedStoreState,
   type SessionRecord,
   type VerificationPurpose,
@@ -152,6 +163,8 @@ export class InMemoryStoreService {
     this.runtimeDataPlane === "simulation" ? [createSimulationPlatformTenant()] : [];
 
   readonly verificationCodes = new Map<string, VerificationRecord>();
+  readonly manualVerificationGrants: ManualVerificationGrantRecord[] = [];
+  private readonly activeManualVerificationGrantIds = new Map<string, string>();
   readonly sessions = new Map<string, SessionRecord>();
   readonly draftSessions = new Map<string, DraftSessionRecord>();
   readonly adminCredentials: AdminCredentialRecord[] = [];
@@ -208,6 +221,8 @@ export class InMemoryStoreService {
         Boolean(persistedResult?.requiresPrivacyRewrite) ||
         Boolean(persistedResult?.requiresDataPlaneRewrite) ||
         persisted.verificationCodes.length !== this.verificationCodes.size ||
+        persisted.manualVerificationGrants.length !==
+          this.manualVerificationGrants.length ||
         persisted.sessions.length > 0 ||
         persisted.draftSessions.length > 0;
     } else {
@@ -415,6 +430,200 @@ export class InMemoryStoreService {
     this.persist();
   }
 
+  issueManualVerificationGrant(payload: {
+    phone: string;
+    purpose: Extract<VerificationPurpose, "app-login" | "password-reset">;
+    code: string;
+    issuerUserId: string;
+    targetUserId: string;
+    tenantId: string;
+    expiresInSeconds: number;
+  }) {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const challengeKey = this.getVerificationCodeKey(
+      payload.phone,
+      payload.purpose
+    );
+    const manualGrantId = this.createSecureToken("manual-code");
+    const previousGrant = this.findActiveManualVerificationGrant(challengeKey);
+
+    if (previousGrant) {
+      if (!this.expireManualVerificationGrant(previousGrant, now)) {
+        previousGrant.supersededAt = nowIso;
+        previousGrant.supersededByGrantId = manualGrantId;
+        this.clearManualVerificationSecret(previousGrant);
+        this.activeManualVerificationGrantIds.delete(challengeKey);
+        this.logManualVerificationTransition(
+          previousGrant,
+          "supersede-manual-verification-code",
+          { supersededByGrantId: manualGrantId }
+        );
+      }
+    }
+
+    const codeSalt = randomBytes(16).toString("base64url");
+    const codeHash = this.hashManualVerificationCode(payload.code, codeSalt);
+    const record: ManualVerificationGrantRecord = {
+      manualGrantId,
+      challengeKey,
+      purpose: payload.purpose,
+      issuerUserId: payload.issuerUserId,
+      targetUserId: payload.targetUserId,
+      tenantId: payload.tenantId,
+      phoneHash: createHash("sha256")
+        .update(
+          `${this.dataPlaneInstanceId}\0${payload.tenantId}\0${payload.phone}`,
+          "utf8"
+        )
+        .digest("hex"),
+      codeSalt,
+      codeHash,
+      expiresAt: new Date(now + payload.expiresInSeconds * 1_000).toISOString(),
+      requestedAt: nowIso,
+      failedAttempts: 0
+    };
+
+    this.manualVerificationGrants.unshift(record);
+    this.activeManualVerificationGrantIds.set(challengeKey, manualGrantId);
+    this.persist();
+    return structuredClone(record);
+  }
+
+  tryVerifyManualVerificationGrant(
+    phone: string,
+    code: string,
+    purpose: VerificationPurpose
+  ): {
+    handled: boolean;
+    verified: boolean;
+    tenantId?: string;
+    targetUserId?: string;
+    grantId?: string;
+  } {
+    const challengeKey = this.getVerificationCodeKey(phone, purpose);
+    const record = this.findActiveManualVerificationGrant(challengeKey);
+
+    if (!record) {
+      return { handled: false, verified: false };
+    }
+
+    const result = {
+      handled: true,
+      verified: false,
+      tenantId: record.tenantId,
+      targetUserId: record.targetUserId,
+      grantId: record.manualGrantId
+    };
+
+    if (this.expireManualVerificationGrant(record)) {
+      this.persist();
+      return result;
+    }
+
+    if (!record.codeSalt || !record.codeHash) {
+      record.lockedAt = new Date().toISOString();
+      this.activeManualVerificationGrantIds.delete(challengeKey);
+      this.clearManualVerificationSecret(record);
+      this.logManualVerificationTransition(
+        record,
+        "lock-manual-verification-code"
+      );
+      this.persist();
+      return result;
+    }
+
+    const expected = Buffer.from(record.codeHash, "base64url");
+    const received = Buffer.from(
+      this.hashManualVerificationCode(code, record.codeSalt),
+      "base64url"
+    );
+
+    if (
+      expected.length !== received.length ||
+      !timingSafeEqual(expected, received)
+    ) {
+      record.failedAttempts += 1;
+
+      if (record.failedAttempts >= MAX_VERIFICATION_FAILURES) {
+        record.lockedAt = new Date().toISOString();
+        this.activeManualVerificationGrantIds.delete(challengeKey);
+        this.clearManualVerificationSecret(record);
+        this.logManualVerificationTransition(
+          record,
+          "lock-manual-verification-code"
+        );
+      } else {
+        this.logManualVerificationTransition(
+          record,
+          "fail-manual-verification-code"
+        );
+      }
+      this.persist();
+      return result;
+    }
+
+    record.consumedAt = new Date().toISOString();
+    this.activeManualVerificationGrantIds.delete(challengeKey);
+    this.clearManualVerificationSecret(record);
+    this.logManualVerificationTransition(
+      record,
+      "consume-manual-verification-code"
+    );
+    this.persist();
+
+    return {
+      ...result,
+      verified: true
+    };
+  }
+
+  listManualVerificationGrants(tenantId: string) {
+    const changed = this.expireManualVerificationGrants();
+    if (changed) {
+      this.persist();
+    }
+
+    return this.manualVerificationGrants
+      .filter(
+        (record) => record.tenantId === tenantId
+      )
+      .map((record) => structuredClone(record))
+      .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt));
+  }
+
+  revokeManualVerificationGrant(grantId: string, tenantId: string) {
+    const record = this.manualVerificationGrants.find(
+      (entry) =>
+        entry.manualGrantId === grantId &&
+        entry.tenantId === tenantId
+    );
+
+    if (!record) {
+      return undefined;
+    }
+
+    if (this.expireManualVerificationGrant(record)) {
+      this.persist();
+      return undefined;
+    }
+
+    if (this.isManualVerificationGrantTerminal(record)) {
+      return undefined;
+    }
+
+    record.revokedAt = new Date().toISOString();
+    if (
+      this.activeManualVerificationGrantIds.get(record.challengeKey) ===
+      record.manualGrantId
+    ) {
+      this.activeManualVerificationGrantIds.delete(record.challengeKey);
+    }
+    this.clearManualVerificationSecret(record);
+    this.persist();
+    return structuredClone(record);
+  }
+
   getVerificationRecord(phone: string, purpose: VerificationPurpose = "general") {
     return this.verificationCodes.get(this.getVerificationCodeKey(phone, purpose));
   }
@@ -462,6 +671,7 @@ export class InMemoryStoreService {
     return Boolean(
       record &&
       !record.consumedAt &&
+      !record.revokedAt &&
       this.isFutureExpiration(record.expiresAt) &&
       (record.failedAttempts ?? 0) < MAX_VERIFICATION_FAILURES &&
       (!externalProvider || record.externalProvider === externalProvider)
@@ -479,6 +689,7 @@ export class InMemoryStoreService {
       !record ||
       (externalChallengeId && record.externalChallengeId !== externalChallengeId) ||
       record.consumedAt ||
+      record.revokedAt ||
       !this.isFutureExpiration(record.expiresAt)
     ) {
       return false;
@@ -528,7 +739,8 @@ export class InMemoryStoreService {
       token,
       userId: user.id,
       role: user.role,
-      tenantId: mobileAdminTenantCredential?.tenantId,
+      tenantId:
+        mobileAdminTenantCredential?.tenantId ?? this.getUserTenantId(user),
       mobileAdminCredentialUpdatedAt: mobileAdminCredential?.passwordUpdatedAt,
       mobileAdminTenantCredentialUpdatedAt: mobileAdminTenantCredential?.passwordUpdatedAt,
       createdAt: new Date(now).toISOString(),
@@ -560,6 +772,22 @@ export class InMemoryStoreService {
     return tenantId ? this.platformTenants.find((entry) => entry.id === tenantId) : undefined;
   }
 
+  getUserTenantId(user: UserRecord) {
+    if (user.tenantId) {
+      return user.tenantId;
+    }
+
+    const tenantCredential = this.backofficeCredentials.find(
+      (entry) => entry.userId === user.id && entry.role !== "super_admin"
+    );
+
+    return tenantCredential?.tenantId ?? this.getDefaultTenantId();
+  }
+
+  getDeviceTenantId(device: DeviceRecord) {
+    return device.tenantId ?? this.getDefaultTenantId();
+  }
+
   getDefaultTenantId() {
     const currentTenant = this.platformTenants[0];
 
@@ -571,6 +799,7 @@ export class InMemoryStoreService {
   }
 
   createDraftSession(payload: {
+    tenantId: string;
     phone: string;
     requestedRole?: UserRole;
     linkedUserId?: string;
@@ -580,6 +809,7 @@ export class InMemoryStoreService {
     const now = Date.now();
     this.draftSessions.set(token, {
       token,
+      tenantId: payload.tenantId,
       phone: payload.phone,
       requestedRole: payload.requestedRole,
       linkedUserId: payload.linkedUserId,
@@ -636,15 +866,35 @@ export class InMemoryStoreService {
       }
     }
 
-    // 当前业务数据仍是单实例模型。租户级后台会话只有绑定当前实例时才可进入业务域，
-    // 避免未来出现第二租户凭证后，在数据尚未完成租户分区前误读当前实例数据。
+    // 非默认实例目前只开放人员、柜机与后台凭证的安全启动域。会话必须同时满足：
+    // 实例仍存在、凭证仍绑定该实例、权限没有越过启动域；任一条件失效都立即撤销。
     if (
       session.backofficeRole &&
       session.backofficeRole !== "super_admin" &&
       session.tenantId !== this.getDefaultTenantId()
     ) {
-      this.sessions.delete(session.token);
-      return undefined;
+      const credential = this.findBackofficeCredentialByUserId(
+        session.userId,
+        session.backofficeRole
+      );
+      const safeTenantPermissions = new Set<BackofficePermission>(
+        session.backofficeRole === "restocker"
+          ? BACKOFFICE_ROLE_ALLOWED_PERMISSIONS.restocker
+          : BACKOFFICE_TENANT_BOOTSTRAP_PERMISSIONS
+      );
+      const bindingIsValid = Boolean(
+        session.tenantId &&
+          this.findPlatformTenantById(session.tenantId) &&
+          credential?.tenantId === session.tenantId &&
+          this.getBackofficeSessionPermissions(session).every((permission) =>
+            safeTenantPermissions.has(permission)
+          )
+      );
+
+      if (!bindingIsValid) {
+        this.sessions.delete(session.token);
+        return undefined;
+      }
     }
 
     if (!user || user.status !== "active" || user.role !== session.role) {
@@ -704,7 +954,9 @@ export class InMemoryStoreService {
       !user ||
       !credential ||
       !this.isUserValidForBackofficeRole(user, session.backofficeRole) ||
-      credential.tenantId !== session.tenantId
+      (session.backofficeRole === "super_admin"
+        ? credential.tenantId !== undefined
+        : credential.tenantId !== session.tenantId)
     ) {
       this.sessions.delete(session.token);
       return undefined;
@@ -726,14 +978,35 @@ export class InMemoryStoreService {
     const linkedUser = draft?.linkedUserId
       ? this.users.find((entry) => entry.id === draft.linkedUserId)
       : undefined;
+    const linkedApplication = draft?.applicationId
+      ? this.registrationApplications.find(
+          (entry) => entry.id === draft.applicationId
+        )
+      : undefined;
     const linkedUserInvalid = Boolean(
       draft?.linkedUserId &&
       (!linkedUser ||
         linkedUser.status !== "active" ||
+        this.getUserTenantId(linkedUser) !== draft.tenantId ||
         (draft.requestedRole !== undefined && draft.requestedRole !== linkedUser.role))
     );
+    const linkedApplicationInvalid = Boolean(
+      draft?.applicationId &&
+      (!linkedApplication ||
+        (linkedApplication.tenantId ?? this.getDefaultTenantId()) !==
+          draft.tenantId)
+    );
+    const tenantInvalid = Boolean(
+      draft && !this.findPlatformTenantById(draft.tenantId)
+    );
 
-    if (!draft || !this.isFutureExpiration(draft.expiresAt) || linkedUserInvalid) {
+    if (
+      !draft ||
+      !this.isFutureExpiration(draft.expiresAt) ||
+      linkedUserInvalid ||
+      linkedApplicationInvalid ||
+      tenantInvalid
+    ) {
       this.draftSessions.delete(token);
       return undefined;
     }
@@ -827,11 +1100,21 @@ export class InMemoryStoreService {
       return [];
     }
 
+    if (session.backofficeRole === "super_admin") {
+      if (!session.tenantId) {
+        return [...BACKOFFICE_PROVIDER_PERMISSIONS];
+      }
+
+      return session.tenantId === this.getDefaultTenantId()
+        ? [...BACKOFFICE_TENANT_PERMISSIONS]
+        : [...BACKOFFICE_TENANT_BOOTSTRAP_PERMISSIONS];
+    }
+
     return this.getBackofficePermissions(session.userId, session.backofficeRole);
   }
 
-  getBackofficeScope(role: BackofficeRole) {
-    return role === "super_admin" ? "provider" : "tenant";
+  getBackofficeScope(role: BackofficeRole, tenantId?: string) {
+    return role === "super_admin" && !tenantId ? "provider" : "tenant";
   }
 
   isUserValidForBackofficeRole(user: UserRecord, role: BackofficeRole) {
@@ -843,7 +1126,11 @@ export class InMemoryStoreService {
       return user.role === "admin";
     }
 
-    return user.role === "merchant";
+    if (role === "merchant") {
+      return user.role === "merchant";
+    }
+
+    return user.role === "restocker";
   }
 
   isHiddenBackofficeUser(user?: UserRecord) {
@@ -986,8 +1273,121 @@ export class InMemoryStoreService {
     return `${timePart}${randomPart}`;
   }
 
-  private createSecureToken(prefix: "session" | "draft" | "challenge") {
+  private createSecureToken(
+    prefix: "session" | "draft" | "challenge" | "manual-code"
+  ) {
     return `${prefix}_${randomBytes(32).toString("base64url")}`;
+  }
+
+  private hashManualVerificationCode(code: string, salt: string) {
+    return scryptSync(code, salt, 32).toString("base64url");
+  }
+
+  private findActiveManualVerificationGrant(challengeKey: string) {
+    const grantId = this.activeManualVerificationGrantIds.get(challengeKey);
+    if (!grantId) {
+      return undefined;
+    }
+
+    const record = this.manualVerificationGrants.find(
+      (entry) => entry.manualGrantId === grantId
+    );
+    if (!record || this.isManualVerificationGrantTerminal(record)) {
+      this.activeManualVerificationGrantIds.delete(challengeKey);
+      return undefined;
+    }
+
+    return record;
+  }
+
+  private isManualVerificationGrantTerminal(
+    record: ManualVerificationGrantRecord
+  ) {
+    return Boolean(
+      record.consumedAt ||
+        record.revokedAt ||
+        record.lockedAt ||
+        record.expiredAt ||
+        record.supersededAt
+    );
+  }
+
+  private expireManualVerificationGrant(
+    record: ManualVerificationGrantRecord,
+    now = Date.now()
+  ) {
+    if (
+      this.isManualVerificationGrantTerminal(record) ||
+      new Date(record.expiresAt).getTime() > now
+    ) {
+      return false;
+    }
+
+    record.expiredAt = new Date(now).toISOString();
+    if (
+      this.activeManualVerificationGrantIds.get(record.challengeKey) ===
+      record.manualGrantId
+    ) {
+      this.activeManualVerificationGrantIds.delete(record.challengeKey);
+    }
+    this.clearManualVerificationSecret(record);
+    this.logManualVerificationTransition(
+      record,
+      "expire-manual-verification-code"
+    );
+    return true;
+  }
+
+  private expireManualVerificationGrants() {
+    const now = Date.now();
+    return this.manualVerificationGrants.reduce(
+      (changed, record) =>
+        this.expireManualVerificationGrant(record, now) || changed,
+      false
+    );
+  }
+
+  private clearManualVerificationSecret(
+    record: ManualVerificationGrantRecord
+  ) {
+    record.codeSalt = undefined;
+    record.codeHash = undefined;
+  }
+
+  private logManualVerificationTransition(
+    record: ManualVerificationGrantRecord,
+    type: string,
+    metadata?: Record<string, unknown>
+  ) {
+    const targetUser = this.users.find(
+      (entry) => entry.id === record.targetUserId
+    );
+    this.logOperation({
+      category: "admin",
+      type,
+      status:
+        type === "fail-manual-verification-code" ? "warning" : "success",
+      actor: {
+        type: "system",
+        name: "验证码授权服务"
+      },
+      primarySubject: targetUser
+        ? {
+            type: "user",
+            id: targetUser.id,
+            label: targetUser.name
+          }
+        : undefined,
+      metadata: {
+        manualGrantId: record.manualGrantId,
+        tenantId: record.tenantId,
+        purpose: record.purpose,
+        phoneHash: record.phoneHash,
+        failedAttempts: record.failedAttempts,
+        ...metadata,
+        undoState: "not_undoable"
+      }
+    });
   }
 
   private getVerificationCodeKey(phone: string, purpose: VerificationPurpose) {
@@ -1001,11 +1401,11 @@ export class InMemoryStoreService {
     return (
       /^challenge:v1:[a-f0-9]{64}$/.test(key) &&
       record.externalChallenge === true &&
-      (record.externalProvider === "manual" ||
-        record.externalProvider === "aliyun_pnvs") &&
+      record.externalProvider === "aliyun_pnvs" &&
       typeof record.externalChallengeId === "string" &&
       /^challenge_[A-Za-z0-9_-]{43}$/.test(record.externalChallengeId) &&
       record.code === "" &&
+      record.manualGrant !== true &&
       this.isFutureExpiration(record.expiresAt)
     );
   }
@@ -1317,10 +1717,16 @@ export class InMemoryStoreService {
 
     this.users.forEach((user) => {
       if (!user.merchantProfile) {
+        user.assignedDeviceCodes = user.assignedDeviceCodes?.filter(
+          (code) => code !== deviceCode
+        );
         return;
       }
 
       user.merchantProfile.defaultDeviceCodes = user.merchantProfile.defaultDeviceCodes.filter(
+        (code) => code !== deviceCode
+      );
+      user.assignedDeviceCodes = user.assignedDeviceCodes?.filter(
         (code) => code !== deviceCode
       );
     });
@@ -1890,6 +2296,8 @@ export class InMemoryStoreService {
   }
 
   snapshot(): PersistedStoreState {
+    this.expireManualVerificationGrants();
+
     return {
       dataPlane: this.runtimeDataPlane,
       instanceId: this.dataPlaneInstanceId,
@@ -1928,6 +2336,9 @@ export class InMemoryStoreService {
           ([key, record]) =>
             [key, structuredClone(record)] as [string, VerificationRecord]
         ),
+      manualVerificationGrants: structuredClone(
+        this.manualVerificationGrants
+      ),
       sessions: [],
       draftSessions: [],
       adminCredentials: structuredClone(this.adminCredentials),
@@ -2017,6 +2428,30 @@ export class InMemoryStoreService {
     for (const [key, record] of state.verificationCodes) {
       if (this.isPersistableVerificationChallenge(key, record)) {
         this.verificationCodes.set(key, structuredClone(record));
+      }
+    }
+    this.replaceArray(
+      this.manualVerificationGrants,
+      state.manualVerificationGrants
+    );
+    this.activeManualVerificationGrantIds.clear();
+    for (const record of [...this.manualVerificationGrants].sort((left, right) =>
+      right.requestedAt.localeCompare(left.requestedAt)
+    )) {
+      if (
+        this.isManualVerificationGrantTerminal(record) ||
+        !record.codeSalt ||
+        !record.codeHash ||
+        new Date(record.expiresAt).getTime() <= Date.now()
+      ) {
+        continue;
+      }
+
+      if (!this.activeManualVerificationGrantIds.has(record.challengeKey)) {
+        this.activeManualVerificationGrantIds.set(
+          record.challengeKey,
+          record.manualGrantId
+        );
       }
     }
     // Bearer 会话和资料草稿仍不从快照恢复，避免复活旧登录态。

@@ -5,7 +5,8 @@ import type { GoodsCategory } from "@vm/shared-types";
 import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { MerchantGoodsTemplatesService } from "./merchant-goods-templates.service";
@@ -19,15 +20,26 @@ export class MerchantGoodsTemplatesController {
   ) {}
 
   @Get("merchant-goods-templates")
-  @AllowedRoles("merchant", "admin")
+  @AllowedRoles("merchant", "restocker", "admin")
   @AllowedBackofficeSessionPermissions("merchant-workbench:view")
-  list(@Req() request: { authUser?: { id: string; role: "admin" | "merchant" } }) {
+  @TenantScopedBackofficeRoute()
+  list(
+    @Req()
+    request: {
+      authUser?: {
+        id: string;
+        role: "admin" | "merchant" | "restocker";
+        tenantId?: string;
+      };
+    }
+  ) {
     return ok(this.merchantGoodsTemplatesService.list(request.authUser));
   }
 
   @Post("merchant-goods-templates")
   @AllowedRoles("merchant")
   @AllowedBackofficeSessionPermissions("merchant-workbench:manage")
+  @TenantScopedBackofficeRoute()
   create(
     @Body()
     body: {
@@ -44,10 +56,14 @@ export class MerchantGoodsTemplatesController {
       defaultShelfLifeDays: number;
       imageUrl?: string;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
     return ok(
-      this.merchantGoodsTemplatesService.create(request.authUser?.id ?? "", body),
+      this.merchantGoodsTemplatesService.create(
+        request.authUser?.id ?? "",
+        body,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
@@ -55,6 +71,7 @@ export class MerchantGoodsTemplatesController {
   @Patch("merchant-goods-templates/:id")
   @AllowedRoles("merchant")
   @AllowedBackofficeSessionPermissions("merchant-workbench:manage")
+  @TenantScopedBackofficeRoute()
   update(
     @Param("id") id: string,
     @Body()
@@ -73,17 +90,23 @@ export class MerchantGoodsTemplatesController {
       imageUrl?: string;
       status: "active" | "inactive";
     }>,
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
     return ok(
-      this.merchantGoodsTemplatesService.update(request.authUser?.id ?? "", id, body),
+      this.merchantGoodsTemplatesService.update(
+        request.authUser?.id ?? "",
+        id,
+        body,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
 
   @Post("merchant-restocks")
-  @AllowedRoles("merchant", "admin")
+  @AllowedRoles("merchant", "restocker", "admin")
   @AllowedBackofficeSessionPermissions("merchant-workbench:manage")
+  @TenantScopedBackofficeRoute()
   createRestock(
     @Body()
     body: {
@@ -95,18 +118,30 @@ export class MerchantGoodsTemplatesController {
       confirmed?: boolean;
       cabinetEventId?: string;
     },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
     return ok(
-      this.merchantGoodsTemplatesService.createRestock(request.authUser?.id ?? "", body),
+      this.merchantGoodsTemplatesService.createRestock(
+        request.authUser?.id ?? "",
+        body,
+        request.authUser?.tenantId
+      ),
       "操作成功"
     );
   }
 
   @Get("merchant-restock-traces")
-  @AllowedRoles("merchant")
+  @AllowedRoles("merchant", "restocker")
   @AllowedBackofficeSessionPermissions("merchant-workbench:view")
-  traces(@Req() request: { authUser?: { id: string } }) {
-    return ok(this.merchantGoodsTemplatesService.listRestockTraces(request.authUser?.id ?? ""));
+  @TenantScopedBackofficeRoute()
+  traces(
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
+  ) {
+    return ok(
+      this.merchantGoodsTemplatesService.listRestockTraces(
+        request.authUser?.id ?? "",
+        request.authUser?.tenantId
+      )
+    );
   }
 }

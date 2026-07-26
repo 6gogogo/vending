@@ -27,13 +27,23 @@ export class MerchantGoodsTemplatesService {
     @Inject(AlertsService) private readonly alertsService: AlertsService
   ) {}
 
-  list(actor?: { id: string; role: UserRole }) {
-    const storedTemplates =
-      actor?.role === "merchant"
-        ? this.store.merchantGoodsTemplates.filter(
-            (entry) => entry.ownerUserId === actor.id || entry.ownerUserId === "system"
-          )
-        : this.store.merchantGoodsTemplates;
+  list(actor?: { id: string; role: UserRole; tenantId?: string }) {
+    this.assertActorTenant(actor?.id, actor?.tenantId);
+    const storedTemplates = this.store.merchantGoodsTemplates.filter((entry) => {
+      if (actor?.role === "merchant") {
+        return entry.ownerUserId === actor.id || entry.ownerUserId === "system";
+      }
+
+      if (actor?.role === "restocker") {
+        return entry.ownerUserId === "system";
+      }
+
+      if (actor?.role === "admin" && actor.tenantId) {
+        return this.templateBelongsToTenant(entry, actor.tenantId);
+      }
+
+      return true;
+    });
     const templatedGoodsIds = new Set(storedTemplates.map((entry) => entry.goodsId).filter(Boolean));
     const catalogTemplates: MerchantGoodsTemplate[] = this.store.goodsCatalog
       .filter((entry) => entry.status !== "inactive" && !templatedGoodsIds.has(entry.goodsId))
@@ -77,9 +87,10 @@ export class MerchantGoodsTemplatesService {
       defaultQuantity: number;
       defaultShelfLifeDays: number;
       imageUrl?: string;
-    }
+    },
+    actorTenantId?: string
   ) {
-    const owner = this.getMerchant(ownerUserId);
+    const owner = this.getMerchant(ownerUserId, actorTenantId);
     const normalized = this.normalizeTemplatePayload(payload);
     const now = new Date().toISOString();
     const created: MerchantGoodsTemplate = {
@@ -137,9 +148,10 @@ export class MerchantGoodsTemplatesService {
       defaultShelfLifeDays: number;
       imageUrl?: string;
       status: "active" | "inactive";
-    }>
+    }>,
+    actorTenantId?: string
   ) {
-    const owner = this.getMerchant(ownerUserId);
+    const owner = this.getMerchant(ownerUserId, actorTenantId);
     const normalized = this.normalizeTemplatePatch(payload);
     // 先校验补丁，再按需从公共目录创建商户模板，避免失败请求留下空壳模板。
     const template = this.findOrCreateTemplateFromCatalog(ownerUserId, templateId);
@@ -185,14 +197,22 @@ export class MerchantGoodsTemplatesService {
       note?: string;
       confirmed?: boolean;
       cabinetEventId?: string;
-    }
+    },
+    actorTenantId?: string
   ) {
     if (payload.confirmed !== true) {
       throw new BadRequestException("补货登记前需要先确认补货明细。");
     }
 
-    const owner = this.getRestockActor(ownerUserId);
-    const template = this.findTemplateForActor(owner.id, owner.role, payload.templateId);
+    const owner = this.getRestockActor(ownerUserId, actorTenantId);
+    const effectiveTenantId =
+      actorTenantId ?? this.store.getUserTenantId(owner);
+    const template = this.findTemplateForActor(
+      owner.id,
+      owner.role,
+      payload.templateId,
+      effectiveTenantId
+    );
 
     if (template.status !== "active") {
       throw new BadRequestException("当前货品模板已停用。");
@@ -208,6 +228,19 @@ export class MerchantGoodsTemplatesService {
 
     if (!device) {
       throw new NotFoundException("未找到对应柜机。");
+    }
+
+    if (this.store.getDeviceTenantId(device) !== effectiveTenantId) {
+      throw new NotFoundException("未找到对应柜机。");
+    }
+
+    if (owner.role !== "admin") {
+      const assignedDeviceCodes =
+        owner.assignedDeviceCodes ?? owner.merchantProfile?.defaultDeviceCodes ?? [];
+
+      if (!assignedDeviceCodes.includes(device.deviceCode)) {
+        throw new ForbiddenException("当前账号未被分配该柜机。");
+      }
     }
 
     const cabinetEventId = payload.cabinetEventId?.trim();
@@ -329,7 +362,7 @@ export class MerchantGoodsTemplatesService {
         type: "merchant-restock-template",
         status: "success",
         actor: {
-          type: owner.role === "admin" ? "admin" : "merchant",
+          type: owner.role,
           id: owner.id,
           name: owner.name,
           role: owner.role
@@ -368,7 +401,12 @@ export class MerchantGoodsTemplatesService {
 
       this.alertsService.create({
         type: "expiry",
-        title: owner.role === "admin" ? "管理员入柜批次待到期跟进" : "商家补货批次待到期跟进",
+        title:
+          owner.role === "admin"
+            ? "管理员入柜批次待到期跟进"
+            : owner.role === "restocker"
+              ? "补货员入柜批次待到期跟进"
+              : "商家补货批次待到期跟进",
         deviceCode: device.deviceCode,
         targetUserId: owner.id,
         goodsId: goods.goodsId,
@@ -400,8 +438,8 @@ export class MerchantGoodsTemplatesService {
     }
   }
 
-  listRestockTraces(ownerUserId: string) {
-    this.getMerchant(ownerUserId);
+  listRestockTraces(ownerUserId: string, actorTenantId?: string) {
+    this.getStockOperator(ownerUserId, actorTenantId);
     const batches = this.store.goodsBatches
       .filter((entry) => entry.sourceUserId === ownerUserId)
       .slice()
@@ -566,11 +604,23 @@ export class MerchantGoodsTemplatesService {
     return this.mapCatalogItemToTemplate(catalogItem);
   }
 
-  private findTemplateForActor(ownerUserId: string, role: UserRole, templateId: string) {
+  private findTemplateForActor(
+    ownerUserId: string,
+    role: UserRole,
+    templateId: string,
+    actorTenantId?: string
+  ) {
     const template = this.store.merchantGoodsTemplates.find((entry) => entry.id === templateId);
 
     if (template) {
-      if (role !== "admin" && template.ownerUserId !== ownerUserId && template.ownerUserId !== "system") {
+      const canUseTemplate =
+        (role === "admin" &&
+          (!actorTenantId ||
+            this.templateBelongsToTenant(template, actorTenantId))) ||
+        template.ownerUserId === "system" ||
+        (role === "merchant" && template.ownerUserId === ownerUserId);
+
+      if (!canUseTemplate) {
         throw new ForbiddenException("不能使用其他商家的常用商品模板。");
       }
 
@@ -803,22 +853,41 @@ export class MerchantGoodsTemplatesService {
     return patch;
   }
 
-  private getRestockActor(ownerUserId: string) {
+  private getRestockActor(ownerUserId: string, actorTenantId?: string) {
     const actor = this.store.users.find(
       (entry) =>
         entry.id === ownerUserId &&
         entry.status === "active" &&
-        (entry.role === "merchant" || entry.role === "admin")
+        (entry.role === "merchant" ||
+          entry.role === "restocker" ||
+          entry.role === "admin")
     );
 
     if (!actor) {
       throw new ForbiddenException("当前账号不能提交入柜登记。");
     }
 
+    this.assertActorTenant(actor.id, actorTenantId);
     return actor;
   }
 
-  private getMerchant(ownerUserId: string) {
+  private getStockOperator(ownerUserId: string, actorTenantId?: string) {
+    const operator = this.store.users.find(
+      (entry) =>
+        entry.id === ownerUserId &&
+        entry.status === "active" &&
+        (entry.role === "merchant" || entry.role === "restocker")
+    );
+
+    if (!operator) {
+      throw new ForbiddenException("当前账号不能查看补货追溯。");
+    }
+
+    this.assertActorTenant(operator.id, actorTenantId);
+    return operator;
+  }
+
+  private getMerchant(ownerUserId: string, actorTenantId?: string) {
     const merchant = this.store.users.find(
       (entry) => entry.id === ownerUserId && entry.role === "merchant" && entry.status === "active"
     );
@@ -827,6 +896,32 @@ export class MerchantGoodsTemplatesService {
       throw new ForbiddenException("当前账号不是商家。");
     }
 
+    this.assertActorTenant(merchant.id, actorTenantId);
     return merchant;
+  }
+
+  private assertActorTenant(userId?: string, actorTenantId?: string) {
+    if (!userId || !actorTenantId) {
+      return;
+    }
+
+    const user = this.store.users.find((entry) => entry.id === userId);
+    if (!user || this.store.getUserTenantId(user) !== actorTenantId) {
+      throw new ForbiddenException("当前账号不属于该实例。");
+    }
+  }
+
+  private templateBelongsToTenant(
+    template: MerchantGoodsTemplate,
+    tenantId: string
+  ) {
+    if (template.ownerUserId === "system") {
+      return true;
+    }
+
+    const owner = this.store.users.find(
+      (entry) => entry.id === template.ownerUserId
+    );
+    return Boolean(owner && this.store.getUserTenantId(owner) === tenantId);
   }
 }

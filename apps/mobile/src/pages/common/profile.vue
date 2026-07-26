@@ -30,11 +30,13 @@ const role = computed<UserRole>(() => sessionStore.draft?.requestedRole ?? "spec
 const titleMap: Record<UserRole, string> = {
   special: "完善用户资料",
   merchant: "完善商家资料",
+  restocker: "完善补货员资料",
   admin: "完善管理员资料"
 };
 const subtitleMap: Record<UserRole, string> = {
   special: "提交后如手机号已预录入可直接通过，否则进入人工审核。",
   merchant: "请补充商家联系人和经营地址，便于补货与追踪去向。",
+  restocker: "补货员账号由实例管理员建立并分配柜机。",
   admin: "管理员申请需要由现有管理员审核后才能启用高权限。"
 };
 

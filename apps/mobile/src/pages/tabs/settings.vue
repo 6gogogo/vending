@@ -10,7 +10,10 @@ import MobileShell from "../../layouts/MobileShell.vue";
 import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
-import { syncRoleTabBar } from "../../utils/role-routing";
+import {
+  isStockOperatorRole,
+  syncRoleTabBar
+} from "../../utils/role-routing";
 import { getSupportGuideTopics } from "../../utils/support-guides";
 import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 
@@ -25,7 +28,7 @@ const subtitle = computed(() => {
     return "可查看账号信息、提交反馈，并在需要时退出登录。";
   }
 
-  if (sessionStore.user?.role === "merchant") {
+  if (isStockOperatorRole(sessionStore.user?.role)) {
     return "可查看账号信息、提交反馈，并在需要时退出登录。";
   }
 
@@ -115,7 +118,17 @@ onShow(() => {
         <view class="info-list">
           <view class="info-item">
             <text class="info-item__label">服务入口</text>
-            <text class="info-item__value">{{ sessionStore.user?.role === "merchant" ? "商家补货" : sessionStore.user?.role === "admin" ? "运营管理" : "用户服务" }}</text>
+            <text class="info-item__value">
+              {{
+                sessionStore.user?.role === "merchant"
+                  ? "商家补货"
+                  : sessionStore.user?.role === "restocker"
+                    ? "柜机补货"
+                    : sessionStore.user?.role === "admin"
+                      ? "运营管理"
+                      : "用户服务"
+              }}
+            </text>
           </view>
           <view class="info-item">
             <text class="info-item__label">账号状态</text>

@@ -11,7 +11,8 @@ import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { OperationLogsService } from "./operation-logs.service";
@@ -24,6 +25,7 @@ export class OperationLogsController {
 
   @Get()
   @AllowedBackofficeSessionPermissions("operation-logs:view")
+  @TenantScopedBackofficeRoute()
   list(
     @Query("category") category?: OperationLogCategory,
     @Query("status") status?: OperationLogStatus,
@@ -31,7 +33,10 @@ export class OperationLogsController {
     @Query("subjectId") subjectId?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
-    @Req() request?: { authUser?: { backofficeRole?: BackofficeRole } }
+    @Req()
+    request?: {
+      authUser?: { backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
     return ok(
       this.operationLogsService.list({
@@ -41,12 +46,13 @@ export class OperationLogsController {
         subjectId,
         dateFrom,
         dateTo
-      }, request?.authUser?.backofficeRole)
+      }, request?.authUser?.backofficeRole, request?.authUser?.tenantId)
     );
   }
 
   @Get("export/file")
   @AllowedBackofficePermissions("operation-logs:export")
+  @TenantScopedBackofficeRoute()
   export(
     @Res()
     response: {
@@ -59,7 +65,10 @@ export class OperationLogsController {
     @Query("subjectId") subjectId?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
-    @Req() request?: { authUser?: { backofficeRole?: BackofficeRole } }
+    @Req()
+    request?: {
+      authUser?: { backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
     const file = this.operationLogsService.buildExport({
       category,
@@ -68,7 +77,7 @@ export class OperationLogsController {
       subjectId,
       dateFrom,
       dateTo
-    }, request?.authUser?.backofficeRole);
+    }, request?.authUser?.backofficeRole, request?.authUser?.tenantId);
     response.setHeader("Content-Type", file.contentType);
     response.setHeader("Content-Disposition", `attachment; filename=\"${file.filename}\"`);
     response.send(file.body);
@@ -108,21 +117,44 @@ export class OperationLogsController {
 
   @Get(":id")
   @AllowedBackofficeSessionPermissions("operation-logs:view")
+  @TenantScopedBackofficeRoute()
   detail(
     @Param("id") id: string,
-    @Req() request: { authUser?: { backofficeRole?: BackofficeRole } }
+    @Req()
+    request: {
+      authUser?: { backofficeRole?: BackofficeRole; tenantId?: string };
+    }
   ) {
-    return ok(this.operationLogsService.detail(id, request.authUser?.backofficeRole));
+    return ok(
+      this.operationLogsService.detail(
+        id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      )
+    );
   }
 
   @Post(":id/undo")
   @AllowedBackofficeSessionPermissions("operation-logs:undo")
+  @TenantScopedBackofficeRoute()
   undo(
     @Param("id") id: string,
-    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+    @Req()
+    request: {
+      authUser?: {
+        id: string;
+        backofficeRole?: BackofficeRole;
+        tenantId?: string;
+      };
+    }
   ) {
     return ok(
-      this.operationLogsService.undo(id, request.authUser?.id, request.authUser?.backofficeRole),
+      this.operationLogsService.undo(
+        id,
+        request.authUser?.id,
+        request.authUser?.backofficeRole,
+        request.authUser?.tenantId
+      ),
       "撤销已记录。"
     );
   }

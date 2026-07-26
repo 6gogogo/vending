@@ -283,7 +283,7 @@ router.beforeEach(async (to) => {
           token: string;
           user: {
             id: string;
-            role: "admin" | "merchant";
+            role: "admin" | "merchant" | "restocker";
             backofficeRole: BackofficeRole;
             scope: BackofficeScope;
             tenantId?: string;
