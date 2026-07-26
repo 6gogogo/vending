@@ -51,6 +51,7 @@ import { isFullSimulationProfile } from "../config/full-simulation-mode";
 import { runWithFinancialWriterFence } from "../coordination/financial-writer-fence";
 
 export type VerificationPurpose = "app-login" | "register" | "general" | "password-reset";
+export type ExternalVerificationProvider = "manual" | "aliyun_pnvs";
 export type PersistedDataPlaneInitializationSource =
   | "simulation-seed"
   | "simulation-empty"
@@ -67,6 +68,8 @@ export interface VerificationRecord {
   failedAttempts?: number;
   consumedAt?: string;
   externalChallenge?: boolean;
+  externalProvider?: ExternalVerificationProvider;
+  externalChallengeId?: string;
 }
 
 export interface SessionRecord {

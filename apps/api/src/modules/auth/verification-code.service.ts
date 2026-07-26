@@ -71,7 +71,11 @@ export class VerificationCodeService {
 
     if (provider === "aliyun_pnvs") {
       await this.requestAliyunPnvsCode(normalizedPhone, normalizedPurpose);
-      this.store.rememberVerificationRequest(normalizedPhone, normalizedPurpose);
+      this.store.rememberVerificationRequest(
+        normalizedPhone,
+        normalizedPurpose,
+        "aliyun_pnvs"
+      );
       return {
         phone: normalizedPhone,
         expiresInSeconds: 300,
@@ -80,7 +84,7 @@ export class VerificationCodeService {
     }
 
     if (provider === "manual") {
-      this.store.rememberVerificationRequest(normalizedPhone, normalizedPurpose);
+      this.store.rememberVerificationRequest(normalizedPhone, normalizedPurpose, "manual");
       return {
         phone: normalizedPhone,
         expiresInSeconds: 300,
@@ -109,7 +113,12 @@ export class VerificationCodeService {
     const provider = this.getProvider();
 
     if (provider === "aliyun_pnvs") {
-      if (!this.store.canAttemptVerification(normalizedPhone, normalizedPurpose)) {
+      const externalChallengeId = this.store.getExternalVerificationChallengeId(
+        normalizedPhone,
+        normalizedPurpose,
+        "aliyun_pnvs"
+      );
+      if (!externalChallengeId) {
         return false;
       }
 
@@ -120,24 +129,45 @@ export class VerificationCodeService {
       );
 
       if (!verified) {
-        this.store.recordVerificationFailure(normalizedPhone, normalizedPurpose);
+        this.store.recordVerificationFailure(
+          normalizedPhone,
+          normalizedPurpose,
+          externalChallengeId
+        );
         return false;
       }
 
       // 本地挑战先绑定本应用发码，再以上游 PASS 和单次消费共同决定结果。
-      return this.store.consumeVerificationRequest(normalizedPhone, normalizedPurpose);
+      return this.store.consumeVerificationRequest(
+        normalizedPhone,
+        normalizedPurpose,
+        externalChallengeId
+      );
     }
 
     if (provider === "manual") {
-      if (!this.store.canAttemptVerification(normalizedPhone, normalizedPurpose)) {
+      const externalChallengeId = this.store.getExternalVerificationChallengeId(
+        normalizedPhone,
+        normalizedPurpose,
+        "manual"
+      );
+      if (!externalChallengeId) {
         return false;
       }
 
       if (this.matchesManualVerificationCode(normalizedCode)) {
-        return this.store.consumeVerificationRequest(normalizedPhone, normalizedPurpose);
+        return this.store.consumeVerificationRequest(
+          normalizedPhone,
+          normalizedPurpose,
+          externalChallengeId
+        );
       }
 
-      this.store.recordVerificationFailure(normalizedPhone, normalizedPurpose);
+      this.store.recordVerificationFailure(
+        normalizedPhone,
+        normalizedPurpose,
+        externalChallengeId
+      );
       return false;
     }
 

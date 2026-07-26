@@ -52,6 +52,7 @@ import {
   type AdminCredentialRecord,
   type BackofficeCredentialRecord,
   type DraftSessionRecord,
+  type ExternalVerificationProvider,
   isControlledLiveBootstrapProcess,
   type PersistedStoreState,
   type SessionRecord,
@@ -392,7 +393,11 @@ export class InMemoryStoreService {
     return code;
   }
 
-  rememberVerificationRequest(phone: string, purpose: VerificationPurpose = "general") {
+  rememberVerificationRequest(
+    phone: string,
+    purpose: VerificationPurpose,
+    externalProvider: ExternalVerificationProvider
+  ) {
     const now = Date.now();
     const key = this.getVerificationCodeKey(phone, purpose);
 
@@ -400,6 +405,8 @@ export class InMemoryStoreService {
       code: "",
       purpose,
       externalChallenge: true,
+      externalProvider,
+      externalChallengeId: this.createSecureToken("challenge"),
       expiresAt: new Date(now + 5 * 60_000).toISOString(),
       requestedAt: new Date(now).toISOString(),
       resendAvailableAt: new Date(now + 60_000).toISOString(),
@@ -410,6 +417,24 @@ export class InMemoryStoreService {
 
   getVerificationRecord(phone: string, purpose: VerificationPurpose = "general") {
     return this.verificationCodes.get(this.getVerificationCodeKey(phone, purpose));
+  }
+
+  getExternalVerificationChallengeId(
+    phone: string,
+    purpose: VerificationPurpose,
+    externalProvider: ExternalVerificationProvider
+  ) {
+    const record = this.getVerificationRecord(phone, purpose);
+
+    if (
+      record?.externalChallenge !== true ||
+      !record?.externalChallengeId ||
+      !this.canAttemptVerification(phone, purpose, externalProvider)
+    ) {
+      return undefined;
+    }
+
+    return record.externalChallengeId;
   }
 
   verifyCode(phone: string, code: string, purpose: VerificationPurpose = "general") {
@@ -427,21 +452,35 @@ export class InMemoryStoreService {
     return this.consumeVerificationRequest(phone, purpose);
   }
 
-  canAttemptVerification(phone: string, purpose: VerificationPurpose = "general") {
+  canAttemptVerification(
+    phone: string,
+    purpose: VerificationPurpose = "general",
+    externalProvider?: ExternalVerificationProvider
+  ) {
     const record = this.getVerificationRecord(phone, purpose);
 
     return Boolean(
       record &&
       !record.consumedAt &&
       this.isFutureExpiration(record.expiresAt) &&
-      (record.failedAttempts ?? 0) < MAX_VERIFICATION_FAILURES
+      (record.failedAttempts ?? 0) < MAX_VERIFICATION_FAILURES &&
+      (!externalProvider || record.externalProvider === externalProvider)
     );
   }
 
-  recordVerificationFailure(phone: string, purpose: VerificationPurpose = "general") {
+  recordVerificationFailure(
+    phone: string,
+    purpose: VerificationPurpose = "general",
+    externalChallengeId?: string
+  ) {
     const record = this.getVerificationRecord(phone, purpose);
 
-    if (!record || record.consumedAt || !this.isFutureExpiration(record.expiresAt)) {
+    if (
+      !record ||
+      (externalChallengeId && record.externalChallengeId !== externalChallengeId) ||
+      record.consumedAt ||
+      !this.isFutureExpiration(record.expiresAt)
+    ) {
       return false;
     }
 
@@ -455,10 +494,18 @@ export class InMemoryStoreService {
     return true;
   }
 
-  consumeVerificationRequest(phone: string, purpose: VerificationPurpose = "general") {
+  consumeVerificationRequest(
+    phone: string,
+    purpose: VerificationPurpose = "general",
+    externalChallengeId?: string
+  ) {
     const record = this.getVerificationRecord(phone, purpose);
 
-    if (!record || !this.canAttemptVerification(phone, purpose)) {
+    if (
+      !record ||
+      (externalChallengeId && record.externalChallengeId !== externalChallengeId) ||
+      !this.canAttemptVerification(phone, purpose)
+    ) {
       return false;
     }
 
@@ -939,7 +986,7 @@ export class InMemoryStoreService {
     return `${timePart}${randomPart}`;
   }
 
-  private createSecureToken(prefix: "session" | "draft") {
+  private createSecureToken(prefix: "session" | "draft" | "challenge") {
     return `${prefix}_${randomBytes(32).toString("base64url")}`;
   }
 
@@ -954,6 +1001,10 @@ export class InMemoryStoreService {
     return (
       /^challenge:v1:[a-f0-9]{64}$/.test(key) &&
       record.externalChallenge === true &&
+      (record.externalProvider === "manual" ||
+        record.externalProvider === "aliyun_pnvs") &&
+      typeof record.externalChallengeId === "string" &&
+      /^challenge_[A-Za-z0-9_-]{43}$/.test(record.externalChallengeId) &&
       record.code === "" &&
       this.isFutureExpiration(record.expiresAt)
     );

@@ -738,6 +738,125 @@ test("全真模拟可使用手动设置的验证码，且仍受一次性校验�
   assert.equal(await service.verifyCode("13812345684", "246810", "app-login"), false);
 });
 
+test("PNVS 只校验由本应用 PNVS 发码创建的挑战", async () => {
+  const store = createIsolatedStore();
+  const phone = "13812345685";
+  const manualService = new VerificationCodeService(
+    {
+      get: (key: string) =>
+        ({
+          VM_DATA_PLANE: "simulation",
+          VM_SIMULATION_PROFILE: "full",
+          VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
+          VERIFICATION_CODE_PROVIDER: "mock",
+          VERIFICATION_CODE_MANUAL_VALUE: "246810"
+        })[key]
+    } as never,
+    store
+  );
+
+  await manualService.requestCode(phone, "app-login");
+
+  const pnvsService = new VerificationCodeService(
+    {
+      get: (key: string) =>
+        ({
+          VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
+          ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key",
+          ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-secret"
+        })[key]
+    } as never,
+    store
+  );
+  let checkCalls = 0;
+  (
+    pnvsService as unknown as {
+      createAliyunPnvsClient: () => {
+        checkSmsVerifyCode: () => Promise<unknown>;
+      };
+    }
+  ).createAliyunPnvsClient = () => ({
+    checkSmsVerifyCode: async () => {
+      checkCalls += 1;
+      return {
+        body: { code: "OK", success: true, model: { verifyResult: "PASS" } }
+      };
+    }
+  });
+
+  assert.equal(await pnvsService.verifyCode(phone, "123456", "app-login"), false);
+  assert.equal(checkCalls, 0);
+});
+
+test("PNVS 旧校验结果不能授权或消费重新发送的新挑战", async () => {
+  const store = createIsolatedStore();
+  const phone = "13812345686";
+  let now = Date.now();
+  const originalDateNow = Date.now;
+  Date.now = () => now;
+
+  try {
+    const service = new VerificationCodeService(
+      {
+        get: (key: string) =>
+          ({
+            VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
+            ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key",
+            ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-secret",
+            ALIYUN_PNVS_SIGN_NAME: "test-sign",
+            ALIYUN_PNVS_TEMPLATE_CODE: "test-template"
+          })[key]
+      } as never,
+      store
+    );
+    let checkCalls = 0;
+    let markFirstCheckStarted!: () => void;
+    const firstCheckStarted = new Promise<void>((resolve) => {
+      markFirstCheckStarted = resolve;
+    });
+    let resolveFirstCheck!: (response: unknown) => void;
+    const firstCheckResponse = new Promise<unknown>((resolve) => {
+      resolveFirstCheck = resolve;
+    });
+    (
+      service as unknown as {
+        createAliyunPnvsClient: () => {
+          sendSmsVerifyCode: () => Promise<unknown>;
+          checkSmsVerifyCode: () => Promise<unknown>;
+        };
+      }
+    ).createAliyunPnvsClient = () => ({
+      sendSmsVerifyCode: async () => ({ body: { code: "OK", success: true } }),
+      checkSmsVerifyCode: async () => {
+        checkCalls += 1;
+        if (checkCalls === 1) {
+          markFirstCheckStarted();
+          return firstCheckResponse;
+        }
+        return {
+          body: { code: "OK", success: true, model: { verifyResult: "PASS" } }
+        };
+      }
+    });
+
+    await service.requestCode(phone, "app-login");
+    const firstVerification = service.verifyCode(phone, "123456", "app-login");
+    await firstCheckStarted;
+
+    now += 61_000;
+    await service.requestCode(phone, "app-login");
+    resolveFirstCheck({
+      body: { code: "OK", success: true, model: { verifyResult: "PASS" } }
+    });
+
+    assert.equal(await firstVerification, false);
+    assert.equal(await service.verifyCode(phone, "654321", "app-login"), true);
+    assert.equal(checkCalls, 2);
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
 test("真实短信校验并发返回成功时，也只有一次能消费本地验证码状态", async () => {
   const store = createIsolatedStore();
   process.env.NODE_ENV = "test";
@@ -751,7 +870,7 @@ test("真实短信校验并发返回成功时，也只有一次能消费本地�
     store
   );
   const phone = "13812345684";
-  store.rememberVerificationRequest(phone, "app-login");
+  store.rememberVerificationRequest(phone, "app-login", "aliyun_pnvs");
   (service as unknown as { verifyAliyunPnvsCode: () => Promise<boolean> }).verifyAliyunPnvsCode =
     async () => true;
 
@@ -985,11 +1104,29 @@ test("真实 PNVS 挑战在 API 重启后仍可校验，并在未登记时进入
 
   const persistedText = readFileSync(process.env.API_DATA_FILE, "utf8");
   const persistedState = JSON.parse(persistedText) as {
-    verificationCodes: Array<[string, { code?: string; externalChallenge?: boolean }]>;
+    verificationCodes: Array<
+      [
+        string,
+        {
+          code?: string;
+          externalChallenge?: boolean;
+          externalProvider?: string;
+          externalChallengeId?: string;
+        }
+      ]
+    >;
   };
   assert.equal(persistedState.verificationCodes.length, 1);
   assert.match(persistedState.verificationCodes[0][0], /^challenge:v1:[a-f0-9]{64}$/);
   assert.equal(persistedState.verificationCodes[0][1].externalChallenge, true);
+  assert.equal(
+    persistedState.verificationCodes[0][1].externalProvider,
+    "aliyun_pnvs"
+  );
+  assert.match(
+    persistedState.verificationCodes[0][1].externalChallengeId ?? "",
+    /^challenge_[A-Za-z0-9_-]{43}$/
+  );
   assert.equal(persistedState.verificationCodes[0][1].code, "");
   assert.doesNotMatch(persistedText, new RegExp(`${phone}|${code}`));
 
