@@ -256,6 +256,33 @@ test("全真模拟启用真实 PNVS 时必须在保存或启动前发现缺失�
   );
 });
 
+test("真实 PNVS 可留空方案名称并使用阿里云默认方案", () => {
+  const requiredPnvsSettings = {
+    ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key-id",
+    ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-key-secret",
+    ALIYUN_PNVS_SIGN_NAME: "test-sign-name",
+    ALIYUN_PNVS_TEMPLATE_CODE: "test-template-code"
+  };
+
+  assert.doesNotThrow(() =>
+    assertRuntimeDataPlaneExternalIntegrationPolicy({
+      ...fullSimulationSettings,
+      VM_FULL_SIMULATION_VERIFICATION_MODE: "real",
+      VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+      ...requiredPnvsSettings
+    })
+  );
+  assert.doesNotThrow(() =>
+    assertRuntimeDataPlaneExternalIntegrationPolicy({
+      ...liveSettings,
+      ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: undefined,
+      ALIYUN_PNVS_SCHEME_NAME_REGISTER: undefined,
+      ALIYUN_PNVS_SCHEME_NAME_GENERAL: undefined,
+      ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: undefined
+    })
+  );
+});
+
 test("全真模拟启用真实地图时必须成组配置 Web Key 与安全密钥", () => {
   assert.throws(
     () =>

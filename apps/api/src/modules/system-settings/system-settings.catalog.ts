@@ -631,27 +631,23 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: {
     label: "PNVS 小程序登录方案",
-    description: "只用于 app-login；发送与核验必须使用同一方案名称。",
-    inputType: "text",
-    required: true
+    description: "可选；留空使用阿里云默认方案。填写时只用于 app-login，发送与核验必须一致。",
+    inputType: "text"
   },
   ALIYUN_PNVS_SCHEME_NAME_REGISTER: {
     label: "PNVS 注册方案",
-    description: "只用于 register；不得与登录或通用验证码共用。",
-    inputType: "text",
-    required: true
+    description: "可选；留空使用阿里云默认方案。填写时只用于 register。",
+    inputType: "text"
   },
   ALIYUN_PNVS_SCHEME_NAME_GENERAL: {
     label: "PNVS 通用登录方案",
-    description: "只用于 general；发送与核验必须使用同一方案名称。",
-    inputType: "text",
-    required: true
+    description: "可选；留空使用阿里云默认方案。填写时只用于 general，发送与核验必须一致。",
+    inputType: "text"
   },
   ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: {
     label: "PNVS 本人密码重置方案",
-    description: "只用于 password-reset；发送与核验必须使用同一方案名称。",
-    inputType: "text",
-    required: true
+    description: "可选；留空使用阿里云默认方案。填写时只用于 password-reset，发送与核验必须一致。",
+    inputType: "text"
   }
 };
 

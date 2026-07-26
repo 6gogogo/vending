@@ -353,10 +353,11 @@ export class VerificationCodeService {
 
   private async requestAliyunPnvsCode(phone: string, purpose: VerificationPurpose) {
     try {
+      const schemeName = this.getAliyunPnvsSchemeName(purpose);
       const request = new SendSmsVerifyCodeRequest({
         phoneNumber: phone,
         countryCode: "86",
-        schemeName: this.getAliyunPnvsSchemeName(purpose),
+        ...(schemeName ? { schemeName } : {}),
         signName: this.requireAliyunPnvsConfig("ALIYUN_PNVS_SIGN_NAME"),
         templateCode: this.requireAliyunPnvsConfig("ALIYUN_PNVS_TEMPLATE_CODE"),
         templateParam: JSON.stringify({ code: "##code##" }),
@@ -387,10 +388,11 @@ export class VerificationCodeService {
     purpose: VerificationPurpose
   ) {
     try {
+      const schemeName = this.getAliyunPnvsSchemeName(purpose);
       const request = new CheckSmsVerifyCodeRequest({
         phoneNumber: phone,
         countryCode: "86",
-        schemeName: this.getAliyunPnvsSchemeName(purpose),
+        ...(schemeName ? { schemeName } : {}),
         verifyCode: code
       });
       const response = await this.createAliyunPnvsClient().checkSmsVerifyCode(request);
@@ -413,7 +415,7 @@ export class VerificationCodeService {
           : purpose === "password-reset"
             ? "ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET"
             : "ALIYUN_PNVS_SCHEME_NAME_GENERAL";
-    return this.requireAliyunPnvsConfig(key);
+    return this.configService.get<string>(key)?.trim() || undefined;
   }
 
   private requireAliyunPnvsConfig(key: string) {

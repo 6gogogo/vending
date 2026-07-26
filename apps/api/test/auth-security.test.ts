@@ -823,6 +823,56 @@ test("阿里云 PNVS 按用途隔离发送和核验方案，且绝不返回真�
   );
 });
 
+test("阿里云 PNVS 未配置方案名称时发送和核验都使用默认方案", async () => {
+  const store = createIsolatedStore();
+  const requests: Array<{ type: "send" | "check"; request: Record<string, unknown> }> = [];
+  const service = new VerificationCodeService(
+    {
+      get: (key: string) =>
+        ({
+          VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
+          ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key",
+          ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-secret",
+          ALIYUN_PNVS_SIGN_NAME: "test-sign",
+          ALIYUN_PNVS_TEMPLATE_CODE: "test-template"
+        })[key]
+    } as never,
+    store
+  );
+  (
+    service as unknown as {
+      createAliyunPnvsClient: () => {
+        sendSmsVerifyCode: (request: Record<string, unknown>) => Promise<unknown>;
+        checkSmsVerifyCode: (request: Record<string, unknown>) => Promise<unknown>;
+      };
+    }
+  ).createAliyunPnvsClient = () => ({
+    sendSmsVerifyCode: async (request) => {
+      requests.push({ type: "send", request });
+      return { body: { code: "OK", success: true } };
+    },
+    checkSmsVerifyCode: async (request) => {
+      requests.push({ type: "check", request });
+      return { body: { code: "OK", success: true, model: { verifyResult: "PASS" } } };
+    }
+  });
+
+  const issued = await service.requestCode("13812345686", "app-login");
+  assert.equal(issued.provider, "aliyun_pnvs");
+  assert.equal(issued.previewCode, undefined);
+  assert.equal(await service.verifyCode("13812345686", "123456", "app-login"), true);
+  assert.deepEqual(
+    requests.map(({ type, request }) => ({
+      type,
+      schemeName: request.schemeName
+    })),
+    [
+      { type: "send", schemeName: undefined },
+      { type: "check", schemeName: undefined }
+    ]
+  );
+});
+
 test("同一手机号的发码冷却和验证码按用途隔离", async () => {
   const store = createIsolatedStore();
   const verificationCodes = createVerificationCodeService(store);
