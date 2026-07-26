@@ -253,6 +253,21 @@ export class UsersService {
     tags?: string[];
     quota?: AccessQuota;
   }, actorUserId?: string) {
+    if (
+      payload.role !== "admin" &&
+      payload.role !== "merchant" &&
+      payload.role !== "special"
+    ) {
+      throw new BadRequestException("请选择有效的用户角色。");
+    }
+    if (
+      payload.status !== undefined &&
+      payload.status !== "active" &&
+      payload.status !== "inactive"
+    ) {
+      throw new BadRequestException("请选择有效的用户状态。");
+    }
+
     const region = this.resolveRegion(payload.regionId, payload.regionName ?? payload.neighborhood);
     const created: UserRecord = {
       id: this.store.createId(payload.role),

@@ -110,6 +110,131 @@ test("PATCH /api/users/batch 命中批量接口而不是动态用户参数路由
   }
 });
 
+test("POST /api/users 拒绝未定义角色且不落库", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-user-create-role-"));
+  temporaryDirectories.push(directory);
+  process.env.API_DATA_FILE = join(directory, "store.json");
+  process.env.ENABLE_TEST_DEVICE_BOOTSTRAP = "false";
+  const app = await NestFactory.create(AppModule, { logger: ["error"] });
+  app.setGlobalPrefix("api");
+  await app.listen(0, "127.0.0.1");
+
+  try {
+    const store = app.get(InMemoryStoreService);
+    const actor = store.users.find(
+      (entry) =>
+        entry.role === "admin" &&
+        entry.status === "active" &&
+        !store.isHiddenBackofficeUser(entry)
+    );
+    assert.ok(actor);
+    const token = store.createBackofficeSession(actor, "admin", store.getDefaultTenantId());
+    const beforeUsers = structuredClone(store.users);
+    const beforeLogs = structuredClone(store.logs);
+    const address = app.getHttpServer().address();
+    assert.ok(address && typeof address === "object");
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/users`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        role: "restocker",
+        phone: "19900000000",
+        name: "非法角色测试用户"
+      })
+    });
+    const payload = (await response.json()) as {
+      code?: number;
+      message?: string;
+    };
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.message, "请选择有效的用户角色。");
+    assert.deepEqual(store.users, beforeUsers);
+    assert.deepEqual(store.logs, beforeLogs);
+  } finally {
+    await app.close();
+  }
+});
+
+test("用户创建拒绝未知状态且不落库", () => {
+  const { controller, actor, store } = createFixture();
+  const beforeUsers = structuredClone(store.users);
+  const beforeLogs = structuredClone(store.logs);
+
+  assert.throws(
+    () =>
+      controller.createUser(
+        {
+          role: "special",
+          phone: "19900000000",
+          name: "非法状态测试用户",
+          status: "paused" as never
+        },
+        { authUser: { id: actor.id } }
+      ),
+    (error: unknown) =>
+      error instanceof BadRequestException &&
+      error.message === "请选择有效的用户状态。"
+  );
+
+  assert.deepEqual(store.users, beforeUsers);
+  assert.deepEqual(store.logs, beforeLogs);
+});
+
+test("创建第二个管理员后重启不会重复生成默认后台凭据", () => {
+  const { controller, actor, store } = createFixture();
+
+  controller.createUser(
+    {
+      role: "admin",
+      phone: "19900000001",
+      name: "第二实例管理员",
+      status: "active"
+    },
+    { authUser: { id: actor.id } }
+  );
+  store.persist();
+
+  const reloadedStore = new InMemoryStoreService();
+  const defaultAdminCredentials = reloadedStore.adminCredentials.filter(
+    (entry) => entry.username === "admin"
+  );
+
+  assert.equal(reloadedStore.isPersistedStateIntegrityReady(), true);
+  assert.equal(defaultAdminCredentials.length, 1);
+  assert.equal(defaultAdminCredentials[0]?.userId, actor.id);
+});
+
+test("创建未开通后台账号的第二个商户后重启不会重复生成默认商户凭据", () => {
+  const { controller, actor, store } = createFixture();
+  const defaultMerchant = store.users.find((entry) => entry.id === "merchant-001");
+  assert.ok(defaultMerchant);
+
+  controller.createUser(
+    {
+      role: "merchant",
+      phone: "19900000002",
+      name: "第二测试商户",
+      status: "active"
+    },
+    { authUser: { id: actor.id } }
+  );
+  store.persist();
+
+  const reloadedStore = new InMemoryStoreService();
+  const defaultMerchantCredentials = reloadedStore.backofficeCredentials.filter(
+    (entry) => entry.username === "merchant"
+  );
+
+  assert.equal(reloadedStore.isPersistedStateIntegrityReady(), true);
+  assert.equal(defaultMerchantCredentials.length, 1);
+  assert.equal(defaultMerchantCredentials[0]?.userId, defaultMerchant.id);
+});
+
 test("普通移动管理员更新基础资料时不能夹带角色变更", () => {
   const { controller, actor, target } = createFixture();
 

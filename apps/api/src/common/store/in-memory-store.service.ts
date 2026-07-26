@@ -2104,12 +2104,28 @@ export class InMemoryStoreService {
 
     changed = this.normalizeBackofficeBootstrapCredentials() || changed;
 
-    let adminUser = this.users.find(
-      (entry) =>
-        entry.role === "admin" &&
-        entry.status === "active" &&
-        !this.isHiddenBackofficeUser(entry)
-    );
+    const defaultAdminCredential =
+      this.adminCredentials.find(
+        (entry) => entry.username.trim().toLowerCase() === DEFAULT_ADMIN_USERNAME
+      ) ??
+      this.backofficeCredentials.find(
+        (entry) =>
+          entry.role === "admin" &&
+          entry.username.trim().toLowerCase() === DEFAULT_ADMIN_USERNAME
+      );
+    let adminUser =
+      this.users.find(
+        (entry) =>
+          entry.id === defaultAdminCredential?.userId &&
+          entry.role === "admin" &&
+          !this.isHiddenBackofficeUser(entry)
+      ) ??
+      this.users.find(
+        (entry) =>
+          entry.id === "admin-001" &&
+          entry.role === "admin" &&
+          !this.isHiddenBackofficeUser(entry)
+      );
 
     if (!adminUser) {
       adminUser = {
@@ -2131,7 +2147,20 @@ export class InMemoryStoreService {
       changed = true;
     }
 
-    let merchantUser = this.users.find((entry) => entry.role === "merchant" && entry.status === "active");
+    const defaultMerchantCredential = this.backofficeCredentials.find(
+      (entry) =>
+        entry.role === "merchant" &&
+        entry.username.trim().toLowerCase() === DEFAULT_MERCHANT_USERNAME
+    );
+    let merchantUser =
+      this.users.find(
+        (entry) =>
+          entry.id === defaultMerchantCredential?.userId &&
+          entry.role === "merchant"
+      ) ??
+      this.users.find(
+        (entry) => entry.id === "merchant-001" && entry.role === "merchant"
+      );
 
     if (!merchantUser) {
       merchantUser = {
