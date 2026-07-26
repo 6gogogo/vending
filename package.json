@@ -32,6 +32,7 @@
     "build:mobile:app": "npm run build:app --workspace @vm/mobile",
     "build:mobile:weixin": "npm run build:weixin --workspace @vm/mobile",
     "build:mobile:alipay": "npm run build:alipay --workspace @vm/mobile",
+    "build:public-web": "npm run build --workspace @vm/admin-web && npm run build:h5:deployment --workspace @vm/mobile",
     "sandbox:device": "node sandbox/scripts/query-device-info.mjs",
     "sandbox:ai": "node sandbox/scripts/check-ai.mjs",
     "sandbox:events": "node sandbox/scripts/query-events.mjs",

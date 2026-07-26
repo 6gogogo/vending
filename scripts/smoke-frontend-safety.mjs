@@ -442,6 +442,7 @@ const appLoginSource = readSource("apps/mobile/src/pages/common/app-login.vue");
 const mobileAuthFlowSource = readSource("apps/mobile/src/composables/useAuthFlow.ts");
 const mobileRegisterSource = readSource("apps/mobile/src/pages/common/register.vue");
 const publicWebServerSource = readSource("scripts/serve-public-web.mjs");
+const rootPackageJson = JSON.parse(readSource("package.json"));
 const mobileViteConfigSource = readSource("apps/mobile/vite.config.ts");
 const mobileH5PublicBaseSource = readSource("apps/mobile/src/config/h5-public-base.ts");
 const mobileH5DeploymentBuildSource = readSource("apps/mobile/scripts/build-h5-deployment.mjs");
@@ -466,6 +467,11 @@ assert.match(
   mobileH5DeploymentBuildSource,
   /VITE_SHOW_VERIFICATION_PREVIEW:\s*"false"/,
   "移动 H5 公网部署构建必须显式关闭验证码预览"
+);
+assert.equal(
+  rootPackageJson.scripts["build:public-web"],
+  "npm run build --workspace @vm/admin-web && npm run build:h5:deployment --workspace @vm/mobile",
+  "公网静态构建必须在后台构建后重新生成 /mobile/ 基路径的移动 H5，避免全量构建覆盖发布产物"
 );
 for (const [name, source] of [
   ["应用登录", appLoginSource],
