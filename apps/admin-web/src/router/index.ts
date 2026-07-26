@@ -18,6 +18,7 @@ import GoodsDetailPage from "../pages/GoodsDetailPage.vue";
 import LogsPage from "../pages/LogsPage.vue";
 import LogDetailPage from "../pages/LogDetailPage.vue";
 import MerchantBackofficePage from "../pages/MerchantBackofficePage.vue";
+import MapAcceptancePage from "../pages/MapAcceptancePage.vue";
 import OperationsPage from "../pages/OperationsPage.vue";
 import PlatformOverviewPage from "../pages/PlatformOverviewPage.vue";
 import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
@@ -51,6 +52,13 @@ export const router = createRouter({
     {
       path: "/login",
       component: AdminLoginPage
+    },
+    {
+      path: "/__acceptance/map",
+      component: MapAcceptancePage,
+      meta: {
+        publicAcceptance: true
+      }
     },
     {
       path: "/",
@@ -233,6 +241,10 @@ export const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
+  if (to.path === "/__acceptance/map" && to.meta.publicAcceptance === true) {
+    return true;
+  }
+
   const sessionStore = useAdminSessionStore();
 
   if (to.path === "/login") {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const readSource = (path) => readFileSync(resolve(process.cwd(), path), "utf8");
@@ -92,6 +92,7 @@ assert.match(resultSource, /不要重复发起开柜/, "开门待确认结果必
 const adminDeviceSource = readSource("apps/admin-web/src/pages/DeviceDetailPage.vue");
 const adminAppSource = readSource("apps/admin-web/src/App.vue");
 const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
+const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
 assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
 assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟实例");
 assert.match(adminCopySource, /验收模拟实例/, "管理后台模拟实例文案必须集中维护");
@@ -102,19 +103,36 @@ assert.match(
 );
 const amapLoaderSource = readSource("apps/admin-web/src/utils/amap-loader.ts");
 const amapPickerSource = readSource("apps/admin-web/src/components/AmapLocationPicker.vue");
-const mapAcceptanceSource = readSource("apps/admin-web/public/__acceptance/map/index.html");
-assert.match(mapAcceptanceSource, /<title>公益智助柜地图链路验收<\/title>/, "地图验收页必须使用独立验收标题");
-assert.match(mapAcceptanceSource, /noindex,nofollow/, "地图验收页必须禁止索引");
-assert.match(mapAcceptanceSource, /模拟实例 · 只读地图验收/, "地图验收页必须醒目标明模拟只读边界");
-assert.match(mapAcceptanceSource, /fetch\("\/api\/public-config"\)/, "地图验收页必须先读取公开运行配置");
-assert.match(mapAcceptanceSource, /runtimeDataPlane !== "simulation"/, "地图验收页必须拒绝真实数据平面");
-assert.match(mapAcceptanceSource, /amapRuntimeMode !== "real"/, "地图验收页必须要求真实地图模式");
-assert.match(mapAcceptanceSource, /window\._AMapSecurityConfig = \{ securityJsCode: config\.amapSecurityJsCode \}/, "地图验收页必须在加载脚本前设置高德安全码");
-assert.match(mapAcceptanceSource, /https:\/\/webapi\.amap\.com\/maps\?v=2\.0/, "地图验收页必须走高德 JS 2.0 路径");
-assert.match(mapAcceptanceSource, /AMap\.PlaceSearch\(\{ pageSize: 8, pageIndex: 1, city: "全国", citylimit: false \}\)/, "地图验收页必须使用生产一致的地点搜索参数");
-assert.match(mapAcceptanceSource, /sameOriginWriteRequestCount/, "地图验收页必须暴露同源写请求计数");
-assert.match(mapAcceptanceSource, /saveRequestIssued: false/, "地图验收页必须明确未发起保存请求");
-assert.doesNotMatch(mapAcceptanceSource, /updateDeviceLocation|\/devices\//, "地图验收页不得包含柜机保存接口");
+const mapAcceptancePageSource = readSource("apps/admin-web/src/pages/MapAcceptancePage.vue");
+assert.equal(
+  existsSync(resolve(process.cwd(), "apps/admin-web/public/__acceptance/map/index.html")),
+  false,
+  "地图验收不得继续依赖静态 HTML 页面"
+);
+assert.match(
+  adminRouterSource,
+  /path: "\/__acceptance\/map"[\s\S]{0,160}meta: \{[\s\S]{0,80}publicAcceptance: true/,
+  "地图验收必须使用精确的公开 SPA 路由"
+);
+assert.match(
+  adminRouterSource,
+  /if \(to\.path === "\/__acceptance\/map" && to\.meta\.publicAcceptance === true\) \{[\s\S]{0,80}return true;[\s\S]{0,80}\}[\s\S]{0,80}const sessionStore/,
+  "只有精确的地图验收 meta 能在登录检查前放行"
+);
+assert.match(mapAcceptancePageSource, /document\.title = "公益智助柜地图链路验收"/, "地图验收页必须设置独立标题");
+assert.match(mapAcceptancePageSource, /loadPublicRuntimeConfig/, "地图验收页必须读取公开运行配置");
+assert.match(
+  mapAcceptancePageSource,
+  /runtimeDataPlane\.value === "simulation" && amapRuntimeMode\.value === "real"/,
+  "地图验收页必须仅在模拟实例和真实地图模式下渲染"
+);
+assert.match(mapAcceptancePageSource, /<AmapLocationPicker/, "地图验收页必须复用生产地图组件");
+assert.match(mapAcceptancePageSource, /confirm-label="回填验收草稿"/, "地图验收页必须明确只回填草稿");
+assert.match(mapAcceptancePageSource, /window\.__vmMapAcceptanceResult/, "地图验收页必须暴露无敏感验收结果");
+assert.match(mapAcceptancePageSource, /saveRequestIssued: false/, "地图验收页不得发起保存请求");
+assert.doesNotMatch(mapAcceptancePageSource, /adminApi|updateDeviceLocation|\/devices\//, "地图验收页不得包含后台写接口");
+assert.match(amapPickerSource, /props\.confirmLabel\?\.trim\(\) \|\| "保存位置"/, "业务地图组件默认按钮文案必须保持保存位置");
+assert.match(amapPickerSource, /\{\{ resolvedConfirmLabel \}\}/, "业务地图组件必须使用可选确认按钮文案");
 assert.match(
   adminCopySource,
   /地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求/,

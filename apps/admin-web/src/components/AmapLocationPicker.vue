@@ -13,6 +13,7 @@ const props = defineProps<{
   title?: string;
   description?: string;
   locationPlaceholder?: string;
+  confirmLabel?: string;
 }>();
 
 const emit = defineEmits<{
@@ -68,6 +69,7 @@ const resolvedTitle = props.title?.trim() || `搜索地点后选择候选项，�
 const resolvedDescription = props.description?.trim() || "地图选点";
 const resolvedLocationPlaceholder =
   props.locationPlaceholder?.trim() || `例如 ${resolvedSubjectLabel}所在位置说明`;
+const resolvedConfirmLabel = props.confirmLabel?.trim() || "保存位置";
 
 const updateCurrentPositionText = (longitude: number, latitude: number, label?: string) => {
   const coordinates = formatCoordinates(longitude, latitude);
@@ -506,7 +508,7 @@ watch(
       <span class="admin-table__subtext">
         {{ selectedLongitude !== undefined && selectedLatitude !== undefined ? `已选择 ${selectedLongitude.toFixed(6)}, ${selectedLatitude.toFixed(6)}` : "尚未选择坐标" }}
       </span>
-      <button class="admin-button" @click="submit">保存位置</button>
+      <button class="admin-button" @click="submit">{{ resolvedConfirmLabel }}</button>
     </div>
   </section>
 </template>
