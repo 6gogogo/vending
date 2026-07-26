@@ -468,6 +468,11 @@ assert.match(
   /VITE_SHOW_VERIFICATION_PREVIEW:\s*"false"/,
   "移动 H5 公网部署构建必须显式关闭验证码预览"
 );
+assert.match(
+  mobileH5DeploymentBuildSource,
+  /VITE_API_BASE_URL:\s*"\/api"/,
+  "移动 H5 公网部署构建必须使用同源 /api，避免跨域阻断运行配置与登录链路"
+);
 assert.equal(
   rootPackageJson.scripts["build:public-web"],
   "npm run build --workspace @vm/admin-web && npm run build:h5:deployment --workspace @vm/mobile",

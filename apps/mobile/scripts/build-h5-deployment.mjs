@@ -17,6 +17,7 @@ const buildResult = spawnSync(buildCommand.command, buildCommand.args, {
   env: {
     ...process.env,
     VITE_MOBILE_H5_PUBLIC_BASE: "/mobile/",
+    VITE_API_BASE_URL: "/api",
     VITE_SHOW_VERIFICATION_PREVIEW: "false"
   },
   stdio: "inherit"

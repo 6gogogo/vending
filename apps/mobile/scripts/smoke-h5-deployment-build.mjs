@@ -36,4 +36,16 @@ assert.doesNotMatch(
   "生产 H5 构建不得保留验证码预览响应字段的数据路径"
 );
 
+assert.doesNotMatch(
+  bundledJavaScript,
+  /https:\/\/5gogogo\.top\/api/,
+  "移动 H5 公网部署产物不得继续跨域访问主站 API"
+);
+
+assert.match(
+  bundledJavaScript,
+  /["']\/api["']/,
+  "移动 H5 公网部署产物必须固定使用同源 /api"
+);
+
 console.log("mobile H5 deployment smoke: passed");
