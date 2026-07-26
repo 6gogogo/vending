@@ -372,7 +372,49 @@ assert.ok(
 
 const nativeInputAccessibilitySource = readSource("apps/mobile/src/utils/native-input-accessibility.ts");
 const appLoginSource = readSource("apps/mobile/src/pages/common/app-login.vue");
+const mobileAuthFlowSource = readSource("apps/mobile/src/composables/useAuthFlow.ts");
+const mobileRegisterSource = readSource("apps/mobile/src/pages/common/register.vue");
+const mobileViteConfigSource = readSource("apps/mobile/vite.config.ts");
+const mobileH5PublicBaseSource = readSource("apps/mobile/src/config/h5-public-base.ts");
+const mobileH5DeploymentBuildSource = readSource("apps/mobile/scripts/build-h5-deployment.mjs");
+const mobileProductionEnvSource = readSource("apps/mobile/.env.production");
 const merchantRestockSource = readSource("apps/mobile/src/pages/merchant/restock.vue");
+assert.match(
+  mobileViteConfigSource,
+  /process\.env\.UNI_PLATFORM === "h5"[\s\S]{0,120}resolveMobileH5PublicBase\(process\.env\.VITE_MOBILE_H5_PUBLIC_BASE\)/,
+  "移动 H5 只有在 H5 构建时才能应用显式发布基路径"
+);
+assert.match(
+  mobileH5PublicBaseSource,
+  /const defaultMobileH5PublicBase = "\/"/,
+  "移动 H5 未配置发布基路径时必须继续使用根路径"
+);
+assert.match(
+  mobileH5DeploymentBuildSource,
+  /VITE_MOBILE_H5_PUBLIC_BASE:\s*"\/mobile\/"/,
+  "移动 H5 公网部署构建必须显式固定 /mobile/ 基路径"
+);
+assert.match(
+  mobileH5DeploymentBuildSource,
+  /VITE_SHOW_VERIFICATION_PREVIEW:\s*"false"/,
+  "移动 H5 公网部署构建必须显式关闭验证码预览"
+);
+for (const [name, source] of [
+  ["应用登录", appLoginSource],
+  ["注册", mobileRegisterSource],
+  ["通用认证流程", mobileAuthFlowSource]
+]) {
+  assert.match(
+    source,
+    /import\.meta\.env\.DEV && import\.meta\.env\.VITE_SHOW_VERIFICATION_PREVIEW === "true"/,
+    `${name}的验证码预览必须同时受开发模式门禁`
+  );
+}
+assert.doesNotMatch(
+  mobileProductionEnvSource,
+  /^VITE_SHOW_VERIFICATION_PREVIEW\s*=\s*true\s*$/m,
+  "移动端生产配置不得启用验证码预览"
+);
 assert.match(nativeInputAccessibilitySource, /querySelector\("input"\)/, "uni-app H5 必须将可访问名同步到真正获取焦点的 input");
 assert.match(nativeInputAccessibilitySource, /setAttribute\("aria-labelledby", options\.labelId\)/, "H5 原生输入必须关联可见标签");
 assert.match(nativeInputAccessibilitySource, /input\.autocomplete = options\.autocomplete/, "H5 原生输入必须接收登录表单的自动填充语义");

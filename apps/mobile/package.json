@@ -9,9 +9,11 @@
     "dev:alipay": "uni -p mp-alipay",
     "dev:app": "uni -p app",
     "build": "uni build -p h5",
+    "build:h5:deployment": "node ./scripts/build-h5-deployment.mjs",
     "build:weixin": "uni build -p mp-weixin && node ./scripts/verify-weixin-production-api.mjs",
     "build:alipay": "uni build -p mp-alipay",
     "build:app": "uni build -p app",
+    "smoke:h5-deployment": "node ./scripts/smoke-h5-deployment-build.mjs",
     "test": "tsx --test src/utils/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
