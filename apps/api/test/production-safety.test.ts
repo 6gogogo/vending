@@ -118,6 +118,21 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
       assertProductionSafety(createConfigService(), emptyCredentialStore as never, readyAuditLog as never)
     );
 
+    for (const schemeValue of [undefined, "", "   "]) {
+      assert.doesNotThrow(() =>
+        assertProductionSafety(
+          createConfigService({
+            ALIYUN_PNVS_SCHEME_NAME_APP_LOGIN: schemeValue,
+            ALIYUN_PNVS_SCHEME_NAME_REGISTER: schemeValue,
+            ALIYUN_PNVS_SCHEME_NAME_GENERAL: schemeValue,
+            ALIYUN_PNVS_SCHEME_NAME_PASSWORD_RESET: schemeValue
+          }),
+          emptyCredentialStore as never,
+          readyAuditLog as never
+        )
+      );
+    }
+
     assert.doesNotThrow(() =>
       assertProductionSafety(
         createConfigService({ API_INSTANCE_COUNT: "1" }),
@@ -252,9 +267,24 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
         message: /PAYMENT_RECONCILIATION_ENABLED=true/
       },
       {
+        name: "真实短信 AccessKey ID 不能为空",
+        overrides: { ALIYUN_PNVS_ACCESS_KEY_ID: undefined },
+        message: /ALIYUN_PNVS_ACCESS_KEY_ID/
+      },
+      {
         name: "真实短信密钥不能为空",
         overrides: { ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined },
         message: /ALIYUN_PNVS_ACCESS_KEY_SECRET/
+      },
+      {
+        name: "真实短信签名不能为空",
+        overrides: { ALIYUN_PNVS_SIGN_NAME: undefined },
+        message: /ALIYUN_PNVS_SIGN_NAME/
+      },
+      {
+        name: "真实短信模板不能为空",
+        overrides: { ALIYUN_PNVS_TEMPLATE_CODE: undefined },
+        message: /ALIYUN_PNVS_TEMPLATE_CODE/
       },
       {
         name: "严格真实支付配置不能为空",
