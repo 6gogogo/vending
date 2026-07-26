@@ -756,6 +756,32 @@ test("真实短信校验并发返回成功时，也只有一次能消费本地�
   assert.deepEqual(results.sort(), [false, true]);
 });
 
+test("阿里云 PNVS 客户端按当前 SDK 的实际导出形态构造", () => {
+  const store = createIsolatedStore();
+  const service = new VerificationCodeService(
+    {
+      get: (key: string) =>
+        ({
+          ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key",
+          ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-secret"
+        })[key]
+    } as never,
+    store
+  );
+
+  const client = (
+    service as unknown as {
+      createAliyunPnvsClient: () => {
+        sendSmsVerifyCode: unknown;
+        checkSmsVerifyCode: unknown;
+      };
+    }
+  ).createAliyunPnvsClient();
+
+  assert.equal(typeof client.sendSmsVerifyCode, "function");
+  assert.equal(typeof client.checkSmsVerifyCode, "function");
+});
+
 test("阿里云 PNVS 按用途隔离发送和核验方案，且绝不返回真实验证码", async () => {
   const store = createIsolatedStore();
   const requests: Array<{ type: "send" | "check"; request: Record<string, unknown> }> = [];

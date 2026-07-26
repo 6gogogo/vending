@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, InternalServerErrorException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { timingSafeEqual } from "node:crypto";
-import Dypnsapi20170525, {
+import Dypnsapi20170525Module, {
   CheckSmsVerifyCodeRequest,
   SendSmsVerifyCodeRequest
 } from "@alicloud/dypnsapi20170525";
@@ -26,6 +26,25 @@ const verificationCodePattern = /^\d{4,8}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+
+type Dypnsapi20170525Constructor = typeof Dypnsapi20170525Module;
+
+const resolveDypnsapi20170525Constructor = (
+  moduleValue: unknown
+): Dypnsapi20170525Constructor => {
+  const constructor =
+    typeof moduleValue === "function"
+      ? moduleValue
+      : isRecord(moduleValue)
+        ? moduleValue.default
+        : undefined;
+
+  if (typeof constructor !== "function") {
+    throw new InternalServerErrorException("短信验证码 SDK 初始化失败。");
+  }
+
+  return constructor as Dypnsapi20170525Constructor;
+};
 
 @Injectable()
 export class VerificationCodeService {
@@ -348,6 +367,9 @@ export class VerificationCodeService {
     config.regionId = regionId;
     config.endpoint = endpoint;
 
+    const Dypnsapi20170525 = resolveDypnsapi20170525Constructor(
+      Dypnsapi20170525Module as unknown
+    );
     return new Dypnsapi20170525(config);
   }
 
