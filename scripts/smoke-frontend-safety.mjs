@@ -102,6 +102,18 @@ assert.match(
 );
 const amapLoaderSource = readSource("apps/admin-web/src/utils/amap-loader.ts");
 const amapPickerSource = readSource("apps/admin-web/src/components/AmapLocationPicker.vue");
+const mapAcceptanceSource = readSource("apps/admin-web/public/__acceptance/map.html");
+assert.match(mapAcceptanceSource, /noindex,nofollow/, "地图验收页必须禁止索引");
+assert.match(mapAcceptanceSource, /模拟实例 · 只读地图验收/, "地图验收页必须醒目标明模拟只读边界");
+assert.match(mapAcceptanceSource, /fetch\("\/api\/public-config"\)/, "地图验收页必须先读取公开运行配置");
+assert.match(mapAcceptanceSource, /runtimeDataPlane !== "simulation"/, "地图验收页必须拒绝真实数据平面");
+assert.match(mapAcceptanceSource, /amapRuntimeMode !== "real"/, "地图验收页必须要求真实地图模式");
+assert.match(mapAcceptanceSource, /window\._AMapSecurityConfig = \{ securityJsCode: config\.amapSecurityJsCode \}/, "地图验收页必须在加载脚本前设置高德安全码");
+assert.match(mapAcceptanceSource, /https:\/\/webapi\.amap\.com\/maps\?v=2\.0/, "地图验收页必须走高德 JS 2.0 路径");
+assert.match(mapAcceptanceSource, /AMap\.PlaceSearch\(\{ pageSize: 8, pageIndex: 1, city: "全国", citylimit: false \}\)/, "地图验收页必须使用生产一致的地点搜索参数");
+assert.match(mapAcceptanceSource, /sameOriginWriteRequestCount/, "地图验收页必须暴露同源写请求计数");
+assert.match(mapAcceptanceSource, /saveRequestIssued: false/, "地图验收页必须明确未发起保存请求");
+assert.doesNotMatch(mapAcceptanceSource, /updateDeviceLocation|\/devices\//, "地图验收页不得包含柜机保存接口");
 assert.match(
   adminCopySource,
   /地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求/,

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>地图验收 · 模拟实例</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 0; background: #f5f7fb; color: #172033; }
+      main { width: min(100%, 760px); margin: 0 auto; padding: 16px; }
+      .badge { display: inline-block; border: 1px solid #9a4f00; border-radius: 999px; padding: 5px 10px; color: #713900; background: #fff5e8; font-size: 13px; font-weight: 700; }
+      h1 { font-size: clamp(20px, 6vw, 28px); margin: 12px 0 6px; }
+      p, li { line-height: 1.55; }
+      .panel { margin-top: 12px; padding: 14px; overflow-wrap: anywhere; border: 1px solid #d7deeb; border-radius: 12px; background: #fff; }
+      #map { width: 100%; height: min(52vh, 420px); min-height: 260px; margin-top: 12px; border-radius: 12px; overflow: hidden; background: #e9eef7; }
+      #results { margin: 12px 0 0; padding-left: 22px; }
+      .draft { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .draft label { display: grid; gap: 4px; font-size: 13px; }
+      input { width: 100%; min-width: 0; padding: 9px; border: 1px solid #c7d0df; border-radius: 8px; background: #f8fafc; }
+      @media (max-width: 390px) { main { padding: 12px; } .draft { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="badge">模拟实例 · 只读地图验收</span>
+      <h1>高德地图与地点搜索验收</h1>
+      <p id="status" role="status" aria-live="polite">正在读取运行配置…</p>
+      <section class="panel" aria-label="只读坐标草稿">
+        <div class="draft">
+          <label>经度<input id="longitude" readonly /></label>
+          <label>纬度<input id="latitude" readonly /></label>
+        </div>
+        <p>本页不会保存柜机、不会发起任何写入请求。</p>
+      </section>
+      <div id="map" aria-label="地图验收视图"></div>
+      <ol id="results" aria-label="地点搜索候选"></ol>
+    </main>
+    <script>
+      (() => {
+        const result = (window.__vmMapAcceptanceResult = {
+          ok: false,
+          stage: "boot",
+          runtimeDataPlane: "unknown",
+          amapRuntimeMode: "unknown",
+          scriptLoaded: false,
+          searchStatus: "not-started",
+          poiCount: 0,
+          candidateNames: [],
+          selected: null,
+          sameOriginWriteRequestCount: 0,
+          saveRequestIssued: false
+        });
+        const status = document.querySelector("#status");
+        const results = document.querySelector("#results");
+        const longitude = document.querySelector("#longitude");
+        const latitude = document.querySelector("#latitude");
+        const originalFetch = window.fetch.bind(window);
+
+        window.fetch = (input, init = {}) => {
+          const requestUrl = input instanceof Request ? input.url : input;
+          const method = (init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+          if (new URL(requestUrl, window.location.href).origin === window.location.origin && !["GET", "HEAD"].includes(method)) {
+            result.sameOriginWriteRequestCount += 1;
+          }
+          return originalFetch(input, init);
+        };
+
+        const fail = (stage, message) => {
+          result.stage = stage;
+          status.textContent = message;
+        };
+
+        const loadAmap = (config) => new Promise((resolve, reject) => {
+          window._AMapSecurityConfig = { securityJsCode: config.amapSecurityJsCode };
+          const script = document.createElement("script");
+          script.async = true;
+          script.defer = true;
+          script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(config.amapWebKey)}&plugin=AMap.PlaceSearch,AMap.AutoComplete,AMap.Geocoder`;
+          script.onload = () => window.AMap ? resolve(window.AMap) : reject(new Error("高德脚本未暴露 AMap"));
+          script.onerror = () => reject(new Error("高德脚本加载失败"));
+          document.head.appendChild(script);
+        });
+
+        const normalizePois = (items) => items.map((item, index) => {
+          const longitudeValue = item.location?.lng;
+          const latitudeValue = item.location?.lat;
+          if (typeof longitudeValue !== "number" || typeof latitudeValue !== "number") return null;
+          return {
+            id: `${item.id || item.name || "poi"}-${index}`,
+            name: item.name || "未命名地点",
+            address: [item.pname, item.cityname, item.adname, item.address].filter(Boolean).join(" "),
+            longitude: longitudeValue,
+            latitude: latitudeValue
+          };
+        }).filter(Boolean);
+
+        const renderCandidates = (candidates) => {
+          results.replaceChildren();
+          for (const candidate of candidates) {
+            const item = document.createElement("li");
+            item.textContent = candidate.address ? `${candidate.name} · ${candidate.address}` : candidate.name;
+            results.appendChild(item);
+          }
+        };
+
+        const run = async () => {
+          try {
+            result.stage = "public-config";
+            const response = await window.fetch("/api/public-config");
+            const payload = await response.json();
+            const config = payload?.data || {};
+            result.runtimeDataPlane = config.runtimeDataPlane || "unknown";
+            result.amapRuntimeMode = config.amapRuntimeMode || "unknown";
+            if (!response.ok || payload?.code !== 200) throw new Error(payload?.message || "读取公开运行配置失败");
+            if (result.runtimeDataPlane !== "simulation") throw new Error("真实数据平面拒绝执行只读地图验收");
+            if (result.amapRuntimeMode !== "real" || !config.amapWebKey || !config.amapSecurityJsCode) throw new Error("模拟实例未启用真实地图运行配置");
+
+            result.stage = "load-script";
+            const AMap = await loadAmap(config);
+            result.scriptLoaded = true;
+            const map = new AMap.Map("map", { zoom: 14, center: [120.2915, 31.5528] });
+            const placeSearch = new AMap.PlaceSearch({ pageSize: 8, pageIndex: 1, city: "全国", citylimit: false });
+            result.stage = "place-search";
+            placeSearch.search("无锡站", (searchStatus, searchResult) => {
+              result.searchStatus = searchStatus;
+              const candidates = searchStatus === "complete" ? normalizePois(searchResult?.poiList?.pois || []) : [];
+              result.poiCount = candidates.length;
+              result.candidateNames = candidates.map((candidate) => candidate.name);
+              renderCandidates(candidates);
+              const selected = candidates[0];
+              if (!selected) return fail("place-search", "未找到“无锡站”候选地点。");
+              result.selected = { name: selected.name, longitude: selected.longitude, latitude: selected.latitude };
+              longitude.value = String(selected.longitude);
+              latitude.value = String(selected.latitude);
+              map.setCenter([selected.longitude, selected.latitude]);
+              new AMap.Marker({ position: [selected.longitude, selected.latitude], map });
+              result.ok = result.sameOriginWriteRequestCount === 0 && result.saveRequestIssued === false;
+              result.stage = "complete";
+              status.textContent = `已加载地图并选择：${selected.name}（只读，未保存）`;
+            });
+          } catch (error) {
+            fail(result.stage, error instanceof Error ? error.message : "地图验收失败");
+          }
+        };
+
+        void run();
+      })();
+    </script>
+  </body>
+</html>
