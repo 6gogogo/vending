@@ -19,6 +19,7 @@ import {
 
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
+import { adminCopy } from "../constants/copy";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
@@ -812,17 +813,17 @@ const removeSelectedUsers = async () => {
   const count = targets.length;
 
   if (!count) {
-    showActionMessage("error", "批量删除失败：请先选择需要删除的人员。");
+    showActionMessage("error", adminCopy.users.batchRemoveNoSelection);
     return;
   }
   if (targets.some((user) => user.id === sessionStore.user?.id)) {
-    showActionMessage("error", "批量删除失败：不能包含当前登录账号。");
+    showActionMessage("error", adminCopy.users.batchRemoveIncludesCurrent);
     return;
   }
-  if (!window.confirm(`第一次确认：将从当前人员台账中删除 ${count} 人，历史记录仍会保留。是否继续？`)) {
+  if (!window.confirm(adminCopy.users.batchRemoveFirstConfirmation(count))) {
     return;
   }
-  if (!window.confirm(`第二次确认：确定删除这 ${count} 人吗？该操作不能直接撤销。`)) {
+  if (!window.confirm(adminCopy.users.batchRemoveSecondConfirmation(count))) {
     return;
   }
 
@@ -835,9 +836,12 @@ const removeSelectedUsers = async () => {
     });
     selectedUserIds.value = [];
     await load();
-    showActionMessage("success", `已从人员台账中删除 ${result.count} 人，历史记录仍保留用于追溯。`);
+    showActionMessage("success", adminCopy.users.batchRemoveSuccess(result.count));
   } catch (error) {
-    showActionMessage("error", `批量删除人员失败：${readErrorMessage(error, "请稍后重试")}`);
+    showActionMessage(
+      "error",
+      adminCopy.users.batchRemoveFailed(readErrorMessage(error, "请稍后重试"))
+    );
   } finally {
     removingSelectedUsers.value = false;
   }
@@ -1249,7 +1253,11 @@ onMounted(load);
               :disabled="removingSelectedUsers || !selectedUsers.length"
               @click="removeSelectedUsers"
             >
-              {{ removingSelectedUsers ? "删除中" : `批量删除（${selectedUsers.length}）` }}
+              {{
+                removingSelectedUsers
+                  ? adminCopy.users.batchRemovingButton
+                  : adminCopy.users.batchRemoveButton(selectedUsers.length)
+              }}
             </button>
           </div>
         </div>

@@ -144,14 +144,19 @@ assert.match(adminCopySource, /验收模拟实例/, "管理后台模拟实例文
 assert.match(adminApiSource, /batchRemoveUsers/, "人员后台必须提供批量删除 API 调用");
 assert.match(adminUsersSource, /const removeSelectedUsers = async/, "人员后台必须提供批量删除操作");
 assert.match(
-  adminUsersSource,
+  adminCopySource,
   /第一次确认：将从当前人员台账中删除 \$\{count\} 人/,
   "批量删除第一次确认必须显示准确人数"
 );
 assert.match(
-  adminUsersSource,
+  adminCopySource,
   /第二次确认：确定删除这 \$\{count\} 人/,
   "批量删除第二次确认必须再次显示准确人数"
+);
+assert.match(
+  adminUsersSource,
+  /adminCopy\.users\.batchRemoveFirstConfirmation\(count\)[\s\S]{0,180}adminCopy\.users\.batchRemoveSecondConfirmation\(count\)/,
+  "人员后台必须按顺序使用两次集中维护的确认文案"
 );
 assert.match(
   adminUsersSource,

@@ -3,6 +3,19 @@ export const adminCopy = {
     simulationBadge: "验收模拟实例",
     unknownBadge: "运行环境未确认"
   },
+  users: {
+    batchRemoveNoSelection: "批量删除失败：请先选择需要删除的人员。",
+    batchRemoveIncludesCurrent: "批量删除失败：不能包含当前登录账号。",
+    batchRemoveFirstConfirmation: (count: number) =>
+      `第一次确认：将从当前人员台账中删除 ${count} 人，历史记录仍会保留。是否继续？`,
+    batchRemoveSecondConfirmation: (count: number) =>
+      `第二次确认：确定删除这 ${count} 人吗？该操作不能直接撤销。`,
+    batchRemoveSuccess: (count: number) =>
+      `已从人员台账中删除 ${count} 人，历史记录仍保留用于追溯。`,
+    batchRemoveFailed: (reason: string) => `批量删除人员失败：${reason}`,
+    batchRemoveButton: (count: number) => `批量删除（${count}）`,
+    batchRemovingButton: "删除中"
+  },
   map: {
     unsupported: "当前环境不支持地图加载",
     mockMode:
