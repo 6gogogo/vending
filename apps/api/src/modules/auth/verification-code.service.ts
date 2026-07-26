@@ -376,17 +376,21 @@ export class VerificationCodeService {
   private async requestAliyunPnvsCode(phone: string, purpose: VerificationPurpose) {
     try {
       const schemeName = this.getAliyunPnvsSchemeName(purpose);
+      const validTime = 300;
       const request = new SendSmsVerifyCodeRequest({
         phoneNumber: phone,
         countryCode: "86",
         ...(schemeName ? { schemeName } : {}),
         signName: this.requireAliyunPnvsConfig("ALIYUN_PNVS_SIGN_NAME"),
         templateCode: this.requireAliyunPnvsConfig("ALIYUN_PNVS_TEMPLATE_CODE"),
-        templateParam: JSON.stringify({ code: "##code##" }),
+        templateParam: JSON.stringify({
+          code: "##code##",
+          min: String(validTime / 60)
+        }),
         returnVerifyCode: false,
         codeLength: 6,
         codeType: 1,
-        validTime: 300,
+        validTime,
         interval: 60,
         duplicatePolicy: 1,
         autoRetry: 0

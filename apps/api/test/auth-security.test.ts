@@ -837,7 +837,7 @@ test("阿里云 PNVS 按用途隔离发送和核验方案，且绝不返回真�
         type: "send",
         schemeName: "scheme-password-reset",
         returnVerifyCode: false,
-        templateParam: JSON.stringify({ code: "##code##" })
+        templateParam: JSON.stringify({ code: "##code##", min: "5" })
       },
       {
         type: "check",
