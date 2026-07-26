@@ -102,7 +102,8 @@ assert.match(
 );
 const amapLoaderSource = readSource("apps/admin-web/src/utils/amap-loader.ts");
 const amapPickerSource = readSource("apps/admin-web/src/components/AmapLocationPicker.vue");
-const mapAcceptanceSource = readSource("apps/admin-web/public/__acceptance/map.html");
+const mapAcceptanceSource = readSource("apps/admin-web/public/__acceptance/map/index.html");
+assert.match(mapAcceptanceSource, /<title>公益智助柜地图链路验收<\/title>/, "地图验收页必须使用独立验收标题");
 assert.match(mapAcceptanceSource, /noindex,nofollow/, "地图验收页必须禁止索引");
 assert.match(mapAcceptanceSource, /模拟实例 · 只读地图验收/, "地图验收页必须醒目标明模拟只读边界");
 assert.match(mapAcceptanceSource, /fetch\("\/api\/public-config"\)/, "地图验收页必须先读取公开运行配置");
