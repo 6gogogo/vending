@@ -99,6 +99,23 @@ export class UsersController {
     );
   }
 
+  @Post("batch-remove")
+  @AllowedBackofficePermissions("users:manage")
+  batchRemove(
+    @Body()
+    body: {
+      userIds: string[];
+      confirmedCount: number;
+    },
+    @Req() request: { authUser?: { id: string; backofficeRole?: BackofficeRole } }
+  ) {
+    this.assertRequestFields(body, ["userIds", "confirmedCount"], "批量删除");
+    return ok(
+      this.usersService.batchRemove(body, request.authUser?.id, request.authUser?.backofficeRole),
+      "操作成功"
+    );
+  }
+
   @Patch(":userId")
   @AllowedBackofficeSessionPermissions("users:manage")
   updateUser(

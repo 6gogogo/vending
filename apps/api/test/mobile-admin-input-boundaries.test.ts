@@ -370,6 +370,74 @@ test("批量更新拒绝重复用户编号且不产生重复修改或日志", ()
   assert.deepEqual(store.logs, beforeLogs);
 });
 
+test("批量删除要求确认人数与所选人数一致且失败时零副作用", () => {
+  const { controller, actor, target, store } = createFixture();
+  const secondTarget = store.users.find(
+    (entry) => entry.role === "merchant" && entry.status === "active"
+  );
+  assert.ok(secondTarget);
+  const beforeUsers = structuredClone(store.users);
+  const beforeLogs = structuredClone(store.logs);
+
+  assert.throws(
+    () =>
+      controller.batchRemove(
+        {
+          userIds: [target.id, secondTarget.id],
+          confirmedCount: 1
+        },
+        { authUser: { id: actor.id, backofficeRole: "admin" } }
+      ),
+    /确认人数必须与所选人数一致/
+  );
+
+  assert.deepEqual(store.users, beforeUsers);
+  assert.deepEqual(store.logs, beforeLogs);
+});
+
+test("批量删除返回准确数量、撤销会话并写入逐人和批次审计", () => {
+  const { controller, actor, target, store } = createFixture();
+  const secondTarget = store.users.find(
+    (entry) => entry.role === "merchant" && entry.status === "active"
+  );
+  assert.ok(secondTarget);
+  const targetToken = store.createSession(target);
+  const secondTargetToken = store.createSession(secondTarget);
+
+  const response = controller.batchRemove(
+    {
+      userIds: [target.id, secondTarget.id],
+      confirmedCount: 2
+    },
+    { authUser: { id: actor.id, backofficeRole: "admin" } }
+  );
+
+  assert.equal(response.data.count, 2);
+  assert.deepEqual(
+    response.data.removed.map((entry) => entry.id).sort(),
+    [target.id, secondTarget.id].sort()
+  );
+  assert.equal(store.users.some((entry) => entry.id === target.id), false);
+  assert.equal(store.users.some((entry) => entry.id === secondTarget.id), false);
+  assert.equal(store.sessions.has(targetToken), false);
+  assert.equal(store.sessions.has(secondTargetToken), false);
+  assert.equal(
+    store.logs.filter(
+      (entry) =>
+        entry.type === "remove-user" &&
+        [target.id, secondTarget.id].includes(entry.primarySubject?.id ?? "")
+    ).length,
+    2
+  );
+  const batchLog = store.logs.find((entry) => entry.type === "batch-remove-users");
+  assert.ok(batchLog);
+  assert.equal(batchLog.metadata?.count, 2);
+  assert.deepEqual(
+    (batchLog.metadata?.userIds as string[] | undefined)?.slice().sort(),
+    [target.id, secondTarget.id].sort()
+  );
+});
+
 test("批量更新提交阶段失败时回滚全部用户、会话和日志", () => {
   const { controller, actor, target, store } = createFixture();
   const secondTarget = store.users.find(

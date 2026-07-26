@@ -229,6 +229,13 @@ export const adminApi = {
     requireBackofficePermission("users:manage");
     return adminClient.delete<{ id: string; name: string }>(`/users/${userId}`);
   },
+  batchRemoveUsers(payload: { userIds: string[]; confirmedCount: number }) {
+    requireBackofficePermission("users:manage");
+    return adminClient.post<{ count: number; removed: Array<{ id: string; name: string }> }>(
+      "/users/batch-remove",
+      payload
+    );
+  },
   userDetail(userId: string, query?: { month?: string; date?: string }) {
     requireBackofficePermission("users:view");
     return adminClient.get<UserManagementDetail>(`/users/${userId}`, {

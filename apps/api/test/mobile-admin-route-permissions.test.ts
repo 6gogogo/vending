@@ -103,6 +103,7 @@ const backofficeOnlyRoutes: RouteTarget[] = [
   { controller: RegistrationApplicationsController, method: "detail", label: "未被移动端使用的申请详情" },
   { controller: UsersController, method: "createUser", label: "创建人员" },
   { controller: UsersController, method: "removeUser", label: "删除人员" },
+  { controller: UsersController, method: "batchRemove", label: "批量删除人员" },
   { controller: UsersController, method: "importUsers", label: "导入人员" },
   { controller: UsersController, method: "saveAccessPolicy", label: "创建个人领取策略" },
   { controller: SpecialAccessPoliciesController, method: "create", label: "创建策略模板" },

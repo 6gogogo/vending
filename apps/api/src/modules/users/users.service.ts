@@ -40,6 +40,11 @@ interface BatchUpdatePayload {
   };
 }
 
+interface BatchRemovePayload {
+  userIds: string[];
+  confirmedCount: number;
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -379,24 +384,50 @@ export class UsersService {
   removeUser(userId: string, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
     const user = this.findById(userId);
     this.assertCanViewUser(user, actorBackofficeRole);
+    this.assertCanRemoveUsers([user], actorUserId);
 
-    if (user.id === actorUserId) {
-      throw new BadRequestException("不能删除当前登录账号。");
+    return this.removeUserRecord(user, actorUserId);
+  }
+
+  batchRemove(payload: BatchRemovePayload, actorUserId?: string, actorBackofficeRole?: BackofficeRole) {
+    this.assertBatchRemovePayload(payload);
+
+    if (new Set(payload.userIds).size !== payload.userIds.length) {
+      throw new BadRequestException("批量删除不能包含重复用户。");
     }
 
-    if (
-      user.role === "admin" &&
-      this.store.users.filter(
-        (entry) =>
-          entry.role === "admin" &&
-          entry.status === "active" &&
-          !this.store.isHiddenBackofficeUser(entry)
-      ).length <= 1
-    ) {
-      throw new BadRequestException("至少需要保留一个启用的管理员账号。");
-    }
+    const targetUsers = payload.userIds.map((userId) => {
+      const user = this.findById(userId);
+      this.assertCanViewUser(user, actorBackofficeRole);
+      return user;
+    });
+    this.assertCanRemoveUsers(targetUsers, actorUserId);
 
-    const targetIndex = this.store.users.findIndex((entry) => entry.id === userId);
+    const removed = targetUsers.map((user) => this.removeUserRecord(user, actorUserId));
+    this.store.logOperation({
+      category: "user",
+      type: "batch-remove-users",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      description: `管理员批量删除了 ${removed.length} 名人员。`,
+      detail: `本次批量删除已按确认人数 ${payload.confirmedCount} 完成，历史日志、库存记录和柜机事件保留。`,
+      metadata: {
+        count: removed.length,
+        confirmedCount: payload.confirmedCount,
+        userIds: removed.map((entry) => entry.id),
+        userNames: removed.map((entry) => entry.name),
+        undoState: "not_undoable"
+      }
+    });
+
+    return {
+      count: removed.length,
+      removed
+    };
+  }
+
+  private removeUserRecord(user: UserRecord, actorUserId?: string) {
+    const targetIndex = this.store.users.findIndex((entry) => entry.id === user.id);
 
     if (targetIndex < 0) {
       throw new NotFoundException("未找到对应用户。");
@@ -1172,6 +1203,51 @@ export class UsersService {
     }
     if (patch.quota !== undefined) {
       this.assertAccessQuota(patch.quota);
+    }
+  }
+
+  private assertBatchRemovePayload(payload: unknown) {
+    const body = this.requirePlainObject(payload, "批量删除请求体");
+    this.assertOnlyFields(body, ["userIds", "confirmedCount"], "批量删除");
+
+    if (!Array.isArray(body.userIds) || body.userIds.length === 0 || body.userIds.length > 200) {
+      throw new BadRequestException("批量删除用户编号必须是 1 至 200 项的数组。");
+    }
+    for (const userId of body.userIds) {
+      this.assertStringValue(userId, "用户编号", 128);
+    }
+
+    if (
+      typeof body.confirmedCount !== "number" ||
+      !Number.isSafeInteger(body.confirmedCount) ||
+      body.confirmedCount <= 0
+    ) {
+      throw new BadRequestException("批量删除确认人数必须是正整数。");
+    }
+    if (body.confirmedCount !== body.userIds.length) {
+      throw new BadRequestException("批量删除确认人数必须与所选人数一致。");
+    }
+  }
+
+  private assertCanRemoveUsers(users: UserRecord[], actorUserId?: string) {
+    if (actorUserId && users.some((user) => user.id === actorUserId)) {
+      throw new BadRequestException("不能删除当前登录账号。");
+    }
+
+    const activeAdminIds = new Set(
+      this.store.users
+        .filter(
+          (entry) =>
+            entry.role === "admin" &&
+            entry.status === "active" &&
+            !this.store.isHiddenBackofficeUser(entry)
+        )
+        .map((entry) => entry.id)
+    );
+    const removedActiveAdminCount = users.filter((user) => activeAdminIds.has(user.id)).length;
+
+    if (removedActiveAdminCount > 0 && activeAdminIds.size - removedActiveAdminCount < 1) {
+      throw new BadRequestException("至少需要保留一个启用的管理员账号。");
     }
   }
 

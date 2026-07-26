@@ -198,6 +198,7 @@ const saving = ref(false);
 const reservationSaving = ref(false);
 const reviewingApplicationId = ref("");
 const removingUserId = ref("");
+const removingSelectedUsers = ref(false);
 const creatingRegion = ref(false);
 const drawerMode = ref<DrawerMode>("");
 const editingUserId = ref("");
@@ -806,6 +807,42 @@ const removeEditingUser = async () => {
   await removeUser(user);
 };
 
+const removeSelectedUsers = async () => {
+  const targets = selectedUsers.value;
+  const count = targets.length;
+
+  if (!count) {
+    showActionMessage("error", "批量删除失败：请先选择需要删除的人员。");
+    return;
+  }
+  if (targets.some((user) => user.id === sessionStore.user?.id)) {
+    showActionMessage("error", "批量删除失败：不能包含当前登录账号。");
+    return;
+  }
+  if (!window.confirm(`第一次确认：将从当前人员台账中删除 ${count} 人，历史记录仍会保留。是否继续？`)) {
+    return;
+  }
+  if (!window.confirm(`第二次确认：确定删除这 ${count} 人吗？该操作不能直接撤销。`)) {
+    return;
+  }
+
+  removingSelectedUsers.value = true;
+  actionMessage.value = null;
+  try {
+    const result = await adminApi.batchRemoveUsers({
+      userIds: targets.map((user) => user.id),
+      confirmedCount: count
+    });
+    selectedUserIds.value = [];
+    await load();
+    showActionMessage("success", `已从人员台账中删除 ${result.count} 人，历史记录仍保留用于追溯。`);
+  } catch (error) {
+    showActionMessage("error", `批量删除人员失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    removingSelectedUsers.value = false;
+  }
+};
+
 const createRegionDirect = async () => {
   const name = regionDraftName.value.trim();
 
@@ -1204,7 +1241,17 @@ onMounted(load);
             <span class="admin-kicker">人员台账</span>
             <h3 class="admin-panel__title">按区域分组，状态显示注册与领取进度</h3>
           </div>
-          <button class="admin-button admin-button--ghost" @click="toggleSelectAll">{{ allFilteredSelected ? "取消全选" : "全选当前结果" }}</button>
+          <div class="admin-inline-links">
+            <button class="admin-button admin-button--ghost" @click="toggleSelectAll">{{ allFilteredSelected ? "取消全选" : "全选当前结果" }}</button>
+            <button
+              v-if="canManageUsers"
+              class="admin-button admin-button--danger"
+              :disabled="removingSelectedUsers || !selectedUsers.length"
+              @click="removeSelectedUsers"
+            >
+              {{ removingSelectedUsers ? "删除中" : `批量删除（${selectedUsers.length}）` }}
+            </button>
+          </div>
         </div>
 
         <div v-if="groupedUsers.length" class="users-region-groups users-contained-list users-contained-list--large">

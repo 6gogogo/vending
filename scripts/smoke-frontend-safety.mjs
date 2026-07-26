@@ -92,6 +92,8 @@ assert.match(resultSource, /不要重复发起开柜/, "开门待确认结果必
 const adminDeviceSource = readSource("apps/admin-web/src/pages/DeviceDetailPage.vue");
 const adminAppSource = readSource("apps/admin-web/src/App.vue");
 const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
+const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
+const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
 const publicConfigControllerSource = readSource("apps/api/src/app.controller.ts");
 const sharedTypesSource = readSource("packages/shared-types/src/index.ts");
@@ -139,6 +141,23 @@ assert.doesNotMatch(
 assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
 assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟实例");
 assert.match(adminCopySource, /验收模拟实例/, "管理后台模拟实例文案必须集中维护");
+assert.match(adminApiSource, /batchRemoveUsers/, "人员后台必须提供批量删除 API 调用");
+assert.match(adminUsersSource, /const removeSelectedUsers = async/, "人员后台必须提供批量删除操作");
+assert.match(
+  adminUsersSource,
+  /第一次确认：将从当前人员台账中删除 \$\{count\} 人/,
+  "批量删除第一次确认必须显示准确人数"
+);
+assert.match(
+  adminUsersSource,
+  /第二次确认：确定删除这 \$\{count\} 人/,
+  "批量删除第二次确认必须再次显示准确人数"
+);
+assert.match(
+  adminUsersSource,
+  /confirmedCount:\s*count/,
+  "批量删除请求必须把已确认人数交给服务端复核"
+);
 assert.match(
   adminAppSource,
   /role="status"[\s\S]+aria-live="polite"/,
@@ -514,7 +533,6 @@ const ensureDisclaimerSource = appLoginSource.slice(
 assert.doesNotMatch(ensureDisclaimerSource, /openDisclaimer|showModal/, "未勾选时只能高亮提示，不得强制打开弹窗");
 assert.match(appLoginSource, /disclaimerPreviousFocus/, "免责声明关闭后必须恢复触发点焦点");
 
-const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminLayoutSource = readSource("apps/admin-web/src/layouts/AdminLayout.vue");
 const mobileApiSource = readSource("apps/mobile/src/api/mobile.ts");
 const mobileSettingsSource = readSource("apps/mobile/src/pages/tabs/settings.vue");
@@ -553,7 +571,6 @@ const mobileErrorMessageSource = readSource("apps/mobile/src/utils/error-message
 const recordsSource = readSource("apps/mobile/src/pages/tabs/records.vue");
 const primarySource = readSource("apps/mobile/src/pages/tabs/primary.vue");
 const mobileReviewsSource = readSource("apps/mobile/src/pages/admin/reviews.vue");
-const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
 const feedbackSource = readSource("apps/mobile/src/pages/common/feedback.vue");
 const seedSource = readSource("packages/shared-types/src/index.ts");
 assert.match(recordsSource, /Promise\.allSettled/, "管理员三类记录必须独立接收加载结果");
