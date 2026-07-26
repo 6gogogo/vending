@@ -1,8 +1,8 @@
+import type { PublicRuntimeConfig } from "@vm/shared-types";
+
 import { mobileClient } from "./client";
 
-export interface MobilePublicConfig {
-  runtimeDataPlane?: "simulation" | "live";
-}
+export type MobilePublicConfig = PublicRuntimeConfig;
 
 let publicConfigRequest: Promise<MobilePublicConfig> | undefined;
 

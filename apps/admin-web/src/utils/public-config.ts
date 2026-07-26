@@ -1,11 +1,8 @@
+import type { PublicRuntimeConfig } from "@vm/shared-types";
+
 import { adminApiBaseUrl } from "../api/client";
 
-export interface AdminPublicConfig {
-  runtimeDataPlane?: "simulation" | "live";
-  amapRuntimeMode?: "mock" | "real";
-  amapWebKey?: string;
-  amapSecurityJsCode?: string;
-}
+export type AdminPublicConfig = PublicRuntimeConfig;
 
 export const loadPublicRuntimeConfig = async (): Promise<AdminPublicConfig> => {
   const response = await fetch(`${adminApiBaseUrl}/public-config`);

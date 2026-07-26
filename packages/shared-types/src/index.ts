@@ -1,6 +1,17 @@
 export type UserRole = "admin" | "merchant" | "special";
 export type BackofficeRole = "super_admin" | "admin" | "merchant";
 export type BackofficeScope = "provider" | "tenant";
+export type RuntimeDataPlane = "simulation" | "live";
+export type AmapRuntimeMode = "mock" | "real";
+export type VerificationProvider = "mock" | "manual" | "aliyun_pnvs";
+export interface PublicRuntimeConfig {
+  runtimeDataPlane?: RuntimeDataPlane;
+  amapRuntimeMode?: AmapRuntimeMode;
+  amapWebKey?: string;
+  amapSecurityJsCode?: string;
+  verificationProvider?: VerificationProvider;
+  verificationPreviewEnabled?: boolean;
+}
 export const BACKOFFICE_PERMISSIONS = [
   "platform-overview:view",
   "platform-tenants:view",

@@ -6,6 +6,7 @@ import Dypnsapi20170525, {
   SendSmsVerifyCodeRequest
 } from "@alicloud/dypnsapi20170525";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
+import type { VerificationProvider } from "@vm/shared-types";
 
 import { isProductionRuntime } from "../../common/config/production-safety";
 import { resolveFullSimulationExternalMode } from "../../common/config/full-simulation-mode";
@@ -13,7 +14,6 @@ import { assertConfiguredRuntimeDataPlaneVerificationPolicy } from "../../common
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import type { VerificationPurpose } from "../../common/store/persistence";
 
-type VerificationProvider = "mock" | "aliyun_pnvs" | "manual";
 interface VerificationCodeResult {
   phone: string;
   expiresInSeconds: number;

@@ -8,6 +8,7 @@ import { AiInsightsModule } from "./modules/ai-insights/ai-insights.module";
 import { AlertsModule } from "./modules/alerts/alerts.module";
 import { AnalyticsModule } from "./modules/analytics/analytics.module";
 import { AuthModule } from "./modules/auth/auth.module";
+import { VerificationCodeModule } from "./modules/auth/verification-code.module";
 import { CabinetEventsModule } from "./modules/cabinet-events/cabinet-events.module";
 import { DevicesModule } from "./modules/devices/devices.module";
 import { GoodsModule } from "./modules/goods/goods.module";
@@ -74,6 +75,7 @@ const resolveEnvFilePath = () => {
     CabinetEventsModule,
     AnalyticsModule,
     AuthModule,
+    VerificationCodeModule,
     SpecialAccessPoliciesModule,
     SystemSettingsModule,
     RegistrationApplicationsModule,

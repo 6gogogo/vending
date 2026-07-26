@@ -106,6 +106,12 @@ const createController = (
   return new AppController(
     { get: (key: string) => config[key] } as never,
     store as never,
+    {
+      getRuntimeConfig: () => ({
+        provider: "aliyun_pnvs",
+        previewEnabled: false
+      })
+    } as never,
     { isReady: () => __auditReady === true } as never
   );
 };

@@ -93,6 +93,49 @@ const adminDeviceSource = readSource("apps/admin-web/src/pages/DeviceDetailPage.
 const adminAppSource = readSource("apps/admin-web/src/App.vue");
 const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
+const publicConfigControllerSource = readSource("apps/api/src/app.controller.ts");
+const sharedTypesSource = readSource("packages/shared-types/src/index.ts");
+const adminPublicConfigSource = readSource("apps/admin-web/src/utils/public-config.ts");
+const mobilePublicConfigSource = readSource("apps/mobile/src/api/runtime-config.ts");
+assert.match(
+  sharedTypesSource,
+  /export type VerificationProvider = "mock" \| "manual" \| "aliyun_pnvs"/,
+  "共享公开配置必须使用封闭的验证码提供方枚举"
+);
+assert.match(
+  sharedTypesSource,
+  /verificationProvider\?: VerificationProvider;[\s\S]{0,80}verificationPreviewEnabled\?: boolean;/,
+  "共享公开配置必须声明验证码提供方和预览状态"
+);
+assert.match(
+  adminPublicConfigSource,
+  /AdminPublicConfig = PublicRuntimeConfig/,
+  "后台必须复用共享公开配置类型"
+);
+assert.match(
+  mobilePublicConfigSource,
+  /MobilePublicConfig = PublicRuntimeConfig/,
+  "移动端必须复用共享公开配置类型"
+);
+const publicConfigMethodSource = publicConfigControllerSource.slice(
+  publicConfigControllerSource.indexOf("publicConfig()"),
+  publicConfigControllerSource.lastIndexOf("\n  }")
+);
+assert.match(
+  publicConfigMethodSource,
+  /verificationProvider: verificationRuntimeConfig\.provider/,
+  "公开配置必须暴露非敏感的验证码提供方状态"
+);
+assert.match(
+  publicConfigMethodSource,
+  /verificationPreviewEnabled: verificationRuntimeConfig\.previewEnabled/,
+  "公开配置必须暴露非敏感的验证码预览状态"
+);
+assert.doesNotMatch(
+  publicConfigMethodSource,
+  /ALIYUN_PNVS_(?:ACCESS_KEY|SIGN_NAME|TEMPLATE_CODE|SCHEME_NAME)|VERIFICATION_CODE_MANUAL_VALUE/,
+  "公开配置不得读取或返回验证码凭据、方案、签名、模板或人工码"
+);
 assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
 assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟实例");
 assert.match(adminCopySource, /验收模拟实例/, "管理后台模拟实例文案必须集中维护");

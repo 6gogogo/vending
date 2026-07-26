@@ -1,5 +1,6 @@
 import { Controller, Get, Inject, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import type { PublicRuntimeConfig } from "@vm/shared-types";
 
 import { resolveFullSimulationExternalMode } from "./common/config/full-simulation-mode";
 import { isProductionReady } from "./common/config/production-safety";
@@ -7,12 +8,15 @@ import { resolveRuntimeDataPlane } from "./common/config/runtime-data-plane";
 import { ok } from "./common/dto/api-response";
 import { InMemoryStoreService } from "./common/store/in-memory-store.service";
 import { SystemAuditLogService } from "./common/store/system-audit-log.service";
+import { VerificationCodeService } from "./modules/auth/verification-code.service";
 
 @Controller()
 export class AppController {
   constructor(
     @Inject(ConfigService) private readonly configService: ConfigService,
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
+    @Inject(VerificationCodeService)
+    private readonly verificationCodeService: VerificationCodeService,
     @Optional()
     @Inject(SystemAuditLogService)
     private readonly auditLog: SystemAuditLogService = new SystemAuditLogService()
@@ -46,8 +50,9 @@ export class AppController {
       )
     });
     const useMockMap = fullSimulationMapMode === "mock";
+    const verificationRuntimeConfig = this.verificationCodeService.getRuntimeConfig();
 
-    return ok({
+    const publicConfig = {
       runtimeDataPlane: resolveRuntimeDataPlane({
         VM_DATA_PLANE: this.configService.get<string>("VM_DATA_PLANE")
       }),
@@ -55,7 +60,11 @@ export class AppController {
       amapWebKey: useMockMap ? "" : this.configService.get<string>("AMAP_WEB_KEY") ?? "",
       amapSecurityJsCode: useMockMap
         ? ""
-        : this.configService.get<string>("AMAP_SECURITY_JS_CODE") ?? ""
-    });
+        : this.configService.get<string>("AMAP_SECURITY_JS_CODE") ?? "",
+      verificationProvider: verificationRuntimeConfig.provider,
+      verificationPreviewEnabled: verificationRuntimeConfig.previewEnabled
+    } satisfies PublicRuntimeConfig;
+
+    return ok(publicConfig);
   }
 }
