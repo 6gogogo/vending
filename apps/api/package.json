@@ -10,6 +10,7 @@
     "data:init": "tsx src/scripts/init-data.ts",
     "data:init:empty": "tsx src/scripts/init-empty-data.ts",
     "data:init:live": "tsx src/scripts/initialize-live-data.ts",
+    "data:init:first-backoffice-password": "tsx src/scripts/initialize-first-backoffice-password.ts",
     "data:backup": "tsx src/scripts/runtime-data-maintenance.ts backup",
     "data:verify": "tsx src/scripts/runtime-data-maintenance.ts verify",
     "data:restore": "tsx src/scripts/runtime-data-maintenance.ts restore",
