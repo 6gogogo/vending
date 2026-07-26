@@ -198,6 +198,12 @@ test("公开手机号状态查询有来源限流，注册资料字段有长度�
     { verifyCode: async () => true } as never,
     { get: () => "false" } as never
   );
+  const knownPhone = store.registrationApplications[0]?.phone;
+  assert.ok(knownPhone);
+  const knownPublicLookup = await service.lookupByPhone(knownPhone, undefined, "127.0.0.8");
+  const unknownPublicLookup = await service.lookupByPhone("13988888888", undefined, "127.0.0.8");
+  assert.deepEqual(knownPublicLookup, { phone: knownPhone, state: "new" });
+  assert.deepEqual(unknownPublicLookup, { phone: "13988888888", state: "new" });
 
   for (let index = 0; index < 30; index += 1) {
     await service.lookupByPhone(`1390000${String(index).padStart(4, "0")}`, undefined, "127.0.0.9");

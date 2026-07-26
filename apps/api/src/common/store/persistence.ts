@@ -66,6 +66,7 @@ export interface VerificationRecord {
   resendAvailableAt?: string;
   failedAttempts?: number;
   consumedAt?: string;
+  externalChallenge?: boolean;
 }
 
 export interface SessionRecord {

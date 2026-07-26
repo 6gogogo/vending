@@ -137,10 +137,15 @@ const main = async () => {
   }
 
   for (const [phone, record] of state.verificationCodes) {
+    if (record.externalChallenge || !record.code) {
+      continue;
+    }
+
+    const { externalChallenge: _externalChallenge, ...legacyRecord } = record;
     await prisma.verificationCode.upsert({
       where: { phone },
-      create: { phone, ...record },
-      update: record
+      create: { phone, ...legacyRecord },
+      update: legacyRecord
     });
   }
 

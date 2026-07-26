@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { randomBytes, randomInt } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 
 import {
   cloneSeedState,
@@ -202,11 +202,11 @@ export class InMemoryStoreService {
           "真实数据平面初始化尚未完成；常规 API 进程不能加载待初始化的真实库。"
         );
       }
-      // 短期认证状态只应存在于当前进程内；升级后顺手清除旧版本可能落盘的明文 token。
+      // 只恢复不含手机号和验证码原文的短期挑战；旧版明文认证状态仍会被清除。
       shouldPersist =
         Boolean(persistedResult?.requiresPrivacyRewrite) ||
         Boolean(persistedResult?.requiresDataPlaneRewrite) ||
-        persisted.verificationCodes.length > 0 ||
+        persisted.verificationCodes.length !== this.verificationCodes.size ||
         persisted.sessions.length > 0 ||
         persisted.draftSessions.length > 0;
     } else {
@@ -399,11 +399,13 @@ export class InMemoryStoreService {
     this.verificationCodes.set(key, {
       code: "",
       purpose,
+      externalChallenge: true,
       expiresAt: new Date(now + 5 * 60_000).toISOString(),
       requestedAt: new Date(now).toISOString(),
       resendAvailableAt: new Date(now + 60_000).toISOString(),
       failedAttempts: 0
     });
+    this.persist();
   }
 
   getVerificationRecord(phone: string, purpose: VerificationPurpose = "general") {
@@ -447,6 +449,9 @@ export class InMemoryStoreService {
       MAX_VERIFICATION_FAILURES,
       (record.failedAttempts ?? 0) + 1
     );
+    if (record.externalChallenge) {
+      this.persist();
+    }
     return true;
   }
 
@@ -459,6 +464,9 @@ export class InMemoryStoreService {
 
     record.code = "";
     record.consumedAt = new Date().toISOString();
+    if (record.externalChallenge) {
+      this.persist();
+    }
     return true;
   }
 
@@ -936,7 +944,19 @@ export class InMemoryStoreService {
   }
 
   private getVerificationCodeKey(phone: string, purpose: VerificationPurpose) {
-    return `${purpose}:${phone}`;
+    const digest = createHash("sha256")
+      .update(`${this.dataPlaneInstanceId}\0${purpose}\0${phone}`, "utf8")
+      .digest("hex");
+    return `challenge:v1:${digest}`;
+  }
+
+  private isPersistableVerificationChallenge(key: string, record: VerificationRecord) {
+    return (
+      /^challenge:v1:[a-f0-9]{64}$/.test(key) &&
+      record.externalChallenge === true &&
+      record.code === "" &&
+      this.isFutureExpiration(record.expiresAt)
+    );
   }
 
   private isFutureExpiration(expiresAt?: string) {
@@ -1850,8 +1870,13 @@ export class InMemoryStoreService {
       alerts: structuredClone(this.alerts),
       logs: structuredClone(this.logs),
       platformTenants: structuredClone(this.platformTenants),
-      // 验证码、Bearer 会话和资料草稿都属于短期认证状态，不进入业务快照或备份。
-      verificationCodes: [],
+      // 仅持久化不含手机号和验证码原文的外部挑战；Bearer 会话与资料草稿仍只在进程内。
+      verificationCodes: Array.from(this.verificationCodes.entries())
+        .filter(([key, record]) => this.isPersistableVerificationChallenge(key, record))
+        .map(
+          ([key, record]) =>
+            [key, structuredClone(record)] as [string, VerificationRecord]
+        ),
       sessions: [],
       draftSessions: [],
       adminCredentials: structuredClone(this.adminCredentials),
@@ -1938,7 +1963,12 @@ export class InMemoryStoreService {
     this.replaceArray(this.platformTenants, state.platformTenants);
 
     this.verificationCodes.clear();
-    // 历史快照可能含有明文 token；启动时主动丢弃，避免恢复旧登录态。
+    for (const [key, record] of state.verificationCodes) {
+      if (this.isPersistableVerificationChallenge(key, record)) {
+        this.verificationCodes.set(key, structuredClone(record));
+      }
+    }
+    // Bearer 会话和资料草稿仍不从快照恢复，避免复活旧登录态。
     this.sessions.clear();
     this.draftSessions.clear();
 

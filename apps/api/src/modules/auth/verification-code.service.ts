@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, InternalServerErrorException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  ServiceUnavailableException
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { timingSafeEqual } from "node:crypto";
 import Dypnsapi20170525Module, {
@@ -113,14 +119,13 @@ export class VerificationCodeService {
         normalizedPurpose
       );
 
-      if (verified) {
-        // 以本地一次性状态成功消费为最终结果，避免并发校验同时获得登录资格。
-        return this.store.consumeVerificationRequest(normalizedPhone, normalizedPurpose);
-      } else {
+      if (!verified) {
         this.store.recordVerificationFailure(normalizedPhone, normalizedPurpose);
+        return false;
       }
 
-      return false;
+      // 本地挑战先绑定本应用发码，再以上游 PASS 和单次消费共同决定结果。
+      return this.store.consumeVerificationRequest(normalizedPhone, normalizedPurpose);
     }
 
     if (provider === "manual") {
@@ -398,7 +403,7 @@ export class VerificationCodeService {
       const response = await this.createAliyunPnvsClient().sendSmsVerifyCode(request);
       const body = isRecord(response.body) ? response.body : ({} as Record<string, unknown>);
 
-      if (!(body.code === "OK" || body.success === true)) {
+      if (!(body.code === "OK" && body.success === true)) {
         throw new Error(
           typeof body.message === "string" && body.message ? body.message : "短信验证码发送失败。"
         );
@@ -423,10 +428,12 @@ export class VerificationCodeService {
       });
       const response = await this.createAliyunPnvsClient().checkSmsVerifyCode(request);
       const body = isRecord(response.body) ? response.body : ({} as Record<string, unknown>);
+      if (!(body.code === "OK" && body.success === true)) {
+        throw new Error("短信验证码校验服务返回失败。");
+      }
+
       const model = isRecord(body.model) ? body.model : undefined;
-      return Boolean(
-        (body.code === "OK" || body.success === true) && model?.verifyResult === "PASS"
-      );
+      return model?.verifyResult === "PASS";
     } catch (error) {
       throw this.wrapAliyunPnvsError(error, "短信验证码校验失败。");
     }
@@ -455,23 +462,14 @@ export class VerificationCodeService {
   }
 
   private wrapAliyunPnvsError(error: unknown, fallback: string) {
-    if (error instanceof BadRequestException || error instanceof InternalServerErrorException) {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof InternalServerErrorException ||
+      error instanceof ServiceUnavailableException
+    ) {
       return error;
     }
 
-    const detail = isRecord(error)
-      ? isRecord(error.data)
-        ? error.data.Recommend ??
-          error.data.Message ??
-          error.data.message ??
-          error.message
-        : error.message
-      : undefined;
-
-    if (error instanceof Error) {
-      return new BadRequestException((typeof detail === "string" && detail) || error.message || fallback);
-    }
-
-    return new BadRequestException((typeof detail === "string" && detail) || fallback);
+    return new ServiceUnavailableException(fallback);
   }
 }

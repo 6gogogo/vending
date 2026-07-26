@@ -39,7 +39,12 @@ const SENSITIVE_LOG_KEY_SUFFIXES = [
   "encryptionkey",
   "privatekey",
   "secretkey",
-  "signingkey"
+  "signingkey",
+  "phone",
+  "phonenumber",
+  "mobile",
+  "mobilenumber",
+  "telephone"
 ] as const;
 const SENSITIVE_LOG_CODE_KEYS = new Set([
   "authcode",

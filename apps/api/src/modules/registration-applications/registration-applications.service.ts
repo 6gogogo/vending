@@ -63,11 +63,15 @@ export class RegistrationApplicationsService {
     const normalizedPhone = phone.trim();
     const includePrivateDetails = Boolean(code?.trim());
 
-    if (includePrivateDetails) {
-      await this.ensureVerifiedCode(normalizedPhone, code!.trim());
-    } else {
+    if (!includePrivateDetails) {
       this.assertPublicLookupAllowed(sourceKey);
+      return {
+        phone: normalizedPhone,
+        state: "new"
+      };
     }
+
+    await this.ensureVerifiedCode(normalizedPhone, code!.trim());
 
     if (!normalizedPhone) {
       return {

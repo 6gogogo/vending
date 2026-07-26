@@ -76,7 +76,7 @@ export class AuthService {
 
   async appLogin(phone: string, code: string): Promise<AppLoginResult> {
     if (!(await this.verificationCodeService.verifyCode(phone, code, "app-login"))) {
-      throw new UnauthorizedException("手机号或验证码不正确。");
+      throw new UnauthorizedException("验证码不正确或已失效，请重新获取。");
     }
 
     const existingUser = this.store.users.find((entry) => entry.phone === phone && entry.status === "active");

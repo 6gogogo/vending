@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 
 import type { CallHandler, ExecutionContext } from "@nestjs/common";
+import { ServiceUnavailableException } from "@nestjs/common";
 import { firstValueFrom, of, throwError } from "rxjs";
 
 import { PersistenceInterceptor } from "../src/common/store/persistence.interceptor";
@@ -258,7 +259,11 @@ test("失败状态的写请求保留审计记录，但不触发业务状态写�
       getRequest: () => ({
         method: "POST",
         path: "/api/auth/mobile-login",
-        body: { phone: "13987654321", code: "111222" },
+        body: {
+          phone: "13987654321",
+          code: "111222",
+          mobileProfileCompleted: true
+        },
         headers: {}
       }),
       getResponse: () => ({ statusCode: 401 })
@@ -274,7 +279,9 @@ test("失败状态的写请求保留审计记录，但不触发业务状态写�
   assert.equal(persistedCount, 0);
   const serialized = readFileSync(systemLogFile, "utf8");
   assert.match(serialized, /mobile-login/);
+  assert.match(serialized, /"mobileProfileCompleted":true/);
   assert.doesNotMatch(serialized, /111222/);
+  assert.doesNotMatch(serialized, /13987654321/);
 });
 
 test("登录态和资料草稿使用高熵 token，并由服务端拒绝过期记录", () => {
@@ -897,6 +904,144 @@ test("阿里云 PNVS 未配置方案名称时发送和核验都使用默认方�
       { type: "check", schemeName: undefined }
     ]
   );
+});
+
+test("阿里云 PNVS 上游异常统一为 503，且不泄露供应商细节", async () => {
+  const store = createIsolatedStore();
+  const upstreamDetail = "provider-internal-recommendation";
+  const service = new VerificationCodeService(
+    {
+      get: (key: string) =>
+        ({
+          VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
+          ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key",
+          ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-secret",
+          ALIYUN_PNVS_SIGN_NAME: "test-sign",
+          ALIYUN_PNVS_TEMPLATE_CODE: "test-template"
+        })[key]
+    } as never,
+    store
+  );
+  (
+    service as unknown as {
+      createAliyunPnvsClient: () => {
+        sendSmsVerifyCode: () => Promise<unknown>;
+        checkSmsVerifyCode: () => Promise<unknown>;
+      };
+    }
+  ).createAliyunPnvsClient = () => ({
+    sendSmsVerifyCode: async () => ({ body: { code: "OK", success: true } }),
+    checkSmsVerifyCode: async () => ({
+      body: { code: "ProviderError", success: false, message: upstreamDetail }
+    })
+  });
+
+  const phone = "13812345689";
+  await service.requestCode(phone, "app-login");
+  await assert.rejects(
+    () => service.verifyCode(phone, "123456", "app-login"),
+    (error: unknown) => {
+      assert.ok(error instanceof ServiceUnavailableException);
+      assert.equal(error.getStatus(), 503);
+      assert.doesNotMatch(JSON.stringify(error.getResponse()), new RegExp(upstreamDetail));
+      return true;
+    }
+  );
+  assert.equal(store.canAttemptVerification(phone, "app-login"), true);
+});
+
+test("真实 PNVS 挑战在 API 重启后仍可校验，并在未登记时进入注册分支", async () => {
+  const directory = createTemporaryDirectory("vm-pnvs-restart-");
+  process.env.API_DATA_FILE = join(directory, "store.json");
+  process.env.ENABLE_TEST_DEVICE_BOOTSTRAP = "false";
+  process.env.NODE_ENV = "test";
+  const phone = "13812345687";
+  const code = "123456";
+  const config = {
+    get: (key: string) =>
+      ({
+        VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
+        ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key",
+        ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-secret",
+        ALIYUN_PNVS_SIGN_NAME: "test-sign",
+        ALIYUN_PNVS_TEMPLATE_CODE: "test-template"
+      })[key]
+  } as never;
+
+  const sendingStore = new InMemoryStoreService();
+  const sendingService = new VerificationCodeService(config, sendingStore);
+  (
+    sendingService as unknown as {
+      createAliyunPnvsClient: () => {
+        sendSmsVerifyCode: () => Promise<unknown>;
+      };
+    }
+  ).createAliyunPnvsClient = () => ({
+    sendSmsVerifyCode: async () => ({ body: { code: "OK", success: true } })
+  });
+
+  await sendingService.requestCode(phone, "app-login");
+  sendingStore.persist();
+
+  const persistedText = readFileSync(process.env.API_DATA_FILE, "utf8");
+  const persistedState = JSON.parse(persistedText) as {
+    verificationCodes: Array<[string, { code?: string; externalChallenge?: boolean }]>;
+  };
+  assert.equal(persistedState.verificationCodes.length, 1);
+  assert.match(persistedState.verificationCodes[0][0], /^challenge:v1:[a-f0-9]{64}$/);
+  assert.equal(persistedState.verificationCodes[0][1].externalChallenge, true);
+  assert.equal(persistedState.verificationCodes[0][1].code, "");
+  assert.doesNotMatch(persistedText, new RegExp(`${phone}|${code}`));
+
+  const restartedStore = new InMemoryStoreService();
+  const checkingService = new VerificationCodeService(config, restartedStore);
+  let checkCalls = 0;
+  (
+    checkingService as unknown as {
+      createAliyunPnvsClient: () => {
+        checkSmsVerifyCode: () => Promise<unknown>;
+      };
+    }
+  ).createAliyunPnvsClient = () => ({
+    checkSmsVerifyCode: async () => {
+      checkCalls += 1;
+      return {
+        body: { code: "OK", success: true, model: { verifyResult: "PASS" } }
+      };
+    }
+  });
+  const authService = createAuthService(restartedStore, checkingService);
+
+  const result = await authService.appLogin(phone, code);
+  assert.equal(result.state, "not_registered");
+  assert.equal(checkCalls, 1);
+  await assert.rejects(
+    () => authService.appLogin(phone, code),
+    /验证码不正确或已失效/
+  );
+  assert.equal(checkCalls, 1);
+  assert.equal(
+    await checkingService.verifyCode("13812345688", code, "app-login"),
+    false
+  );
+  assert.equal(checkCalls, 1);
+
+  const secondRestartStore = new InMemoryStoreService();
+  const secondRestartService = new VerificationCodeService(config, secondRestartStore);
+  let secondRestartCheckCalls = 0;
+  (
+    secondRestartService as unknown as {
+      verifyAliyunPnvsCode: () => Promise<boolean>;
+    }
+  ).verifyAliyunPnvsCode = async () => {
+    secondRestartCheckCalls += 1;
+    return true;
+  };
+  await assert.rejects(
+    () => createAuthService(secondRestartStore, secondRestartService).appLogin(phone, code),
+    /验证码不正确或已失效/
+  );
+  assert.equal(secondRestartCheckCalls, 0);
 });
 
 test("同一手机号的发码冷却和验证码按用途隔离", async () => {
