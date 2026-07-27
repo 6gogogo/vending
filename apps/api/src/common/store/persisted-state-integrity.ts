@@ -511,8 +511,18 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
     }
   }
 
+  const isLegacySimulationManualVerificationGrants =
+    parsed.dataPlane === "simulation" && parsed.manualVerificationGrants === undefined;
+
   for (const key of REQUIRED_ARRAY_KEYS) {
     if (!Array.isArray(parsed[key])) {
+      if (key === "manualVerificationGrants" && isLegacySimulationManualVerificationGrants) {
+        result.warnings.push(
+          "历史 simulation 快照缺少 manualVerificationGrants，将在受控启动时补齐。"
+        );
+        continue;
+      }
+
       result.errors.push(`${key} 必须是数组。`);
     }
   }

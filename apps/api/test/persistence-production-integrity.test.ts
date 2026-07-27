@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,9 @@ import {
   createSeededPersistedState,
   readPersistedStateWithMetadata
 } from "../src/common/store/persistence.js";
+import { FinancialSingleWriterLease } from "../src/common/coordination/financial-single-writer-lease.js";
+import { installFinancialWriterFence } from "../src/common/coordination/financial-writer-fence.js";
+import { InMemoryStoreService } from "../src/common/store/in-memory-store.service.js";
 
 const withEnvironment = (
   values: Record<string, string | undefined>,
@@ -243,6 +246,103 @@ test("仅完全无 marker 的历史模拟数据可进行一次兼容迁移，半
         () => readPersistedStateWithMetadata(),
         /运行数据平面标记无效或不完整/
       );
+    }
+  );
+});
+
+test("生产模拟平面在受控启动时补齐历史人工验证码签发集合", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-legacy-manual-grants-"));
+  const dataFile = join(directory, "store.json");
+  const legacy = createSeededPersistedState() as unknown as Record<string, unknown>;
+  delete legacy.manualVerificationGrants;
+  writeFileSync(dataFile, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "",
+      API_DATA_FILE: dataFile,
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      const loaded = readPersistedStateWithMetadata();
+
+      assert.ok(loaded);
+      assert.deepEqual(loaded.state.manualVerificationGrants, []);
+      assert.equal(loaded.requiresDataPlaneRewrite, true);
+    }
+  );
+});
+
+test("模拟平面拒绝人工验证码签发集合的非数组值", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-invalid-manual-grants-"));
+  const dataFile = join(directory, "store.json");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  for (const invalidValue of [null, "not-an-array"]) {
+    const state = createSeededPersistedState() as unknown as Record<string, unknown>;
+    state.manualVerificationGrants = invalidValue;
+    writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+    withEnvironment(
+      {
+        VM_DATA_PLANE: "simulation",
+        VM_DATA_ROOT: "",
+        VM_DATA_PLANE_ID: "",
+        API_DATA_FILE: dataFile,
+        NODE_ENV: "test",
+        APP_ENV: undefined
+      },
+      () => {
+        assert.throws(
+          () => readPersistedStateWithMetadata(),
+          /运行数据完整性检查未通过/
+        );
+      }
+    );
+  }
+});
+
+test("受控启动把历史模拟快照的空人工验证码签发集合写回磁盘", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-manual-grants-bootstrap-"));
+  const dataFile = join(directory, "store.json");
+  const lockFile = join(directory, "financial-writer.lock");
+  const legacy = createSeededPersistedState() as unknown as Record<string, unknown>;
+  delete legacy.manualVerificationGrants;
+  writeFileSync(dataFile, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "",
+      API_DATA_FILE: dataFile,
+      FINANCIAL_SINGLE_WRITER_ENABLED: "true",
+      NODE_ENV: "test",
+      APP_ENV: undefined
+    },
+    () => {
+      const lease = new FinancialSingleWriterLease({
+        lockFile,
+        ownerId: "manual-grants-bootstrap",
+        autoHeartbeat: false
+      });
+      lease.acquire();
+      const uninstall = installFinancialWriterFence(lease);
+
+      try {
+        const store = new InMemoryStoreService();
+        assert.equal(store.flushBootstrapPersistence(), true);
+        const rewritten = JSON.parse(readFileSync(dataFile, "utf8")) as Record<string, unknown>;
+        assert.deepEqual(rewritten.manualVerificationGrants, []);
+      } finally {
+        uninstall();
+        lease.release();
+      }
     }
   );
 });

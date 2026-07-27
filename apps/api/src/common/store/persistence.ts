@@ -805,8 +805,14 @@ export const readPersistedStateWithMetadata = (): PersistedStateReadResult | und
   }
 
   const validation = validatePersistedState(raw);
+  const hasInvalidManualVerificationGrants =
+    raw.manualVerificationGrants !== undefined &&
+    !Array.isArray(raw.manualVerificationGrants);
 
-  if ((isProductionRuntime() || runtimeDataPlane === "live") && validation.errors.length > 0) {
+  if (
+    (isProductionRuntime() || runtimeDataPlane === "live" || hasInvalidManualVerificationGrants) &&
+    validation.errors.length > 0
+  ) {
     throw new Error("运行数据完整性检查未通过。");
   }
 
@@ -819,7 +825,8 @@ export const readPersistedStateWithMetadata = (): PersistedStateReadResult | und
       raw.dataPlane !== normalized.dataPlane ||
       raw.instanceId !== normalized.instanceId ||
       raw.initializationSource !== normalized.initializationSource ||
-      raw.platformTenants === undefined
+      raw.platformTenants === undefined ||
+      raw.manualVerificationGrants === undefined
   };
 };
 

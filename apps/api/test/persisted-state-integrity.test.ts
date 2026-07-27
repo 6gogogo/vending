@@ -43,6 +43,33 @@ test("持久化状态完整性校验接受默认业务快照", () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("仅兼容历史模拟快照缺失人工验证码签发集合", () => {
+  const simulationState = createRawState();
+  delete simulationState.manualVerificationGrants;
+
+  const simulationResult = validatePersistedState(simulationState);
+
+  assert.deepEqual(simulationResult.errors, []);
+  assert.deepEqual(simulationResult.warnings, [
+    "历史 simulation 快照缺少 manualVerificationGrants，将在受控启动时补齐。"
+  ]);
+
+  const liveState = createRawState();
+  liveState.dataPlane = "live";
+  liveState.initializationSource = "live-bootstrap";
+  delete liveState.manualVerificationGrants;
+
+  const liveResult = validatePersistedState(liveState);
+
+  assert.ok(liveResult.errors.includes("manualVerificationGrants 必须是数组。"));
+  assert.equal(
+    liveResult.warnings.includes(
+      "历史 simulation 快照缺少 manualVerificationGrants，将在受控启动时补齐。"
+    ),
+    false
+  );
+});
+
 test("持久化状态完整性校验拒绝缺失的状态集合和大小写等价的重复后台账号", () => {
   const state = createRawState();
   const users = state.users as Array<Record<string, unknown>>;
