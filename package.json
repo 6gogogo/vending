@@ -11,7 +11,7 @@
     "init:api-data": "npm run data:init --workspace @vm/api",
     "init:all-data": "npm run data:init:empty --workspace @vm/api --",
     "init:live-data": "npm run data:init:live --workspace @vm/api",
-    "init:first-backoffice-password": "npm run data:init:first-backoffice-password --workspace @vm/api",
+    "init:first-backoffice-password:maintenance": "node scripts/run-first-backoffice-password-maintenance.mjs",
     "init:all-data:keep-uploads": "npm run data:init:empty --workspace @vm/api -- --keep-uploads",
     "backup:api-data": "npm run data:backup --workspace @vm/api --",
     "verify:api-data": "npm run data:verify --workspace @vm/api --",
@@ -61,9 +61,10 @@
     "test:public-http-entry-redirect": "node --test scripts/serve-public-http-entry-redirect.test.mjs",
     "test:vnc-nginx-edge-contract": "node --test scripts/verify-vnc-nginx-edge-contract.test.mjs",
     "test:vending-spark-vhost-cutover": "node --test scripts/vending-spark-vhost-cutover.test.mjs",
+    "test:first-backoffice-password-maintenance": "node --test scripts/first-backoffice-password-maintenance.test.mjs",
     "test:vending-public-ingress-root-action": "node --test scripts/vending-public-ingress-root-action.test.mjs",
     "smoke:frontend-safety": "node scripts/smoke-frontend-safety.mjs",
-    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety && npm run test:public-web && npm run test:private-api-relay && npm run test:public-edge-relay && npm run test:public-http-entry-redirect && npm run test:vnc-nginx-edge-contract && npm run test:vending-spark-vhost-cutover && npm run test:vending-public-ingress-root-action",
+    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety && npm run test:public-web && npm run test:private-api-relay && npm run test:public-edge-relay && npm run test:public-http-entry-redirect && npm run test:vnc-nginx-edge-contract && npm run test:vending-spark-vhost-cutover && npm run test:first-backoffice-password-maintenance && npm run test:vending-public-ingress-root-action",
     "check:local:full": "npm run check:local && npm run build && npm run build:mobile:weixin && npm run build:mobile:alipay && npm run build:mobile:app",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

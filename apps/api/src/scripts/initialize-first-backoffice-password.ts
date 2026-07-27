@@ -8,6 +8,7 @@ import {
   assertFirstBackofficePasswordTarget,
   initializeFirstBackofficePassword
 } from "../modules/auth/first-backoffice-password.js";
+import { assertFirstBackofficePasswordMaintenanceServiceContext } from "./first-backoffice-password-maintenance-context.js";
 
 const assertInteractiveTerminal = () => {
   if (!process.stdin.isTTY || !process.stdout.isTTY || typeof process.stdin.setRawMode !== "function") {
@@ -84,6 +85,7 @@ const main = async () => {
   }
 
   assertInteractiveTerminal();
+  assertFirstBackofficePasswordMaintenanceServiceContext();
 
   const dataPlane = resolveRuntimeDataPlane();
 
