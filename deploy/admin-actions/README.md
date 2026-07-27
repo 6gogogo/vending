@@ -1,6 +1,6 @@
 # Vending 公网入口 root action 候选
 
-本目录提供的是受限 root action 的**候选包**。它只解决公网入口所需的 root 托管边界，不能代替 `codex-admin *`，不能接受任意路径或参数，也不会直接暴露 Spark 服务端口。
+本目录提供的是受限 root action 的**历史候选包**。它只解决旧版 VNC Unix-socket API edge 的 root 托管边界，不能代替 `codex-admin *`，不能接受任意路径或参数，也不会直接暴露 Spark 服务端口。当前最终入口改为 VNC Nginx 直接代理 Spark `10.66.66.2:5795`，本次上线不要安装或执行本目录 wrapper；请使用 [最小切换助手](../simple-vnc-spark-cutover/README.md)。
 
 ## 固定能力
 

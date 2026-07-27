@@ -9,6 +9,12 @@ WorkingDirectory=/home/fivegogogo/vending/current
 Environment=PATH=/home/fivegogogo/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PUBLIC_WEB_BIND_HOST=10.66.66.2
 Environment=PUBLIC_WEB_PORT=5795
+Environment=PUBLIC_WEB_API_RELAY_ENABLED=1
+Environment=PUBLIC_WEB_API_RELAY_ALLOWED_SOURCES=10.66.66.1
+Environment=PUBLIC_WEB_API_RELAY_ALLOWED_HOST=vending.5gogogo.top
+Environment=PUBLIC_WEB_API_RELAY_CLIENT_IP_POLICY=nginx-real-ip
+Environment=PUBLIC_WEB_API_RELAY_UPSTREAM_HOST=127.0.0.1
+Environment=PUBLIC_WEB_API_RELAY_UPSTREAM_PORT=8100
 ExecStart=/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/npm run start:public-web
 Restart=on-failure
 RestartSec=5

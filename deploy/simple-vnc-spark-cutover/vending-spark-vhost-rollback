@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 0 ]; then
+  printf '%s\n' 'This fixed rollback command accepts no arguments.' >&2
+  exit 64
+fi
+
+exec /usr/bin/python3 /usr/local/lib/vending-spark-vhost-cutover/vending_spark_vhost_cutover.py rollback

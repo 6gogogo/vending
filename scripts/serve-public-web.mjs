@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { createServer } from "node:http";
-import { isIPv4 } from "node:net";
+import { createServer, request as createUpstreamRequest } from "node:http";
+import { isIP, isIPv4 } from "node:net";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -9,6 +9,23 @@ const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_PORT = 5795;
 const DEFAULT_ADMIN_ROOT = "apps/admin-web/dist";
 const DEFAULT_MOBILE_ROOT = "apps/mobile/dist/build/h5";
+const API_RELAY_TIMEOUT_MS = 30_000;
+const API_RELAY_UPSTREAM_HOST = "127.0.0.1";
+const API_RELAY_UPSTREAM_PORT = 8100;
+const VNC_WIREGUARD_SOURCE = "10.66.66.1";
+const VENDING_PUBLIC_HOST = "vending.5gogogo.top";
+
+const hopByHopHeaders = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade"
+]);
 
 const isAllowedPrivateIpv4 = (host) => {
   if (!isIPv4(host)) {
@@ -187,6 +204,42 @@ export const resolvePublicWebBindHost = (value) => {
   );
 };
 
+// Spark 静态服务默认不代理 API。只有受管单元明确启用、固定为 VNC 的
+// WireGuard 对端、固定为本机 API 上游时，才开放同源 /api/ 反代。
+export const resolvePublicWebApiRelayConfig = (env = process.env) => {
+  const enabled = String(env.PUBLIC_WEB_API_RELAY_ENABLED ?? "").trim();
+  if (!enabled) {
+    return undefined;
+  }
+  if (enabled !== "1") {
+    throw new Error("PUBLIC_WEB_API_RELAY_ENABLED must be exactly 1");
+  }
+
+  if (String(env.PUBLIC_WEB_API_RELAY_ALLOWED_SOURCES ?? "").trim() !== VNC_WIREGUARD_SOURCE) {
+    throw new Error("PUBLIC_WEB_API_RELAY_ALLOWED_SOURCES must be exactly 10.66.66.1");
+  }
+  if (String(env.PUBLIC_WEB_API_RELAY_ALLOWED_HOST ?? "").trim().toLowerCase() !== VENDING_PUBLIC_HOST) {
+    throw new Error("PUBLIC_WEB_API_RELAY_ALLOWED_HOST must be exactly vending.5gogogo.top");
+  }
+  if (String(env.PUBLIC_WEB_API_RELAY_CLIENT_IP_POLICY ?? "").trim() !== "nginx-real-ip") {
+    throw new Error("PUBLIC_WEB_API_RELAY_CLIENT_IP_POLICY must be nginx-real-ip");
+  }
+  if (String(env.PUBLIC_WEB_API_RELAY_UPSTREAM_HOST ?? "").trim() !== API_RELAY_UPSTREAM_HOST) {
+    throw new Error("PUBLIC_WEB_API_RELAY_UPSTREAM_HOST must be exactly 127.0.0.1");
+  }
+  if (String(env.PUBLIC_WEB_API_RELAY_UPSTREAM_PORT ?? "").trim() !== String(API_RELAY_UPSTREAM_PORT)) {
+    throw new Error("PUBLIC_WEB_API_RELAY_UPSTREAM_PORT must be exactly 8100");
+  }
+
+  return {
+    allowedSources: new Set([VNC_WIREGUARD_SOURCE]),
+    clientIpPolicy: "nginx-real-ip",
+    host: VENDING_PUBLIC_HOST,
+    upstreamHost: API_RELAY_UPSTREAM_HOST,
+    upstreamPort: API_RELAY_UPSTREAM_PORT
+  };
+};
+
 const isPathInside = (root, candidate) => {
   const relationship = relative(root, candidate);
   return relationship === "" || (!relationship.startsWith("..") && !isAbsolute(relationship));
@@ -224,6 +277,159 @@ const cacheControlFor = (filePath) =>
     : /[/\\]assets[/\\]/u.test(filePath)
       ? "public, max-age=31536000, immutable"
       : "public, max-age=3600";
+
+const normalizeIp = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
+};
+
+const getSingleHeader = (headers, name) => {
+  const value = headers[name];
+  if (Array.isArray(value) || typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized && !normalized.includes(",") ? normalized : undefined;
+};
+
+const connectionHeaderNames = (headers) => {
+  const value = headers.connection;
+  const raw = Array.isArray(value) ? value.join(",") : value;
+  return new Set(
+    String(raw ?? "")
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+  );
+};
+
+const isRemovedApiInboundHeader = (name, connectionNames) => {
+  const normalized = name.toLowerCase();
+  return (
+    hopByHopHeaders.has(normalized) ||
+    connectionNames.has(normalized) ||
+    normalized === "host" ||
+    normalized === "forwarded" ||
+    normalized === "x-real-ip" ||
+    normalized.startsWith("x-forwarded-") ||
+    normalized.startsWith("x-vending-")
+  );
+};
+
+const copyApiUpstreamHeaders = (incoming, context) => {
+  const headers = {};
+  const connectionNames = connectionHeaderNames(incoming.headers);
+
+  for (const [name, value] of Object.entries(incoming.headers)) {
+    if (value === undefined || isRemovedApiInboundHeader(name, connectionNames)) {
+      continue;
+    }
+    headers[name.toLowerCase()] = value;
+  }
+
+  headers.host = context.host;
+  headers["x-forwarded-for"] = context.clientIp;
+  headers["x-forwarded-host"] = context.host;
+  headers["x-forwarded-proto"] = "https";
+  return headers;
+};
+
+const copyApiDownstreamHeaders = (headers) => {
+  const result = {};
+  const connectionNames = connectionHeaderNames(headers);
+  for (const [name, value] of Object.entries(headers)) {
+    const normalized = name.toLowerCase();
+    if (
+      value !== undefined &&
+      !hopByHopHeaders.has(normalized) &&
+      !connectionNames.has(normalized) &&
+      !normalized.startsWith("x-accel-")
+    ) {
+      result[name] = value;
+    }
+  }
+  return result;
+};
+
+const writeEmptyResponse = (response, status) => {
+  if (response.destroyed || response.writableEnded) {
+    return;
+  }
+  if (response.headersSent) {
+    response.destroy();
+    return;
+  }
+
+  response.writeHead(status, {
+    "Cache-Control": "no-store",
+    "Content-Length": "0",
+    "X-Content-Type-Options": "nosniff"
+  });
+  response.end();
+};
+
+const resolveApiRequestContext = (incoming, config, source) => {
+  if (config.clientIpPolicy !== "nginx-real-ip") {
+    return undefined;
+  }
+
+  const requestedClientIp = normalizeIp(getSingleHeader(incoming.headers, "x-real-ip"));
+  const clientIp = isIP(requestedClientIp) === 0 ? source : requestedClientIp;
+
+  return { clientIp, host: config.host };
+};
+
+const proxyApiRequest = (incoming, outgoing, config) => {
+  const source = normalizeIp(incoming.socket.remoteAddress);
+  if (!config.allowedSources.has(source)) {
+    incoming.resume();
+    writeEmptyResponse(outgoing, 403);
+    return;
+  }
+
+  const context = resolveApiRequestContext(incoming, config, source);
+  if (!context) {
+    incoming.resume();
+    writeEmptyResponse(outgoing, 403);
+    return;
+  }
+
+  let upstreamResponse;
+  const upstream = createUpstreamRequest(
+    {
+      agent: false,
+      hostname: config.upstreamHost,
+      port: config.upstreamPort,
+      method: incoming.method,
+      path: incoming.url,
+      headers: copyApiUpstreamHeaders(incoming, context)
+    },
+    (receivedUpstreamResponse) => {
+      upstreamResponse = receivedUpstreamResponse;
+      outgoing.writeHead(
+        receivedUpstreamResponse.statusCode ?? 502,
+        copyApiDownstreamHeaders(receivedUpstreamResponse.headers)
+      );
+      receivedUpstreamResponse.once("error", () => outgoing.destroy());
+      receivedUpstreamResponse.pipe(outgoing);
+    }
+  );
+
+  upstream.setTimeout(API_RELAY_TIMEOUT_MS, () => {
+    upstream.destroy(new Error("public web API relay upstream timeout"));
+  });
+  upstream.once("error", () => writeEmptyResponse(outgoing, 502));
+  incoming.once("aborted", () => upstream.destroy());
+  incoming.once("error", () => upstream.destroy());
+  outgoing.once("close", () => {
+    if (!outgoing.writableEnded) {
+      upstreamResponse?.destroy();
+      upstream.destroy();
+    }
+  });
+  incoming.pipe(upstream);
+};
 
 const writeTextResponse = (response, method, status, message, extraHeaders = {}) => {
   const body = `${message}\n`;
@@ -264,7 +470,7 @@ const streamFileResponse = (response, method, file) => {
   stream.pipe(response);
 };
 
-export const createPublicWebServer = async ({ adminRoot, mobileRoot } = {}) => {
+export const createPublicWebServer = async ({ adminRoot, mobileRoot, apiRelay } = {}) => {
   const effectiveAdminRoot = await realpath(resolve(adminRoot ?? DEFAULT_ADMIN_ROOT));
   const effectiveMobileRoot = await realpath(resolve(mobileRoot ?? DEFAULT_MOBILE_ROOT));
   const adminIndex = await resolveExistingFile(effectiveAdminRoot, "index.html");
@@ -276,6 +482,11 @@ export const createPublicWebServer = async ({ adminRoot, mobileRoot } = {}) => {
 
   return createServer(async (request, response) => {
     const method = request.method ?? "";
+    const pathname = decodeRequestPath(request.url ?? "");
+    if (apiRelay && (pathname === "/api" || pathname?.startsWith("/api/"))) {
+      proxyApiRequest(request, response, apiRelay);
+      return;
+    }
     const route = resolvePublicWebRoute({
       method,
       requestTarget: request.url ?? ""
@@ -319,7 +530,8 @@ export const createPublicWebServer = async ({ adminRoot, mobileRoot } = {}) => {
 const run = async () => {
   const port = resolvePublicWebPort(process.env.PUBLIC_WEB_PORT);
   const bindHost = resolvePublicWebBindHost(process.env.PUBLIC_WEB_BIND_HOST);
-  const server = await createPublicWebServer();
+  const apiRelay = resolvePublicWebApiRelayConfig();
+  const server = await createPublicWebServer({ apiRelay });
 
   await new Promise((resolveListening, rejectListening) => {
     server.once("error", rejectListening);
