@@ -463,13 +463,9 @@ export const resolveFirstBackofficeMaintenancePlan = ({
     "Restart=no",
     "RemainAfterExit=no",
     "TimeoutStartSec=15min",
-    "StandardInput=tty",
-    "StandardOutput=tty",
-    "StandardError=tty",
-    `TTYPath=${safeTtyPath}`,
-    "TTYReset=no",
-    "TTYVHangup=no",
-    "TTYVTDisallocate=no",
+    `StandardInput=file:${safeTtyPath}`,
+    `StandardOutput=file:${safeTtyPath}`,
+    `StandardError=file:${safeTtyPath}`,
     ""
   ].join("\n");
 

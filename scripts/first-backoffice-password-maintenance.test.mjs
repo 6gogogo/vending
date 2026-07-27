@@ -48,9 +48,13 @@ test("本机首次后台密码维护计划只覆盖执行与终端配置，不�
     plan.contents,
     /^ExecStart=\/home\/fivegogogo\/.nvm\/versions\/node\/v22\.22\.2\/bin\/node \/home\/fivegogogo\/vending\/current\/scripts\/first-backoffice-password-maintenance-runner\.mjs$/mu
   );
-  assert.match(plan.contents, /^TTYPath=\/dev\/pts\/8$/mu);
+  assert.match(plan.contents, /^StandardInput=file:\/dev\/pts\/8$/mu);
+  assert.match(plan.contents, /^StandardOutput=file:\/dev\/pts\/8$/mu);
+  assert.match(plan.contents, /^StandardError=file:\/dev\/pts\/8$/mu);
   assert.match(plan.contents, /^Restart=no$/mu);
   assert.match(plan.contents, /^UnsetEnvironment=NODE_OPTIONS NODE_PATH$/mu);
+  assert.doesNotMatch(plan.contents, /^Standard(?:Input|Output|Error)=tty$/mu);
+  assert.doesNotMatch(plan.contents, /^TTY(?:Path|Reset|VHangup|VTDisallocate)=/mu);
   assert.doesNotMatch(plan.contents, /^Environment(?:File)?=/mu);
   assert.doesNotMatch(plan.contents, /(?:password|code|secret)=/iu);
 });
