@@ -85,6 +85,41 @@ const encodeEnv = (values: Record<string, string>) =>
     .map(([key, value]) => `${key}=${value}`)
     .join("\n")}\n`;
 
+test("示例设置将领取和 App 验证选项集中展示，运行环境只能从模板选项选择", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-example-options-"));
+  const envFilePath = join(directory, ".env");
+  const settings = {
+    NODE_ENV: "development",
+    APP_ENV: "development",
+    VM_RESERVATION_ONLY_PICKUP: "true",
+    VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
+    SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: "auto"
+  };
+  writeFileSync(envFilePath, encodeEnv(settings), "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => settings[key as keyof typeof settings],
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const entries = new Map(service.getSettings().settings.map((entry) => [entry.key, entry]));
+
+    assert.deepEqual(entries.get("NODE_ENV")?.options?.map((option) => option.value), [
+      "development",
+      "test",
+      "production"
+    ]);
+    assert.equal(entries.get("VM_RESERVATION_ONLY_PICKUP")?.group, "示例设置");
+    assert.equal(entries.get("VM_FULL_SIMULATION_VERIFICATION_MODE")?.group, "示例设置");
+    assert.equal(entries.get("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE")?.group, "示例设置");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("真实数据平面没有受控配置写入适配器时拒绝后台改写默认 .env", () => {
   const service = new SystemSettingsService(
     {

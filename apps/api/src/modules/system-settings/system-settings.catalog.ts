@@ -7,6 +7,7 @@ import type {
 import { productionConfigurationSafetyCriticalKeys } from "../../common/config/production-safety";
 
 interface SystemSettingMetadata {
+  group?: string;
   label: string;
   description: string;
   inputType?: SystemSettingInputType;
@@ -19,18 +20,31 @@ interface SystemSettingMetadata {
 
 export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   NODE_ENV: {
+    group: "运行方式",
     label: "Node 运行环境",
-    description: "由受控部署环境设置；生产运行中禁止在线修改。",
-    inputType: "text",
+    description: "选择与当前部署模板一致的运行环境。生产环境由部署流程固定，不能在运行中修改。",
+    inputType: "select",
+    options: [
+      { label: "开发环境", value: "development" },
+      { label: "测试环境", value: "test" },
+      { label: "生产环境（受控部署）", value: "production" }
+    ],
     restartRequired: true
   },
   APP_ENV: {
+    group: "运行方式",
     label: "应用运行环境",
-    description: "由受控部署环境设置；生产运行中禁止在线修改。",
-    inputType: "text",
+    description: "与 Node 运行环境保持一致；生产环境由部署流程固定，不能在运行中修改。",
+    inputType: "select",
+    options: [
+      { label: "开发环境", value: "development" },
+      { label: "测试环境", value: "test" },
+      { label: "生产环境（受控部署）", value: "production" }
+    ],
     restartRequired: true
   },
   VM_DATA_PLANE: {
+    group: "运行方式",
     label: "运行数据平面",
     description: "由部署进程管理器固定注入；simulation 为本地模拟平面，live 为纯净真实平面。运行中不得在线修改。",
     inputType: "select",
@@ -42,6 +56,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_SIMULATION_PROFILE: {
+    group: "运行方式",
     label: "模拟运行档",
     description: "standard 为全模块 mock；full 为隔离的全真模拟，允许逐项选择真实外部模块，但仍绝不使用真实数据平面。",
     inputType: "select",
@@ -53,12 +68,14 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_ENABLED: {
+    group: "运行方式",
     label: "确认启用全真模拟",
     description: "只有 VM_SIMULATION_PROFILE=full 时生效。必须显式开启，并配合独立的数据根和实例标识后才能启动。",
     inputType: "boolean",
     restartRequired: true
   },
   VM_FULL_SIMULATION_SMARTVM_MODE: {
+    group: "运行方式",
     label: "全真模拟：柜机平台",
     description: "mock 不会向 SmartVM 发请求；real 仅在隔离模拟数据下使用已配置的真实柜机平台，缺少接入配置将拒绝启动。",
     inputType: "select",
@@ -69,8 +86,9 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_PAYMENT_MODE: {
-    label: "全真模拟：支付",
-    description: "mock 使用本地模拟支付；real 按真实微信/支付宝配置创建真实渠道订单，缺少配置时会明确报错且不回退。",
+    group: "示例设置",
+    label: "非预约领取：支付验证",
+    description: "仅在关闭预约取货后用于测试非预约领取。预约取货开启时无需设置，也不会创建新的支付单。",
     inputType: "select",
     options: [
       { label: "模拟支付", value: "mock" },
@@ -79,8 +97,9 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_VERIFICATION_MODE: {
-    label: "全真模拟：登录验证码方式",
-    description: "mock 使用本地验证码；real 使用阿里云 PNVS；manual 仅接受当前实例管理员在人员页随机签发的 6 位短期人工码，不发送短信，也不存在固定通用验证码。真实短信配置缺失时会明确报错，绝不发送到模拟通道。",
+    group: "示例设置",
+    label: "App 登录验证方式",
+    description: "手动设置验证码由当前实例管理员在人员页为已启用账号签发，6 位、短期且只能使用一次；不会发送短信。",
     inputType: "select",
     options: [
       { label: "模拟验证码", value: "mock" },
@@ -90,6 +109,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_AI_MODE: {
+    group: "运行方式",
     label: "全真模拟：AI",
     description: "mock 返回本地稳定兜底结果且不外发业务上下文；real 调用已配置的 OpenAI 兼容服务。",
     inputType: "select",
@@ -100,6 +120,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_MAP_MODE: {
+    group: "运行方式",
     label: "全真模拟：地图",
     description: "mock 不加载高德脚本，可手工录入坐标；real 向后台提供已配置的高德 Web Key。",
     inputType: "select",
@@ -110,8 +131,9 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_RESERVATION_ONLY_PICKUP: {
-    label: "预约取货模式",
-    description: "开启后，特殊群体只能先预约再开柜；新流程只做领取核对，不创建新的支付单或补扣。历史订单的查询、核对和退款仍保留。",
+    group: "示例设置",
+    label: "预约取货",
+    description: "开启后，用户先预约再取货；当前公益领取不需要支付配置。关闭后可测试非预约领取流程。",
     inputType: "boolean",
     restartRequired: true
   },
@@ -305,14 +327,15 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "path"
   },
   SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: {
-    label: "补扣额度归属时间",
-    description: "平台补扣占用免费额度时使用哪个时间点。自动模式下，有预约按预约创建时间，无预约按原开柜交易时间。",
+    group: "示例设置",
+    label: "领取差异的额度归属",
+    description: "当柜机实际数量与预约不一致时，选择差异计入哪一天的可领取额度。建议保留“自动”。",
     inputType: "select",
     options: [
-      { label: "自动", value: "auto" },
-      { label: "原交易时间", value: "transaction_time" },
-      { label: "预约创建时间", value: "reservation_time" },
-      { label: "补扣回调时间", value: "callback_time" }
+      { label: "自动：有预约按预约日，无预约按领取日", value: "auto" },
+      { label: "按原领取时间计入额度", value: "transaction_time" },
+      { label: "按预约创建时间计入额度", value: "reservation_time" },
+      { label: "按柜机回传时间计入额度", value: "callback_time" }
     ]
   },
   SMARTVM_REFUND_CALLBACK_PATH: {

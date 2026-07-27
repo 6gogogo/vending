@@ -330,7 +330,7 @@ export class SystemSettingsService {
           : runtimeValue !== undefined
             ? "runtime"
             : "example";
-    const group = envFile.groups.get(key) ?? exampleFile.groups.get(key) ?? defaultGroupName;
+    const group = metadata?.group ?? envFile.groups.get(key) ?? exampleFile.groups.get(key) ?? defaultGroupName;
     const inputType = this.resolveInputType(key, value, exampleValue, metadata?.inputType);
 
     return {

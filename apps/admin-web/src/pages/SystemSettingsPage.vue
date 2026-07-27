@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
 import type {
   PaymentDiagnosticsResult,
@@ -14,6 +14,11 @@ import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
+import {
+  isReservationOnlyPickupEnabled,
+  reservationOnlyPickupSettingKey,
+  settingsVisibleForCurrentPickupMode
+} from "../utils/system-settings-display";
 
 type LeaveDecision = "save" | "discard" | "stay";
 
@@ -39,7 +44,18 @@ const settings = computed(() => settingsSnapshot.value?.settings ?? []);
 const canUpdateSettings = computed(() => sessionStore.can("system-settings:update"));
 const canViewSensitiveSettings = computed(() => sessionStore.can("system-settings:secret:view"));
 const settingsByKey = computed(() => new Map(settings.value.map((entry) => [entry.key, entry])));
-const groups = computed(() => [...new Set(settings.value.map((entry) => entry.group))]);
+const optionLabel = (key: string) => {
+  const entry = settingsByKey.value.get(key);
+  const currentValue = formValues[key] ?? entry?.value ?? "";
+  return entry?.options?.find((option) => option.value === currentValue)?.label ?? "未设置";
+};
+const reservationOnlyPickup = computed(() =>
+  isReservationOnlyPickupEnabled(formValues[reservationOnlyPickupSettingKey])
+);
+const settingsForCurrentPickupMode = computed(() =>
+  settingsVisibleForCurrentPickupMode(settings.value, reservationOnlyPickup.value)
+);
+const groups = computed(() => [...new Set(settingsForCurrentPickupMode.value.map((entry) => entry.group))]);
 const dirtyKeys = computed(() =>
   Object.keys(formValues).filter((key) => formValues[key] !== originalValues.value[key])
 );
@@ -51,7 +67,7 @@ const runtimeDirtyKeys = computed(() =>
   dirtyKeys.value.filter((key) => !settingsByKey.value.get(key)?.restartRequired)
 );
 const activeGroupSettings = computed(() =>
-  settings.value.filter((entry) => !activeGroup.value || entry.group === activeGroup.value)
+  settingsForCurrentPickupMode.value.filter((entry) => !activeGroup.value || entry.group === activeGroup.value)
 );
 const visibleSettings = computed(() => {
   const query = searchText.value.trim().toLowerCase();
@@ -70,17 +86,12 @@ const visibleSettings = computed(() => {
 const groupCounts = computed(() =>
   groups.value.map((group) => ({
     group,
-    count: settings.value.filter((entry) => entry.group === group).length,
+    count: settingsForCurrentPickupMode.value.filter((entry) => entry.group === group).length,
     dirtyCount: dirtyKeys.value.filter((key) => settingsByKey.value.get(key)?.group === group).length
   }))
 );
-const sourceSummary = computed(() => {
-  const envCount = settings.value.filter((entry) => entry.source === "env").length;
-  const exampleCount = settings.value.filter((entry) => entry.source === "example").length;
-  const runtimeCount = settings.value.filter((entry) => entry.source === "runtime").length;
-
-  return { envCount, exampleCount, runtimeCount };
-});
+const verificationModeLabel = computed(() => optionLabel("VM_FULL_SIMULATION_VERIFICATION_MODE"));
+const adjustmentQuotaModeLabel = computed(() => optionLabel("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"));
 const paymentSummaryClass = computed(() => {
   const summary = paymentDiagnostics.value?.summary;
 
@@ -118,6 +129,24 @@ const applySnapshot = (snapshot: SystemSettingsSnapshot) => {
   }
 };
 
+const clearPaymentDiagnostics = () => {
+  paymentDiagnostics.value = undefined;
+  paymentDiagnosticsError.value = "";
+};
+
+const refreshPaymentDiagnosticsFor = (snapshot: Pick<SystemSettingsSnapshot, "settings">) => {
+  const reservationOnly = isReservationOnlyPickupEnabled(
+    snapshot.settings.find((entry) => entry.key === reservationOnlyPickupSettingKey)?.value
+  );
+
+  if (reservationOnly) {
+    clearPaymentDiagnostics();
+    return;
+  }
+
+  void loadPaymentDiagnostics();
+};
+
 const loadPaymentDiagnostics = async () => {
   paymentDiagnosticsLoading.value = true;
   paymentDiagnosticsError.value = "";
@@ -137,8 +166,9 @@ const loadSettings = async () => {
   saveMessage.value = null;
 
   try {
-    applySnapshot(await adminApi.systemSettings());
-    void loadPaymentDiagnostics();
+    const snapshot = await adminApi.systemSettings();
+    applySnapshot(snapshot);
+    refreshPaymentDiagnosticsFor(snapshot);
     lastSaveResult.value = undefined;
   } catch (error) {
     loadError.value = readErrorMessage(error, "加载系统设置失败。");
@@ -165,7 +195,7 @@ const saveSettings = async () => {
     });
     lastSaveResult.value = response;
     applySnapshot(response);
-    void loadPaymentDiagnostics();
+    refreshPaymentDiagnosticsFor(response);
     saveMessage.value = {
       type: "success",
       text: response.changedKeys.length
@@ -349,6 +379,12 @@ onBeforeRouteLeave(async () => {
   return saveSettings();
 });
 
+watch(groups, (nextGroups) => {
+  if (!nextGroups.some((group) => group === activeGroup.value)) {
+    activeGroup.value = nextGroups[0] ?? "";
+  }
+}, { immediate: true });
+
 onMounted(() => {
   void loadSettings();
   window.addEventListener("beforeunload", handleBeforeUnload);
@@ -365,11 +401,10 @@ onBeforeUnmount(() => {
       <div class="admin-page__section-head settings-page__topbar">
         <div class="settings-page__heading-copy">
           <p class="admin-copy">
-            当前配置文件：
-            <span class="admin-code">{{ settingsSnapshot?.envFilePath ?? "apps/api/.env" }}</span>
+            先在“示例设置”选择领取方式、领取差异额度归属和 App 登录验证；高级接入配置仅在确有授权时维护。
           </p>
           <p class="admin-copy">
-            已加载 {{ settings.length }} 项；.env {{ sourceSummary.envCount }} 项，示例默认 {{ sourceSummary.exampleCount }} 项，运行时 {{ sourceSummary.runtimeCount }} 项。
+            保存后按页面提示重启服务。详细操作说明与验收步骤已整理在项目使用手册中。
           </p>
         </div>
 
@@ -395,7 +430,7 @@ onBeforeUnmount(() => {
         当前账号只有查看权限，不能修改或保存系统设置。
       </div>
       <div class="admin-note settings-page__note">
-        这里只维护短信、支付、柜机平台和服务密钥等技术接入参数；人员每日物资和提前预约规则在“人员管理”中配置。
+        示例设置用于演示领取和登录流程；人员额度、预约时段和审核规则仍在“人员管理”中维护。
       </div>
       <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
@@ -414,7 +449,38 @@ onBeforeUnmount(() => {
         当前有 {{ dirtyKeys.length }} 项未保存；{{ runtimeDirtyKeys.length }} 项保存后立即写入运行时，{{ restartDirtyKeys.length }} 项需要重启后完全生效。
       </div>
 
-      <section class="admin-panel admin-panel-block payment-diagnostics">
+      <section class="admin-panel admin-panel-block settings-page__example-overview">
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">业务示例</span>
+            <h3 class="admin-panel__title">先确认这三项</h3>
+          </div>
+          <button class="admin-button admin-button--ghost" type="button" @click="setActiveGroup('示例设置')">
+            打开示例设置
+          </button>
+        </div>
+        <div class="settings-page__example-grid">
+          <section class="settings-page__example-card">
+            <span class="settings-page__example-label">领取方式</span>
+            <strong>{{ reservationOnlyPickup ? "预约后取货" : "即时领取（测试）" }}</strong>
+            <p class="admin-copy">
+              {{ reservationOnlyPickup ? "当前流程不需要新建支付单或填写支付参数。" : "非预约领取测试会显示支付相关配置。" }}
+            </p>
+          </section>
+          <section class="settings-page__example-card">
+            <span class="settings-page__example-label">领取差异额度</span>
+            <strong>{{ adjustmentQuotaModeLabel }}</strong>
+            <p class="admin-copy">用于处理柜机实际领取数量多于或少于预约数量的情况。</p>
+          </section>
+          <section class="settings-page__example-card">
+            <span class="settings-page__example-label">App 登录验证</span>
+            <strong>{{ verificationModeLabel }}</strong>
+            <p class="admin-copy">手动码由实例管理员为已启用人员单独签发，不发送短信。</p>
+          </section>
+        </div>
+      </section>
+
+      <section v-if="!reservationOnlyPickup" class="admin-panel admin-panel-block payment-diagnostics">
         <div class="admin-panel__head payment-diagnostics__head">
           <div>
             <span class="admin-kicker">支付自检</span>
@@ -499,6 +565,9 @@ onBeforeUnmount(() => {
           <div class="admin-empty__body">请稍候。</div>
         </div>
       </section>
+      <div v-else class="admin-note settings-page__note settings-page__note--success">
+        当前为预约取货：新的领取流程不需要支付配置，支付自检与支付专用设置已收起；历史订单仍可在订单和日志中查询。
+      </div>
     </section>
 
     <section class="settings-page__workspace">
@@ -525,14 +594,14 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="admin-note settings-page__note">
-          保存会写回 <span class="admin-code">apps/api/.env</span> 并同步当前 API 进程配置；标记为重启后生效的项会保留提示。
+          先使用“示例设置”。高级接入项按页面的保存和重启提示执行；敏感内容始终隐藏。
         </div>
       </aside>
 
       <article class="admin-panel admin-panel-block settings-page__form-panel">
         <div class="admin-panel__head settings-page__panel-head">
           <div>
-            <span class="admin-kicker">统一配置</span>
+            <span class="admin-kicker">配置</span>
             <h3 class="admin-panel__title">{{ activeGroup || "系统设置" }}</h3>
           </div>
           <div class="settings-page__state-pills">
@@ -565,9 +634,14 @@ onBeforeUnmount(() => {
             <div class="settings-page__field-meta">
               <div class="settings-page__field-title-line">
                 <span class="settings-page__field-title">{{ entry.label }}</span>
-                <span class="admin-code settings-page__field-key">{{ entry.key }}</span>
+                <span v-if="entry.group !== '示例设置'" class="admin-code settings-page__field-key">{{ entry.key }}</span>
               </div>
-              <p class="admin-copy settings-page__field-description">{{ entry.description }}</p>
+              <p v-if="entry.group === '示例设置'" class="admin-copy settings-page__field-description">
+                {{ entry.description }}
+              </p>
+              <p v-else class="admin-copy settings-page__field-description">
+                按对应服务提供的信息填写；详细约束请查阅系统设置说明。
+              </p>
               <div class="settings-page__field-pills">
                 <span class="admin-pill" :class="fieldPillClass(entry)">{{ fieldPillText(entry) }}</span>
                 <span v-if="entry.sensitive" class="admin-pill admin-pill--neutral">敏感项</span>
@@ -700,6 +774,41 @@ onBeforeUnmount(() => {
   border-left-color: #a9d2b5;
   background: #effaf2;
   color: #1d6b3d;
+}
+
+.settings-page__example-overview {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.settings-page__example-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-page__example-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #cfdbe9;
+  border-radius: 10px;
+  background: #f7faff;
+}
+
+.settings-page__example-card strong {
+  color: #1d4f91;
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+
+.settings-page__example-label {
+  color: var(--admin-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .payment-diagnostics {
@@ -999,7 +1108,8 @@ onBeforeUnmount(() => {
 @media (max-width: 1120px) {
   .settings-page__workspace,
   .settings-page__field-row,
-  .payment-diagnostics__providers {
+  .payment-diagnostics__providers,
+  .settings-page__example-grid {
     grid-template-columns: 1fr;
   }
 
