@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/vnc/111/vending
+WorkingDirectory=/home/vnc/vending-release-current
 Environment=PATH=/home/vnc/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PUBLIC_EDGE_RELAY_MODE=static
 Environment=PUBLIC_EDGE_RELAY_BIND_HOST=127.0.0.1

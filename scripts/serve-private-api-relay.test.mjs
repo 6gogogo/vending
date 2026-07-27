@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
 import { createServer, request } from "node:http";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   createPrivateApiRelayServer,
   resolvePrivateApiRelayConfig
 } from "./serve-private-api-relay.mjs";
+
+const defaultTokenDirectory = mkdtempSync(join(tmpdir(), "vm-private-relay-default-token-"));
+const defaultTokenFile = join(defaultTokenDirectory, "relay-token");
+const defaultSharedToken = "test-shared-token-012345678901234567890123456789";
+writeFileSync(defaultTokenFile, defaultSharedToken, { encoding: "utf8", mode: 0o600 });
+if (process.platform !== "win32") {
+  chmodSync(defaultTokenFile, 0o600);
+}
+process.once("exit", () => rmSync(defaultTokenDirectory, { recursive: true, force: true }));
 
 const listen = (server) =>
   new Promise((resolveListening, rejectListening) => {
@@ -50,7 +62,8 @@ const send = ({ port, method = "GET", path = "/", headers, body = "" }) =>
 const trustedRelayHeaders = {
   "X-Vending-Relay-Client-IP": "198.51.100.13",
   "X-Vending-Relay-Host": "vending.5gogogo.top",
-  "X-Vending-Relay-Proto": "https"
+  "X-Vending-Relay-Proto": "https",
+  "X-Vending-Relay-Shared-Token": defaultSharedToken
 };
 
 const testRelayConfig = (overrides = {}) =>
@@ -59,6 +72,7 @@ const testRelayConfig = (overrides = {}) =>
     PRIVATE_API_RELAY_ALLOWED_SOURCES: "127.0.0.1",
     PRIVATE_API_RELAY_ALLOWED_HOSTS: "vending.5gogogo.top",
     PRIVATE_API_RELAY_UPSTREAM_HOST: "127.0.0.1",
+    PRIVATE_API_RELAY_SHARED_TOKEN_FILE: defaultTokenFile,
     ...overrides
   });
 
@@ -68,14 +82,17 @@ test("private API relay requires an explicit private source and public host allo
       PRIVATE_API_RELAY_BIND_HOST: "10.66.66.2",
       PRIVATE_API_RELAY_PORT: "8100",
       PRIVATE_API_RELAY_ALLOWED_SOURCES: "10.66.66.1",
-      PRIVATE_API_RELAY_ALLOWED_HOSTS: "vending.5gogogo.top"
+      PRIVATE_API_RELAY_ALLOWED_HOSTS: "vending.5gogogo.top",
+      PRIVATE_API_RELAY_SHARED_TOKEN_FILE: defaultTokenFile
     }),
     {
       bindHost: "10.66.66.2",
       port: 8100,
       allowedSources: new Set(["10.66.66.1"]),
       allowedHosts: new Set(["vending.5gogogo.top"]),
+      allowedProtocols: new Set(["https"]),
       healthProbeSource: undefined,
+      sharedToken: defaultSharedToken,
       upstreamHost: "127.0.0.1",
       upstreamPort: 8100
     }
@@ -108,6 +125,112 @@ test("private API relay requires an explicit private source and public host allo
       }),
     /loopback/u
   );
+  assert.throws(
+    () =>
+      resolvePrivateApiRelayConfig({
+        PRIVATE_API_RELAY_BIND_HOST: "10.66.66.2",
+        PRIVATE_API_RELAY_ALLOWED_SOURCES: "10.66.66.1",
+        PRIVATE_API_RELAY_ALLOWED_HOSTS: "vending.5gogogo.top"
+      }),
+    /SHARED_TOKEN_FILE is required/u
+  );
+});
+
+test(
+  "private API relay rejects symlinked or writable token parent chains",
+  { skip: process.platform === "win32" },
+  (t) => {
+    const rootDirectory = mkdtempSync(join(tmpdir(), "vm-private-relay-token-chain-"));
+    const tokenDirectory = join(rootDirectory, "private");
+    const linkedDirectory = join(rootDirectory, "linked");
+    const tokenFile = join(tokenDirectory, "relay-token");
+    mkdirSync(tokenDirectory, { mode: 0o700 });
+    writeFileSync(tokenFile, defaultSharedToken, { encoding: "utf8", mode: 0o600 });
+    chmodSync(tokenDirectory, 0o700);
+    chmodSync(tokenFile, 0o600);
+    symlinkSync(tokenDirectory, linkedDirectory, "dir");
+    t.after(() => {
+      chmodSync(rootDirectory, 0o700);
+      rmSync(rootDirectory, { recursive: true, force: true });
+    });
+
+    assert.throws(
+      () =>
+        testRelayConfig({
+          PRIVATE_API_RELAY_SHARED_TOKEN_FILE: join(linkedDirectory, "relay-token")
+        }),
+      /parent chain must contain only directories/u
+    );
+
+    chmodSync(rootDirectory, 0o720);
+    assert.throws(
+      () => testRelayConfig({ PRIVATE_API_RELAY_SHARED_TOKEN_FILE: tokenFile }),
+      /parent chain must not be group- or world-writable/u
+    );
+  }
+);
+
+test("private API relay only accepts the configured gateway token for forwarded requests", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-private-relay-token-"));
+  const tokenFile = join(directory, "relay-token");
+  const token = "test-shared-token-012345678901234567890123456789";
+  writeFileSync(tokenFile, token, { encoding: "utf8", mode: 0o600 });
+  if (process.platform !== "win32") {
+    chmodSync(tokenFile, 0o600);
+  }
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  let upstreamRequests = 0;
+  const upstream = createServer((_incoming, response) => {
+    upstreamRequests += 1;
+    response.end("upstream-ok");
+  });
+  await listen(upstream);
+  t.after(() => close(upstream));
+
+  const relay = createPrivateApiRelayServer(
+    testRelayConfig({
+      PRIVATE_API_RELAY_UPSTREAM_PORT: String(upstream.address().port),
+      PRIVATE_API_RELAY_ALLOWED_PROTOCOLS: "https,http",
+      PRIVATE_API_RELAY_SHARED_TOKEN_FILE: tokenFile
+    })
+  );
+  await listen(relay);
+  t.after(() => close(relay));
+
+  const tokenTestRelayHeaders = {
+    "X-Vending-Relay-Client-IP": "198.51.100.13",
+    "X-Vending-Relay-Host": "vending.5gogogo.top",
+    "X-Vending-Relay-Proto": "http"
+  };
+
+  const missing = await send({
+    port: relay.address().port,
+    path: "/api/example",
+    headers: tokenTestRelayHeaders
+  });
+  const wrong = await send({
+    port: relay.address().port,
+    path: "/api/example",
+    headers: {
+      ...tokenTestRelayHeaders,
+      "X-Vending-Relay-Shared-Token": "wrong-shared-token-012345678901234567890123456789"
+    }
+  });
+  const allowed = await send({
+    port: relay.address().port,
+    path: "/api/example",
+    headers: {
+      ...tokenTestRelayHeaders,
+      "X-Vending-Relay-Shared-Token": token
+    }
+  });
+
+  assert.equal(missing.status, 403);
+  assert.equal(wrong.status, 403);
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.body, "upstream-ok");
+  assert.equal(upstreamRequests, 1);
 });
 
 test("private API relay permits its local health gateway only for two fixed GET paths", async () => {

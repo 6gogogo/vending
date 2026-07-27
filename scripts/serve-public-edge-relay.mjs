@@ -1,9 +1,11 @@
+import { chmodSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
 import { createServer, request as createUpstreamRequest } from "node:http";
 import { isIP, isIPv4 } from "node:net";
-import { resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const RELAY_TIMEOUT_MS = 30_000;
+const DEFAULT_API_SOCKET_MODE = 0o660;
 const loopbackHosts = new Set(["127.0.0.1", "::1"]);
 const modes = new Set(["api", "static"]);
 const hopByHopHeaders = new Set([
@@ -51,6 +53,113 @@ const isPrivateIpv4 = (value) => {
     (first === 172 && second >= 16 && second <= 31) ||
     (first === 192 && second === 168)
   );
+};
+
+const assertPrivateTokenPathChain = (filePath, variableName) => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const serviceUserId = process.getuid();
+  let directoryPath = dirname(filePath);
+  for (;;) {
+    const metadata = lstatSync(directoryPath);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error(`${variableName} parent chain must contain only directories`);
+    }
+
+    const isWritableByGroupOrOthers = (metadata.mode & 0o022) !== 0;
+    const isProtectedStickyDirectory =
+      metadata.uid !== serviceUserId && (metadata.mode & 0o1000) !== 0;
+    if (isWritableByGroupOrOthers && !isProtectedStickyDirectory) {
+      throw new Error(`${variableName} parent chain must not be group- or world-writable`);
+    }
+
+    const parentPath = dirname(directoryPath);
+    if (parentPath === directoryPath) {
+      return;
+    }
+    directoryPath = parentPath;
+  }
+};
+
+const readSharedToken = (filePath) => {
+  const resolvedFilePath = resolve(filePath);
+  const metadata = lstatSync(resolvedFilePath);
+  const parentMetadata = lstatSync(dirname(resolvedFilePath));
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error("PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE must be a regular file");
+  }
+  if (!parentMetadata.isDirectory() || parentMetadata.isSymbolicLink()) {
+    throw new Error("PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE parent must be a directory");
+  }
+  if (
+    process.platform !== "win32" &&
+    ((metadata.mode & 0o077) !== 0 ||
+      (parentMetadata.mode & 0o022) !== 0 ||
+      metadata.uid !== process.getuid() ||
+      parentMetadata.uid !== process.getuid())
+  ) {
+    throw new Error("PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE must be private to the service user");
+  }
+  assertPrivateTokenPathChain(resolvedFilePath, "PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE");
+
+  const token = readFileSync(resolvedFilePath, "utf8").trim();
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(token)) {
+    throw new Error("PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE must contain a high-entropy token");
+  }
+  return token;
+};
+
+const resolveApiSocketPath = (value, directory) => {
+  const rawPath = String(value ?? "").trim();
+  const rawDirectory = String(directory ?? "").trim();
+  if (!rawPath || !rawDirectory || !isAbsolute(rawPath) || !isAbsolute(rawDirectory)) {
+    throw new Error("PUBLIC_EDGE_RELAY_SOCKET_PATH and PUBLIC_EDGE_RELAY_SOCKET_DIRECTORY are required");
+  }
+
+  const socketPath = resolve(rawPath);
+  const socketDirectory = resolve(rawDirectory);
+  if (dirname(socketPath) !== socketDirectory || !socketPath.endsWith(".sock")) {
+    throw new Error("PUBLIC_EDGE_RELAY_SOCKET_PATH must be a direct .sock child of the controlled socket directory");
+  }
+
+  return { socketDirectory, socketPath };
+};
+
+const assertApiSocketDirectory = (config) => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const metadata = lstatSync(config.socketDirectory);
+  if (
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    metadata.uid !== process.getuid() ||
+    (metadata.mode & 0o007) !== 0 ||
+    (metadata.mode & 0o2000) === 0
+  ) {
+    throw new Error("PUBLIC_EDGE_RELAY_SOCKET_DIRECTORY must be a private setgid service directory");
+  }
+};
+
+const removeStaleApiSocket = (socketPath) => {
+  try {
+    const metadata = lstatSync(socketPath);
+    if (!metadata.isSocket() || metadata.isSymbolicLink()) {
+      throw new Error("PUBLIC_EDGE_RELAY_SOCKET_PATH exists but is not a socket");
+    }
+    if (process.platform !== "win32" && metadata.uid !== process.getuid()) {
+      throw new Error("PUBLIC_EDGE_RELAY_SOCKET_PATH is not owned by the service user");
+    }
+    unlinkSync(socketPath);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
 };
 
 const normalizeAllowedHost = (value) => {
@@ -132,6 +241,7 @@ const copyUpstreamHeaders = (incoming, context, mode) => {
     headers["x-vending-relay-client-ip"] = context.clientIp;
     headers["x-vending-relay-host"] = context.host;
     headers["x-vending-relay-proto"] = "https";
+    headers["x-vending-relay-shared-token"] = context.sharedToken;
   }
   return headers;
 };
@@ -187,7 +297,11 @@ const resolveRequestContext = (incoming, config) => {
     return undefined;
   }
 
-  return { clientIp, host };
+  return {
+    clientIp,
+    host,
+    sharedToken: config.sharedToken
+  };
 };
 
 const isSafeRequestTarget = (value) =>
@@ -199,32 +313,51 @@ export const resolvePublicEdgeRelayConfig = (env = process.env) => {
     throw new Error("PUBLIC_EDGE_RELAY_MODE must be api or static");
   }
 
-  const bindHost = String(env.PUBLIC_EDGE_RELAY_BIND_HOST ?? "").trim();
-  if (!isLoopbackHost(bindHost)) {
-    throw new Error("PUBLIC_EDGE_RELAY_BIND_HOST must be a loopback address");
-  }
-
   const upstreamHost = String(env.PUBLIC_EDGE_RELAY_UPSTREAM_HOST ?? "").trim();
   if (!isPrivateIpv4(upstreamHost)) {
     throw new Error("PUBLIC_EDGE_RELAY_UPSTREAM_HOST must be an RFC1918 IPv4 address");
   }
 
+  const sharedTokenFile = String(env.PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE ?? "").trim();
+  if (mode === "api" && !sharedTokenFile) {
+    throw new Error("PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE is required for API mode");
+  }
+
+  const socketConfig =
+    mode === "api"
+      ? resolveApiSocketPath(
+          env.PUBLIC_EDGE_RELAY_SOCKET_PATH,
+          env.PUBLIC_EDGE_RELAY_SOCKET_DIRECTORY
+        )
+      : undefined;
+  const bindHost = String(env.PUBLIC_EDGE_RELAY_BIND_HOST ?? "").trim();
+  if (mode === "static" && !isLoopbackHost(bindHost)) {
+    throw new Error("PUBLIC_EDGE_RELAY_BIND_HOST must be a loopback address for static mode");
+  }
+
   return {
     mode,
-    bindHost,
-    port: resolvePort(env.PUBLIC_EDGE_RELAY_PORT, "PUBLIC_EDGE_RELAY_PORT"),
+    bindHost: mode === "static" ? bindHost : undefined,
+    port:
+      mode === "static"
+        ? resolvePort(env.PUBLIC_EDGE_RELAY_PORT, "PUBLIC_EDGE_RELAY_PORT")
+        : undefined,
     upstreamHost,
     upstreamPort: resolvePort(
       env.PUBLIC_EDGE_RELAY_UPSTREAM_PORT,
       "PUBLIC_EDGE_RELAY_UPSTREAM_PORT"
     ),
-    allowedHosts: resolveAllowedHosts(env.PUBLIC_EDGE_RELAY_ALLOWED_HOSTS)
+    allowedHosts: resolveAllowedHosts(env.PUBLIC_EDGE_RELAY_ALLOWED_HOSTS),
+    socketDirectory: socketConfig?.socketDirectory,
+    socketPath: socketConfig?.socketPath,
+    socketMode: mode === "api" ? DEFAULT_API_SOCKET_MODE : undefined,
+    sharedToken: mode === "api" ? readSharedToken(sharedTokenFile) : undefined
   };
 };
 
 export const createPublicEdgeRelayServer = (config) => {
   const server = createServer((incoming, outgoing) => {
-    if (!isLoopbackHost(incoming.socket.remoteAddress)) {
+    if (config.mode === "static" && !isLoopbackHost(incoming.socket.remoteAddress)) {
       incoming.resume();
       writeEmptyResponse(outgoing, 403);
       return;
@@ -302,19 +435,58 @@ export const createPublicEdgeRelayServer = (config) => {
   return server;
 };
 
-const run = async () => {
-  const config = resolvePublicEdgeRelayConfig();
-  const server = createPublicEdgeRelayServer(config);
-
-  await new Promise((resolveListening, rejectListening) => {
+export const listenPublicEdgeRelay = (server, config) =>
+  new Promise((resolveListening, rejectListening) => {
     server.once("error", rejectListening);
+
+    if (config.mode === "api") {
+      try {
+        assertApiSocketDirectory(config);
+        removeStaleApiSocket(config.socketPath);
+      } catch (error) {
+        server.off("error", rejectListening);
+        rejectListening(error);
+        return;
+      }
+
+      server.listen(config.socketPath, () => {
+        try {
+          if (process.platform !== "win32") {
+            chmodSync(config.socketPath, config.socketMode);
+            const socketMetadata = lstatSync(config.socketPath);
+            const directoryMetadata = lstatSync(config.socketDirectory);
+            if (
+              socketMetadata.uid !== process.getuid() ||
+              socketMetadata.gid !== directoryMetadata.gid ||
+              (socketMetadata.mode & 0o007) !== 0
+            ) {
+              throw new Error("PUBLIC_EDGE_RELAY_SOCKET_PATH ownership or mode is unsafe");
+            }
+          }
+          server.off("error", rejectListening);
+          resolveListening();
+        } catch (error) {
+          server.close(() => rejectListening(error));
+        }
+      });
+      return;
+    }
+
     server.listen(config.port, config.bindHost, () => {
       server.off("error", rejectListening);
       resolveListening();
     });
   });
 
-  console.log(`public_edge_relay_listening=${config.mode}:${config.bindHost}:${config.port}`);
+const run = async () => {
+  const config = resolvePublicEdgeRelayConfig();
+  const server = createPublicEdgeRelayServer(config);
+
+  await listenPublicEdgeRelay(server, config);
+
+  console.log(
+    `public_edge_relay_listening=${config.mode}:${config.socketPath ?? `${config.bindHost}:${config.port}`}`
+  );
 
   const shutdown = () => {
     server.close((error) => {

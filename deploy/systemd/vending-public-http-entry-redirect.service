@@ -1,0 +1,26 @@
+[Unit]
+Description=Vending HTTP entry alias redirect to the protected HTTPS site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vnc/vending-release-current
+Environment=PATH=/home/vnc/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PUBLIC_HTTP_ENTRY_REDIRECT_BIND_HOST=172.24.14.210
+Environment=PUBLIC_HTTP_ENTRY_REDIRECT_PORT=5795
+Environment=PUBLIC_HTTP_ENTRY_REDIRECT_ALLOWED_HOSTS=5gogogo.top
+Environment=PUBLIC_HTTP_ENTRY_REDIRECT_CANONICAL_HTTPS_URL=https://vending.5gogogo.top/
+ExecStart=/home/vnc/.nvm/versions/node/v22.22.2/bin/node scripts/serve-public-http-entry-redirect.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

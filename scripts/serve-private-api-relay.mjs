@@ -1,6 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
+import { lstatSync, readFileSync } from "node:fs";
 import { createServer, request as createUpstreamRequest } from "node:http";
 import { isIP, isIPv4 } from "node:net";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_PORT = 8100;
@@ -11,6 +13,7 @@ const healthProbePaths = new Set([
   "/api/health",
   "/api/health/production-readiness"
 ]);
+const allowedProtocols = new Set(["https", "http"]);
 
 const hopByHopHeaders = new Set([
   "connection",
@@ -85,6 +88,75 @@ const resolveCommaSeparated = (value, name, resolveEntry) => {
   return new Set(entries.map(resolveEntry));
 };
 
+const resolveAllowedProtocols = (value) => {
+  const entries = String(value ?? "https")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (entries.length === 0 || entries.some((entry) => !allowedProtocols.has(entry))) {
+    throw new Error("PRIVATE_API_RELAY_ALLOWED_PROTOCOLS must only contain https or http");
+  }
+
+  return new Set(entries);
+};
+
+const assertPrivateTokenPathChain = (filePath, variableName) => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const serviceUserId = process.getuid();
+  let directoryPath = dirname(filePath);
+  for (;;) {
+    const metadata = lstatSync(directoryPath);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error(`${variableName} parent chain must contain only directories`);
+    }
+
+    const isWritableByGroupOrOthers = (metadata.mode & 0o022) !== 0;
+    const isProtectedStickyDirectory =
+      metadata.uid !== serviceUserId && (metadata.mode & 0o1000) !== 0;
+    if (isWritableByGroupOrOthers && !isProtectedStickyDirectory) {
+      throw new Error(`${variableName} parent chain must not be group- or world-writable`);
+    }
+
+    const parentPath = dirname(directoryPath);
+    if (parentPath === directoryPath) {
+      return;
+    }
+    directoryPath = parentPath;
+  }
+};
+
+const readSharedToken = (filePath) => {
+  const resolvedFilePath = resolve(filePath);
+  const metadata = lstatSync(resolvedFilePath);
+  const parentMetadata = lstatSync(dirname(resolvedFilePath));
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error("PRIVATE_API_RELAY_SHARED_TOKEN_FILE must be a regular file");
+  }
+  if (!parentMetadata.isDirectory() || parentMetadata.isSymbolicLink()) {
+    throw new Error("PRIVATE_API_RELAY_SHARED_TOKEN_FILE parent must be a directory");
+  }
+  if (
+    process.platform !== "win32" &&
+    ((metadata.mode & 0o077) !== 0 ||
+      (parentMetadata.mode & 0o022) !== 0 ||
+      metadata.uid !== process.getuid() ||
+      parentMetadata.uid !== process.getuid())
+  ) {
+    throw new Error("PRIVATE_API_RELAY_SHARED_TOKEN_FILE must be private to the service user");
+  }
+  assertPrivateTokenPathChain(resolvedFilePath, "PRIVATE_API_RELAY_SHARED_TOKEN_FILE");
+
+  const token = readFileSync(resolvedFilePath, "utf8").trim();
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(token)) {
+    throw new Error("PRIVATE_API_RELAY_SHARED_TOKEN_FILE must contain a high-entropy token");
+  }
+  return token;
+};
+
 const normalizeAllowedHost = (value) => {
   const normalized = String(value ?? "").trim().toLowerCase().replace(/\.$/u, "");
   const labels = normalized.split(".");
@@ -142,7 +214,22 @@ const isRemovedInboundHeader = (name, connectionNames) => {
   );
 };
 
-const trustedRequestContext = (incoming, allowedHosts) => {
+const hasExpectedSharedToken = (incoming, expectedToken) => {
+  if (!expectedToken) {
+    return false;
+  }
+
+  const receivedToken = getSingleHeader(incoming.headers, "x-vending-relay-shared-token");
+  if (!receivedToken) {
+    return false;
+  }
+
+  const expected = Buffer.from(expectedToken, "utf8");
+  const received = Buffer.from(receivedToken, "utf8");
+  return expected.length === received.length && timingSafeEqual(expected, received);
+};
+
+const trustedRequestContext = (incoming, config) => {
   const clientIp = normalizeIp(
     getSingleHeader(incoming.headers, "x-vending-relay-client-ip")
   );
@@ -152,7 +239,12 @@ const trustedRequestContext = (incoming, allowedHosts) => {
   const proto = getSingleHeader(incoming.headers, "x-vending-relay-proto")
     ?.toLowerCase();
 
-  if (isIP(clientIp) === 0 || !allowedHosts.has(host) || proto !== "https") {
+  if (
+    isIP(clientIp) === 0 ||
+    !config.allowedHosts.has(host) ||
+    !config.allowedProtocols.has(proto) ||
+    !hasExpectedSharedToken(incoming, config.sharedToken)
+  ) {
     return undefined;
   }
 
@@ -232,6 +324,7 @@ export const resolvePrivateApiRelayConfig = (env = process.env) => {
     normalizeAllowedHost
   );
   const rawHealthProbeSource = String(env.PRIVATE_API_RELAY_HEALTH_PROBE_SOURCE ?? "").trim();
+  const sharedTokenFile = String(env.PRIVATE_API_RELAY_SHARED_TOKEN_FILE ?? "").trim();
   const healthProbeSource = rawHealthProbeSource
     ? resolvePrivateHost(rawHealthProbeSource, "PRIVATE_API_RELAY_HEALTH_PROBE_SOURCE")
     : undefined;
@@ -240,12 +333,18 @@ export const resolvePrivateApiRelayConfig = (env = process.env) => {
     throw new Error("PRIVATE_API_RELAY_HEALTH_PROBE_SOURCE must be in PRIVATE_API_RELAY_ALLOWED_SOURCES");
   }
 
+  if (!sharedTokenFile) {
+    throw new Error("PRIVATE_API_RELAY_SHARED_TOKEN_FILE is required");
+  }
+
   return {
     bindHost: resolvePrivateHost(env.PRIVATE_API_RELAY_BIND_HOST, "PRIVATE_API_RELAY_BIND_HOST"),
     port: resolvePort(env.PRIVATE_API_RELAY_PORT, "PRIVATE_API_RELAY_PORT", DEFAULT_PORT),
     allowedSources,
     allowedHosts,
+    allowedProtocols: resolveAllowedProtocols(env.PRIVATE_API_RELAY_ALLOWED_PROTOCOLS),
     healthProbeSource,
+    sharedToken: readSharedToken(sharedTokenFile),
     upstreamHost,
     upstreamPort: resolvePort(
       env.PRIVATE_API_RELAY_UPSTREAM_PORT,
@@ -286,7 +385,7 @@ export const createPrivateApiRelayServer = (config) => {
       };
     } else {
       try {
-        context = trustedRequestContext(incoming, config.allowedHosts);
+        context = trustedRequestContext(incoming, config);
       } catch {
         context = undefined;
       }

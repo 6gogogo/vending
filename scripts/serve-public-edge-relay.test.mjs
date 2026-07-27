@@ -1,13 +1,40 @@
 import assert from "node:assert/strict";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs";
 import { createServer, request } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
   createPublicEdgeRelayServer,
+  listenPublicEdgeRelay,
   resolvePublicEdgeRelayConfig
 } from "./serve-public-edge-relay.mjs";
 
-const listen = (server) =>
+const defaultTokenDirectory = mkdtempSync(join(tmpdir(), "vm-public-edge-default-token-"));
+const defaultTokenFile = join(defaultTokenDirectory, "relay-token");
+const defaultSocketDirectory = mkdtempSync(join(tmpdir(), "vm-public-edge-socket-"));
+const defaultSocketPath = join(defaultSocketDirectory, "api-edge.sock");
+const defaultSharedToken = "test-shared-token-012345678901234567890123456789";
+writeFileSync(defaultTokenFile, defaultSharedToken, { encoding: "utf8", mode: 0o600 });
+if (process.platform !== "win32") {
+  chmodSync(defaultTokenFile, 0o600);
+  chmodSync(defaultSocketDirectory, 0o2710);
+}
+process.once("exit", () => {
+  rmSync(defaultTokenDirectory, { recursive: true, force: true });
+  rmSync(defaultSocketDirectory, { recursive: true, force: true });
+});
+
+const listenTcp = (server) =>
   new Promise((resolveListening, rejectListening) => {
     server.once("error", rejectListening);
     server.listen(0, "127.0.0.1", () => {
@@ -21,10 +48,15 @@ const close = (server) =>
     server.close((error) => (error ? rejectClosed(error) : resolveClosed()))
   );
 
-const send = ({ port, method = "GET", path = "/", headers, body = "" }) =>
+const send = ({ port, socketPath, method = "GET", path = "/", headers, body = "" }) =>
   new Promise((resolveResponse, rejectResponse) => {
     const clientRequest = request(
-      { host: "127.0.0.1", port, method, path, headers },
+      {
+        ...(socketPath ? { socketPath } : { host: "127.0.0.1", port }),
+        method,
+        path,
+        headers
+      },
       (response) => {
         const chunks = [];
         response.on("data", (chunk) => chunks.push(chunk));
@@ -41,13 +73,25 @@ const send = ({ port, method = "GET", path = "/", headers, body = "" }) =>
     clientRequest.end(body);
   });
 
-const edgeConfig = (overrides = {}) =>
+const apiConfig = (overrides = {}) =>
   resolvePublicEdgeRelayConfig({
     PUBLIC_EDGE_RELAY_MODE: "api",
-    PUBLIC_EDGE_RELAY_BIND_HOST: "127.0.0.1",
-    PUBLIC_EDGE_RELAY_PORT: "4000",
+    PUBLIC_EDGE_RELAY_SOCKET_DIRECTORY: defaultSocketDirectory,
+    PUBLIC_EDGE_RELAY_SOCKET_PATH: defaultSocketPath,
     PUBLIC_EDGE_RELAY_UPSTREAM_HOST: "10.66.66.2",
     PUBLIC_EDGE_RELAY_UPSTREAM_PORT: "8100",
+    PUBLIC_EDGE_RELAY_ALLOWED_HOSTS: "vending.5gogogo.top",
+    PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE: defaultTokenFile,
+    ...overrides
+  });
+
+const staticConfig = (overrides = {}) =>
+  resolvePublicEdgeRelayConfig({
+    PUBLIC_EDGE_RELAY_MODE: "static",
+    PUBLIC_EDGE_RELAY_BIND_HOST: "127.0.0.1",
+    PUBLIC_EDGE_RELAY_PORT: "5795",
+    PUBLIC_EDGE_RELAY_UPSTREAM_HOST: "10.66.66.2",
+    PUBLIC_EDGE_RELAY_UPSTREAM_PORT: "5795",
     PUBLIC_EDGE_RELAY_ALLOWED_HOSTS: "vending.5gogogo.top",
     ...overrides
   });
@@ -58,30 +102,77 @@ const nginxHeaders = {
   "X-Forwarded-Proto": "https"
 };
 
-test("public edge relay requires a loopback listener and private upstream", () => {
-  assert.deepEqual(edgeConfig(), {
+test("API edge requires a controlled Unix socket while static mode remains loopback-only", () => {
+  assert.deepEqual(apiConfig(), {
     mode: "api",
-    bindHost: "127.0.0.1",
-    port: 4000,
+    bindHost: undefined,
+    port: undefined,
     upstreamHost: "10.66.66.2",
     upstreamPort: 8100,
-    allowedHosts: new Set(["vending.5gogogo.top"])
+    allowedHosts: new Set(["vending.5gogogo.top"]),
+    socketDirectory: resolve(defaultSocketDirectory),
+    socketPath: resolve(defaultSocketPath),
+    socketMode: 0o660,
+    sharedToken: defaultSharedToken
   });
   assert.throws(
-    () => edgeConfig({ PUBLIC_EDGE_RELAY_BIND_HOST: "0.0.0.0" }),
-    /loopback/u
+    () => apiConfig({ PUBLIC_EDGE_RELAY_SOCKET_PATH: "" }),
+    /SOCKET_PATH and PUBLIC_EDGE_RELAY_SOCKET_DIRECTORY are required/u
   );
   assert.throws(
-    () => edgeConfig({ PUBLIC_EDGE_RELAY_BIND_HOST: "localhost" }),
-    /loopback/u
+    () =>
+      apiConfig({
+        PUBLIC_EDGE_RELAY_SOCKET_PATH: join(defaultSocketDirectory, "nested", "api-edge.sock")
+      }),
+    /direct .sock child/u
   );
   assert.throws(
-    () => edgeConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_HOST: "198.51.100.9" }),
+    () => apiConfig({ PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE: "" }),
+    /SHARED_TOKEN_FILE is required/u
+  );
+  assert.throws(
+    () => apiConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_HOST: "198.51.100.9" }),
     /RFC1918/u
+  );
+  assert.throws(
+    () => staticConfig({ PUBLIC_EDGE_RELAY_BIND_HOST: "0.0.0.0" }),
+    /loopback/u
   );
 });
 
-test("API edge relay streams Nginx requests and replaces client forwarding headers", async () => {
+test(
+  "API edge rejects symlinked or writable token parent chains",
+  { skip: process.platform === "win32" },
+  (t) => {
+    const rootDirectory = mkdtempSync(join(tmpdir(), "vm-public-edge-token-chain-"));
+    const tokenDirectory = join(rootDirectory, "private");
+    const linkedDirectory = join(rootDirectory, "linked");
+    const tokenFile = join(tokenDirectory, "relay-token");
+    mkdirSync(tokenDirectory, { mode: 0o700 });
+    writeFileSync(tokenFile, defaultSharedToken, { encoding: "utf8", mode: 0o600 });
+    chmodSync(tokenDirectory, 0o700);
+    chmodSync(tokenFile, 0o600);
+    symlinkSync(tokenDirectory, linkedDirectory, "dir");
+    t.after(() => {
+      chmodSync(rootDirectory, 0o700);
+      rmSync(rootDirectory, { recursive: true, force: true });
+    });
+
+    assert.throws(
+      () =>
+        apiConfig({ PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE: join(linkedDirectory, "relay-token") }),
+      /parent chain must contain only directories/u
+    );
+
+    chmodSync(rootDirectory, 0o720);
+    assert.throws(
+      () => apiConfig({ PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE: tokenFile }),
+      /parent chain must not be group- or world-writable/u
+    );
+  }
+);
+
+test("API edge streams only authenticated Nginx socket headers and replaces forwarding controls", async () => {
   let received;
   const upstream = createServer((incoming, response) => {
     const chunks = [];
@@ -96,18 +187,21 @@ test("API edge relay streams Nginx requests and replaces client forwarding heade
         forwardedFor: incoming.headers["x-forwarded-for"],
         relayClientIp: incoming.headers["x-vending-relay-client-ip"],
         relayHost: incoming.headers["x-vending-relay-host"],
-        relayProto: incoming.headers["x-vending-relay-proto"]
+        relayProto: incoming.headers["x-vending-relay-proto"],
+        relaySharedToken: incoming.headers["x-vending-relay-shared-token"]
       };
       response.writeHead(201, { "X-Edge-Test": "ok" });
       response.end("upstream-ok");
     });
   });
-  await listen(upstream);
+  await listenTcp(upstream);
   const relay = createPublicEdgeRelayServer({
-    ...edgeConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port) }),
+    ...apiConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port) }),
     upstreamHost: "127.0.0.1"
   });
-  await listen(relay);
+  // 该跨平台单测仅通过 TCP 覆盖处理器行为；
+  // 生产 API 模式只能经 listenPublicEdgeRelay 的 Unix socket 路径启动。
+  await listenTcp(relay);
 
   try {
     const response = await send({
@@ -136,7 +230,8 @@ test("API edge relay streams Nginx requests and replaces client forwarding heade
       forwardedFor: undefined,
       relayClientIp: "198.51.100.13",
       relayHost: "vending.5gogogo.top",
-      relayProto: "https"
+      relayProto: "https",
+      relaySharedToken: defaultSharedToken
     });
   } finally {
     await close(relay);
@@ -144,21 +239,21 @@ test("API edge relay streams Nginx requests and replaces client forwarding heade
   }
 });
 
-test("API edge relay rejects missing Nginx controls before upstream", async () => {
+test("API edge rejects missing or insecure Nginx controls before upstream", async () => {
   let upstreamRequests = 0;
   const upstream = createServer((_incoming, response) => {
     upstreamRequests += 1;
     response.end("unexpected");
   });
-  await listen(upstream);
+  await listenTcp(upstream);
   const relay = createPublicEdgeRelayServer({
-    ...edgeConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port) }),
+    ...apiConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port) }),
     upstreamHost: "127.0.0.1"
   });
-  await listen(relay);
+  await listenTcp(relay);
 
   try {
-    const missingRealIp = await send({
+    const missingIp = await send({
       port: relay.address().port,
       headers: { Host: "vending.5gogogo.top", "X-Forwarded-Proto": "https" }
     });
@@ -166,7 +261,7 @@ test("API edge relay rejects missing Nginx controls before upstream", async () =
       port: relay.address().port,
       headers: { ...nginxHeaders, "X-Forwarded-Proto": "http" }
     });
-    assert.equal(missingRealIp.status, 403);
+    assert.equal(missingIp.status, 403);
     assert.equal(insecureProto.status, 403);
     assert.equal(upstreamRequests, 0);
   } finally {
@@ -181,16 +276,12 @@ test("static edge relay streams only after validating its public host", async ()
     received = { path: incoming.url, host: incoming.headers.host };
     response.end("static-ok");
   });
-  await listen(upstream);
+  await listenTcp(upstream);
   const relay = createPublicEdgeRelayServer({
-    ...edgeConfig({
-      PUBLIC_EDGE_RELAY_MODE: "static",
-      PUBLIC_EDGE_RELAY_PORT: "5795",
-      PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port)
-    }),
+    ...staticConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port) }),
     upstreamHost: "127.0.0.1"
   });
-  await listen(relay);
+  await listenTcp(relay);
 
   try {
     const allowed = await send({
@@ -221,21 +312,18 @@ test("static edge relay streams only after validating its public host", async ()
 
 test("public edge relay returns an empty 502 when Spark is unavailable", async () => {
   const unavailableUpstream = createServer();
-  await listen(unavailableUpstream);
+  await listenTcp(unavailableUpstream);
   const unavailablePort = unavailableUpstream.address().port;
   await close(unavailableUpstream);
 
   const relay = createPublicEdgeRelayServer({
-    ...edgeConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(unavailablePort) }),
+    ...apiConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(unavailablePort) }),
     upstreamHost: "127.0.0.1"
   });
-  await listen(relay);
+  await listenTcp(relay);
 
   try {
-    const response = await send({
-      port: relay.address().port,
-      headers: nginxHeaders
-    });
+    const response = await send({ port: relay.address().port, headers: nginxHeaders });
     assert.equal(response.status, 502);
     assert.equal(response.body, "");
   } finally {
@@ -255,12 +343,12 @@ test("public edge relay closes the Spark response when its downstream client dis
     response.write("first");
     response.once("close", resolveUpstreamClosed);
   });
-  await listen(upstream);
+  await listenTcp(upstream);
   const relay = createPublicEdgeRelayServer({
-    ...edgeConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port) }),
+    ...apiConfig({ PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port) }),
     upstreamHost: "127.0.0.1"
   });
-  await listen(relay);
+  await listenTcp(relay);
 
   try {
     await new Promise((resolveClosed, rejectClosed) => {
@@ -285,3 +373,34 @@ test("public edge relay closes the Spark response when its downstream client dis
     await close(upstream);
   }
 });
+
+test(
+  "API edge creates a group-restricted Unix socket only in the controlled directory",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), "vm-public-edge-listen-"));
+    const socketPath = join(directory, "api-edge.sock");
+    chmodSync(directory, 0o2710);
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+    const upstream = createServer((_incoming, response) => response.end("socket-ok"));
+    await listenTcp(upstream);
+    t.after(() => close(upstream));
+
+    const config = apiConfig({
+      PUBLIC_EDGE_RELAY_SOCKET_DIRECTORY: directory,
+      PUBLIC_EDGE_RELAY_SOCKET_PATH: socketPath,
+      PUBLIC_EDGE_RELAY_UPSTREAM_PORT: String(upstream.address().port)
+    });
+    const relay = createPublicEdgeRelayServer({ ...config, upstreamHost: "127.0.0.1" });
+    await listenPublicEdgeRelay(relay, config);
+    t.after(() => close(relay));
+
+    const socketMetadata = statSync(socketPath);
+    assert.equal(socketMetadata.mode & 0o007, 0);
+    assert.equal(socketMetadata.gid, statSync(directory).gid);
+    const response = await send({ socketPath, headers: nginxHeaders });
+    assert.equal(response.status, 200);
+    assert.equal(response.body, "socket-ok");
+  }
+);
