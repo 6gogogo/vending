@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -21,11 +22,36 @@ import {
   resolveLogindSessionIdFromCgroup,
   resolveFirstBackofficeMaintenancePlan,
   resolveSystemBusctlArguments,
+  resolveTypeScriptMaintenanceCommand,
   runFirstBackofficeMaintenanceRecovery,
   selectSingleActiveLocalGraphicalSession
 } from "./first-backoffice-password-maintenance.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+
+test("首次后台密码初始化使用 API tsconfig 装载装饰器脚本", () => {
+  const command = resolveTypeScriptMaintenanceCommand({
+    tsxCliPath: resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    tsconfigPath: resolve(repositoryRoot, "apps", "api", "tsconfig.json"),
+    scriptPath: resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "initialize-first-backoffice-password.ts"
+    ),
+    args: ["--probe"]
+  });
+  const result = spawnSync(process.execPath, command, {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /本命令不接受参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
 
 test("本机首次后台密码维护计划只覆盖执行与终端配置，不注入环境变量", () => {
   const plan = resolveFirstBackofficeMaintenancePlan({

@@ -64,6 +64,13 @@ const assertLocalPseudoTerminal = (value) => {
   return normalized;
 };
 
+export const resolveTypeScriptMaintenanceCommand = ({
+  tsxCliPath,
+  tsconfigPath,
+  scriptPath,
+  args = []
+}) => [tsxCliPath, "--tsconfig", tsconfigPath, scriptPath, ...args];
+
 export const resolveLogindSessionIdFromCgroup = (cgroup) => {
   sessionScopePattern.lastIndex = 0;
   const matches = [...String(cgroup ?? "").matchAll(sessionScopePattern)].map(

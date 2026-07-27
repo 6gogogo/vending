@@ -3,9 +3,12 @@ import { lstatSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveTypeScriptMaintenanceCommand } from "./first-backoffice-password-maintenance.mjs";
+
 const currentFilePath = fileURLToPath(import.meta.url);
 const repositoryRoot = realpathSync(resolve(dirname(currentFilePath), ".."));
 const tsxCliPath = resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs");
+const apiTsconfigPath = resolve(repositoryRoot, "apps", "api", "tsconfig.json");
 const maintenanceScriptPath = resolve(
   repositoryRoot,
   "apps",
@@ -63,7 +66,12 @@ const assertTrustedRepositoryFile = (filePath, name) => {
 const runTypeScriptScript = (scriptPath, args = []) => {
   const result = spawnSync(
     process.execPath,
-    [tsxCliPath, scriptPath, ...args],
+    resolveTypeScriptMaintenanceCommand({
+      tsxCliPath,
+      tsconfigPath: apiTsconfigPath,
+      scriptPath,
+      args
+    }),
     {
       cwd: repositoryRoot,
       stdio: "inherit"
@@ -95,6 +103,7 @@ const main = () => {
   }
 
   assertTrustedRepositoryFile(tsxCliPath, "tsx 运行器");
+  assertTrustedRepositoryFile(apiTsconfigPath, "API TypeScript 配置");
   assertTrustedRepositoryFile(maintenanceScriptPath, "运行数据维护脚本");
   assertTrustedRepositoryFile(passwordInitializationScriptPath, "首次后台密码初始化脚本");
 
