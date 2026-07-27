@@ -1997,7 +1997,7 @@ test("公开注册按已登记实例域名归属且完整审核登录不串实�
       {
         method: "POST",
         headers: {
-          "x-forwarded-host": "5gogogo.top",
+          "x-forwarded-host": "vending.5gogogo.top",
           "content-type": "application/json"
         },
         body: draftProfileBody
@@ -2094,7 +2094,7 @@ test("公开注册按已登记实例域名归属且完整审核登录不串实�
       {
         method: "PATCH",
         headers: {
-          "x-forwarded-host": "5gogogo.top",
+          "x-forwarded-host": "vending.5gogogo.top",
           "content-type": "application/json"
         },
         body: JSON.stringify({
@@ -2158,7 +2158,7 @@ test("公开注册按已登记实例域名归属且完整审核登录不串实�
       `${baseUrl}/registration-applications/by-phone?phone=${encodeURIComponent(phone)}&code=${encodeURIComponent(crossTenantLookupCode)}`,
       {
         headers: {
-          "x-forwarded-host": "5gogogo.top"
+          "x-forwarded-host": "vending.5gogogo.top"
         }
       }
     );
@@ -2176,7 +2176,7 @@ test("公开注册按已登记实例域名归属且完整审核登录不串实�
     const crossTenantAppLoginResponse = await fetch(`${baseUrl}/auth/app-login`, {
       method: "POST",
       headers: {
-        "x-forwarded-host": "5gogogo.top",
+        "x-forwarded-host": "vending.5gogogo.top",
         "content-type": "application/json"
       },
       body: JSON.stringify({

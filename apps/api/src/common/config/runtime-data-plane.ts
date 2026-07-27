@@ -41,7 +41,7 @@ export const createSimulationPlatformTenant = (): PlatformTenantRecord => ({
   code: "current",
   name: "公益智助柜当前实例",
   status: "active",
-  instanceUrl: "https://5gogogo.top",
+  instanceUrl: "https://vending.5gogogo.top",
   contactName: "实例管理员",
   planName: "正式版",
   createdAt: "2026-01-01T00:00:00.000Z"

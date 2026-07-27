@@ -12,7 +12,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import test from "node:test";
 
-const waitForFile = async (file: string, timeoutMs = 5_000) => {
+// 全套 Windows 测试并发运行时，tsx 子进程冷启动可能超过 5 秒；这不是金融租约超时。
+const CHILD_PROCESS_TIMEOUT_MS = 15_000;
+
+const waitForFile = async (file: string, timeoutMs = CHILD_PROCESS_TIMEOUT_MS) => {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(file)) {
     if (Date.now() >= deadline) {
@@ -59,7 +62,7 @@ test("两个真实 Node 进程竞争同一金融租约时只有一个可写，�
       {
         cwd: process.cwd(),
         encoding: "utf8",
-        timeout: 5_000
+        timeout: CHILD_PROCESS_TIMEOUT_MS
       }
     );
     assert.equal(blocked.status, 2);
@@ -75,7 +78,7 @@ test("两个真实 Node 进程竞争同一金融租约时只有一个可写，�
       {
         cwd: process.cwd(),
         encoding: "utf8",
-        timeout: 5_000
+        timeout: CHILD_PROCESS_TIMEOUT_MS
       }
     );
     assert.equal(afterRelease.status, 0, afterRelease.stderr);
@@ -149,7 +152,7 @@ test("两个真实进程同时接管过期租约时只有一个 fencing token �
     await Promise.all([waitForFile(readyA), waitForFile(readyB)]);
     writeFileSync(startFile, "start", "utf8");
 
-    const deadline = Date.now() + 5_000;
+    const deadline = Date.now() + CHILD_PROCESS_TIMEOUT_MS;
     while (!existsSync(acquiredA) && !existsSync(acquiredB)) {
       if (Date.now() >= deadline) {
         throw new Error("没有进程成功取得过期租约。");
@@ -231,7 +234,7 @@ test("API 预启动租约阻止 Store 提前读取，继任进程不会覆盖先
       {
         cwd: process.cwd(),
         encoding: "utf8",
-        timeout: 5_000
+        timeout: CHILD_PROCESS_TIMEOUT_MS
       }
     );
     assert.equal(blocked.status, 2);
@@ -263,7 +266,7 @@ test("API 预启动租约阻止 Store 提前读取，继任进程不会覆盖先
       {
         cwd: process.cwd(),
         encoding: "utf8",
-        timeout: 5_000
+        timeout: CHILD_PROCESS_TIMEOUT_MS
       }
     );
     assert.equal(successor.status, 0, successor.stderr);

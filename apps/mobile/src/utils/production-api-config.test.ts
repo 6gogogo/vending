@@ -13,5 +13,5 @@ test("微信生产构建固定使用已备案的 HTTPS API", () => {
     /^VITE_API_BASE_URL=(.+)$/m
   )?.[1];
 
-  assert.equal(configuredApiBaseUrl, "https://5gogogo.top/api");
+  assert.equal(configuredApiBaseUrl, "https://vending.5gogogo.top/api");
 });

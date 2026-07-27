@@ -1,0 +1,21 @@
+[Unit]
+Description=Vending local static fallback service (not a version rollback)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vnc/111/vending
+Environment=PATH=/home/vnc/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/vnc/.nvm/versions/node/v22.22.2/bin/node scripts/serve-public-web.mjs
+Restart=no
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

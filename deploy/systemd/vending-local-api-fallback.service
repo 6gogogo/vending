@@ -1,0 +1,21 @@
+[Unit]
+Description=Vending local API fallback service (not a version rollback)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vnc/111/vending/apps/api
+Environment=PATH=/home/vnc/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/usr/bin/test -r /home/vnc/111/vending/apps/api/dist/apps/api/src/main.js
+ExecStartPre=/usr/bin/test -r /home/vnc/111/vending/node_modules/tsx/dist/preflight.cjs
+ExecStart=/home/vnc/.nvm/versions/node/v22.22.2/bin/node --require /home/vnc/111/vending/node_modules/tsx/dist/preflight.cjs --import file:///home/vnc/111/vending/node_modules/tsx/dist/loader.mjs dist/apps/api/src/main.js
+Restart=no
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

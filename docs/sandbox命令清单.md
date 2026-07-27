@@ -593,13 +593,13 @@ node sandbox/scripts/verify-sms-code.mjs 13800138000 123456
 命令：
 
 ```bash
-npm run sandbox:external-preflight -- --profile=production --api-base-url https://5gogogo.top/api --device-code 91120149
+npm run sandbox:external-preflight -- --profile=production --api-base-url https://vending.5gogogo.top/api --device-code 91120149
 ```
 
 实际执行内容：
 
 ```bash
-node sandbox/scripts/external-preflight.mjs --profile=production --api-base-url https://5gogogo.top/api --device-code 91120149
+node sandbox/scripts/external-preflight.mjs --profile=production --api-base-url https://vending.5gogogo.top/api --device-code 91120149
 ```
 
 作用：

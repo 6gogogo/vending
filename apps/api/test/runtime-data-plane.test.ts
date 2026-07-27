@@ -82,6 +82,10 @@ test("真实平面的唯一客户实例由部署配置绑定，模拟平面继�
     instanceUrl: "https://live-tenant.example.test"
   });
   assert.equal(createSimulationPlatformTenant().id, "tenant-a");
+  assert.equal(
+    createSimulationPlatformTenant().instanceUrl,
+    "https://vending.5gogogo.top"
+  );
   assert.throws(
     () =>
       assertLivePlatformTenantConfiguration(

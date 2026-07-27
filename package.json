@@ -53,8 +53,13 @@
     "sandbox:sign": "node sandbox/scripts/generate-signature.mjs sandbox/fixtures/open-door.sample.json",
     "start:public-web": "node scripts/serve-public-web.mjs",
     "test:public-web": "node --test scripts/serve-public-web.test.mjs",
+    "start:private-api-relay": "node scripts/serve-private-api-relay.mjs",
+    "test:private-api-relay": "node --test scripts/serve-private-api-relay.test.mjs",
+    "start:public-edge-relay": "node scripts/serve-public-edge-relay.mjs",
+    "test:public-edge-relay": "node --test scripts/serve-public-edge-relay.test.mjs",
+    "test:vnc-nginx-edge-contract": "node --test scripts/verify-vnc-nginx-edge-contract.test.mjs",
     "smoke:frontend-safety": "node scripts/smoke-frontend-safety.mjs",
-    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety",
+    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety && npm run test:public-web && npm run test:private-api-relay && npm run test:public-edge-relay && npm run test:vnc-nginx-edge-contract",
     "check:local:full": "npm run check:local && npm run build && npm run build:mobile:weixin && npm run build:mobile:alipay && npm run build:mobile:app",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

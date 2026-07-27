@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const expectedApiBaseUrl = "https://5gogogo.top/api";
+const expectedApiBaseUrl = "https://vending.5gogogo.top/api";
 const scriptDirectory = fileURLToPath(new URL(".", import.meta.url));
 const clientBundlePath = resolve(
   scriptDirectory,

@@ -1,0 +1,28 @@
+[Unit]
+Description=Vending public API edge relay behind the existing HTTPS Nginx
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vnc/111/vending
+Environment=PATH=/home/vnc/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PUBLIC_EDGE_RELAY_MODE=api
+Environment=PUBLIC_EDGE_RELAY_BIND_HOST=127.0.0.1
+Environment=PUBLIC_EDGE_RELAY_PORT=4000
+Environment=PUBLIC_EDGE_RELAY_UPSTREAM_HOST=10.66.66.2
+Environment=PUBLIC_EDGE_RELAY_UPSTREAM_PORT=8100
+Environment=PUBLIC_EDGE_RELAY_ALLOWED_HOSTS=vending.5gogogo.top
+ExecStart=/home/vnc/.nvm/versions/node/v22.22.2/bin/npm run start:public-edge-relay
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target
