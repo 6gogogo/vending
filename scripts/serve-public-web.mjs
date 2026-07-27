@@ -90,6 +90,12 @@ export const resolvePublicWebRoute = ({ method, requestTarget }) => {
     return errorRoute(400, "Bad Request");
   }
 
+  // 公网 API 必须由同机 HTTPS 反向代理转发到 API 服务。静态服务不能把
+  // /api/* 回退成后台 SPA，否则反代故障会被伪装成页面成功响应。
+  if (pathname === "/api" || pathname.startsWith("/api/")) {
+    return errorRoute(404, "Not Found");
+  }
+
   const queryIndex = requestTarget.indexOf("?");
   const query = queryIndex >= 0 ? requestTarget.slice(queryIndex) : "";
 

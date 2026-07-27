@@ -51,6 +51,16 @@ test("pure router keeps mobile and admin namespaces separate", () => {
     resolvePublicWebRoute({ method: "GET", requestTarget: "/mobile/unknown" }).status,
     404
   );
+  for (const requestTarget of ["/api", "/api/health"]) {
+    assert.deepEqual(
+      resolvePublicWebRoute({ method: "GET", requestTarget }),
+      {
+        kind: "error",
+        status: 404,
+        message: "Not Found"
+      }
+    );
+  }
 });
 
 test("pure router fails closed for writes, malformed paths, and traversal", () => {
@@ -144,6 +154,8 @@ test("integration serves both SPAs and their assets with safe headers", async ()
   const mobile = await requestRaw({ port, path: "/mobile/" });
   const mobileAsset = await requestRaw({ port, path: "/mobile/assets/mobile.js" });
   const adminAsset = await requestRaw({ port, path: "/assets/admin.css" });
+  const apiRoute = await requestRaw({ port, path: "/api/health" });
+  const apiHead = await requestRaw({ port, method: "HEAD", path: "/api/health" });
 
   for (const response of [root, login, mapAcceptance]) {
     assert.equal(response.status, 200);
@@ -161,6 +173,11 @@ test("integration serves both SPAs and their assets with safe headers", async ()
   assert.equal(mobileAsset.headers["cache-control"], "public, max-age=31536000, immutable");
   assert.equal(adminAsset.status, 200);
   assert.match(adminAsset.headers["content-type"], /^text\/css/);
+  assert.equal(apiRoute.status, 404);
+  assert.equal(apiRoute.headers["cache-control"], "no-store");
+  assert.doesNotMatch(apiRoute.body, /ADMIN/);
+  assert.equal(apiHead.status, 404);
+  assert.equal(apiHead.body, "");
 });
 
 test("integration returns HEAD without a body and rejects unsafe requests", async () => {

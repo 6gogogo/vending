@@ -416,7 +416,7 @@ test("后台密码变更撤销该用户全部旧会话，并只返回一个新�
   );
 });
 
-test("首次后台密码初始化仅允许仍为默认密码的 admin，并撤销旧会话", () => {
+test("首次后台密码初始化允许六位密码、仅允许默认 admin，并撤销旧会话", () => {
   const store = createIsolatedStore();
   const credential = store.findBackofficeCredentialByUsername("admin");
   const user = store.users.find((entry) => entry.id === credential?.userId);
@@ -424,7 +424,8 @@ test("首次后台密码初始化仅允许仍为默认密码的 admin，并撤�
   assert.ok(user);
 
   const existingSession = store.createBackofficeSession(user, credential.role, credential.tenantId);
-  const password = "first-backoffice-password";
+  const password = "904281";
+  assert.equal(MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH, 6);
   const result = initializeFirstBackofficePassword(store, password);
 
   assert.equal(result.credential.username, "admin");
