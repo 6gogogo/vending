@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 
 import {
   createPublicWebServer,
+  resolvePublicWebBindHost,
   resolvePublicWebPort,
   resolvePublicWebRoute
 } from "./serve-public-web.mjs";
@@ -88,6 +89,23 @@ test("pure router fails closed for writes, malformed paths, and traversal", () =
   assert.throws(() => resolvePublicWebPort("70000"));
   assert.equal(resolvePublicWebPort(undefined), 5795);
   assert.equal(resolvePublicWebPort("5797"), 5797);
+
+  assert.equal(resolvePublicWebBindHost(undefined), "127.0.0.1");
+  assert.equal(resolvePublicWebBindHost("10.66.66.2"), "10.66.66.2");
+  assert.equal(resolvePublicWebBindHost("192.168.1.20"), "192.168.1.20");
+  assert.equal(resolvePublicWebBindHost("172.16.0.1"), "172.16.0.1");
+  assert.equal(resolvePublicWebBindHost("172.31.255.254"), "172.31.255.254");
+  assert.equal(resolvePublicWebBindHost("::1"), "::1");
+  for (const unsafeHost of [
+    "0.0.0.0",
+    "8.8.8.8",
+    "0172.16.0.1",
+    "172.15.0.1",
+    "172.32.0.1",
+    "localhost"
+  ]) {
+    assert.throws(() => resolvePublicWebBindHost(unsafeHost), unsafeHost);
+  }
 });
 
 const requestRaw = ({ port, method = "GET", path }) =>

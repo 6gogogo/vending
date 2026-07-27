@@ -1,0 +1,24 @@
+[Unit]
+Description=Vending public static web on private relay network
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fivegogogo/vending/current
+Environment=PATH=/home/fivegogogo/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PUBLIC_WEB_BIND_HOST=10.66.66.2
+Environment=PUBLIC_WEB_PORT=5795
+ExecStart=/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/npm run start:public-web
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

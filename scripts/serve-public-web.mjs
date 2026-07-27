@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
+import { isIPv4 } from "node:net";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -8,6 +9,20 @@ const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_PORT = 5795;
 const DEFAULT_ADMIN_ROOT = "apps/admin-web/dist";
 const DEFAULT_MOBILE_ROOT = "apps/mobile/dist/build/h5";
+
+const isAllowedPrivateIpv4 = (host) => {
+  if (!isIPv4(host)) {
+    return false;
+  }
+
+  const octets = host.split(".");
+  const [first, second] = octets.map(Number);
+  return (
+    first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+};
 
 const mimeTypeByExtension = new Map([
   [".avif", "image/avif"],
@@ -155,6 +170,23 @@ export const resolvePublicWebPort = (value) => {
   return normalized;
 };
 
+// 默认只绑定 loopback。受管的内网反向代理可以显式指定 RFC1918 地址，
+// 但绝不接受 0.0.0.0、公开 IP 或主机名，避免静态服务被意外直接暴露。
+export const resolvePublicWebBindHost = (value) => {
+  if (value === undefined || String(value).trim() === "") {
+    return LOOPBACK_HOST;
+  }
+
+  const normalized = String(value).trim();
+  if (normalized === LOOPBACK_HOST || normalized === "::1" || isAllowedPrivateIpv4(normalized)) {
+    return normalized;
+  }
+
+  throw new Error(
+    "PUBLIC_WEB_BIND_HOST must be 127.0.0.1, ::1, or an RFC1918 private IPv4 address"
+  );
+};
+
 const isPathInside = (root, candidate) => {
   const relationship = relative(root, candidate);
   return relationship === "" || (!relationship.startsWith("..") && !isAbsolute(relationship));
@@ -286,17 +318,18 @@ export const createPublicWebServer = async ({ adminRoot, mobileRoot } = {}) => {
 
 const run = async () => {
   const port = resolvePublicWebPort(process.env.PUBLIC_WEB_PORT);
+  const bindHost = resolvePublicWebBindHost(process.env.PUBLIC_WEB_BIND_HOST);
   const server = await createPublicWebServer();
 
   await new Promise((resolveListening, rejectListening) => {
     server.once("error", rejectListening);
-    server.listen(port, LOOPBACK_HOST, () => {
+    server.listen(port, bindHost, () => {
       server.off("error", rejectListening);
       resolveListening();
     });
   });
 
-  console.log(`public_web_listening=${LOOPBACK_HOST}:${port}`);
+  console.log(`public_web_listening=${bindHost}:${port}`);
 
   const shutdown = () => {
     server.close((error) => {
