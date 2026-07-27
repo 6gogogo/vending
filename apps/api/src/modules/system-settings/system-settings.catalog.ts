@@ -79,8 +79,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_VERIFICATION_MODE: {
-    label: "全真模拟：短信验证码",
-    description: "mock 使用本地验证码；real 使用阿里云 PNVS；manual 仅使用手动设置的固定验证码且不发送短信。真实短信配置缺失时会明确报错，绝不发送到模拟通道。",
+    label: "全真模拟：登录验证码方式",
+    description: "mock 使用本地验证码；real 使用阿里云 PNVS；manual 仅接受当前实例管理员在人员页随机签发的 6 位短期人工码，不发送短信，也不存在固定通用验证码。真实短信配置缺失时会明确报错，绝不发送到模拟通道。",
     inputType: "select",
     options: [
       { label: "模拟验证码", value: "mock" },
