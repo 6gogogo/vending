@@ -83,6 +83,18 @@ const assertPrivateTokenPathChain = (filePath, variableName) => {
   }
 };
 
+export const isAllowedTokenParentDirectory = (metadata, serviceUserId, serviceGroupId) => {
+  const mode = metadata.mode & 0o777;
+  const serviceOwnedPrivateDirectory =
+    metadata.uid === serviceUserId && (mode & 0o022) === 0;
+  const rootManagedTraverseDirectory =
+    metadata.uid === 0 &&
+    metadata.gid === serviceGroupId &&
+    mode === 0o710;
+
+  return serviceOwnedPrivateDirectory || rootManagedTraverseDirectory;
+};
+
 const readSharedToken = (filePath) => {
   const resolvedFilePath = resolve(filePath);
   const metadata = lstatSync(resolvedFilePath);
@@ -98,9 +110,11 @@ const readSharedToken = (filePath) => {
     ((metadata.mode & 0o077) !== 0 ||
       (parentMetadata.mode & 0o022) !== 0 ||
       metadata.uid !== process.getuid() ||
-      parentMetadata.uid !== process.getuid())
+      !isAllowedTokenParentDirectory(parentMetadata, process.getuid(), process.getgid()))
   ) {
-    throw new Error("PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE must be private to the service user");
+    throw new Error(
+      "PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE must be service-private beneath a protected directory"
+    );
   }
   assertPrivateTokenPathChain(resolvedFilePath, "PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE");
 

@@ -62,6 +62,30 @@ test("VNC Nginx edge contract requires both complete locations in one vending se
     false
   );
   assert.equal(
+    verifyVncNginxEdgeContract(
+      `${validConfig}\nserver {\n  listen 443 ssl;\n  server_name vending.5gogogo.top;\n  return 444;\n}`
+    ),
+    false
+  );
+  assert.equal(
+    verifyVncNginxEdgeContract(
+      `${validConfig}\nserver {\n  listen [::]:443 ssl;\n  server_name vending.5gogogo.top;\n  return 444;\n}`
+    ),
+    false
+  );
+  assert.equal(
+    verifyVncNginxEdgeContract(
+      `${validConfig}\nserver {\n  listen 443;\n  server_name vending.5gogogo.top;\n  return 444;\n}`
+    ),
+    false
+  );
+  assert.equal(
+    verifyVncNginxEdgeContract(
+      `${validConfig}\nserver {\n  listen [::]:443;\n  server_name vending.5gogogo.top;\n  return 444;\n}`
+    ),
+    false
+  );
+  assert.equal(
     verifyVncNginxEdgeContract(validConfig.replace("return 301 https://$host$request_uri;", "return 302 /;")),
     false
   );

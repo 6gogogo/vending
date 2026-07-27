@@ -34,7 +34,8 @@ import {
 } from "./persisted-state-integrity";
 import {
   envFilesDeclareProductionRuntime,
-  isProductionRuntime
+  isProductionRuntime,
+  isTestEnvironmentIsolated
 } from "../config/runtime-environment";
 import {
   assertLivePlatformTenantConfiguration,
@@ -266,6 +267,10 @@ const apiWorkspaceRoot = findApiWorkspaceRoot();
 export const resolveApiWorkspaceRoot = () => apiWorkspaceRoot;
 
 const loadApiEnvFile = () => {
+  if (isTestEnvironmentIsolated()) {
+    return;
+  }
+
   const processWithEnvLoader = process as typeof process & {
     loadEnvFile?: (path?: string) => void;
   };

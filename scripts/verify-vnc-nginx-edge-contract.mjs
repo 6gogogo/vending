@@ -130,7 +130,11 @@ const hasTargetServerName = (serverBlock) => {
   );
 };
 
+const has443Listener = (serverBlock) =>
+  /^\s*listen\s+(?:\[::\]:)?443\b[^;]*;\s*$/mu.test(topLevelContent(serverBlock));
+
 const hasTls443Listener = (serverBlock) =>
+  has443Listener(serverBlock) &&
   /^\s*listen\s+(?:\[::\]:)?443\b[^;]*\bssl\b[^;]*;\s*$/mu.test(
     topLevelContent(serverBlock)
   );
@@ -157,15 +161,15 @@ export const verifyVncNginxEdgeContract = (nginxConfig) => {
 
   const apiLocation = /(?:^|\n)\s*location\s+\^~\s+\/api\/\s*\{/gmu;
   const staticLocation = /(?:^|\n)\s*location\s+\/\s*\{/gmu;
+  const targetPort443Blocks = targetServerBlocks.filter(has443Listener);
 
-  const hasCompleteTlsServer = targetServerBlocks.some(
-    (serverBlock) =>
-      hasTls443Listener(serverBlock) &&
-      locationMatches(serverBlock, apiLocation, expectedApiDirectives) &&
-      locationMatches(serverBlock, staticLocation, expectedStaticDirectives)
+  return (
+    targetPort443Blocks.length === 1 &&
+    hasTls443Listener(targetPort443Blocks[0]) &&
+    locationMatches(targetPort443Blocks[0], apiLocation, expectedApiDirectives) &&
+    locationMatches(targetPort443Blocks[0], staticLocation, expectedStaticDirectives) &&
+    targetServerBlocks.some(hasHttpRedirect)
   );
-
-  return hasCompleteTlsServer && targetServerBlocks.some(hasHttpRedirect);
 };
 
 const run = async () => {

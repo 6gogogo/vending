@@ -1,7 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
-type RuntimeEnvironment = Partial<Pick<NodeJS.ProcessEnv, "NODE_ENV" | "APP_ENV">>;
+export const TEST_ISOLATED_ENV_KEY = "VM_TEST_ISOLATED_ENV";
+
+type RuntimeEnvironment = Partial<
+  Pick<NodeJS.ProcessEnv, "NODE_ENV" | "APP_ENV" | typeof TEST_ISOLATED_ENV_KEY>
+>;
 
 const normalizeRuntimeName = (value?: string) => value?.trim().toLowerCase();
 
@@ -9,6 +13,13 @@ export const isProductionRuntime = (environment: RuntimeEnvironment = process.en
   [environment.NODE_ENV, environment.APP_ENV].some(
     (value) => normalizeRuntimeName(value) === "production"
   );
+
+/**
+ * 仅由 API 测试启动器设置。隔离测试不能读取开发机或部署机的 .env，
+ * 否则测试可能意外复用真实数据平面或半配置的全真模拟档。
+ */
+export const isTestEnvironmentIsolated = (environment: RuntimeEnvironment = process.env) =>
+  environment[TEST_ISOLATED_ENV_KEY]?.trim() === "1";
 
 export const envFilesDeclareProductionRuntime = (
   paths: readonly string[],

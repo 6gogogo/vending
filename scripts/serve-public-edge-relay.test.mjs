@@ -15,6 +15,7 @@ import test from "node:test";
 
 import {
   createPublicEdgeRelayServer,
+  isAllowedTokenParentDirectory,
   listenPublicEdgeRelay,
   resolvePublicEdgeRelayConfig
 } from "./serve-public-edge-relay.mjs";
@@ -101,6 +102,29 @@ const nginxHeaders = {
   "X-Real-IP": "198.51.100.13",
   "X-Forwarded-Proto": "https"
 };
+
+test("服务令牌目录只接受服务私有目录或 root 管理的 vnc 可遍历目录", () => {
+  const serviceUserId = 1001;
+  const serviceGroupId = 1001;
+  const directory = (uid, gid, mode) => ({ uid, gid, mode });
+
+  assert.equal(
+    isAllowedTokenParentDirectory(directory(serviceUserId, serviceGroupId, 0o700), serviceUserId, serviceGroupId),
+    true
+  );
+  assert.equal(
+    isAllowedTokenParentDirectory(directory(0, serviceGroupId, 0o710), serviceUserId, serviceGroupId),
+    true
+  );
+  assert.equal(
+    isAllowedTokenParentDirectory(directory(0, serviceGroupId, 0o750), serviceUserId, serviceGroupId),
+    false
+  );
+  assert.equal(
+    isAllowedTokenParentDirectory(directory(0, 0, 0o710), serviceUserId, serviceGroupId),
+    false
+  );
+});
 
 test("API edge requires a controlled Unix socket while static mode remains loopback-only", () => {
   assert.deepEqual(apiConfig(), {

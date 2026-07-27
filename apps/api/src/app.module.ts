@@ -28,10 +28,15 @@ import { WarehousesModule } from "./modules/warehouses/warehouses.module";
 import {
   envFilesDeclareFullSimulationProfile,
   envFilesDeclareProductionRuntime,
-  isProductionRuntime
+  isProductionRuntime,
+  isTestEnvironmentIsolated
 } from "./common/config/runtime-environment";
 
 const resolveEnvFilePath = () => {
+  if (isTestEnvironmentIsolated()) {
+    return [];
+  }
+
   const localEnvFiles = [
     ".env.local",
     ".env",

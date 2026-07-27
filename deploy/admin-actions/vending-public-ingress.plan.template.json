@@ -1,0 +1,33 @@
+{
+  "schema": "vending-public-ingress-root-action/v1",
+  "status": "candidate",
+  "actionVersion": "v1",
+  "vncUser": "vnc",
+  "secretSource": "/etc/vending/secrets/vending-private-api-relay.token",
+  "secretTargetState": "absent-or-equal-source",
+  "targets": {
+    "tmpfiles": "/etc/tmpfiles.d/vending-edge.conf",
+    "nginxFragment": "/etc/nginx/snippets/vending-api-edge-unix-socket.conf",
+    "nginxVhost": "/etc/nginx/conf.d/vending.5gogogo.top.conf",
+    "secretTarget": "/etc/vending/credentials/vnc/private-api-relay.token"
+  },
+  "payloads": {
+    "tmpfiles": {
+      "file": "payload/vending-edge.conf",
+      "sha256": "UNCONFIGURED"
+    },
+    "nginxFragment": {
+      "file": "payload/vending-api-edge-unix-socket.conf",
+      "sha256": "UNCONFIGURED"
+    },
+    "nginxVhost": {
+      "file": "payload/vending.5gogogo.top.conf",
+      "sha256": "UNCONFIGURED"
+    }
+  },
+  "expectedCurrent": {
+    "tmpfiles": "absent-or-same",
+    "nginxFragment": "absent-or-same",
+    "nginxVhost": "UNCONFIGURED"
+  }
+}

@@ -1,0 +1,3 @@
+# This file is installed only by a root administrator after reviewing the sealed action bundle.
+# The empty argument string is intentional: callers cannot append arguments.
+vnc ALL=(root) NOSETENV: NOPASSWD: /usr/local/sbin/vending-public-ingress-prepare "", /usr/local/sbin/vending-public-ingress-activate "", /usr/local/sbin/vending-public-ingress-rollback-readiness "", /usr/local/sbin/vending-public-ingress-rollback ""

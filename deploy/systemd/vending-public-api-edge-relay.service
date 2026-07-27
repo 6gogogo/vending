@@ -13,7 +13,7 @@ Environment=PUBLIC_EDGE_RELAY_SOCKET_PATH=/run/vending/api-edge.sock
 Environment=PUBLIC_EDGE_RELAY_UPSTREAM_HOST=10.66.66.2
 Environment=PUBLIC_EDGE_RELAY_UPSTREAM_PORT=8100
 Environment=PUBLIC_EDGE_RELAY_ALLOWED_HOSTS=vending.5gogogo.top
-Environment=PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE=/home/vnc/.config/vending/private-api-relay.token
+Environment=PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE=/etc/vending/credentials/vnc/private-api-relay.token
 ExecStart=/home/vnc/.nvm/versions/node/v22.22.2/bin/npm run start:public-edge-relay
 Restart=on-failure
 RestartSec=5

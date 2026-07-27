@@ -7,7 +7,8 @@ import test from "node:test";
 import {
   envFilesDeclareFullSimulationProfile,
   envFilesDeclareProductionRuntime,
-  isProductionRuntime
+  isProductionRuntime,
+  isTestEnvironmentIsolated
 } from "../src/common/config/runtime-environment.js";
 
 test("NODE_ENV 与 APP_ENV 任一声明 production 都启用严格生产模式", () => {
@@ -34,6 +35,12 @@ test("NODE_ENV 与 APP_ENV 任一声明 production 都启用严格生产模式",
       `NODE_ENV=${String(testCase.nodeEnv)}, APP_ENV=${String(testCase.appEnv)}`
     );
   }
+});
+
+test("隔离测试标记只接受精确值 1", () => {
+  assert.equal(isTestEnvironmentIsolated({}), false);
+  assert.equal(isTestEnvironmentIsolated({ VM_TEST_ISOLATED_ENV: "true" }), false);
+  assert.equal(isTestEnvironmentIsolated({ VM_TEST_ISOLATED_ENV: " 1 " }), true);
 });
 
 test("本地环境文件声明 production 时不会再回落加载示例配置", (t) => {

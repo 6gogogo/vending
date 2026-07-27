@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+umask 077
+cd /
+
+if [ "$#" -ne 0 ] || [ ! -x /usr/bin/node ]; then
+  exit 64
+fi
+
+exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/root \
+  /usr/bin/node -- \
+  /usr/local/lib/vending-public-ingress-admin/v1/vending-public-ingress-rollback-root-action.mjs

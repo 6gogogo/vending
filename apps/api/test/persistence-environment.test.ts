@@ -77,6 +77,7 @@ test("运行时路径在读取配置前加载实际 .env，并优先于示例文
   for (const { environmentKey } of resolverCases) {
     delete environment[environmentKey];
   }
+  delete environment.VM_TEST_ISOLATED_ENV;
 
   for (const { resolver, expectedPath } of resolverCases) {
     const result = spawnSync(
