@@ -23,14 +23,17 @@ import {
   createFirstBackofficeMaintenanceCancellationCoordinator,
   createFirstBackofficeMaintenanceSignalGuard,
   isStoppedServiceState,
+  isGnomeTerminalVteCgroup,
   LOGIND_COMMAND_ENVIRONMENT,
   parseLogindSessionProperties,
   parseLogindSessionIdProperty,
   parseLogindSessionObjectPath,
+  parseLogindUserSessionIds,
   resolveCurrentLogindSessionId,
   resolveFirstBackofficeMaintenancePlan,
   resolveSystemBusctlArguments,
-  runFirstBackofficeMaintenanceRecovery
+  runFirstBackofficeMaintenanceRecovery,
+  selectSingleActiveLocalGraphicalSession
 } from "./first-backoffice-password-maintenance.mjs";
 
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -103,12 +106,15 @@ const systemctlValue = (property) => {
   return value;
 };
 
-const runBusctl = (args) => {
-  const result = spawnSync(busctlPath, resolveSystemBusctlArguments(args), {
+const executeBusctl = (args) =>
+  spawnSync(busctlPath, resolveSystemBusctlArguments(args), {
     encoding: "utf8",
     env: LOGIND_COMMAND_ENVIRONMENT,
     stdio: ["ignore", "pipe", "pipe"]
   });
+
+const runBusctl = (args) => {
+  const result = executeBusctl(args);
 
   if (result.error || result.status !== 0) {
     throw new Error("无法由 logind 核验当前进程会话，拒绝维护。");
@@ -117,17 +123,83 @@ const runBusctl = (args) => {
   return String(result.stdout ?? "");
 };
 
-const readCurrentLogindSessionId = () => {
-  const sessionObjectPath = parseLogindSessionObjectPath(
-    runBusctl([
-      "call",
-      "org.freedesktop.login1",
-      "/org/freedesktop/login1",
-      "org.freedesktop.login1.Manager",
-      "GetSessionByPID",
-      "u",
-      String(process.pid)
+const runLoginctl = (args) => {
+  const result = spawnSync(loginctlPath, args, {
+    encoding: "utf8",
+    env: LOGIND_COMMAND_ENVIRONMENT,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  if (result.error || result.status !== 0) {
+    throw new Error("无法核验当前 logind 会话，拒绝在非本机上下文初始化密码。");
+  }
+
+  return String(result.stdout ?? "");
+};
+
+const readLogindSessionProperties = (sessionId) =>
+  parseLogindSessionProperties(
+    runLoginctl([
+      "show-session",
+      sessionId,
+      "-p",
+      "Remote",
+      "-p",
+      "Type",
+      "-p",
+      "Class",
+      "-p",
+      "State"
     ])
+  );
+
+const isNoKnownSessionBusctlFailure = (result) =>
+  !result.error &&
+  /(?:does not belong to any known session|no session for pid)/iu.test(
+    String(result.stderr ?? "")
+  );
+
+const readSingleActiveLocalGraphicalSessionId = () => {
+  const sessionIds = parseLogindUserSessionIds(
+    runLoginctl([
+      "show-user",
+      String(process.getuid()),
+      "-p",
+      "Sessions",
+      "--value"
+    ])
+  );
+
+  return selectSingleActiveLocalGraphicalSession(
+    sessionIds.map((id) => ({ id, properties: readLogindSessionProperties(id) }))
+  );
+};
+
+const readCurrentLogindSessionId = () => {
+  const cgroup = readFileSync("/proc/self/cgroup", "utf8");
+  const sessionLookup = executeBusctl([
+    "call",
+    "org.freedesktop.login1",
+    "/org/freedesktop/login1",
+    "org.freedesktop.login1.Manager",
+    "GetSessionByPID",
+    "u",
+    String(process.pid)
+  ]);
+
+  if (sessionLookup.error || sessionLookup.status !== 0) {
+    if (
+      isNoKnownSessionBusctlFailure(sessionLookup) &&
+      isGnomeTerminalVteCgroup({ cgroup, uid: process.getuid() })
+    ) {
+      return readSingleActiveLocalGraphicalSessionId();
+    }
+
+    throw new Error("无法由 logind 核验当前进程会话，拒绝维护。");
+  }
+
+  const sessionObjectPath = parseLogindSessionObjectPath(
+    String(sessionLookup.stdout ?? "")
   );
 
   const sessionId = parseLogindSessionIdProperty(
@@ -141,39 +213,14 @@ const readCurrentLogindSessionId = () => {
   );
 
   return resolveCurrentLogindSessionId({
-    cgroup: readFileSync("/proc/self/cgroup", "utf8"),
+    cgroup,
     busctlSessionId: sessionId
   });
 };
 
 const readCurrentLogindSessionProperties = () => {
   const sessionId = readCurrentLogindSessionId();
-  const result = spawnSync(
-    loginctlPath,
-    [
-      "show-session",
-      sessionId,
-      "-p",
-      "Remote",
-      "-p",
-      "Type",
-      "-p",
-      "Class",
-      "-p",
-      "State"
-    ],
-    {
-      encoding: "utf8",
-      env: LOGIND_COMMAND_ENVIRONMENT,
-      stdio: ["ignore", "pipe", "pipe"]
-    }
-  );
-
-  if (result.error || result.status !== 0) {
-    throw new Error("无法核验当前 logind 会话，拒绝在非本机上下文初始化密码。");
-  }
-
-  return parseLogindSessionProperties(result.stdout);
+  return readLogindSessionProperties(sessionId);
 };
 
 const assertInteractiveLocalTerminal = () => {

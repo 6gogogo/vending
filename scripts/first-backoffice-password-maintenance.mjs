@@ -14,6 +14,9 @@ const safeSystemdPathPattern = /^\/[A-Za-z0-9._/+@:-]+$/u;
 const localPseudoTerminalPattern = /^\/dev\/pts\/\d+$/u;
 const sessionScopePattern = /(?:^|\/)session-([A-Za-z0-9_-]+)\.scope(?:\/|$)/gmu;
 const logindSessionIdPattern = /^[A-Za-z0-9_-]+$/u;
+const numericUserIdPattern = /^\d+$/u;
+const gnomeTerminalVteCgroupPattern =
+  /^0::\/user\.slice\/user-(\d+)\.slice\/user@\1\.service\/app\.slice\/app-org\.gnome\.Terminal\.slice\/vte-spawn-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.scope$/iu;
 const logindSessionObjectPathPattern =
   /^o\s+"(\/org\/freedesktop\/login1\/session\/[A-Za-z0-9_]+)"\s*$/u;
 const logindSessionIdPropertyPattern = /^s\s+"([A-Za-z0-9_-]+)"\s*$/u;
@@ -101,6 +104,39 @@ export const resolveCurrentLogindSessionId = ({
   return sessionId;
 };
 
+export const isGnomeTerminalVteCgroup = ({ cgroup, uid }) => {
+  const normalizedUid = String(uid ?? "").trim();
+  const cgroupLines = String(cgroup ?? "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!numericUserIdPattern.test(normalizedUid) || cgroupLines.length !== 1) {
+    return false;
+  }
+
+  const match = cgroupLines[0].match(gnomeTerminalVteCgroupPattern);
+  return Boolean(match && match[1] === normalizedUid);
+};
+
+export const parseLogindUserSessionIds = (output) => {
+  const value = String(output ?? "").trim();
+
+  if (!value) {
+    throw new Error("logind 未返回当前用户的会话，已拒绝维护。");
+  }
+
+  const sessionIds = value.split(/\s+/u);
+  if (
+    sessionIds.some((sessionId) => !logindSessionIdPattern.test(sessionId)) ||
+    new Set(sessionIds).size !== sessionIds.length
+  ) {
+    throw new Error("logind 返回了无效或重复的当前用户会话，已拒绝维护。");
+  }
+
+  return sessionIds;
+};
+
 export const parseLogindSessionObjectPath = (output) => {
   const match = String(output ?? "").trim().match(logindSessionObjectPathPattern);
 
@@ -157,7 +193,7 @@ export const parseLogindSessionProperties = (output) => {
   return properties;
 };
 
-export const assertLocalGraphicalLogindSession = (properties) => {
+export const isActiveLocalGraphicalLogindSession = (properties) => {
   const normalized = Object.fromEntries(
     Object.entries(properties ?? {}).map(([key, value]) => [
       key,
@@ -165,12 +201,40 @@ export const assertLocalGraphicalLogindSession = (properties) => {
     ])
   );
 
-  if (
-    normalized.Remote !== "no" ||
-    !["x11", "wayland"].includes(normalized.Type) ||
-    normalized.Class !== "user" ||
-    normalized.State !== "active"
-  ) {
+  return (
+    normalized.Remote === "no" &&
+    ["x11", "wayland"].includes(normalized.Type) &&
+    normalized.Class === "user" &&
+    normalized.State === "active"
+  );
+};
+
+export const selectSingleActiveLocalGraphicalSession = (sessions) => {
+  if (!Array.isArray(sessions)) {
+    throw new Error("logind 当前用户会话格式无效，已拒绝维护。");
+  }
+
+  const normalizedSessions = sessions.map((session) => {
+    const id = String(session?.id ?? "").trim();
+    if (!logindSessionIdPattern.test(id)) {
+      throw new Error("logind 当前用户会话编号无效，已拒绝维护。");
+    }
+
+    return { id, properties: session?.properties };
+  });
+  const localGraphicalSessions = normalizedSessions.filter((session) =>
+    isActiveLocalGraphicalLogindSession(session.properties)
+  );
+
+  if (localGraphicalSessions.length !== 1) {
+    throw new Error("无法唯一确认当前用户的本机 active 图形会话，已拒绝维护。");
+  }
+
+  return localGraphicalSessions[0].id;
+};
+
+export const assertLocalGraphicalLogindSession = (properties) => {
+  if (!isActiveLocalGraphicalLogindSession(properties)) {
     throw new Error("首次后台密码维护只能从本机 active 图形 VNC 会话启动。");
   }
 };

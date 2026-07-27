@@ -10,7 +10,9 @@ import {
   assertLocalGraphicalLogindSession,
   createFirstBackofficeMaintenanceCancellationCoordinator,
   createFirstBackofficeMaintenanceSignalGuard,
+  isGnomeTerminalVteCgroup,
   isStoppedServiceState,
+  parseLogindUserSessionIds,
   parseLogindSessionProperties,
   parseLogindSessionIdProperty,
   parseLogindSessionObjectPath,
@@ -19,7 +21,8 @@ import {
   resolveLogindSessionIdFromCgroup,
   resolveFirstBackofficeMaintenancePlan,
   resolveSystemBusctlArguments,
-  runFirstBackofficeMaintenanceRecovery
+  runFirstBackofficeMaintenanceRecovery,
+  selectSingleActiveLocalGraphicalSession
 } from "./first-backoffice-password-maintenance.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -200,6 +203,73 @@ test("仅接受当前进程所属的本机 active 图形 logind 会话", () => {
         "Remote=no\nType=x11\nClass=user\nState=active\nUnit=x\n"
       ),
     /意外/u
+  );
+});
+
+test("GNOME Terminal 脱离 session scope 时只能回退到唯一的本机 active 图形会话", () => {
+  const gnomeTerminalCgroup =
+    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.gnome.Terminal.slice/vte-spawn-3ef89552-10ba-4acc-9ddc-a940df91432d.scope\n";
+
+  assert.equal(
+    isGnomeTerminalVteCgroup({ cgroup: gnomeTerminalCgroup, uid: 1000 }),
+    true
+  );
+  assert.equal(
+    isGnomeTerminalVteCgroup({ cgroup: gnomeTerminalCgroup, uid: 1001 }),
+    false
+  );
+  assert.equal(
+    isGnomeTerminalVteCgroup({
+      cgroup:
+        "0::/user.slice/user-1000.slice/user@1000.service/app.slice/vte-spawn-3ef89552-10ba-4acc-9ddc-a940df91432d.scope",
+      uid: 1000
+    }),
+    false
+  );
+
+  assert.deepEqual(parseLogindUserSessionIds("3056 3055 5\n"), [
+    "3056",
+    "3055",
+    "5"
+  ]);
+  assert.throws(() => parseLogindUserSessionIds("5 unexpected/session\n"), /会话/u);
+
+  assert.equal(
+    selectSingleActiveLocalGraphicalSession([
+      {
+        id: "3056",
+        properties: { Remote: "yes", Type: "tty", Class: "user", State: "active" }
+      },
+      {
+        id: "5",
+        properties: { Remote: "no", Type: "x11", Class: "user", State: "active" }
+      }
+    ]),
+    "5"
+  );
+  assert.throws(
+    () =>
+      selectSingleActiveLocalGraphicalSession([
+        {
+          id: "5",
+          properties: { Remote: "no", Type: "x11", Class: "user", State: "active" }
+        },
+        {
+          id: "6",
+          properties: { Remote: "no", Type: "wayland", Class: "user", State: "active" }
+        }
+      ]),
+    /唯一/u
+  );
+  assert.throws(
+    () =>
+      selectSingleActiveLocalGraphicalSession([
+        {
+          id: "3056",
+          properties: { Remote: "yes", Type: "tty", Class: "user", State: "active" }
+        }
+      ]),
+    /唯一/u
   );
 });
 
