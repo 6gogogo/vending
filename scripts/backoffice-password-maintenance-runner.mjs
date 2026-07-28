@@ -19,6 +19,30 @@ const maintenanceScriptPath = resolve(
 );
 const maintenanceLabelPattern = /^[a-z0-9-]+$/u;
 
+export const resolveRuntimeDataMaintenanceCommands = ({
+  readOnlyPreflight,
+  backupLabel = undefined
+}) => {
+  if (
+    typeof readOnlyPreflight !== "boolean" ||
+    (readOnlyPreflight && backupLabel !== undefined) ||
+    (!readOnlyPreflight &&
+      (typeof backupLabel !== "string" || !maintenanceLabelPattern.test(backupLabel)))
+  ) {
+    throw new Error("维护运行模式或备份标签无效。");
+  }
+
+  if (readOnlyPreflight) {
+    return [["verify"]];
+  }
+
+  return [
+    ["verify"],
+    ["backup", "--label", backupLabel, "--keep", "30"],
+    ["verify", "--latest"]
+  ];
+};
+
 const assertInteractiveTerminal = (operation) => {
   if (!process.stdin.isTTY || !process.stdout.isTTY || !process.stderr.isTTY) {
     throw new Error(`${operation}只能由服务器 VNC 本机交互终端启动。`);
@@ -80,10 +104,11 @@ const runTypeScriptScript = (scriptPath, args = []) => {
   }
 };
 
-export const runBackofficePasswordMaintenanceRunner = ({
+const runBackofficePasswordMaintenanceOperation = ({
   operation,
-  passwordScriptPath,
-  backupLabel
+  operationScriptPath,
+  backupLabel = undefined,
+  readOnlyPreflight = false
 }) => {
   if (process.argv.length !== 2) {
     throw new Error(`${operation}运行器不接受任何参数。`);
@@ -93,9 +118,10 @@ export const runBackofficePasswordMaintenanceRunner = ({
     throw new Error(`${operation}运行器只能在 Spark Linux 主机运行。`);
   }
 
-  if (!maintenanceLabelPattern.test(backupLabel)) {
-    throw new Error("维护备份标签必须是受控的静态标识。");
-  }
+  const runtimeDataCommands = resolveRuntimeDataMaintenanceCommands({
+    readOnlyPreflight,
+    backupLabel
+  });
 
   assertInteractiveTerminal(operation);
 
@@ -106,16 +132,38 @@ export const runBackofficePasswordMaintenanceRunner = ({
   assertTrustedRepositoryFile(tsxCliPath, "tsx 运行器");
   assertTrustedRepositoryFile(apiTsconfigPath, "API TypeScript 配置");
   assertTrustedRepositoryFile(maintenanceScriptPath, "运行数据维护脚本");
-  assertTrustedRepositoryFile(passwordScriptPath, `${operation}脚本`);
+  assertTrustedRepositoryFile(operationScriptPath, `${operation}脚本`);
 
-  runTypeScriptScript(maintenanceScriptPath, ["verify"]);
-  runTypeScriptScript(maintenanceScriptPath, [
-    "backup",
-    "--label",
-    backupLabel,
-    "--keep",
-    "30"
-  ]);
-  runTypeScriptScript(maintenanceScriptPath, ["verify", "--latest"]);
-  runTypeScriptScript(passwordScriptPath);
+  for (const args of runtimeDataCommands) {
+    runTypeScriptScript(maintenanceScriptPath, args);
+    if (readOnlyPreflight && args.length === 1 && args[0] === "verify") {
+      console.log("预检通过：运行数据校验");
+    }
+  }
+  runTypeScriptScript(operationScriptPath);
 };
+
+export const runBackofficePasswordMaintenanceRunner = ({
+  operation,
+  passwordScriptPath,
+  backupLabel
+}) =>
+  runBackofficePasswordMaintenanceOperation({
+    operation,
+    operationScriptPath: passwordScriptPath,
+    backupLabel
+  });
+
+// 保持恢复维护入口的既有导出契约；首次初始化使用同一受控写入流程。
+export const runFirstBackofficePasswordMaintenanceRunner =
+  runBackofficePasswordMaintenanceRunner;
+
+export const runFirstBackofficePasswordMaintenancePreflightRunner = ({
+  operation,
+  preflightScriptPath
+}) =>
+  runBackofficePasswordMaintenanceOperation({
+    operation,
+    operationScriptPath: preflightScriptPath,
+    readOnlyPreflight: true
+  });

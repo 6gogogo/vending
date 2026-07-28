@@ -27,6 +27,7 @@ import {
   runFirstBackofficeMaintenanceRecovery,
   selectSingleActiveLocalGraphicalSession
 } from "./first-backoffice-password-maintenance.mjs";
+import { resolveRuntimeDataMaintenanceCommands } from "./backoffice-password-maintenance-runner.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
@@ -118,6 +119,123 @@ test("首次初始化维护入口仍可直接启动并拒绝命令行参数", ()
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
+test("首次后台密码预检入口拒绝命令行参数，避免注入密码或运行模式", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(
+        repositoryRoot,
+        "scripts",
+        "run-first-backoffice-password-maintenance-preflight.mjs"
+      ),
+      "--probe"
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /首次后台密码维护预检命令不接受任何参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
+test("首次后台密码预检脚本使用 API tsconfig 装载并拒绝参数", () => {
+  const command = resolveTypeScriptMaintenanceCommand({
+    tsxCliPath: resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    tsconfigPath: resolve(repositoryRoot, "apps", "api", "tsconfig.json"),
+    scriptPath: resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "verify-first-backoffice-password-maintenance.ts"
+    ),
+    args: ["--probe"]
+  });
+  const result = spawnSync(process.execPath, command, {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /本命令不接受参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
+test("首次后台密码预检只做只读运行数据校验，不创建备份", () => {
+  assert.deepEqual(
+    resolveRuntimeDataMaintenanceCommands({ readOnlyPreflight: true }),
+    [["verify"]]
+  );
+  assert.deepEqual(
+    resolveRuntimeDataMaintenanceCommands({
+      readOnlyPreflight: false,
+      backupLabel: "pre-first-backoffice-password"
+    }),
+    [
+      ["verify"],
+      ["backup", "--label", "pre-first-backoffice-password", "--keep", "30"],
+      ["verify", "--latest"]
+    ]
+  );
+  assert.throws(
+    () =>
+      resolveRuntimeDataMaintenanceCommands({
+        readOnlyPreflight: true,
+        backupLabel: "unexpected"
+      }),
+    /运行模式或备份标签/u
+  );
+  assert.throws(
+    () => resolveRuntimeDataMaintenanceCommands({ readOnlyPreflight: false }),
+    /运行模式或备份标签/u
+  );
+});
+
+test("首次初始化在要求输入密码前先取得金融单写租约", () => {
+  const source = readFileSync(
+    resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "initialize-first-backoffice-password.ts"
+    ),
+    "utf8"
+  );
+
+  assert.ok(
+    source.indexOf("const financialWriter = acquireFinancialSingleWriterForMaintenance()") <
+      source.indexOf("const password = await readConfirmedPassword"),
+    "金融单写租约必须在密码输入前取得"
+  );
+});
+
+test("预检文案不把 API 恢复误称为绝对零写入", () => {
+  const preflightScript = readFileSync(
+    resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "verify-first-backoffice-password-maintenance.ts"
+    ),
+    "utf8"
+  );
+  const deploymentGuide = readFileSync(
+    resolve(repositoryRoot, "docs", "发布与公网部署验证流程.md"),
+    "utf8"
+  );
+
+  assert.doesNotMatch(preflightScript, /未写入运行数据或审计日志/u);
+  assert.match(deploymentGuide, /恢复启动仍可能产生常规启动审计/u);
+});
+
 test("本机首次后台密码维护计划只覆盖执行与终端配置，不注入环境变量", () => {
   const plan = resolveFirstBackofficeMaintenancePlan({
     runtimeDirectory: "/run/user/1000",
@@ -176,6 +294,37 @@ test("admin 密码恢复使用独立受控 drop-in，不与首次初始化路径
   assert.doesNotMatch(plan.contents, /^Environment(?:File)?=/mu);
 });
 
+test("首次后台密码预检使用独立受控 drop-in，并保持同一 VNC TTY 契约", () => {
+  const plan = resolveFirstBackofficeMaintenancePlan({
+    runtimeDirectory: "/run/user/1000",
+    workingDirectory: "/home/fivegogogo/vending/current",
+    nodeExecutable: "/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/node",
+    runnerPath:
+      "/home/fivegogogo/vending/current/scripts/first-backoffice-password-maintenance-preflight-runner.mjs",
+    ttyPath: "/dev/pts/8",
+    dropInName: "97-first-backoffice-password-maintenance-preflight.conf"
+  });
+
+  assert.equal(
+    plan.dropInPath,
+    "/run/user/1000/systemd/user/vending-api-candidate.service.d/97-first-backoffice-password-maintenance-preflight.conf"
+  );
+  assert.doesNotMatch(plan.dropInPath, /95-first-backoffice-password-maintenance/u);
+  assert.doesNotMatch(
+    plan.dropInPath,
+    /96-admin-backoffice-password-recovery/u
+  );
+  assert.match(
+    plan.contents,
+    /^ExecStart=\/home\/fivegogogo\/.nvm\/versions\/node\/v22\.22\.2\/bin\/node \/home\/fivegogogo\/vending\/current\/scripts\/first-backoffice-password-maintenance-preflight-runner\.mjs$/mu
+  );
+  assert.match(plan.contents, /^StandardInput=file:\/dev\/pts\/8$/mu);
+  assert.match(plan.contents, /^StandardOutput=file:\/dev\/pts\/8$/mu);
+  assert.match(plan.contents, /^StandardError=file:\/dev\/pts\/8$/mu);
+  assert.doesNotMatch(plan.contents, /^Environment(?:File)?=/mu);
+  assert.doesNotMatch(plan.contents, /(?:password|code|secret)=/iu);
+});
+
 test("会话验证固定走系统总线并使用最小子进程环境", () => {
   assert.deepEqual(LOGIND_COMMAND_ENVIRONMENT, {
     PATH: "/usr/bin:/bin",
@@ -207,6 +356,10 @@ test("旧的直接首次密码初始化 npm 入口已移除", () => {
   assert.equal(
     rootPackage.scripts["init:first-backoffice-password:maintenance"],
     "node scripts/run-first-backoffice-password-maintenance.mjs"
+  );
+  assert.equal(
+    rootPackage.scripts["preflight:first-backoffice-password:maintenance"],
+    "node scripts/run-first-backoffice-password-maintenance-preflight.mjs"
   );
 });
 

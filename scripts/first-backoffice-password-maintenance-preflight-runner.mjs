@@ -2,24 +2,23 @@ import { dirname, resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { runFirstBackofficePasswordMaintenanceRunner } from "./backoffice-password-maintenance-runner.mjs";
+import { runFirstBackofficePasswordMaintenancePreflightRunner } from "./backoffice-password-maintenance-runner.mjs";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const repositoryRoot = realpathSync(resolve(dirname(currentFilePath), ".."));
-const passwordInitializationScriptPath = resolve(
+const preflightScriptPath = resolve(
   repositoryRoot,
   "apps",
   "api",
   "src",
   "scripts",
-  "initialize-first-backoffice-password.ts"
+  "verify-first-backoffice-password-maintenance.ts"
 );
 
 const main = () => {
-  runFirstBackofficePasswordMaintenanceRunner({
-    operation: "首次后台密码维护",
-    passwordScriptPath: passwordInitializationScriptPath,
-    backupLabel: "pre-first-backoffice-password"
+  runFirstBackofficePasswordMaintenancePreflightRunner({
+    operation: "首次后台密码维护预检",
+    preflightScriptPath
   });
 };
 
