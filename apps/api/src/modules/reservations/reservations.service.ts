@@ -639,13 +639,7 @@ export class ReservationsService {
   }
 
   private getReservableStock(deviceCode: string, goodsId: string) {
-    const reservedQuantity = this.store.reservations
-      .filter((reservation) => reservation.status === "active" && reservation.deviceCode === deviceCode)
-      .flatMap((reservation) => reservation.items)
-      .filter((item) => item.goodsId === goodsId)
-      .reduce((sum, item) => sum + item.quantity, 0);
-
-    return Math.max(0, this.store.getAvailableStock(deviceCode, goodsId) - reservedQuantity);
+    return this.store.getReservableStock(deviceCode, goodsId);
   }
 
   private getActorLog(userId: string | undefined, fallbackRole: UserRole | "admin"): OperationLogActor {

@@ -596,6 +596,12 @@ export class DevicesService {
   }
 
   private getStockForViewer(deviceCode: string, goodsId: string, viewerRole?: UserRole) {
+    // 受控人工码验收必须展示预约真正能锁定的库存。否则运行器可能先选到
+    // 已过期或已被其他预约占用的“物理余量”，随后在创建预约时才失败。
+    if (this.store.isManualAppAcceptanceFixtureMode()) {
+      return this.store.getReservableStock(deviceCode, goodsId);
+    }
+
     return viewerRole === "special"
       ? this.store.getAvailableStock(deviceCode, goodsId)
       : this.store.getCurrentStock(deviceCode, goodsId);

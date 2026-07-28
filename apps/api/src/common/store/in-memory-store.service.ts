@@ -74,6 +74,11 @@ import {
 import { validatePersistedState } from "./persisted-state-integrity";
 import { isProductionRuntime } from "../config/runtime-environment";
 import {
+  assertFullSimulationIsolation,
+  isFullSimulationProfile,
+  resolveFullSimulationExternalMode
+} from "../config/full-simulation-mode";
+import {
   assertLivePlatformTenantConfiguration,
   createSimulationPlatformTenant,
   resolveLivePlatformTenantConfiguration,
@@ -113,6 +118,21 @@ const DEFAULT_MERCHANT_PASSWORD = "merchant123";
 const DEFAULT_MERCHANT_PHONE = "13800000004";
 const DEFAULT_MERCHANT_NAME = "鲜食商家";
 const DEFAULT_SUPER_ADMIN_REGION_NAME = "系统管理";
+const MANUAL_APP_ACCEPTANCE_FIXTURE_DEVICE_CODE = "SIM-APP-ACCEPTANCE-001";
+const MANUAL_APP_ACCEPTANCE_FIXTURE_GOODS: Omit<DeviceGoods, "stock" | "expiresAt"> = {
+  goodsCode: "SIM-APP-RESERVE-PACK",
+  goodsId: "goods-sim-app-reserve-pack",
+  name: "公益食品体验包",
+  fullName: "公益食品体验包",
+  category: "food",
+  categoryName: "食品",
+  price: 0,
+  imageUrl: "",
+  packageForm: "体验装",
+  specification: "1 份",
+  manufacturer: "公益智助柜模拟服务",
+  status: "active"
+};
 
 type OperationLogDraft = Omit<OperationLogRecord, "id" | "occurredAt" | "description" | "detail"> &
   Partial<Pick<OperationLogRecord, "id" | "occurredAt" | "description" | "detail">>;
@@ -246,6 +266,7 @@ export class InMemoryStoreService {
     if (allowTestDeviceBootstrap && !persisted?.flags?.skipCompetitionTestDevice) {
       this.ensureCompetitionTestDevice();
     }
+    shouldPersist = this.ensureManualAppAcceptanceFixture() || shouldPersist;
     this.syncDeviceStocksFromBatches();
     this.refreshAlertPresentation();
     this.refreshPersistedStateIntegrityStatus();
@@ -1268,6 +1289,185 @@ export class InMemoryStoreService {
         });
       }
     }
+  }
+
+  /**
+   * 全真模拟的人工码验收需要一条可预约的业务路径，但不能依赖开发种子或开放通用 mock 写入口。
+   * 仅在隔离 simulation 平面、柜机与支付均为 mock、验证码为 manual 时补齐固定体验柜；
+   * 其他可预约库存存在时完全不触碰，真实平面也绝不会进入这里。
+   */
+  private ensureManualAppAcceptanceFixture() {
+    if (
+      !this.shouldEnsureManualAppAcceptanceFixture() ||
+      this.hasReservableSimulationInventory()
+    ) {
+      return false;
+    }
+
+    const tenantId = this.getDefaultTenantId();
+    const fixture = this.devices.find(
+      (entry) => entry.deviceCode === MANUAL_APP_ACCEPTANCE_FIXTURE_DEVICE_CODE
+    );
+
+    // 固定编号若被非模拟设备或其他实例占用，绝不覆盖用户数据；运行器会保持失败关闭。
+    if (
+      fixture &&
+      (fixture.isMock !== true || this.getDeviceTenantId(fixture) !== tenantId)
+    ) {
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    let targetDevice = fixture;
+    let changed = false;
+
+    if (!targetDevice) {
+      targetDevice = {
+        deviceCode: MANUAL_APP_ACCEPTANCE_FIXTURE_DEVICE_CODE,
+        tenantId,
+        isMock: true,
+        name: "模拟预约体验柜",
+        location: "模拟服务中心",
+        address: "隔离全模拟环境",
+        status: "online",
+        lastSeenAt: now,
+        doors: [
+          {
+            doorNum: "1",
+            label: "体验柜门",
+            goods: []
+          }
+        ]
+      };
+      this.devices.unshift(targetDevice);
+      changed = true;
+    } else {
+      if (targetDevice.tenantId !== tenantId) {
+        targetDevice.tenantId = tenantId;
+        changed = true;
+      }
+      if (targetDevice.status !== "online") {
+        targetDevice.status = "online";
+        changed = true;
+      }
+      targetDevice.lastSeenAt = now;
+      changed = true;
+    }
+
+    const targetDoor =
+      targetDevice.doors.find((entry) => entry.doorNum === "1") ??
+      (() => {
+        const created = { doorNum: "1", label: "体验柜门", goods: [] as DeviceGoods[] };
+        targetDevice.doors.unshift(created);
+        changed = true;
+        return created;
+      })();
+    const targetGoods = targetDoor.goods.find(
+      (entry) => entry.goodsId === MANUAL_APP_ACCEPTANCE_FIXTURE_GOODS.goodsId
+    );
+
+    this.ensureGoodsCatalogItem(MANUAL_APP_ACCEPTANCE_FIXTURE_GOODS);
+
+    if (targetGoods) {
+      Object.assign(targetGoods, MANUAL_APP_ACCEPTANCE_FIXTURE_GOODS);
+    } else {
+      targetDoor.goods.push({ ...MANUAL_APP_ACCEPTANCE_FIXTURE_GOODS, stock: 0 });
+      changed = true;
+    }
+
+    const runtime = this.getDeviceRuntime(targetDevice.deviceCode);
+    if (
+      runtime.doorState !== "closed" ||
+      runtime.openedAfterLastCommand !== true ||
+      runtime.lastRefreshAt !== now
+    ) {
+      this.updateDeviceRuntime(targetDevice.deviceCode, {
+        deviceCode: targetDevice.deviceCode,
+        doorState: "closed",
+        lastClosedAt: now,
+        lastRefreshAt: now,
+        openedAfterLastCommand: true
+      });
+      changed = true;
+    }
+
+    const replenishmentQuantity = Math.max(
+      0,
+      1 -
+        this.getReservableStock(
+          targetDevice.deviceCode,
+          MANUAL_APP_ACCEPTANCE_FIXTURE_GOODS.goodsId
+        )
+    );
+
+    if (replenishmentQuantity > 0) {
+      this.createGoodsBatch({
+        goodsId: MANUAL_APP_ACCEPTANCE_FIXTURE_GOODS.goodsId,
+        deviceCode: targetDevice.deviceCode,
+        quantity: Math.max(3, replenishmentQuantity),
+        sourceType: "system",
+        sourceUserName: "全模拟基线",
+        note: "App 预约体验库存",
+        createdAt: now
+      });
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  /**
+   * 这是受控全真模拟人工码验收的唯一运行组合。设备列表也用它将候选库存
+   * 收敛到预约实际可锁定的数量，避免运行器先看到过期或已被预约的物品。
+   */
+  isManualAppAcceptanceFixtureMode() {
+    return this.shouldEnsureManualAppAcceptanceFixture();
+  }
+
+  private shouldEnsureManualAppAcceptanceFixture() {
+    if (this.isLiveDataPlane() || !isFullSimulationProfile()) {
+      return false;
+    }
+
+    assertFullSimulationIsolation();
+    return (
+      resolveFullSimulationExternalMode("smartvm") === "mock" &&
+      resolveFullSimulationExternalMode("payment") === "mock" &&
+      resolveFullSimulationExternalMode("verification") === "manual"
+    );
+  }
+
+  private hasReservableSimulationInventory() {
+    const tenantId = this.getDefaultTenantId();
+
+    return this.devices.some((device) =>
+      this.getDeviceTenantId(device) === tenantId &&
+      device.status === "online" &&
+      device.doors.some((door) =>
+        door.goods.some((goods) => {
+          if (!["food", "drink", "daily"].includes(goods.category)) {
+            return false;
+          }
+
+          return this.getReservableStock(device.deviceCode, goods.goodsId) > 0;
+        })
+      )
+    );
+  }
+
+  getReservableStock(deviceCode: string, goodsId: string, now = Date.now()) {
+    const reservedQuantity = this.reservations
+      .filter(
+        (reservation) =>
+          reservation.status === "active" &&
+          reservation.deviceCode === deviceCode &&
+          Date.parse(reservation.expiresAt) > now
+      )
+      .flatMap((reservation) => reservation.items)
+      .filter((item) => item.goodsId === goodsId)
+      .reduce((sum, item) => sum + item.quantity, 0);
+
+    return Math.max(0, this.getAvailableStock(deviceCode, goodsId) - reservedQuantity);
   }
 
   private normalizePrefix(prefix: string) {
