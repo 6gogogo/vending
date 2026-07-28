@@ -1,0 +1,2 @@
+# 仅允许 Spark 服务用户以零参数启动固定的 root bootstrap；不得改为通配符或 Node/shell 权限。
+fivegogogo ALL=(root) /usr/local/sbin/vending-public-app-acceptance-root ""
