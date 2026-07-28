@@ -17,7 +17,7 @@ const passwordInitializationScriptPath = resolve(
 
 const main = () => {
   runFirstBackofficePasswordMaintenanceRunner({
-    operation: "首次后台密码维护",
+    operation: "admin 后台密码维护",
     passwordScriptPath: passwordInitializationScriptPath,
     backupLabel: "pre-first-backoffice-password"
   });

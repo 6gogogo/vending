@@ -115,7 +115,7 @@ test("首次初始化维护入口仍可直接启动并拒绝命令行参数", ()
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /首次后台密码维护命令不接受任何参数/u);
+  assert.match(result.stderr, /admin 后台密码维护命令不接受任何参数/u);
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
@@ -137,7 +137,7 @@ test("首次后台密码预检入口拒绝命令行参数，避免注入密码�
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /首次后台密码维护预检命令不接受任何参数/u);
+  assert.match(result.stderr, /admin 后台密码维护预检命令不接受任何参数/u);
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
@@ -210,9 +210,40 @@ test("首次初始化在要求输入密码前先取得金融单写租约", () =>
 
   assert.ok(
     source.indexOf("const financialWriter = acquireFinancialSingleWriterForMaintenance()") <
-      source.indexOf("const password = await readConfirmedPassword"),
+      source.indexOf("password = await readConfirmedPassword"),
     "金融单写租约必须在密码输入前取得"
   );
+});
+
+test("已初始化 admin 的本机维护会先校验当前密码，再请求新密码", () => {
+  const source = readFileSync(
+    resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "initialize-first-backoffice-password.ts"
+    ),
+    "utf8"
+  );
+  const leasePosition = source.indexOf(
+    "const financialWriter = acquireFinancialSingleWriterForMaintenance()"
+  );
+  const currentPasswordPosition = source.indexOf(
+    'currentPassword = await readHiddenLine("输入当前 admin 密码以验证（输入不回显）：")'
+  );
+  const currentPasswordVerificationPosition = source.indexOf(
+    "assertCurrentAdminBackofficePassword(store, currentPassword)"
+  );
+  const newPasswordPromptPosition = source.indexOf(
+    'prompt: "当前密码验证通过。输入新的 admin 密码（输入不回显）："'
+  );
+
+  assert.ok(leasePosition >= 0);
+  assert.ok(currentPasswordPosition > leasePosition);
+  assert.ok(currentPasswordVerificationPosition > currentPasswordPosition);
+  assert.ok(newPasswordPromptPosition > currentPasswordVerificationPosition);
 });
 
 test("admin 密码恢复在要求确认或输入密码前先取得金融单写租约", () => {

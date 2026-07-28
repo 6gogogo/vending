@@ -17,7 +17,7 @@ const preflightScriptPath = resolve(
 
 const main = () => {
   runFirstBackofficePasswordMaintenancePreflightRunner({
-    operation: "首次后台密码维护预检",
+    operation: "admin 后台密码维护预检",
     preflightScriptPath
   });
 };

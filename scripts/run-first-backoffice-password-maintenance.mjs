@@ -46,12 +46,12 @@ const HEALTH_URL = "http://127.0.0.1:8100/api/health";
 const HEALTH_TIMEOUT_MS = 45_000;
 const controlledFileNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const firstBackofficePasswordMaintenanceOperation = Object.freeze({
-  operation: "首次后台密码维护",
+  operation: "admin 后台密码维护",
   runnerFileName: "first-backoffice-password-maintenance-runner.mjs",
   dropInName: "95-first-backoffice-password-maintenance.conf",
   lockFileName: "vending-first-backoffice-password-maintenance.lock",
-  failureMessage: "首次后台密码维护未完成；密码未成功初始化或前置校验失败。",
-  successMessage: "首次后台密码维护完成，API 已恢复并通过本机健康检查。"
+  failureMessage: "admin 后台密码维护未完成；密码未成功初始化、验证或更新，或前置校验失败。",
+  successMessage: "admin 后台密码维护完成，API 已恢复并通过本机健康检查。"
 });
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -229,7 +229,7 @@ const readCurrentLogindSessionProperties = () => {
 
 const assertInteractiveLocalTerminal = () => {
   if (!process.stdin.isTTY || !process.stdout.isTTY || !process.stderr.isTTY) {
-    throw new Error("首次后台密码维护只能在 Spark VNC 本机交互终端运行。");
+    throw new Error("admin 后台密码维护只能在 Spark VNC 本机交互终端运行。");
   }
 
   const terminalPaths = [0, 1, 2].map((descriptor) =>
@@ -241,7 +241,7 @@ const assertInteractiveLocalTerminal = () => {
     !/^\/dev\/pts\/\d+$/u.test(terminalPath) ||
     terminalPaths.some((entry) => entry !== terminalPath)
   ) {
-    throw new Error("首次后台密码维护需要输入、输出和错误输出位于同一 VNC 本机伪终端。");
+    throw new Error("admin 后台密码维护需要输入、输出和错误输出位于同一 VNC 本机伪终端。");
   }
 
   assertLocalGraphicalLogindSession(readCurrentLogindSessionProperties());
@@ -395,11 +395,11 @@ const assertCurrentRepositoryMatchesService = (operation) => {
   );
 
   if (gitStatus.error || gitStatus.status !== 0) {
-    throw new Error("无法确认受管工作树状态，拒绝启动首次密码维护。");
+    throw new Error("无法确认受管工作树状态，拒绝启动 admin 后台密码维护。");
   }
 
   if (String(gitStatus.stdout ?? "").trim()) {
-    throw new Error("受管工作树存在未提交的跟踪文件变更，拒绝启动首次密码维护。");
+    throw new Error("受管工作树存在未提交的跟踪文件变更，拒绝启动 admin 后台密码维护。");
   }
 
   return workingDirectory;
@@ -554,7 +554,7 @@ export const runBackofficePasswordMaintenance = async ({
     }
 
     if (existsSync(plan.dropInPath) || existsSync(temporaryDropInPath)) {
-      throw new Error("首次后台密码维护 drop-in 已存在，拒绝并发或覆盖执行。");
+      throw new Error("admin 后台密码维护 drop-in 已存在，拒绝并发或覆盖执行。");
     }
 
     createExclusivePrivateFile(temporaryDropInPath, plan.contents);

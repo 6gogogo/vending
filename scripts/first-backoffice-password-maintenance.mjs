@@ -61,7 +61,7 @@ const assertLocalPseudoTerminal = (value) => {
   const normalized = String(value ?? "").trim();
 
   if (!localPseudoTerminalPattern.test(normalized)) {
-    throw new Error("首次后台密码维护只能使用服务器 VNC 本机伪终端。");
+    throw new Error("admin 后台密码维护只能使用服务器 VNC 本机伪终端。");
   }
 
   return normalized;
@@ -255,7 +255,7 @@ export const selectSingleActiveLocalGraphicalSession = (sessions) => {
 
 export const assertLocalGraphicalLogindSession = (properties) => {
   if (!isActiveLocalGraphicalLogindSession(properties)) {
-    throw new Error("首次后台密码维护只能从本机 active 图形 VNC 会话启动。");
+    throw new Error("admin 后台密码维护只能从本机 active 图形 VNC 会话启动。");
   }
 };
 
@@ -290,7 +290,7 @@ export const createFirstBackofficeMaintenanceSignalGuard = (
     },
     throwIfRequested() {
       if (requestedSignal) {
-        throw new Error("首次后台密码维护已取消，正在恢复 API 服务。");
+        throw new Error("admin 后台密码维护已取消，正在恢复 API 服务。");
       }
     },
     dispose() {

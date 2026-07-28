@@ -2,7 +2,7 @@ import { InMemoryStoreService } from "../common/store/in-memory-store.service.js
 import { resolveRuntimeDataPlane } from "../common/config/runtime-data-plane.js";
 import { resolveRuntimeStoragePaths } from "../common/store/persistence.js";
 import { assertRuntimePathsSafe } from "../common/store/runtime-path-safety.js";
-import { assertFirstBackofficePasswordTarget } from "../modules/auth/first-backoffice-password.js";
+import { assertAdminBackofficePasswordMaintenanceTarget } from "../modules/auth/first-backoffice-password.js";
 import { assertFirstBackofficePasswordMaintenanceServiceContext } from "./first-backoffice-password-maintenance-context.js";
 import { assertInteractiveLocalPasswordTerminal } from "./local-tty-password-input.js";
 
@@ -35,8 +35,9 @@ export const assertFirstBackofficePasswordMaintenancePreflight = (
   onCheckpoint("运行平面与存储路径");
 
   // InMemoryStoreService 在此仅从已持久化状态 hydrate；不调用 persist 或 flush。
-  assertFirstBackofficePasswordTarget(new InMemoryStoreService());
-  onCheckpoint("默认 admin 初始化目标");
+  // 已初始化账号也必须通过本预检，随后由正式维护流程验证当前密码。
+  assertAdminBackofficePasswordMaintenanceTarget(new InMemoryStoreService());
+  onCheckpoint("唯一 admin 后台账号");
 
   return { dataPlane };
 };

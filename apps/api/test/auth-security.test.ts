@@ -13,6 +13,7 @@ import { InMemoryStoreService } from "../src/common/store/in-memory-store.servic
 import type { VerificationPurpose } from "../src/common/store/persistence";
 import { AuthController } from "../src/modules/auth/auth.controller";
 import {
+  changeAdminBackofficePasswordWithCurrentPassword,
   initializeFirstBackofficePassword,
   MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH,
   MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH,
@@ -455,6 +456,67 @@ test("首次后台密码初始化允许六位密码、仅允许默认 admin，�
         "x".repeat(MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH - 1)
       ),
     /至少需要/
+  );
+});
+
+test("本机 admin 维护会先验证当前密码，再允许已初始化账号改为六位并撤销旧会话", () => {
+  const store = createIsolatedStore();
+  const initialPassword = "714628";
+  initializeFirstBackofficePassword(store, initialPassword);
+  const credential = store.findBackofficeCredentialByUsername("admin");
+  const user = store.users.find((entry) => entry.id === credential?.userId);
+  assert.ok(credential);
+  assert.ok(user);
+
+  const existingSession = store.createBackofficeSession(user, credential.role, credential.tenantId);
+  assert.throws(
+    () =>
+      changeAdminBackofficePasswordWithCurrentPassword(
+        store,
+        "not-the-current-password",
+        "817529"
+      ),
+    /当前 admin 密码不正确/u
+  );
+  assert.equal(store.getSession(existingSession)?.userId, user.id);
+  assert.equal(
+    verifyAdminPassword(initialPassword, credential.passwordSalt, credential.passwordHash),
+    true
+  );
+
+  const updatedPassword = "817529";
+  const result = changeAdminBackofficePasswordWithCurrentPassword(
+    store,
+    initialPassword,
+    updatedPassword
+  );
+
+  assert.equal(result.credential.username, "admin");
+  assert.equal(result.credential.usesDefaultPassword, false);
+  assert.equal(
+    verifyAdminPassword(
+      updatedPassword,
+      result.credential.passwordSalt,
+      result.credential.passwordHash
+    ),
+    true
+  );
+  assert.equal(store.getSession(existingSession), undefined);
+  assert.ok(
+    store.logs.some(
+      (entry) =>
+        entry.type === "change-admin-backoffice-password-with-current-password" &&
+        entry.metadata?.passwordChangeMethod === "local-tty-current-password"
+    )
+  );
+  assert.throws(
+    () =>
+      changeAdminBackofficePasswordWithCurrentPassword(
+        store,
+        updatedPassword,
+        updatedPassword
+      ),
+    /新密码不能与当前密码相同/u
   );
 });
 
