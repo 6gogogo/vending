@@ -625,8 +625,13 @@ export class AuthService {
 
     const normalizedPassword = newPassword.trim();
 
-    if (normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
-      throw new BadRequestException(`新密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
+    const minimumPasswordLength = getBackofficePasswordMinimumLength({
+      username: credential.username,
+      role: user.role
+    });
+
+    if (normalizedPassword.length < minimumPasswordLength) {
+      throw new BadRequestException(`新密码至少需要 ${minimumPasswordLength} 位。`);
     }
 
     if (normalizedPassword === currentPassword.trim()) {

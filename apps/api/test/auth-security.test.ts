@@ -482,10 +482,17 @@ test("唯一 admin 可验证当前密码后改为六位，其他后台账号仍�
 
   const legacyAdmin = await authService.adminPasswordLogin("admin", "admin");
   assert.throws(
-    () => authService.changeAdminPassword(legacyAdmin.token, "admin", "1234567"),
-    /至少需要 8 位/
+    () => authService.changeAdminPassword(legacyAdmin.token, "admin", "12345"),
+    /至少需要 6 位/
   );
   assert.ok(store.getSession(legacyAdmin.token));
+  const updatedLegacyAdmin = authService.changeAdminPassword(
+    legacyAdmin.token,
+    "admin",
+    "123456"
+  );
+  assert.equal(store.getSession(legacyAdmin.token), undefined);
+  assert.ok(store.getSession(updatedLegacyAdmin.token));
 
   const legacyBackoffice = await authService.backofficeLogin("admin", "admin");
   assert.throws(
@@ -543,10 +550,10 @@ test("唯一 admin 可验证当前密码后改为六位，其他后台账号仍�
     })
   );
 
-  const refreshedLegacyAdmin = await authService.adminPasswordLogin("admin", "admin");
+  const refreshedLegacyAdmin = await authService.adminPasswordLogin("admin", "123456");
   const migrated = authService.changeAdminPassword(
     refreshedLegacyAdmin.token,
-    "admin",
+    "123456",
     "12345678"
   );
   assert.ok(store.getSession(migrated.token));
