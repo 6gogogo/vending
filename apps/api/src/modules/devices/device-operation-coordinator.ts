@@ -51,6 +51,17 @@ export class DeviceOperationCoordinator {
       MIN_STATUS_STALE_AFTER_MS,
       MAX_STATUS_STALE_AFTER_MS
     );
+
+    // 全真模拟人工码验收的固定体验柜没有远端设备可上报心跳。仅该受控模拟夹具
+    // 将当前 API 进程视为心跳来源，避免预约完成后因等待页面操作而错误变为离线。
+    if (this.store.isManualAppAcceptanceFixtureDevice(device)) {
+      const recordedAt = Date.parse(device.lastSeenAt);
+
+      if (!Number.isFinite(recordedAt) || now > recordedAt) {
+        device.lastSeenAt = new Date(now).toISOString();
+      }
+    }
+
     const lastObservedAtMs = Date.parse(device.lastSeenAt);
     const heartbeatIsStale =
       device.status === "online" &&

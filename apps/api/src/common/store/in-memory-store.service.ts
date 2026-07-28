@@ -1424,6 +1424,19 @@ export class InMemoryStoreService {
     return this.shouldEnsureManualAppAcceptanceFixture();
   }
 
+  /**
+   * 固定体验柜没有真实柜机回调；在受控人工码演练组合中，由本地模拟进程持续
+   * 提供在线心跳。其余模拟柜、实机和非人工码组合仍必须遵循真实心跳时限。
+   */
+  isManualAppAcceptanceFixtureDevice(device: DeviceRecord) {
+    return (
+      this.shouldEnsureManualAppAcceptanceFixture() &&
+      device.deviceCode === MANUAL_APP_ACCEPTANCE_FIXTURE_DEVICE_CODE &&
+      device.isMock === true &&
+      this.getDeviceTenantId(device) === this.getDefaultTenantId()
+    );
+  }
+
   private shouldEnsureManualAppAcceptanceFixture() {
     if (this.isLiveDataPlane() || !isFullSimulationProfile()) {
       return false;

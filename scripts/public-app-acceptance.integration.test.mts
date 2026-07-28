@@ -15,6 +15,7 @@ import {
 } from "../apps/api/src/common/store/persistence";
 import { InMemoryStoreService } from "../apps/api/src/common/store/in-memory-store.service";
 import { hashAdminPassword } from "../apps/api/src/modules/auth/admin-password.utils";
+import { DeviceOperationCoordinator } from "../apps/api/src/modules/devices/device-operation-coordinator";
 import { listenOnFetchSafeLoopbackPort } from "../apps/api/test/support/fetch-safe-api-listener";
 import { PUBLIC_API_BASE_URL, runPublicAppAcceptance } from "./public-app-acceptance.mjs";
 
@@ -140,6 +141,13 @@ test("受控公网验收模块通过真实隔离 API 完成 App 登录、预约�
     assert.equal(device.deviceCode, fixtureDeviceCode);
     assert.equal(device.isMock, true);
     assert.ok(goods.stock >= 1);
+    const deviceOperations = app.get(DeviceOperationCoordinator);
+    const fixtureReadiness = deviceOperations.getReadiness(
+      device.deviceCode,
+      Date.parse(device.lastSeenAt) + 6 * 60_000
+    );
+    assert.equal(fixtureReadiness.connectivity, "online");
+    assert.equal(fixtureReadiness.canOpen, true);
     store.persist();
     const restartedStore = new InMemoryStoreService();
     assert.equal(
