@@ -4,14 +4,28 @@ export const reservationOnlyPickupSettingKey = "VM_RESERVATION_ONLY_PICKUP";
 export const exampleSettingsGroup = "示例设置";
 
 const instanceOperatorSettingKeys = new Set([
-  "NODE_ENV",
-  "APP_ENV",
-  "VM_DATA_PLANE",
   "VM_RESERVATION_ONLY_PICKUP",
-  "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE",
+  "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"
+]);
+
+const fullSimulationExampleSettingKeys = new Set([
   "VM_FULL_SIMULATION_VERIFICATION_MODE",
   "VM_FULL_SIMULATION_PAYMENT_MODE"
 ]);
+
+const truthyValues = new Set(["1", "true", "yes", "on"]);
+
+const isEnabledFullSimulation = (settings: SystemSettingEntry[]) => {
+  const values = new Map(settings.map((entry) => [entry.key, entry.value.trim()]));
+
+  return (
+    values.get("VM_DATA_PLANE") === "simulation" &&
+    values.get("VM_SIMULATION_PROFILE") === "full" &&
+    truthyValues.has(values.get("VM_FULL_SIMULATION_ENABLED")?.toLowerCase() ?? "") &&
+    Boolean(values.get("VM_DATA_ROOT")) &&
+    Boolean(values.get("VM_DATA_PLANE_ID"))
+  );
+};
 
 const paymentOnlySettingKeys = new Set([
   "VM_FULL_SIMULATION_PAYMENT_MODE",
@@ -30,8 +44,15 @@ export const isPaymentOnlySetting = (key: string) =>
   key.startsWith("ALIPAY_") ||
   key.startsWith("FINANCIAL_");
 
-export const settingsVisibleForInstanceAdministration = (settings: SystemSettingEntry[]) =>
-  settings.filter((entry) => instanceOperatorSettingKeys.has(entry.key));
+export const settingsVisibleForInstanceAdministration = (settings: SystemSettingEntry[]) => {
+  const fullSimulationEnabled = isEnabledFullSimulation(settings);
+
+  return settings.filter(
+    (entry) =>
+      instanceOperatorSettingKeys.has(entry.key) ||
+      (fullSimulationEnabled && fullSimulationExampleSettingKeys.has(entry.key))
+  );
+};
 
 export const settingsVisibleForCurrentPickupMode = (
   settings: SystemSettingEntry[],

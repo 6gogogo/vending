@@ -203,7 +203,7 @@ onShow(() => {
         <view class="section-heading">
           <text class="section-heading__title">AI 助手</text>
           <text class="vm-subtitle">
-            {{ aiStatus?.enabled ? `当前模型：${aiStatus.model || "已接入"}` : "后台暂未配置 AI，可先查看上方流程或提交反馈。" }}
+            {{ aiStatus?.enabled ? "智能助手已就绪，可描述遇到的问题。" : "智能助手暂不可用，可先查看上方流程或提交反馈。" }}
           </text>
         </view>
 

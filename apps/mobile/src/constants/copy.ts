@@ -8,7 +8,7 @@ export const appCopy = {
   loginSupport: "若手机号已预先导入系统，首次登录仍需补齐基础资料；新账号提交后会进入审核流程。",
   runtime: {
     simulationBadge: "模拟服务",
-    unknownBadge: "运行环境未确认"
+    statusPendingBadge: "服务状态待确认"
   },
   disclaimer: {
     title: "公益智助柜用户免责声明",

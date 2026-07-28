@@ -8,6 +8,7 @@ import { ServiceUnavailableException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 
 import { SystemAuditLogService } from "../src/common/store/system-audit-log.service.js";
+import { resolveApiEnvFile } from "../src/common/store/persistence.js";
 import { SystemSettingsService } from "../src/modules/system-settings/system-settings.service.js";
 
 const validPaymentSettings: Record<string, string> = {
@@ -85,6 +86,33 @@ const encodeEnv = (values: Record<string, string>) =>
     .map(([key, value]) => `${key}=${value}`)
     .join("\n")}\n`;
 
+test("隔离演练可显式将系统设置写入自身临时配置文件", () => {
+  const previousIsolatedFlag = process.env.VM_TEST_ISOLATED_ENV;
+  const previousEnvFile = process.env.VM_ISOLATED_SYSTEM_SETTINGS_ENV_FILE;
+  const directory = mkdtempSync(join(tmpdir(), "vm-isolated-system-settings-env-"));
+  const isolatedEnvFile = join(directory, "settings.env");
+  process.env.VM_TEST_ISOLATED_ENV = "1";
+  process.env.VM_ISOLATED_SYSTEM_SETTINGS_ENV_FILE = isolatedEnvFile;
+
+  try {
+    assert.equal(resolveApiEnvFile(), isolatedEnvFile);
+  } finally {
+    if (previousIsolatedFlag === undefined) {
+      delete process.env.VM_TEST_ISOLATED_ENV;
+    } else {
+      process.env.VM_TEST_ISOLATED_ENV = previousIsolatedFlag;
+    }
+
+    if (previousEnvFile === undefined) {
+      delete process.env.VM_ISOLATED_SYSTEM_SETTINGS_ENV_FILE;
+    } else {
+      process.env.VM_ISOLATED_SYSTEM_SETTINGS_ENV_FILE = previousEnvFile;
+    }
+
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("示例设置将领取和 App 验证选项集中展示，运行环境只能从模板选项选择", () => {
   const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-example-options-"));
   const envFilePath = join(directory, ".env");
@@ -116,6 +144,104 @@ test("示例设置将领取和 App 验证选项集中展示，运行环境只能
     assert.equal(entries.get("VM_FULL_SIMULATION_VERIFICATION_MODE")?.group, "示例设置");
     assert.equal(entries.get("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE")?.group, "示例设置");
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("全真模拟的手动验证码演练可单独保存额度归属，不强制填写未启用的短信服务", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-manual-quota-"));
+  const envFilePath = join(directory, ".env");
+  const settings = {
+    NODE_ENV: "development",
+    APP_ENV: "development",
+    VM_DATA_PLANE: "simulation",
+    VM_DATA_ROOT: join(directory, "runtime-data"),
+    VM_DATA_PLANE_ID: "manual-quota-test",
+    VM_SIMULATION_PROFILE: "full",
+    VM_FULL_SIMULATION_ENABLED: "true",
+    VM_FULL_SIMULATION_SMARTVM_MODE: "mock",
+    VM_FULL_SIMULATION_PAYMENT_MODE: "mock",
+    VM_FULL_SIMULATION_VERIFICATION_MODE: "manual",
+    VM_FULL_SIMULATION_AI_MODE: "mock",
+    VM_FULL_SIMULATION_MAP_MODE: "mock",
+    PAYMENT_MODE: "mock",
+    VERIFICATION_CODE_PROVIDER: "mock",
+    VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+    VM_RESERVATION_ONLY_PICKUP: "true",
+    SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: "auto",
+    ALIYUN_PNVS_SIGN_NAME: "",
+    ALIYUN_PNVS_TEMPLATE_CODE: ""
+  };
+  const runtimeValues = new Map(Object.entries(settings));
+  const setCalls: Array<[string, string]> = [];
+  writeFileSync(envFilePath, encodeEnv(settings), "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => runtimeValues.get(key),
+      set: (key: string, value: string) => {
+        setCalls.push([key, value]);
+        runtimeValues.set(key, value);
+      }
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const result = service.updateSettings({
+      values: { SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: "reservation_time" }
+    });
+
+    assert.deepEqual(result.changedKeys, ["SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"]);
+    assert.deepEqual(result.runtimeAppliedKeys, ["SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"]);
+    assert.deepEqual(result.restartRequiredKeys, []);
+    assert.deepEqual(setCalls, [["SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE", "reservation_time"]]);
+    assert.match(readFileSync(envFilePath, "utf8"), /SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE=reservation_time/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("生产配置存在未改的空必填项时，保存无关额度设置必须零副作用失败", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-production-required-"));
+  const envFilePath = join(directory, ".env");
+  const settings = {
+    ...validPaymentSettings,
+    CORS_ORIGINS: "",
+    SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: "auto"
+  };
+  const runtimeValues = new Map(Object.entries(settings));
+  const setCalls: Array<[string, string]> = [];
+  const originalContent = encodeEnv(settings);
+  writeFileSync(envFilePath, originalContent, "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => runtimeValues.get(key),
+      set: (key: string, value: string) => {
+        setCalls.push([key, value]);
+        runtimeValues.set(key, value);
+      }
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+  const previousAppEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "production";
+
+  try {
+    assert.throws(
+      () =>
+        service.updateSettings({
+          values: { SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: "reservation_time" }
+        }),
+      /生产环境缺少必填配置：CORS_ORIGINS/
+    );
+    assert.equal(readFileSync(envFilePath, "utf8"), originalContent);
+    assert.deepEqual(setCalls, []);
+  } finally {
+    if (previousAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnv;
+    }
     rmSync(directory, { recursive: true, force: true });
   }
 });

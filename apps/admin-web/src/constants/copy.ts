@@ -1,7 +1,7 @@
 export const adminCopy = {
   runtime: {
     simulationBadge: "模拟服务",
-    unknownBadge: "运行环境未确认"
+    statusPendingBadge: "服务状态待确认"
   },
   users: {
     batchRemoveNoSelection: "批量删除失败：请先选择需要删除的人员。",

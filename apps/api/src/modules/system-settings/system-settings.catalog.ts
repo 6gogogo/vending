@@ -99,11 +99,11 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   VM_FULL_SIMULATION_VERIFICATION_MODE: {
     group: "示例设置",
     label: "App 登录验证方式",
-    description: "手动设置验证码由当前实例管理员在人员页为已启用账号签发，6 位、短期且只能使用一次；不会发送短信。",
+    description: "选择 App 登录的验证方式。手动设置验证码由当前实例管理员在人员页为已启用账号签发，6 位、短期且只能使用一次。",
     inputType: "select",
     options: [
       { label: "模拟验证码", value: "mock" },
-      { label: "真实 PNVS 短信", value: "real" },
+      { label: "短信验证码（服务自动发送）", value: "real" },
       { label: "手动设置验证码", value: "manual" }
     ],
     restartRequired: true

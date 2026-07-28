@@ -13,8 +13,7 @@ import type {
 
 import {
   assertProductionConfigurationSafety,
-  isProductionRuntime,
-  productionConfigurationSafetyCriticalKeys
+  isProductionRuntime
 } from "../../common/config/production-safety";
 import {
   assertRuntimeDataPlaneExternalIntegrationPolicy,
@@ -54,9 +53,6 @@ export const SYSTEM_SETTINGS_RUNTIME_ADAPTER = Symbol(
 
 const defaultGroupName = "其他配置";
 const envKeyPattern = /^[A-Z][A-Z0-9_]*$/;
-const productionConfigurationSafetyCriticalKeySet = new Set<string>(
-  productionConfigurationSafetyCriticalKeys
-);
 const runtimeEnvironmentKeys = new Set(["NODE_ENV", "APP_ENV"]);
 const runtimeDataPlaneExternalIntegrationKeySet = new Set<string>(
   runtimeDataPlaneExternalIntegrationKeys
@@ -143,10 +139,21 @@ export class SystemSettingsService {
     }
 
     for (const entry of snapshotBefore.settings) {
-      const rawValue = Object.prototype.hasOwnProperty.call(payload.values, entry.key)
-        ? payload.values[entry.key]
-        : entry.value;
-      nextValues.set(entry.key, this.normalizeSettingValue(entry, rawValue ?? ""));
+      const isExplicitlyUpdated = Object.prototype.hasOwnProperty.call(
+        payload.values,
+        entry.key
+      );
+      const rawValue = isExplicitlyUpdated ? payload.values[entry.key] : entry.value;
+
+      // PATCH 只校验本次准备写入的字段。未改动的历史配置仍会作为完整候选
+      // 交给跨字段与数据平面门禁复核，避免保存一个示例选项时被未启用服务的
+      // 必填项阻断。
+      nextValues.set(
+        entry.key,
+        isExplicitlyUpdated
+          ? this.normalizeSettingValue(entry, rawValue ?? "")
+          : rawValue ?? ""
+      );
     }
 
     for (const key of Object.keys(payload.values)) {
@@ -189,12 +196,7 @@ export class SystemSettingsService {
       );
     }
 
-    if (
-      isProductionRuntime() &&
-      changedKeys.some((key) =>
-        productionConfigurationSafetyCriticalKeySet.has(key)
-      )
-    ) {
+    if (isProductionRuntime()) {
       const candidateConfigService = {
         get: (key: string) =>
           nextValues.has(key) ? nextValues.get(key) : this.configService.get(key)

@@ -474,7 +474,21 @@ export const resolveFinancialSingleWriterLeaseFile = (configuredPath?: string) =
   );
 };
 
-export const resolveApiEnvFile = () => resolve(apiWorkspaceRoot, ".env");
+const isolatedSystemSettingsEnvFileKey = "VM_ISOLATED_SYSTEM_SETTINGS_ENV_FILE";
+
+export const resolveApiEnvFile = () => {
+  const isolatedEnvFile = process.env[isolatedSystemSettingsEnvFileKey]?.trim();
+
+  if (isTestEnvironmentIsolated() && isolatedEnvFile) {
+    if (!isAbsolute(isolatedEnvFile)) {
+      throw new Error(`${isolatedSystemSettingsEnvFileKey} 必须是绝对路径。`);
+    }
+
+    return resolve(isolatedEnvFile);
+  }
+
+  return resolve(apiWorkspaceRoot, ".env");
+};
 
 export const createSeededPersistedState = (
   instanceId =

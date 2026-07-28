@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, inject, reactive, ref } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import type { BackofficePermission } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
+import {
+  runtimeStatusLabelInjectionKey
+} from "../utils/runtime-data-plane";
 
 interface NavItem {
   to: string;
@@ -20,6 +23,7 @@ const showPasswordPanel = ref(false);
 const passwordBusy = ref(false);
 const logoutBusy = ref(false);
 const exitInstanceBusy = ref(false);
+const runtimeStatusLabel = inject(runtimeStatusLabelInjectionKey, computed(() => ""));
 const passwordMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const passwordForm = reactive({
   currentPassword: "",
@@ -448,6 +452,9 @@ const isActive = (target: string) => {
           <span>{{ currentMeta.eyebrow }}</span>
         </div>
         <div class="workbench__topbar-actions">
+          <span v-if="runtimeStatusLabel" class="workbench__topbar-chip workbench__topbar-chip--runtime" role="status">
+            {{ runtimeStatusLabel }}
+          </span>
           <span class="workbench__topbar-chip">业务日 {{ todayLabel }}</span>
           <span v-if="sessionStore.user?.tenantName" class="workbench__topbar-chip">
             {{ sessionStore.user.tenantName }}
@@ -575,6 +582,12 @@ const isActive = (target: string) => {
 
 .workbench__topbar-link {
   color: var(--admin-accent-strong);
+}
+
+.workbench__topbar-chip--runtime {
+  border-color: rgba(146, 64, 14, 0.36);
+  color: #78350f;
+  background: #fff7ed;
 }
 
 .workbench__nav-icon {

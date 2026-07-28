@@ -698,7 +698,7 @@ onShow(() => {
         <EmptyState
           v-if="!loadError && !visibleDeviceEntries.length"
           :title="loading ? '正在同步柜机' : isAccessibleSpecial ? '当前没有可选物资' : '当前没有可展示柜机'"
-          :description="loading ? '请稍候，系统正在拉取设备信息。' : isAccessibleSpecial ? '系统会按库存自动刷新。' : '请确认后端是否已经接入柜机数据。'"
+          :description="loading ? '请稍候，系统正在拉取设备信息。' : isAccessibleSpecial ? '系统会按库存自动刷新。' : '暂时没有可用柜机，请联系工作人员确认服务状态。'"
         />
       </view>
     </GlassCard>

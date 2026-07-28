@@ -198,7 +198,7 @@ onShow(() => {
         <EmptyState
           v-else
           :title="loading ? '正在加载柜机' : loadError ? '柜机数据暂时不可用' : '暂无柜机数据'"
-          :description="loadError ? '请点击上方“重新加载”，恢复前不会把请求失败当作空数据。' : '请稍后刷新，或先在后台接入柜机。'"
+          :description="loadError ? '请点击上方“重新加载”，恢复前不会把请求失败当作空数据。' : '请稍后刷新，或在电脑后台添加柜机。'"
         />
       </view>
     </GlassCard>

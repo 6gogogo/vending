@@ -82,7 +82,7 @@ const runtimeBadgeLabel = computed(() => {
     return appCopy.runtime.simulationBadge;
   }
 
-  return runtimeDataPlane.value === "unknown" ? appCopy.runtime.unknownBadge : "";
+  return runtimeDataPlane.value === "unknown" ? appCopy.runtime.statusPendingBadge : "";
 });
 </script>
 

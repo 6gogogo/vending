@@ -69,6 +69,11 @@ const settingsForCurrentPickupMode = computed(() =>
     reservationOnlyPickup.value
   )
 );
+const manualVerificationSettingVisible = computed(() =>
+  settingsForCurrentPickupMode.value.some(
+    (entry) => entry.key === "VM_FULL_SIMULATION_VERIFICATION_MODE"
+  )
+);
 const groups = computed(() =>
   orderSystemSettingsGroups([
     ...new Set(settingsForCurrentPickupMode.value.map((entry) => entry.group))
@@ -110,6 +115,29 @@ const groupCounts = computed(() =>
 );
 const verificationModeLabel = computed(() => optionLabel("VM_FULL_SIMULATION_VERIFICATION_MODE"));
 const adjustmentQuotaModeLabel = computed(() => optionLabel("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"));
+const exampleSettingsIntro = computed(() =>
+  manualVerificationSettingVisible.value
+    ? "先在“示例设置”选择领取方式、领取差异额度归属和 App 登录验证；其余服务项仅由已授权人员维护。"
+    : "先在“示例设置”选择领取方式和领取差异额度归属；当前 App 登录方式由服务管理员维护。"
+);
+const instanceSettingsIntro = computed(() =>
+  manualVerificationSettingVisible.value
+    ? "在这里设置本实例的领取方式和 App 登录；人员额度、预约时段和审核规则请在“人员管理”中维护。"
+    : "在这里设置本实例的领取方式；人员额度、预约时段和审核规则请在“人员管理”中维护。App 登录方式由服务管理员维护。"
+);
+const verificationModeDescription = computed(() => {
+  const value = formValues.VM_FULL_SIMULATION_VERIFICATION_MODE;
+
+  if (value === "manual") {
+    return "手动码由实例管理员为已启用人员单独签发，不发送短信。";
+  }
+
+  if (value === "real") {
+    return "登录时由服务自动发送短信验证码。";
+  }
+
+  return "登录时使用模拟验证码完成演练。";
+});
 const paymentSummaryClass = computed(() => {
   const summary = paymentDiagnostics.value?.summary;
 
@@ -413,7 +441,7 @@ onBeforeUnmount(() => {
       <div class="admin-page__section-head settings-page__topbar">
         <div class="settings-page__heading-copy">
           <p class="admin-copy">
-            先在“示例设置”选择领取方式、领取差异额度归属和 App 登录验证；其余服务项仅由已授权人员维护。
+            {{ exampleSettingsIntro }}
           </p>
           <p class="admin-copy">
             保存后按页面提示确认生效时间；需要重启的项会明确标出。
@@ -441,8 +469,8 @@ onBeforeUnmount(() => {
       <div v-if="!canUpdateSettings" class="admin-note settings-page__note">
         当前账号只有查看权限，不能修改或保存系统设置。
       </div>
-        <div class="admin-note settings-page__note">
-          在这里设置本实例的领取方式和 App 登录；人员额度、预约时段和审核规则请在“人员管理”中维护。服务地址、密钥和发布参数由服务管理员按发布资料维护，不在此页显示。
+      <div class="admin-note settings-page__note">
+        {{ instanceSettingsIntro }}
       </div>
       <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
@@ -458,20 +486,20 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <div v-if="hasDirtyChanges" class="admin-note settings-page__note settings-page__note--warning">
-        当前有 {{ dirtyKeys.length }} 项未保存；{{ runtimeDirtyKeys.length }} 项保存后立即写入运行时，{{ restartDirtyKeys.length }} 项需要重启后完全生效。
+        当前有 {{ dirtyKeys.length }} 项未保存；{{ runtimeDirtyKeys.length }} 项保存后立即生效，{{ restartDirtyKeys.length }} 项需要重新启用服务后完全生效。
       </div>
 
       <section class="admin-panel admin-panel-block settings-page__example-overview">
         <div class="admin-panel__head">
           <div>
-          <span class="admin-kicker">领取与登录</span>
-            <h3 class="admin-panel__title">先确认这三项</h3>
+          <span class="admin-kicker">{{ manualVerificationSettingVisible ? "领取与登录" : "领取设置" }}</span>
+            <h3 class="admin-panel__title">{{ manualVerificationSettingVisible ? "先确认这三项" : "先确认这两项" }}</h3>
           </div>
           <button class="admin-button admin-button--ghost" type="button" @click="setActiveGroup('示例设置')">
             打开示例设置
           </button>
         </div>
-        <div class="settings-page__example-grid">
+        <div class="settings-page__example-grid" :class="{ 'settings-page__example-grid--two': !manualVerificationSettingVisible }">
           <section class="settings-page__example-card">
             <span class="settings-page__example-label">领取方式</span>
             <strong>{{ reservationOnlyPickup ? "预约后取货" : "即时领取" }}</strong>
@@ -484,10 +512,10 @@ onBeforeUnmount(() => {
             <strong>{{ adjustmentQuotaModeLabel }}</strong>
             <p class="admin-copy">用于处理柜机实际领取数量多于或少于预约数量的情况。</p>
           </section>
-          <section class="settings-page__example-card">
+          <section v-if="manualVerificationSettingVisible" class="settings-page__example-card">
             <span class="settings-page__example-label">App 登录验证</span>
             <strong>{{ verificationModeLabel }}</strong>
-            <p class="admin-copy">手动码由实例管理员为已启用人员单独签发，不发送短信。</p>
+            <p class="admin-copy">{{ verificationModeDescription }}</p>
           </section>
         </div>
       </section>
@@ -593,7 +621,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="admin-note settings-page__note">
-          建议先完成“示例设置”。其余服务项只由已授权人员按页面提示维护，敏感内容始终隐藏。
+          建议先完成“示例设置”。其他服务事项请联系服务管理员协助处理。
         </div>
       </aside>
 
@@ -791,6 +819,10 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.settings-page__example-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .settings-page__example-card {
@@ -1114,11 +1146,12 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1280px) {
   .settings-page__workspace,
   .settings-page__field-row,
   .payment-diagnostics__providers,
-  .settings-page__example-grid {
+  .settings-page__example-grid,
+  .settings-page__example-grid--two {
     grid-template-columns: 1fr;
   }
 

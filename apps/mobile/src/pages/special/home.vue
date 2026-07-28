@@ -423,7 +423,7 @@ onShow(() => {
       <GlassCard v-else tone="quiet">
         <EmptyState
           :title="loading ? '正在加载柜机信息' : accessibilityEnabled ? '附近暂无可选物资' : '附近暂无可用柜机'"
-          :description="loading ? '请稍候，系统正在同步设备状态。' : accessibilityEnabled ? '稍后再来查看，系统会按库存自动刷新。' : '请联系工作人员确认设备接入状态。'"
+          :description="loading ? '请稍候，系统正在同步设备状态。' : accessibilityEnabled ? '稍后再来查看，系统会按库存自动刷新。' : '请联系工作人员确认服务状态。'"
         />
       </GlassCard>
     </view>

@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, provide, ref } from "vue";
 
 import { adminCopy } from "./constants/copy";
 import { loadPublicRuntimeConfig } from "./utils/public-config";
+import {
+  runtimeDataPlaneInjectionKey,
+  runtimeStatusLabelInjectionKey,
+  type RuntimeDataPlane
+} from "./utils/runtime-data-plane";
 
-const runtimeDataPlane = ref<"simulation" | "live" | "unknown">("unknown");
-
-const runtimeBadgeLabel = computed(() => {
+const runtimeDataPlane = ref<RuntimeDataPlane>("unknown");
+const runtimeStatusLabel = computed(() => {
   if (runtimeDataPlane.value === "simulation") {
     return adminCopy.runtime.simulationBadge;
   }
 
-  return runtimeDataPlane.value === "unknown" ? adminCopy.runtime.unknownBadge : "";
+  return runtimeDataPlane.value === "unknown" ? adminCopy.runtime.statusPendingBadge : "";
 });
+
+provide(runtimeDataPlaneInjectionKey, runtimeDataPlane);
+provide(runtimeStatusLabelInjectionKey, runtimeStatusLabel);
 
 onMounted(async () => {
   try {
@@ -28,44 +35,28 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div
-    v-if="runtimeBadgeLabel"
-    class="runtime-instance-badge"
+  <span
+    v-if="runtimeStatusLabel"
+    class="runtime-status-announcement"
     role="status"
     aria-live="polite"
     aria-atomic="true"
   >
-    {{ runtimeBadgeLabel }}
-  </div>
+    {{ runtimeStatusLabel }}
+  </span>
   <router-view />
 </template>
 
 <style scoped>
-.runtime-instance-badge {
-  position: fixed;
-  z-index: 1000;
-  top: 12px;
-  right: 12px;
-  max-width: calc(100vw - 24px);
-  padding: 7px 12px;
-  border: 1px solid rgba(146, 64, 14, 0.36);
-  border-radius: 999px;
-  color: #78350f;
-  background: rgba(255, 247, 237, 0.96);
-  box-shadow: 0 6px 18px rgba(120, 53, 15, 0.14);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-  pointer-events: none;
-}
-
-@media (max-width: 640px) {
-  .runtime-instance-badge {
-    top: 8px;
-    right: 8px;
-    max-width: calc(100vw - 16px);
-    padding: 6px 10px;
-    font-size: 12px;
-  }
+.runtime-status-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

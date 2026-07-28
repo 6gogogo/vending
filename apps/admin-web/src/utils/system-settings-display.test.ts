@@ -9,9 +9,9 @@ import {
   settingsVisibleForCurrentPickupMode
 } from "./system-settings-display";
 
-const createSetting = (key: string): SystemSettingEntry => ({
+const createSetting = (key: string, value = ""): SystemSettingEntry => ({
   key,
-  value: "",
+  value,
   group: "测试",
   label: key,
   description: "",
@@ -58,11 +58,12 @@ test("示例设置始终作为系统设置的首个入口", () => {
   );
 });
 
-test("实例后台只展示日常领取、登录和运行环境设置", () => {
+test("实例后台在标准模拟或实机服务中只展示日常领取设置", () => {
   const settings = [
     createSetting("NODE_ENV"),
     createSetting("APP_ENV"),
     createSetting("VM_DATA_PLANE"),
+    createSetting("VM_SIMULATION_PROFILE", "standard"),
     createSetting("VM_RESERVATION_ONLY_PICKUP"),
     createSetting("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"),
     createSetting("VM_FULL_SIMULATION_VERIFICATION_MODE"),
@@ -76,13 +77,65 @@ test("实例后台只展示日常领取、登录和运行环境设置", () => {
   assert.deepEqual(
     settingsVisibleForInstanceAdministration(settings).map((entry) => entry.key),
     [
-      "NODE_ENV",
-      "APP_ENV",
-      "VM_DATA_PLANE",
+      "VM_RESERVATION_ONLY_PICKUP",
+      "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"
+    ]
+  );
+});
+
+test("实例后台仅在全真模拟演练中显示登录和支付验证选择", () => {
+  const settings = [
+    createSetting("VM_DATA_PLANE", "simulation"),
+    createSetting("VM_SIMULATION_PROFILE", "full"),
+    createSetting("VM_FULL_SIMULATION_ENABLED", "true"),
+    createSetting("VM_DATA_ROOT", "runtime-data/full-simulation"),
+    createSetting("VM_DATA_PLANE_ID", "full-simulation-test"),
+    createSetting("VM_RESERVATION_ONLY_PICKUP"),
+    createSetting("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"),
+    createSetting("VM_FULL_SIMULATION_VERIFICATION_MODE"),
+    createSetting("VM_FULL_SIMULATION_PAYMENT_MODE")
+  ];
+
+  assert.deepEqual(
+    settingsVisibleForInstanceAdministration(settings).map((entry) => entry.key),
+    [
       "VM_RESERVATION_ONLY_PICKUP",
       "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE",
       "VM_FULL_SIMULATION_VERIFICATION_MODE",
       "VM_FULL_SIMULATION_PAYMENT_MODE"
     ]
   );
+});
+
+test("全真模拟未启用或未隔离时不显示演练专用登录和支付选择", () => {
+  const baseSettings = [
+    createSetting("VM_DATA_PLANE", "simulation"),
+    createSetting("VM_SIMULATION_PROFILE", "full"),
+    createSetting("VM_FULL_SIMULATION_ENABLED", "true"),
+    createSetting("VM_DATA_ROOT", "runtime-data/full-simulation"),
+    createSetting("VM_DATA_PLANE_ID", "full-simulation-test"),
+    createSetting("VM_RESERVATION_ONLY_PICKUP"),
+    createSetting("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"),
+    createSetting("VM_FULL_SIMULATION_VERIFICATION_MODE"),
+    createSetting("VM_FULL_SIMULATION_PAYMENT_MODE")
+  ];
+
+  for (const invalidSettings of [
+    baseSettings.map((entry) =>
+      entry.key === "VM_FULL_SIMULATION_ENABLED"
+        ? { ...entry, value: "false" }
+        : entry
+    ),
+    baseSettings.map((entry) =>
+      entry.key === "VM_DATA_PLANE" ? { ...entry, value: "live" } : entry
+    ),
+    baseSettings.map((entry) =>
+      entry.key === "VM_DATA_ROOT" ? { ...entry, value: "" } : entry
+    )
+  ]) {
+    assert.deepEqual(
+      settingsVisibleForInstanceAdministration(invalidSettings).map((entry) => entry.key),
+      ["VM_RESERVATION_ONLY_PICKUP", "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"]
+    );
+  }
 });
