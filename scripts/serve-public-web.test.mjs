@@ -108,15 +108,16 @@ test("pure router fails closed for writes, malformed paths, and traversal", () =
       }),
     /ALLOWED_SOURCES/u
   );
-  assert.deepEqual(
-    resolvePublicWebApiRelayConfig({
+  const apiRelayConfig = resolvePublicWebApiRelayConfig({
       PUBLIC_WEB_API_RELAY_ENABLED: "1",
       PUBLIC_WEB_API_RELAY_ALLOWED_SOURCES: "10.66.66.1",
       PUBLIC_WEB_API_RELAY_ALLOWED_HOST: "vending.5gogogo.top",
       PUBLIC_WEB_API_RELAY_CLIENT_IP_POLICY: "nginx-real-ip",
       PUBLIC_WEB_API_RELAY_UPSTREAM_HOST: "127.0.0.1",
       PUBLIC_WEB_API_RELAY_UPSTREAM_PORT: "8100"
-    }),
+    });
+  assert.deepEqual(
+    apiRelayConfig,
     {
       allowedSources: new Set(["10.66.66.1"]),
       host: "vending.5gogogo.top",
@@ -125,6 +126,7 @@ test("pure router fails closed for writes, malformed paths, and traversal", () =
       upstreamPort: 8100
     }
   );
+  assert.equal(apiRelayConfig.allowedSources.has("10.66.66.2"), false);
 
   assert.equal(resolvePublicWebBindHost(undefined), "127.0.0.1");
   assert.equal(resolvePublicWebBindHost("10.66.66.2"), "10.66.66.2");

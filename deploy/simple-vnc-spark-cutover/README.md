@@ -6,9 +6,9 @@
 
 ## 硬门禁与流程
 
-执行顺序固定：确认 Spark `http://10.66.66.2:5795/` 与 `http://10.66.66.2:5795/api/health` 都返回精确 `200`；将当前 vhost 写入 root-only `/var/lib/vending-spark-vhost-cutover/` 备份；原子替换两行 upstream；运行 `nginx -t`；成功后 `systemctl reload nginx`。替换、语法测试或 reload 任一步失败时，工具会原子恢复已备份 vhost，并再次 `nginx -t`，仅在测试通过时 reload 已恢复配置。输出只含阶段和成功/失败，不输出 Nginx 全文、响应体、环境变量或任何秘密。
+执行顺序固定：Spark 本机先确认 `http://10.66.66.2:5795/` 返回精确 `200`、`http://127.0.0.1:8100/api/health` 返回精确 `200`，并确认本机直连 `http://10.66.66.2:5795/api/health` 返回 `403`；这是 relay 仅信任 VNC 来源的预期行为。随后必须从 VNC `10.66.66.1` 确认 Spark 根路径与 `/api/health` 都返回精确 `200`，才可将当前 vhost 写入 root-only `/var/lib/vending-spark-vhost-cutover/` 备份、原子替换两行 upstream、运行 `nginx -t` 并 reload。替换、语法测试或 reload 任一步失败时，工具会原子恢复已备份 vhost，并再次 `nginx -t`，仅在测试通过时 reload 已恢复配置。输出只含阶段和成功/失败，不输出 Nginx 全文、响应体、环境变量或任何秘密。
 
-当前仓库的 `scripts/serve-public-web.mjs` 有意将 `/api/*` 返回 `404`。因此，若 Spark `:5795` 当前确实由该静态服务提供，`/api/health=200` 门禁会拒绝本工具，且这是正确行为：不能把 API 健康检查悄悄降级为 `404`，也不能在 VNC 上恢复旧 API 绕过它。先使 Spark 上 `:5795` 的受管服务同时满足这两个精确健康检查，才可以执行本切换。
+当前受管 `scripts/serve-public-web.mjs` 在启用 API relay 后，只接受 VNC `10.66.66.1` 的 `/api/*` 请求：Spark 自身或其他来源会收到 `403`，而 VNC 来源的 `/api/health` 必须为 `200`。未启用 relay 的静态服务才会对 `/api/*` 返回 `404`。不能为了让非 VNC 来源返回 `200` 而放宽白名单，也不能在 VNC 上恢复旧 API 绕过它；先满足上述来源边界与精确健康检查，才可以执行本切换。
 
 ## 安装与执行
 

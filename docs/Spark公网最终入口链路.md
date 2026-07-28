@@ -20,11 +20,11 @@ Spark 上受管的 `vending-public-web.service` 必须由当前 Git 发布版本
 
 ```bash
 curl -fsS -o /dev/null http://10.66.66.2:5795/
-test "$(curl -sS -o /dev/null -w '%{http_code}' http://10.66.66.2:5795/api/health)" = 200
+test "$(curl -sS -o /dev/null -w '%{http_code}' http://10.66.66.2:5795/api/health)" = 403
 curl -fsS -o /dev/null http://127.0.0.1:8100/api/health
 ```
 
-`/api/health` 为非 `200`（包括 `404`）时，入口切换必须停止；不能用旧 VNC API、裸露 Spark 端口或临时 Nginx 配置绕过。Spark 内部 relay 仍必须限制来源和重建信任代理头，不能把客户端转发头直接交给 API。
+Spark 本机请求不是 VNC relay 的授权来源，因此 `:5795/api/health=403` 是预期的失败关闭；不能为了让本机检查返回 `200` 而放宽来源白名单。切换前必须改在 VNC `10.66.66.1` 上核对同一服务：根页面与 `/api/health` 都精确返回 `200`。若 VNC 请求的 `/api/health` 非 `200`（包括 `403`、`404`），入口切换必须停止；不能用旧 VNC API、裸露 Spark 端口或临时 Nginx 配置绕过。Spark 内部 relay 仍必须限制来源和重建信任代理头，不能把客户端转发头直接交给 API。
 
 ## VNC 切换与回滚
 
