@@ -140,7 +140,8 @@ assert.doesNotMatch(
 );
 assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
 assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟实例");
-assert.match(adminCopySource, /验收模拟实例/, "管理后台模拟实例文案必须集中维护");
+assert.match(adminCopySource, /公益服务模拟实例/, "管理后台模拟实例标识必须集中维护");
+assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
 assert.match(adminApiSource, /batchRemoveUsers/, "人员后台必须提供批量删除 API 调用");
 assert.match(adminUsersSource, /const removeSelectedUsers = async/, "人员后台必须提供批量删除操作");
 assert.match(
@@ -766,7 +767,8 @@ const mobileCopySource = readSource("apps/mobile/src/constants/copy.ts");
 const specialHomeSource = readSource("apps/mobile/src/pages/special/home.vue");
 assert.match(mobileShellSource, /runtimeDataPlane/, "移动端全局壳层必须读取公开运行数据平面");
 assert.match(mobileShellSource, /appCopy\.runtime\.simulationBadge/, "移动端必须持续标明模拟实例");
-assert.match(mobileCopySource, /验收模拟实例/, "移动端模拟实例文案必须集中维护");
+assert.match(mobileCopySource, /公益服务模拟实例/, "移动端模拟实例标识必须集中维护");
+assert.doesNotMatch(mobileCopySource, /验收模拟实例/, "移动端不得向用户展示验收自述");
 assert.match(
   mobileShellSource,
   /role="status"[\s\S]+aria-live="polite"/,

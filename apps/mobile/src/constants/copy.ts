@@ -7,7 +7,7 @@ export const appCopy = {
     "请使用手机号验证码登录。首次使用可直接提交身份资料，审核通过后自动进入对应角色页面。",
   loginSupport: "若手机号已预先导入系统，首次登录仍需补齐基础资料；新账号提交后会进入审核流程。",
   runtime: {
-    simulationBadge: "验收模拟实例",
+    simulationBadge: "公益服务模拟实例",
     unknownBadge: "运行环境未确认"
   },
   disclaimer: {

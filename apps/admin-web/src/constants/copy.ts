@@ -1,6 +1,6 @@
 export const adminCopy = {
   runtime: {
-    simulationBadge: "验收模拟实例",
+    simulationBadge: "公益服务模拟实例",
     unknownBadge: "运行环境未确认"
   },
   users: {
