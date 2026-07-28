@@ -9,6 +9,7 @@ import test, { after } from "node:test";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "../src/app.module";
+import { InventoryBatchChangesService } from "../src/common/inventory/inventory-batch-changes.service";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
@@ -381,6 +382,156 @@ test("后台签发的 6 位人工码只用于绑定账号且单次消费，不�
           entry.metadata?.manualGrantId === supersededGrantId
       )
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test("人工码 App 登录取得的移动会话可完成预约，且同一码不能重放", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const adminToken = createTenantAdminToken(store);
+    const adminHeaders = {
+      authorization: `Bearer ${adminToken}`,
+      "content-type": "application/json"
+    };
+    const device = store.devices[0];
+    const door = device?.doors[0];
+    const goods = door?.goods[0];
+    assert.ok(device);
+    assert.ok(door);
+    assert.ok(goods);
+
+    new InventoryBatchChangesService(store).recordBatchOnly({
+      deviceCode: device.deviceCode,
+      goodsId: goods.goodsId,
+      quantity: 4,
+      sourceType: "system"
+    });
+
+    const createUserResponse = await fetch(`${baseUrl}/users`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        role: "special",
+        phone: "18800000911",
+        name: "人工码预约测试账号"
+      })
+    });
+    const createUserPayload = (await createUserResponse.json()) as {
+      data?: { id?: string; mobileProfileCompleted?: boolean };
+    };
+    const targetUserId = createUserPayload.data?.id;
+    assert.equal(createUserResponse.status, 201);
+    assert.ok(targetUserId);
+    assert.equal(createUserPayload.data?.mobileProfileCompleted, true);
+
+    const targetUser = store.users.find((entry) => entry.id === targetUserId);
+    assert.ok(targetUser);
+    targetUser.quota = {
+      dailyLimit: 1,
+      categoryLimit: { food: 1, drink: 1, daily: 1 }
+    };
+    store.persist();
+
+    const policyResponse = await fetch(`${baseUrl}/special-access-policies`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: "人工码预约验收策略",
+        weekdays: [0, 1, 2, 3, 4, 5, 6],
+        startHour: 0,
+        endHour: 24,
+        goodsLimits: [{ goodsId: goods.goodsId, quantity: 1 }],
+        applicableUserIds: [targetUserId],
+        status: "active"
+      })
+    });
+    assert.equal(policyResponse.status, 201);
+
+    const issueResponse = await fetch(
+      `${baseUrl}/auth/manual-verification-codes`,
+      {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          userId: targetUserId,
+          purpose: "app-login",
+          code: "630951",
+          expiresInSeconds: 300
+        })
+      }
+    );
+    assert.equal(issueResponse.status, 201);
+
+    const loginResponse = await fetch(`${baseUrl}/auth/app-login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        phone: "18800000911",
+        code: "630951"
+      })
+    });
+    const loginPayload = (await loginResponse.json()) as {
+      data?: {
+        state?: string;
+        token?: string;
+        user?: { id?: string; role?: string };
+      };
+    };
+    const appToken = loginPayload.data?.token;
+    assert.equal(loginResponse.status, 201);
+    assert.equal(loginPayload.data?.state, "approved");
+    assert.equal(loginPayload.data?.user?.id, targetUserId);
+    assert.equal(loginPayload.data?.user?.role, "special");
+    assert.ok(appToken);
+
+    const reservationResponse = await fetch(`${baseUrl}/reservations`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${appToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        deviceCode: device.deviceCode,
+        doorNum: door.doorNum,
+        intentItems: [
+          {
+            goodsId: goods.goodsId,
+            goodsName: goods.name,
+            category: goods.category,
+            quantity: 1
+          }
+        ]
+      })
+    });
+    const reservationPayload = (await reservationResponse.json()) as {
+      data?: { id?: string; status?: string; userId?: string };
+    };
+    assert.equal(reservationResponse.status, 200);
+    assert.ok(reservationPayload.data?.id);
+    assert.equal(reservationPayload.data?.status, "active");
+    assert.equal(reservationPayload.data?.userId, targetUserId);
+
+    const mineResponse = await fetch(`${baseUrl}/reservations/my`, {
+      headers: { authorization: `Bearer ${appToken}` }
+    });
+    const minePayload = (await mineResponse.json()) as {
+      data?: Array<{ id?: string; status?: string }>;
+    };
+    assert.equal(mineResponse.status, 200);
+    assert.deepEqual(minePayload.data?.map((entry) => entry.id), [reservationPayload.data?.id]);
+
+    const replayResponse = await fetch(`${baseUrl}/auth/app-login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        phone: "18800000911",
+        code: "630951"
+      })
+    });
+    assert.equal(replayResponse.status, 401);
   } finally {
     await app.close();
   }
