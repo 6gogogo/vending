@@ -1,6 +1,6 @@
 export const adminCopy = {
   runtime: {
-    simulationBadge: "公益服务模拟实例",
+    simulationBadge: "模拟服务",
     unknownBadge: "运行环境未确认"
   },
   users: {
@@ -18,21 +18,12 @@ export const adminCopy = {
   },
   map: {
     unsupported: "当前环境不支持地图加载",
-    mockMode:
-      "当前实例地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求。" +
-      "请将 VM_FULL_SIMULATION_MAP_MODE 设为 real，并为 API 进程配置有效的 " +
-      "AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 后重启；在此之前可手工录入坐标。",
-    missingWebKey: "后端未配置 AMAP_WEB_KEY",
-    scriptLoadFailed:
-      "高德地图脚本加载失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单",
-    searchUnavailable:
-      "地图尚未初始化，无法搜索地点。请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与域名白名单。",
+    mockMode: "当前地图服务尚未启用，暂时不能搜索地点；请联系服务管理员完成地图服务设置，或先手工录入坐标。",
+    missingWebKey: "地图服务尚未完成设置。",
+    scriptLoadFailed: "地图服务暂时不可用，请确认服务授权和当前站点设置。",
+    searchUnavailable: "地图服务尚未就绪，暂时无法搜索地点。",
     searchNoResult: "未找到地点，请尝试更具体的关键词。",
-    searchInvalidCredential: (info: string) =>
-      `高德搜索失败（${info}），请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前域名白名单。`,
-    searchFailed: (info?: string) =>
-      info
-        ? `高德搜索失败（${info}），请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE、域名白名单或控制台配额。`
-        : "高德搜索失败，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE、域名白名单或控制台配额。"
+    searchInvalidCredential: (_info: string) => "地图搜索暂时不可用，请确认服务设置后重试，或改为手工录入坐标。",
+    searchFailed: (_info?: string) => "地图搜索暂时不可用，请稍后重试，或改为手工录入坐标。"
   }
 } as const;

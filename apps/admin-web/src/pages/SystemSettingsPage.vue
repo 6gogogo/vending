@@ -18,6 +18,7 @@ import {
   isReservationOnlyPickupEnabled,
   orderSystemSettingsGroups,
   reservationOnlyPickupSettingKey,
+  settingsVisibleForInstanceAdministration,
   settingsVisibleForCurrentPickupMode
 } from "../utils/system-settings-display";
 import {
@@ -63,7 +64,10 @@ const reservationOnlyPickup = computed(() =>
   isReservationOnlyPickupEnabled(formValues[reservationOnlyPickupSettingKey])
 );
 const settingsForCurrentPickupMode = computed(() =>
-  settingsVisibleForCurrentPickupMode(settings.value, reservationOnlyPickup.value)
+  settingsVisibleForCurrentPickupMode(
+    settingsVisibleForInstanceAdministration(settings.value),
+    reservationOnlyPickup.value
+  )
 );
 const groups = computed(() =>
   orderSystemSettingsGroups([
@@ -91,7 +95,7 @@ const visibleSettings = computed(() => {
   }
 
   return activeGroupSettings.value.filter((entry) =>
-    [entry.key, entry.label, entry.description, entry.group]
+    [entry.label, entry.description, entry.group]
       .join(" ")
       .toLowerCase()
       .includes(query)
@@ -272,28 +276,16 @@ const inputTypeFor = (entry: SystemSettingEntry) => {
   return "text";
 };
 
-const sourceLabel = (source: SystemSettingEntry["source"]) => {
-  if (source === "env") {
-    return ".env";
-  }
-
-  if (source === "runtime") {
-    return "运行时";
-  }
-
-  return "示例默认";
-};
-
 const paymentRuntimeModeLabel = (mode: PaymentRuntimeMode) => {
   if (mode === "real") {
     return "严格真实";
   }
 
   if (mode === "mock") {
-    return "强制模拟";
+    return "模拟服务";
   }
 
-  return "自动";
+  return "自动选择";
 };
 
 const paymentEffectiveModeLabel = (mode: PaymentEffectiveMode | "mixed") => {
@@ -421,10 +413,10 @@ onBeforeUnmount(() => {
       <div class="admin-page__section-head settings-page__topbar">
         <div class="settings-page__heading-copy">
           <p class="admin-copy">
-            先在“示例设置”选择领取方式、领取差异额度归属和 App 登录验证；高级接入配置仅在确有授权时维护。
+            先在“示例设置”选择领取方式、领取差异额度归属和 App 登录验证；其余服务项仅由已授权人员维护。
           </p>
           <p class="admin-copy">
-            保存后按页面提示重启服务。详细操作说明与验收步骤已整理在项目使用手册中。
+            保存后按页面提示确认生效时间；需要重启的项会明确标出。
           </p>
         </div>
 
@@ -449,8 +441,8 @@ onBeforeUnmount(() => {
       <div v-if="!canUpdateSettings" class="admin-note settings-page__note">
         当前账号只有查看权限，不能修改或保存系统设置。
       </div>
-      <div class="admin-note settings-page__note">
-        示例设置用于演示领取和登录流程；人员额度、预约时段和审核规则仍在“人员管理”中维护。
+        <div class="admin-note settings-page__note">
+          在这里设置本实例的领取方式和 App 登录；人员额度、预约时段和审核规则请在“人员管理”中维护。服务地址、密钥和发布参数由服务管理员按发布资料维护，不在此页显示。
       </div>
       <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
@@ -462,7 +454,7 @@ onBeforeUnmount(() => {
       >
         {{ saveMessage.text }}
         <span v-if="lastSaveResult?.restartRequiredKeys.length">
-          其中 {{ lastSaveResult.restartRequiredKeys.join("、") }} 需要重启后完全生效。
+          其中 {{ lastSaveResult.restartRequiredKeys.length }} 项需要重启后完全生效。
         </span>
       </div>
       <div v-if="hasDirtyChanges" class="admin-note settings-page__note settings-page__note--warning">
@@ -472,7 +464,7 @@ onBeforeUnmount(() => {
       <section class="admin-panel admin-panel-block settings-page__example-overview">
         <div class="admin-panel__head">
           <div>
-            <span class="admin-kicker">业务示例</span>
+          <span class="admin-kicker">领取与登录</span>
             <h3 class="admin-panel__title">先确认这三项</h3>
           </div>
           <button class="admin-button admin-button--ghost" type="button" @click="setActiveGroup('示例设置')">
@@ -482,9 +474,9 @@ onBeforeUnmount(() => {
         <div class="settings-page__example-grid">
           <section class="settings-page__example-card">
             <span class="settings-page__example-label">领取方式</span>
-            <strong>{{ reservationOnlyPickup ? "预约后取货" : "即时领取（测试）" }}</strong>
+            <strong>{{ reservationOnlyPickup ? "预约后取货" : "即时领取" }}</strong>
             <p class="admin-copy">
-              {{ reservationOnlyPickup ? "当前流程不需要新建支付单或填写支付参数。" : "非预约领取测试会显示支付相关配置。" }}
+              {{ reservationOnlyPickup ? "当前流程不需要新建支付单或填写支付参数。" : "即时领取会显示支付相关设置。" }}
             </p>
           </section>
           <section class="settings-page__example-card">
@@ -522,10 +514,9 @@ onBeforeUnmount(() => {
 
         <div v-if="paymentDiagnostics" class="payment-diagnostics__body">
           <div class="payment-diagnostics__summary" :class="paymentSummaryClass">
-            <span>总体：{{ paymentEffectiveModeLabel(paymentDiagnostics.summary.effectiveMode) }}</span>
-            <span>请求模式：{{ paymentRuntimeModeLabel(paymentDiagnostics.requestedMode) }}</span>
-            <span>严格真实：{{ paymentDiagnostics.summary.strictRealEnabled ? "已开启" : "未开启" }}</span>
-            <span>模拟完成接口：{{ paymentDiagnostics.summary.mockPaymentEndpointEnabled ? "可用" : "关闭" }}</span>
+            <span>支付服务：{{ paymentEffectiveModeLabel(paymentDiagnostics.summary.effectiveMode) }}</span>
+            <span>服务方式：{{ paymentRuntimeModeLabel(paymentDiagnostics.requestedMode) }}</span>
+            <span>当前状态：{{ paymentDiagnostics.summary.strictRealEnabled ? "已按真实服务要求运行" : "按当前设置运行" }}</span>
           </div>
 
           <div class="payment-diagnostics__reconciliation">
@@ -533,9 +524,9 @@ onBeforeUnmount(() => {
               <span class="admin-kicker">资金恢复</span>
               <strong>自动对账：{{ paymentDiagnostics.reconciliation.automaticEnabled ? "已启用" : "未启用" }}</strong>
             </div>
-            <span>单写者：{{ paymentDiagnostics.reconciliation.singleWriterHeld ? "租约正常" : "未持有" }}</span>
+            <span>处理服务：{{ paymentDiagnostics.reconciliation.singleWriterHeld ? "正常" : "待处理" }}</span>
             <span>待确认支付：{{ paymentDiagnostics.reconciliation.pendingPayments }}</span>
-            <span>待补回写：{{ paymentDiagnostics.reconciliation.pendingSmartVmForwards }}</span>
+            <span>待完成柜机通知：{{ paymentDiagnostics.reconciliation.pendingSmartVmForwards }}</span>
             <span>待确认退款：{{ paymentDiagnostics.reconciliation.pendingRefunds }}</span>
             <span>当前到期：{{ paymentDiagnostics.reconciliation.dueNow }}</span>
             <span>人工核对：{{ paymentDiagnostics.reconciliation.manualReview }}</span>
@@ -556,27 +547,15 @@ onBeforeUnmount(() => {
                 </span>
               </div>
               <p class="admin-copy">
-                {{ provider.readyForRealPayment ? "真实支付配置自检通过。" : "真实支付配置不完整。" }}
-              </p>
-              <p v-if="provider.simulatedReason" class="admin-copy">
-                {{ provider.simulatedReason }}
-              </p>
-              <p v-if="provider.missingRequiredKeys.length" class="admin-copy">
-                缺少：<span class="admin-code">{{ provider.missingRequiredKeys.join("、") }}</span>
-              </p>
-              <p v-for="blocker in provider.blockers" :key="blocker" class="admin-copy payment-diagnostics__danger-text">
-                {{ blocker }}
-              </p>
-              <p v-for="warning in provider.warnings" :key="warning" class="admin-copy payment-diagnostics__warning-text">
-                {{ warning }}
+                {{ provider.readyForRealPayment ? "支付服务已准备就绪。" : "支付服务资料尚未齐备，请联系服务管理员完成设置。" }}
               </p>
             </section>
           </div>
 
-          <div v-if="paymentDiagnostics.warnings.length" class="payment-diagnostics__warnings">
-            <p v-for="warning in paymentDiagnostics.warnings" :key="warning" class="admin-copy payment-diagnostics__warning-text">
-              {{ warning }}
-            </p>
+        <div v-if="paymentDiagnostics.warnings.length" class="payment-diagnostics__warnings">
+          <p class="admin-copy payment-diagnostics__warning-text">
+            支付服务存在待处理事项，请联系服务管理员查看并处理。
+          </p>
           </div>
         </div>
 
@@ -593,8 +572,8 @@ onBeforeUnmount(() => {
     <section class="settings-page__workspace">
       <aside class="admin-panel admin-panel-block settings-page__sidebar">
         <label class="admin-field">
-          <span class="admin-field__label">搜索配置</span>
-          <input v-model.trim="searchText" class="admin-input" placeholder="变量名、说明或分组" />
+          <span class="admin-field__label">搜索设置</span>
+          <input v-model.trim="searchText" class="admin-input" placeholder="设置名称、说明或分类" />
         </label>
 
         <div class="settings-page__group-list">
@@ -614,14 +593,14 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="admin-note settings-page__note">
-          先使用“示例设置”。高级接入项按页面的保存和重启提示执行；敏感内容始终隐藏。
+          建议先完成“示例设置”。其余服务项只由已授权人员按页面提示维护，敏感内容始终隐藏。
         </div>
       </aside>
 
       <article class="admin-panel admin-panel-block settings-page__form-panel">
         <div class="admin-panel__head settings-page__panel-head">
           <div>
-            <span class="admin-kicker">配置</span>
+            <span class="admin-kicker">服务设置</span>
             <h3 class="admin-panel__title">{{ activeGroup || "系统设置" }}</h3>
           </div>
           <div class="settings-page__state-pills">
@@ -640,7 +619,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else-if="!visibleSettings.length" class="admin-empty">
-          <div class="admin-empty__title">没有匹配的配置项</div>
+          <div class="admin-empty__title">没有匹配的设置</div>
           <div class="admin-empty__body">请调整搜索关键词或切换左侧分组。</div>
         </div>
 
@@ -654,7 +633,6 @@ onBeforeUnmount(() => {
             <div class="settings-page__field-meta">
               <div class="settings-page__field-title-line">
                 <span class="settings-page__field-title">{{ entry.label }}</span>
-                <span v-if="entry.group !== '示例设置'" class="admin-code settings-page__field-key">{{ entry.key }}</span>
               </div>
               <p v-if="entry.group === '示例设置'" class="admin-copy settings-page__field-description">
                 {{ entry.description }}
@@ -668,7 +646,6 @@ onBeforeUnmount(() => {
                 <span class="admin-pill" :class="fieldPillClass(entry)">{{ fieldPillText(entry) }}</span>
                 <span v-if="entry.sensitive" class="admin-pill admin-pill--neutral">敏感项</span>
                 <span v-if="entry.masked" class="admin-pill admin-pill--neutral">已隐藏</span>
-                <span class="admin-pill admin-pill--neutral">来源 {{ sourceLabel(entry.source) }}</span>
               </div>
             </div>
 
@@ -699,8 +676,8 @@ onBeforeUnmount(() => {
                 <textarea
                   v-else
                   v-model="formValues[entry.key]"
-                  class="admin-input settings-page__textarea admin-code"
-                  :placeholder="entry.exampleValue || entry.key"
+                  class="admin-input settings-page__textarea"
+                  :placeholder="entry.exampleValue || `请输入${entry.label}`"
                   :disabled="!canEditEntry(entry)"
                 />
               </template>
@@ -708,9 +685,9 @@ onBeforeUnmount(() => {
               <div v-else class="settings-page__input-wrap">
                 <input
                   v-model="formValues[entry.key]"
-                  class="admin-input admin-code"
+                  class="admin-input"
                   :type="inputTypeFor(entry)"
-                  :placeholder="entry.exampleValue || entry.key"
+                  :placeholder="entry.exampleValue || `请输入${entry.label}`"
                   :min="entry.numberConstraints?.min"
                   :max="entry.numberConstraints?.max"
                   :step="entry.numberConstraints?.integerOnly ? 1 : undefined"
@@ -739,9 +716,6 @@ onBeforeUnmount(() => {
                   : "此项由发布流程管理，后台仅供查看。" }}
               </p>
 
-              <p v-if="entry.exampleValue && entry.exampleValue !== formValues[entry.key]" class="admin-copy settings-page__example">
-                示例：<span class="admin-code">{{ entry.exampleValue }}</span>
-              </p>
             </div>
           </section>
         </div>
@@ -757,7 +731,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <p class="admin-copy">
-          当前有 {{ dirtyKeys.length }} 项配置尚未保存。保存后会写入 .env，选择不保存会丢弃本次更改。
+           当前有 {{ dirtyKeys.length }} 项设置尚未保存。保存后将应用本次更改，选择不保存会丢弃本次更改。
         </p>
         <div class="admin-toolbar settings-page__modal-actions">
           <button class="admin-button admin-button--ghost" type="button" @click="resolveLeave('stay')">继续编辑</button>

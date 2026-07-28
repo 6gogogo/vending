@@ -55,7 +55,7 @@ export const getSystemSettingOperatorDescription = (
   }
 
   if (entry.group === "运行方式") {
-    return "决定本次演示是否连接外部服务。日常预约演示通常保持当前选项。";
+    return "决定本实例是否连接已授权服务。日常预约取货通常保持当前选择。";
   }
 
   return "按服务商或部署资料确认后填写；保存后按页面提示重启或复核。";

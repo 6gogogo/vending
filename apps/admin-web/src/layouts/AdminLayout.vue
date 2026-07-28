@@ -118,7 +118,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     items: [
       {
         to: "/settings",
-        label: "技术接入设置",
+        label: "系统设置",
         permission: "system-settings:view",
         icon: "M10.29 3.86a1.75 1.75 0 0 1 3.42 0l.16.76c.52.14 1.02.34 1.49.62l.68-.41a1.75 1.75 0 0 1 2.35.61l.46.79a1.75 1.75 0 0 1-.43 2.25l-.6.5c.05.34.08.68.08 1.02s-.03.68-.08 1.02l.6.5a1.75 1.75 0 0 1 .43 2.25l-.46.79a1.75 1.75 0 0 1-2.35.61l-.68-.41c-.47.28-.97.49-1.49.62l-.16.76a1.75 1.75 0 0 1-3.42 0l-.16-.76a6.6 6.6 0 0 1-1.49-.62l-.68.41a1.75 1.75 0 0 1-2.35-.61l-.46-.79a1.75 1.75 0 0 1 .43-2.25l.6-.5A6.7 6.7 0 0 1 6.1 12c0-.34.03-.68.08-1.02l-.6-.5a1.75 1.75 0 0 1-.43-2.25l.46-.79a1.75 1.75 0 0 1 2.35-.61l.68.41c.47-.28.97-.49 1.49-.62zm1.71 5.14a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5"
       }
@@ -470,9 +470,9 @@ const isActive = (target: string) => {
           <p class="admin-subtitle workbench__header-copy">{{ currentMeta.description }}</p>
         </div>
         <div class="workbench__header-side">
-          <span class="admin-kicker">工作视图</span>
+          <span class="admin-kicker">当前页面</span>
           <span class="workbench__header-value">{{ currentGroup }}</span>
-          <p class="admin-copy">当前模块的入口、数据和操作会在这一栏联动展示，重点风险使用颜色和状态标签区分。</p>
+          <p class="admin-copy">请按页面提示完成当前实例的日常管理。</p>
         </div>
       </header>
 

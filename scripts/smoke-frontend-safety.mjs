@@ -92,6 +92,7 @@ assert.match(resultSource, /不要重复发起开柜/, "开门待确认结果必
 const adminDeviceSource = readSource("apps/admin-web/src/pages/DeviceDetailPage.vue");
 const adminAppSource = readSource("apps/admin-web/src/App.vue");
 const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
+const adminSystemSettingsPageSource = readSource("apps/admin-web/src/pages/SystemSettingsPage.vue");
 const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
@@ -139,9 +140,19 @@ assert.doesNotMatch(
   "公开配置不得读取或返回验证码凭据、方案、签名、模板或人工码"
 );
 assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
-assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟实例");
-assert.match(adminCopySource, /公益服务模拟实例/, "管理后台模拟实例标识必须集中维护");
+assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟运行状态");
+assert.match(adminCopySource, /模拟服务/, "管理后台模拟状态标识必须集中维护");
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
+assert.match(
+  adminSystemSettingsPageSource,
+  /settingsVisibleForInstanceAdministration/,
+  "实例管理员设置页只展示日常领取、登录和运行环境设置"
+);
+assert.doesNotMatch(
+  adminSystemSettingsPageSource,
+  /示例：\{\{ entry\.exampleValue \}\}/,
+  "用户可见设置页不得回显底层示例值"
+);
 assert.match(adminApiSource, /batchRemoveUsers/, "人员后台必须提供批量删除 API 调用");
 assert.match(adminUsersSource, /const removeSelectedUsers = async/, "人员后台必须提供批量删除操作");
 assert.match(
@@ -171,45 +182,29 @@ assert.match(
 );
 const amapLoaderSource = readSource("apps/admin-web/src/utils/amap-loader.ts");
 const amapPickerSource = readSource("apps/admin-web/src/components/AmapLocationPicker.vue");
-const mapAcceptancePageSource = readSource("apps/admin-web/src/pages/MapAcceptancePage.vue");
 assert.equal(
   existsSync(resolve(process.cwd(), "apps/admin-web/public/__acceptance/map/index.html")),
   false,
-  "地图验收不得继续依赖静态 HTML 页面"
+  "公开站点不得继续保留地图验收静态页面"
 );
-assert.match(
-  adminRouterSource,
-  /path: "\/__acceptance\/map"[\s\S]{0,160}meta: \{[\s\S]{0,80}publicAcceptance: true/,
-  "地图验收必须使用精确的公开 SPA 路由"
+assert.equal(
+  existsSync(resolve(process.cwd(), "apps/admin-web/src/pages/MapAcceptancePage.vue")),
+  false,
+  "公开地图验收页面必须从生产前端移除"
 );
-assert.match(
-  adminRouterSource,
-  /if \(to\.path === "\/__acceptance\/map" && to\.meta\.publicAcceptance === true\) \{[\s\S]{0,80}return true;[\s\S]{0,80}\}[\s\S]{0,80}const sessionStore/,
-  "只有精确的地图验收 meta 能在登录检查前放行"
-);
-assert.match(mapAcceptancePageSource, /document\.title = "公益智助柜地图链路验收"/, "地图验收页必须设置独立标题");
-assert.match(mapAcceptancePageSource, /loadPublicRuntimeConfig/, "地图验收页必须读取公开运行配置");
-assert.match(
-  mapAcceptancePageSource,
-  /runtimeDataPlane\.value === "simulation" && amapRuntimeMode\.value === "real"/,
-  "地图验收页必须仅在模拟实例和真实地图模式下渲染"
-);
-assert.match(mapAcceptancePageSource, /<AmapLocationPicker/, "地图验收页必须复用生产地图组件");
-assert.match(mapAcceptancePageSource, /confirm-label="回填验收草稿"/, "地图验收页必须明确只回填草稿");
-assert.match(mapAcceptancePageSource, /window\.__vmMapAcceptanceResult/, "地图验收页必须暴露无敏感验收结果");
-assert.match(mapAcceptancePageSource, /saveRequestIssued: false/, "地图验收页不得发起保存请求");
-assert.doesNotMatch(mapAcceptancePageSource, /adminApi|updateDeviceLocation|\/devices\//, "地图验收页不得包含后台写接口");
+assert.doesNotMatch(adminRouterSource, /__acceptance\/map/, "地图验收路径不得继续出现在生产路由中");
+assert.doesNotMatch(adminRouterSource, /publicAcceptance/, "生产路由不得保留公开验收放行标记");
 assert.match(amapPickerSource, /props\.confirmLabel\?\.trim\(\) \|\| "保存位置"/, "业务地图组件默认按钮文案必须保持保存位置");
 assert.match(amapPickerSource, /\{\{ resolvedConfirmLabel \}\}/, "业务地图组件必须使用可选确认按钮文案");
 assert.match(
   adminCopySource,
-  /地图模式为模拟，未加载高德脚本，也不会发送地点搜索请求/,
-  "地图模拟模式必须明确说明脚本与地点搜索请求均未发生"
+  /请联系服务管理员完成地图服务设置/,
+  "地图未启用时必须给出可理解的处理方式"
 );
-assert.match(
+assert.doesNotMatch(
   adminCopySource,
-  /VM_FULL_SIMULATION_MAP_MODE[\s\S]+AMAP_WEB_KEY[\s\S]+AMAP_SECURITY_JS_CODE/,
-  "地图模拟模式提示必须给出可执行的最小配置条件"
+  /VM_FULL_SIMULATION_MAP_MODE|AMAP_WEB_KEY|AMAP_SECURITY_JS_CODE/,
+  "用户可见地图提示不得泄露部署变量名"
 );
 assert.match(
   amapLoaderSource,
@@ -766,13 +761,13 @@ const mobileShellSource = readSource("apps/mobile/src/layouts/MobileShell.vue");
 const mobileCopySource = readSource("apps/mobile/src/constants/copy.ts");
 const specialHomeSource = readSource("apps/mobile/src/pages/special/home.vue");
 assert.match(mobileShellSource, /runtimeDataPlane/, "移动端全局壳层必须读取公开运行数据平面");
-assert.match(mobileShellSource, /appCopy\.runtime\.simulationBadge/, "移动端必须持续标明模拟实例");
-assert.match(mobileCopySource, /公益服务模拟实例/, "移动端模拟实例标识必须集中维护");
+assert.match(mobileShellSource, /appCopy\.runtime\.simulationBadge/, "移动端必须持续标明模拟运行状态");
+assert.match(mobileCopySource, /模拟服务/, "移动端模拟状态标识必须集中维护");
 assert.doesNotMatch(mobileCopySource, /验收模拟实例/, "移动端不得向用户展示验收自述");
 assert.match(
   mobileShellSource,
   /role="status"[\s\S]+aria-live="polite"/,
-  "移动端模拟实例标识必须向辅助技术声明"
+  "移动端模拟状态标识必须向辅助技术声明"
 );
 for (const color of ["#9a4f00", "#8f4700", "#a95500", "#ad5700"]) {
   assert.ok(themeSource.includes(color), `主题必须包含已核验的高对比度颜色 ${color}`);

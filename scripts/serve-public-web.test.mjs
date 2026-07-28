@@ -213,11 +213,12 @@ test("integration serves both SPAs and their assets with safe headers", async ()
   const apiRoute = await requestRaw({ port, path: "/api/health" });
   const apiHead = await requestRaw({ port, method: "HEAD", path: "/api/health" });
 
-  for (const response of [root, login, mapAcceptance]) {
+  for (const response of [root, login]) {
     assert.equal(response.status, 200);
     assert.match(response.body, /<title>ADMIN<\/title>/);
     assert.equal(response.headers["cache-control"], "no-store");
   }
+  assert.equal(mapAcceptance.status, 404);
   assert.equal(mobileRedirect.status, 308);
   assert.equal(mobileRedirect.headers.location, "/mobile/");
   assert.equal(mobile.status, 200);

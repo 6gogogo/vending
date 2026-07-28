@@ -147,7 +147,7 @@ const permissionLabels: Record<BackofficePermission, string> = {
   "system-settings:secret:view": "查看敏感配置",
   "system-settings:update": "系统设置修改",
   "uploads:images": "图片上传",
-  "verification-codes:manage": "签发一次性人工验证码",
+  "verification-codes:manage": "签发一次性验证码",
   "backoffice-credentials:manage": "后台账号权限配置"
 };
 
@@ -339,7 +339,7 @@ const currentDrawerTitle = computed(() =>
             : drawerMode.value === "device-assignment"
               ? "分配可管理柜机"
               : drawerMode.value === "manual-code"
-                ? "签发一次性人工验证码"
+                ? "签发一次性验证码"
             : ""
 );
 const isUserMutating = computed(
@@ -1063,7 +1063,7 @@ const submitManualVerificationCode = async () => {
   const expiresInSeconds = manualVerificationForm.value.expiresInSeconds;
 
   if (!isManualVerificationCode(code)) {
-    showActionMessage("error", "人工验证码必须是 6 位数字。");
+    showActionMessage("error", "一次性验证码必须是 6 位数字。");
     return;
   }
 
@@ -1072,7 +1072,7 @@ const submitManualVerificationCode = async () => {
     expiresInSeconds < 60 ||
     expiresInSeconds > 600
   ) {
-    showActionMessage("error", "人工验证码有效期必须在 60 至 600 秒之间。");
+    showActionMessage("error", "一次性验证码有效期必须在 60 至 600 秒之间。");
     return;
   }
 
@@ -1095,7 +1095,7 @@ const submitManualVerificationCode = async () => {
       `已为 ${manualVerificationForm.value.userName} 签发一次性${manualPurposeLabel(grant.purpose)}验证码。`
     );
   } catch (error) {
-    showActionMessage("error", `人工验证码签发失败：${readErrorMessage(error, "请稍后重试")}`);
+    showActionMessage("error", `一次性验证码签发失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     manualCodeSaving.value = false;
   }
@@ -1117,9 +1117,9 @@ const revokeManualVerificationGrant = async (grant: ManualVerificationGrantSnaps
     manualVerificationGrants.value = manualVerificationGrants.value.map((item) =>
       item.id === revoked.id ? revoked : item
     );
-    showActionMessage("success", `已撤销 ${grant.userName} 的一次性人工验证码。`);
+    showActionMessage("success", `已撤销 ${grant.userName} 的一次性验证码。`);
   } catch (error) {
-    showActionMessage("error", `人工验证码撤销失败：${readErrorMessage(error, "请稍后重试")}`);
+    showActionMessage("error", `一次性验证码撤销失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     revokingManualGrantId.value = "";
   }
@@ -1381,9 +1381,9 @@ onMounted(load);
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">实例初始化</p>
-          <h3 class="admin-page__section-title">先创建角色，再分配柜机和登录方式</h3>
+          <h3 class="admin-page__section-title">先新增人员，再分配柜机并开通登录</h3>
         </div>
-        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">创建测试角色</button>
+        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">新增人员</button>
       </div>
       <article class="admin-panel admin-panel-block users-tenant-flow">
         <div class="users-setup-step">
@@ -1410,8 +1410,8 @@ onMounted(load);
         <div class="users-setup-step">
           <span class="users-setup-step__index">4</span>
           <div>
-            <span class="admin-table__strong">签发短期人工码</span>
-            <span class="admin-table__subtext">仅供已存在账号登录或重置密码，60–600 秒、单次使用。</span>
+            <span class="admin-table__strong">签发临时验证码</span>
+            <span class="admin-table__subtext">仅限本实例已启用账号；用于 App 登录时须先完成资料审核。</span>
           </div>
         </div>
       </article>
@@ -1431,7 +1431,7 @@ onMounted(load);
     <section v-if="canManageManualVerificationCodes" class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
-          <p class="admin-kicker">一次性人工验证码</p>
+          <p class="admin-kicker">一次性验证码</p>
           <h3 class="admin-page__section-title">只为当前实例中的已启用账号签发</h3>
         </div>
         <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
@@ -1440,7 +1440,7 @@ onMounted(load);
       </div>
       <article class="admin-panel admin-panel-block users-manual-grants">
         <div class="admin-note">
-          人工码是内部验证方式，不是第三种运营模式。验证码固定 6 位、有效期 60–600 秒，成功后立即失效，连续失败 5 次会锁定。
+          为当前实例已启用账号签发短期登录验证码：6 位、单次使用；有效期可设为 1–10 分钟，连续输错 5 次将锁定。
         </div>
         <table v-if="visibleManualVerificationGrants.length" class="admin-table">
           <thead>
@@ -1483,8 +1483,8 @@ onMounted(load);
           </tbody>
         </table>
         <div v-else class="admin-empty">
-          <div class="admin-empty__title">还没有人工验证码记录</div>
-          <div class="admin-empty__body">在下方人员台账选择已启用账号并点击“签发人工码”。</div>
+          <div class="admin-empty__title">还没有一次性验证码记录</div>
+          <div class="admin-empty__body">在下方人员台账选择已启用账号并点击“签发验证码”。</div>
         </div>
       </article>
     </section>
@@ -1721,7 +1721,7 @@ onMounted(load);
                         type="button"
                         @click="openManualVerificationCode(user)"
                       >
-                        签发人工码
+                        签发验证码
                       </button>
                     </div>
                   </td>
@@ -1925,7 +1925,7 @@ onMounted(load);
 
         <div v-else-if="drawerMode === 'manual-code'" class="users-drawer__body">
           <div class="admin-note">
-            正在为 {{ manualVerificationForm.userName }} 签发短期人工码。只能用于当前实例中的这个已启用账号，不能自动创建人员或跨实例使用。
+            正在为 {{ manualVerificationForm.userName }} 签发临时验证码。仅当前实例的已启用账号可使用；用于 App 登录的账号还需完成资料审核。
           </div>
           <label class="admin-field">
             <span class="admin-field__label">用途</span>
@@ -1971,7 +1971,7 @@ onMounted(load);
             />
           </label>
           <div v-if="manualCodeIssued" class="admin-note users-manual-code-success" role="status">
-            已签发。请仅通过受控渠道交付上方验证码；关闭面板后后台不会再次显示该码。
+            已签发。请仅通过安全渠道交付上方验证码；关闭面板后后台不会再次显示该码。
           </div>
           <button
             class="admin-button"

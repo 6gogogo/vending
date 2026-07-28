@@ -313,20 +313,13 @@ const searchPlaces = async () => {
 };
 
 const normalizeMapErrorMessage = (error: unknown) => {
-  const message = error instanceof Error ? error.message : "地图加载失败";
-
-  if (message.includes("AMAP_WEB_KEY")) {
-    return message;
-  }
+  const message = error instanceof Error ? error.message : "";
 
   if (message.includes("高德地图脚本加载失败")) {
-    if (message.includes("域名白名单")) {
-      return message;
-    }
-    return `${message}，请检查 AMAP_WEB_KEY、AMAP_SECURITY_JS_CODE 与当前管理端域名白名单。`;
+    return adminCopy.map.scriptLoadFailed;
   }
 
-  return message;
+  return "地图服务暂时不可用，请稍后重试或改为手工录入坐标。";
 };
 
 const initialize = async () => {

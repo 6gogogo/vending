@@ -20,37 +20,37 @@ interface SystemSettingMetadata {
 
 export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   NODE_ENV: {
-    group: "运行方式",
-    label: "Node 运行环境",
-    description: "选择与当前部署模板一致的运行环境。生产环境由部署流程固定，不能在运行中修改。",
+    group: "运行环境",
+    label: "服务运行环境",
+    description: "从下拉选项选择服务用途。上线后的生产环境由发布流程锁定。",
     inputType: "select",
     options: [
       { label: "开发环境", value: "development" },
       { label: "测试环境", value: "test" },
-      { label: "生产环境（受控部署）", value: "production" }
+      { label: "生产环境", value: "production" }
     ],
     restartRequired: true
   },
   APP_ENV: {
-    group: "运行方式",
+    group: "运行环境",
     label: "应用运行环境",
-    description: "与 Node 运行环境保持一致；生产环境由部署流程固定，不能在运行中修改。",
+    description: "与服务运行环境保持一致。上线后的生产环境由发布流程锁定。",
     inputType: "select",
     options: [
       { label: "开发环境", value: "development" },
       { label: "测试环境", value: "test" },
-      { label: "生产环境（受控部署）", value: "production" }
+      { label: "生产环境", value: "production" }
     ],
     restartRequired: true
   },
   VM_DATA_PLANE: {
-    group: "运行方式",
-    label: "运行数据平面",
-    description: "由部署进程管理器固定注入；simulation 为本地模拟平面，live 为纯净真实平面。运行中不得在线修改。",
+    group: "运行环境",
+    label: "数据运行方式",
+    description: "由发布流程确定。后台仅用于确认当前服务使用模拟数据还是实机数据。",
     inputType: "select",
     options: [
-      { label: "模拟平面", value: "simulation" },
-      { label: "真实平面", value: "live" }
+      { label: "模拟服务", value: "simulation" },
+      { label: "实机服务", value: "live" }
     ],
     required: true,
     restartRequired: true
@@ -88,7 +88,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   VM_FULL_SIMULATION_PAYMENT_MODE: {
     group: "示例设置",
     label: "非预约领取：支付验证",
-    description: "仅在关闭预约取货后用于测试非预约领取。预约取货开启时无需设置，也不会创建新的支付单。",
+    description: "仅在关闭预约取货后选择即时领取的支付处理方式。预约取货开启时无需设置，也不会创建新的支付单。",
     inputType: "select",
     options: [
       { label: "模拟支付", value: "mock" },
@@ -133,7 +133,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   VM_RESERVATION_ONLY_PICKUP: {
     group: "示例设置",
     label: "预约取货",
-    description: "开启后，用户先预约再取货；当前公益领取不需要支付配置。关闭后可测试非预约领取流程。",
+    description: "开启后，用户先预约再取货；当前领取流程不需要支付配置。关闭后按即时领取方式处理。",
     inputType: "boolean",
     restartRequired: true
   },

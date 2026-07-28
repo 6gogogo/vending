@@ -83,7 +83,7 @@ const validateCode = () => {
   }
 
   uni.showToast({
-    title: verificationProvider.value === "manual" ? "请输入 6 位人工码" : "请输入验证码",
+    title: verificationProvider.value === "manual" ? "请输入 6 位一次性验证码" : "请输入验证码",
     icon: "none"
   });
   return false;
@@ -377,7 +377,7 @@ onMounted(() => {
               name="verification-code"
               autocomplete="one-time-code"
               aria-label="验证码"
-              :placeholder="verificationProvider === 'manual' ? '请输入 6 位人工码' : '请输入验证码'"
+              :placeholder="verificationProvider === 'manual' ? '请输入 6 位一次性验证码' : '请输入验证码'"
             />
             <button
               v-if="verificationPresentation.canRequestCode"

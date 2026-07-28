@@ -128,6 +128,10 @@ export const resolvePublicWebRoute = ({ method, requestTarget }) => {
     return errorRoute(404, "Not Found");
   }
 
+  if (pathname === "/__acceptance" || pathname.startsWith("/__acceptance/")) {
+    return errorRoute(404, "Not Found");
+  }
+
   const queryIndex = requestTarget.indexOf("?");
   const query = queryIndex >= 0 ? requestTarget.slice(queryIndex) : "";
 

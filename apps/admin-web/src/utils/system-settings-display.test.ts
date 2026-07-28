@@ -5,6 +5,7 @@ import type { SystemSettingEntry } from "@vm/shared-types";
 import {
   isReservationOnlyPickupEnabled,
   orderSystemSettingsGroups,
+  settingsVisibleForInstanceAdministration,
   settingsVisibleForCurrentPickupMode
 } from "./system-settings-display";
 
@@ -54,5 +55,34 @@ test("示例设置始终作为系统设置的首个入口", () => {
   assert.deepEqual(
     orderSystemSettingsGroups(["运行方式", "地图服务", "示例设置", "短信服务"]),
     ["示例设置", "运行方式", "地图服务", "短信服务"]
+  );
+});
+
+test("实例后台只展示日常领取、登录和运行环境设置", () => {
+  const settings = [
+    createSetting("NODE_ENV"),
+    createSetting("APP_ENV"),
+    createSetting("VM_DATA_PLANE"),
+    createSetting("VM_RESERVATION_ONLY_PICKUP"),
+    createSetting("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"),
+    createSetting("VM_FULL_SIMULATION_VERIFICATION_MODE"),
+    createSetting("VM_FULL_SIMULATION_PAYMENT_MODE"),
+    createSetting("AMAP_WEB_KEY"),
+    createSetting("SMARTVM_CLIENT_ID"),
+    createSetting("PAYMENT_MODE"),
+    createSetting("WEB_CONCURRENCY")
+  ];
+
+  assert.deepEqual(
+    settingsVisibleForInstanceAdministration(settings).map((entry) => entry.key),
+    [
+      "NODE_ENV",
+      "APP_ENV",
+      "VM_DATA_PLANE",
+      "VM_RESERVATION_ONLY_PICKUP",
+      "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE",
+      "VM_FULL_SIMULATION_VERIFICATION_MODE",
+      "VM_FULL_SIMULATION_PAYMENT_MODE"
+    ]
   );
 });

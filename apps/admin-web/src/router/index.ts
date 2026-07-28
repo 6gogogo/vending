@@ -18,7 +18,6 @@ import GoodsDetailPage from "../pages/GoodsDetailPage.vue";
 import LogsPage from "../pages/LogsPage.vue";
 import LogDetailPage from "../pages/LogDetailPage.vue";
 import MerchantBackofficePage from "../pages/MerchantBackofficePage.vue";
-import MapAcceptancePage from "../pages/MapAcceptancePage.vue";
 import OperationsPage from "../pages/OperationsPage.vue";
 import PlatformOverviewPage from "../pages/PlatformOverviewPage.vue";
 import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
@@ -54,13 +53,6 @@ export const router = createRouter({
       component: AdminLoginPage
     },
     {
-      path: "/__acceptance/map",
-      component: MapAcceptancePage,
-      meta: {
-        publicAcceptance: true
-      }
-    },
-    {
       path: "/",
       component: AdminLayout,
       children: [
@@ -77,7 +69,7 @@ export const router = createRouter({
             group: "服务商后台",
             eyebrow: "全局工作台",
             title: "全局工作台",
-            description: "服务商视角查看当前实例运行状态，以及未来扩展多实例时的汇总入口。",
+            description: "服务商查看当前实例的运行状态与汇总信息。",
             permission: "platform-overview:view"
           }
         },
@@ -152,9 +144,9 @@ export const router = createRouter({
           component: SystemSettingsPage,
           meta: {
             group: "系统设置",
-            eyebrow: "技术接入设置",
-            title: "短信、支付与柜机接口配置",
-            description: "维护后端 .env 中的大模型、短信、账户接入、支付和柜机平台参数。",
+            eyebrow: "系统设置",
+            title: "领取与服务设置",
+            description: "设置本实例的领取方式、登录验证和已授权服务。",
             permission: "system-settings:view"
           }
         },
@@ -241,10 +233,6 @@ export const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
-  if (to.path === "/__acceptance/map" && to.meta.publicAcceptance === true) {
-    return true;
-  }
-
   const sessionStore = useAdminSessionStore();
 
   if (to.path === "/login") {

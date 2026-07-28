@@ -3,6 +3,16 @@ import type { SystemSettingEntry } from "@vm/shared-types";
 export const reservationOnlyPickupSettingKey = "VM_RESERVATION_ONLY_PICKUP";
 export const exampleSettingsGroup = "示例设置";
 
+const instanceOperatorSettingKeys = new Set([
+  "NODE_ENV",
+  "APP_ENV",
+  "VM_DATA_PLANE",
+  "VM_RESERVATION_ONLY_PICKUP",
+  "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE",
+  "VM_FULL_SIMULATION_VERIFICATION_MODE",
+  "VM_FULL_SIMULATION_PAYMENT_MODE"
+]);
+
 const paymentOnlySettingKeys = new Set([
   "VM_FULL_SIMULATION_PAYMENT_MODE",
   "SMARTVM_DEFAULT_PAY_STYLE",
@@ -19,6 +29,9 @@ export const isPaymentOnlySetting = (key: string) =>
   key.startsWith("WECHAT_") ||
   key.startsWith("ALIPAY_") ||
   key.startsWith("FINANCIAL_");
+
+export const settingsVisibleForInstanceAdministration = (settings: SystemSettingEntry[]) =>
+  settings.filter((entry) => instanceOperatorSettingKeys.has(entry.key));
 
 export const settingsVisibleForCurrentPickupMode = (
   settings: SystemSettingEntry[],
