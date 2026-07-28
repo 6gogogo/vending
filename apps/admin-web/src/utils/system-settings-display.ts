@@ -1,6 +1,7 @@
 import type { SystemSettingEntry } from "@vm/shared-types";
 
 export const reservationOnlyPickupSettingKey = "VM_RESERVATION_ONLY_PICKUP";
+export const exampleSettingsGroup = "示例设置";
 
 const paymentOnlySettingKeys = new Set([
   "VM_FULL_SIMULATION_PAYMENT_MODE",
@@ -26,3 +27,20 @@ export const settingsVisibleForCurrentPickupMode = (
   reservationOnlyPickupEnabled
     ? settings.filter((entry) => !isPaymentOnlySetting(entry.key))
     : settings;
+
+export const orderSystemSettingsGroups = (groups: string[]) =>
+  [...groups].sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+
+    if (left === exampleSettingsGroup) {
+      return -1;
+    }
+
+    if (right === exampleSettingsGroup) {
+      return 1;
+    }
+
+    return 0;
+  });

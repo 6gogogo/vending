@@ -302,8 +302,8 @@ export class UsersService {
       tags: payload.tags ?? [],
       quota: payload.role === "special" ? payload.quota : undefined,
       assignedDeviceCodes: payload.role === "restocker" ? [] : undefined,
-      // 运营角色只能由后台建立；后台建档本身即完成角色审批。
-      mobileProfileCompleted: payload.role !== "special"
+      // 此入口由实例管理员显式建档，保存即代表资料已核验，可直接进入对应移动端流程。
+      mobileProfileCompleted: true
     };
 
     this.store.users.unshift(created);

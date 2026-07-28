@@ -2,9 +2,10 @@
 import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 
-import type { AppLoginResult } from "@vm/shared-types";
+import type { AppLoginResult, VerificationProvider } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import { loadMobileRuntimeConfig } from "../../api/runtime-config";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import { appCopy } from "../../constants/copy";
@@ -15,9 +16,12 @@ import { getErrorMessage } from "../../utils/error-message";
 import { syncNativeInputAccessibility } from "../../utils/native-input-accessibility";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 import {
-  isVerificationCode,
   normalizeVerificationCode
 } from "../../utils/verification-code";
+import {
+  isAppLoginVerificationCode,
+  resolveAppLoginVerificationPresentation
+} from "../../utils/app-login-verification";
 
 const sessionStore = useSessionStore();
 const phone = ref("");
@@ -32,8 +36,13 @@ const showDisclaimer = ref(false);
 const disclaimerValidationMessage = ref("");
 const disclaimerDialog = ref<HTMLElement | { $el?: HTMLElement }>();
 let disclaimerPreviousFocus: HTMLElement | undefined;
+const verificationProvider = ref<VerificationProvider>();
 const showVerificationPreview =
   import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
+
+const verificationPresentation = computed(() =>
+  resolveAppLoginVerificationPresentation(verificationProvider.value)
+);
 
 const syncLoginInputAccessibility = async () => {
   await nextTick();
@@ -69,12 +78,12 @@ const validatePhone = () => {
 };
 
 const validateCode = () => {
-  if (isVerificationCode(code.value)) {
+  if (isAppLoginVerificationCode(code.value, verificationProvider.value)) {
     return true;
   }
 
   uni.showToast({
-    title: "请输入验证码",
+    title: verificationProvider.value === "manual" ? "请输入 6 位人工码" : "请输入验证码",
     icon: "none"
   });
   return false;
@@ -100,7 +109,27 @@ const bootstrap = async () => {
   });
 };
 
+const loadVerificationProvider = async () => {
+  try {
+    const runtimeConfig = await loadMobileRuntimeConfig({ forceRefresh: true });
+    verificationProvider.value = runtimeConfig.verificationProvider;
+  } catch {
+    verificationProvider.value = undefined;
+  }
+};
+
 const sendCode = async () => {
+  if (!verificationPresentation.value.canRequestCode) {
+    uni.showToast({
+      title:
+        verificationProvider.value === "manual"
+          ? "请向实例管理员获取一次性验证码"
+          : "正在确认验证码方式，请稍后重试",
+      icon: "none"
+    });
+    return;
+  }
+
   if (!validatePhone()) {
     return;
   }
@@ -279,7 +308,8 @@ onLoad((query) => {
 });
 
 onShow(() => {
-  bootstrap();
+  void bootstrap();
+  void loadVerificationProvider();
 });
 
 onMounted(() => {
@@ -303,7 +333,7 @@ onMounted(() => {
           </view>
           <view class="login-guide__item">
             <text class="login-guide__index">2</text>
-            <text>获取验证码完成身份识别</text>
+            <text>{{ verificationPresentation.guideText }}</text>
           </view>
           <view class="login-guide__item">
             <text class="login-guide__index">3</text>
@@ -333,7 +363,7 @@ onMounted(() => {
         <view class="vm-field">
           <view class="field-header">
             <text id="app-login-code-label" class="vm-field__label">验证码</text>
-            <text class="vm-field__helper">勾选下方协议后发送</text>
+            <text class="vm-field__helper">{{ verificationPresentation.codeHelper }}</text>
           </view>
           <view class="vm-field-shell vm-field-shell--stacked-action">
             <MenuIcon name="code" size="sm" tone="neutral" />
@@ -343,13 +373,14 @@ onMounted(() => {
               class="vm-field-shell__input"
               type="tel"
               inputmode="numeric"
-              maxlength="8"
+              :maxlength="verificationProvider === 'manual' ? 6 : 8"
               name="verification-code"
               autocomplete="one-time-code"
               aria-label="验证码"
-              placeholder="请输入验证码"
+              :placeholder="verificationProvider === 'manual' ? '请输入 6 位人工码' : '请输入验证码'"
             />
             <button
+              v-if="verificationPresentation.canRequestCode"
               class="vm-field-shell__button"
               :disabled="sendingCode"
               :loading="sendingCode"

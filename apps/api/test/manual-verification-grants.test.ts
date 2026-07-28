@@ -109,11 +109,12 @@ test("后台签发的 6 位人工码只用于绑定账号且单次消费，不�
       })
     });
     const createUserPayload = (await createUserResponse.json()) as {
-      data?: { id?: string; tenantId?: string };
+      data?: { id?: string; tenantId?: string; mobileProfileCompleted?: boolean };
     };
     const targetUserId = createUserPayload.data?.id;
     assert.equal(createUserResponse.status, 201);
     assert.ok(targetUserId);
+    assert.equal(createUserPayload.data?.mobileProfileCompleted, true);
 
     const issueResponse = await fetch(
       `${baseUrl}/auth/manual-verification-codes`,
@@ -192,8 +193,7 @@ test("后台签发的 6 位人工码只用于绑定账号且单次消费，不�
     };
 
     assert.equal(loginResponse.status, 201);
-    assert.equal(loginPayload.data?.state, "not_registered");
-    assert.equal(loginPayload.data?.phone, "18800000901");
+    assert.equal(loginPayload.data?.state, "approved");
 
     const replayResponse = await fetch(`${baseUrl}/auth/app-login`, {
       method: "POST",
@@ -381,6 +381,58 @@ test("后台签发的 6 位人工码只用于绑定账号且单次消费，不�
           entry.metadata?.manualGrantId === supersededGrantId
       )
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test("未完成移动资料的既有人员不能签发 APP 登录人工码", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const adminToken = createTenantAdminToken(store);
+    const adminHeaders = {
+      authorization: `Bearer ${adminToken}`,
+      "content-type": "application/json"
+    };
+    const createUserResponse = await fetch(`${baseUrl}/users`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        role: "special",
+        phone: "18800000902",
+        name: "待审核人工码测试账号"
+      })
+    });
+    const createUserPayload = (await createUserResponse.json()) as {
+      data?: { id?: string };
+    };
+    const targetUserId = createUserPayload.data?.id;
+    assert.equal(createUserResponse.status, 201);
+    assert.ok(targetUserId);
+
+    const targetUser = store.users.find((entry) => entry.id === targetUserId);
+    assert.ok(targetUser);
+    targetUser.mobileProfileCompleted = false;
+    store.persist();
+    const grantsBeforeIssue = store.manualVerificationGrants.length;
+
+    const issueResponse = await fetch(
+      `${baseUrl}/auth/manual-verification-codes`,
+      {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          userId: targetUserId,
+          purpose: "app-login",
+          code: "654322",
+          expiresInSeconds: 300
+        })
+      }
+    );
+
+    assert.equal(issueResponse.status, 400);
+    assert.equal(store.manualVerificationGrants.length, grantsBeforeIssue);
   } finally {
     await app.close();
   }
@@ -620,7 +672,7 @@ test("人工码达到失败上限或过期后关闭，API 重启后仍可单次�
       data?: { state?: string };
     };
     assert.equal(restartedLoginResponse.status, 201);
-    assert.equal(restartedLoginPayload.data?.state, "not_registered");
+    assert.equal(restartedLoginPayload.data?.state, "approved");
 
     const replayResponse = await fetch(
       `${runningApi.baseUrl}/auth/app-login`,

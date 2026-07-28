@@ -1,18 +1,17 @@
 import type { PublicRuntimeConfig } from "@vm/shared-types";
 
 import { mobileClient } from "./client";
+import {
+  createCachedAsyncLoader,
+  type CachedAsyncLoadOptions
+} from "../utils/runtime-config-loader";
 
 export type MobilePublicConfig = PublicRuntimeConfig;
 
-let publicConfigRequest: Promise<MobilePublicConfig> | undefined;
+const mobileRuntimeConfigLoader = createCachedAsyncLoader(() =>
+  mobileClient.get<MobilePublicConfig>("/public-config")
+);
 
-export const loadMobileRuntimeConfig = async (): Promise<MobilePublicConfig> => {
-  publicConfigRequest ??= mobileClient.get<MobilePublicConfig>("/public-config");
-
-  try {
-    return await publicConfigRequest;
-  } catch (error) {
-    publicConfigRequest = undefined;
-    throw error;
-  }
-};
+export const loadMobileRuntimeConfig = (
+  options?: CachedAsyncLoadOptions
+): Promise<MobilePublicConfig> => mobileRuntimeConfigLoader.load(options);

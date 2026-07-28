@@ -272,7 +272,7 @@ test("运行中拒绝切换金融租约路径，避免维护命令绕到另一�
   }
 });
 
-test("运行中拒绝切换数据、审计、上传和备份路径，避免状态分叉", () => {
+test("运行中拒绝切换数据、实例身份、审计、上传和备份路径，避免状态分叉", () => {
   const runtimeValues = new Map(Object.entries(validPaymentSettings));
   const setCalls: Array<[string, string]> = [];
   let auditCalls = 0;
@@ -295,6 +295,9 @@ test("运行中拒绝切换数据、审计、上传和备份路径，避免状�
     }
   });
   const blockedChanges: Record<string, string> = {
+    VM_DATA_ROOT: "runtime-data/next",
+    VM_DATA_PLANE_ID: "live-production-next",
+    VM_PLATFORM_TENANT_NAME: "下一实例",
     API_DATA_FILE: "runtime-data/store-next.json",
     SYSTEM_LOG_FILE: "runtime-data/system-audit-next.ndjson",
     UPLOAD_DIR: "runtime-uploads-next",
@@ -306,7 +309,7 @@ test("运行中拒绝切换数据、审计、上传和备份路径，避免状�
     for (const [key, value] of Object.entries(blockedChanges)) {
       assert.throws(
         () => service.updateSettings({ values: { [key]: value } }),
-        /运行中不能切换运行数据、审计、上传、备份或金融租约路径/
+        /运行中不能切换运行数据、当前实例身份、审计、上传、备份或金融租约路径/
       );
       assert.equal(readFileSync(envFilePath, "utf8"), originalContent);
       assert.deepEqual(setCalls, []);

@@ -4,6 +4,7 @@ import type { SystemSettingEntry } from "@vm/shared-types";
 
 import {
   isReservationOnlyPickupEnabled,
+  orderSystemSettingsGroups,
   settingsVisibleForCurrentPickupMode
 } from "./system-settings-display";
 
@@ -47,4 +48,11 @@ test("预约取货时收起支付专用设置，保留领取和登录设置", ()
     ]
   );
   assert.equal(settingsVisibleForCurrentPickupMode(settings, false).length, settings.length);
+});
+
+test("示例设置始终作为系统设置的首个入口", () => {
+  assert.deepEqual(
+    orderSystemSettingsGroups(["运行方式", "地图服务", "示例设置", "短信服务"]),
+    ["示例设置", "运行方式", "地图服务", "短信服务"]
+  );
 });

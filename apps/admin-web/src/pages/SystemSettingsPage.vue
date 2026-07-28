@@ -16,9 +16,17 @@ import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 import {
   isReservationOnlyPickupEnabled,
+  orderSystemSettingsGroups,
   reservationOnlyPickupSettingKey,
   settingsVisibleForCurrentPickupMode
 } from "../utils/system-settings-display";
+import {
+  getEffectiveSystemSettingValues,
+  getSystemSettingOperatorDescription,
+  isDeploymentManagedRuntimeSetting,
+  isProductionManagedRuntimeSetting,
+  isProductionRuntimeSettings
+} from "../utils/system-settings-operator-copy";
 
 type LeaveDecision = "save" | "discard" | "stay";
 
@@ -43,6 +51,8 @@ let resolveLeaveDecision: ((decision: LeaveDecision) => void) | undefined;
 const settings = computed(() => settingsSnapshot.value?.settings ?? []);
 const canUpdateSettings = computed(() => sessionStore.can("system-settings:update"));
 const canViewSensitiveSettings = computed(() => sessionStore.can("system-settings:secret:view"));
+const effectiveRuntimeValues = computed(() => getEffectiveSystemSettingValues(settings.value));
+const isProductionRuntime = computed(() => isProductionRuntimeSettings(effectiveRuntimeValues.value));
 const settingsByKey = computed(() => new Map(settings.value.map((entry) => [entry.key, entry])));
 const optionLabel = (key: string) => {
   const entry = settingsByKey.value.get(key);
@@ -55,7 +65,11 @@ const reservationOnlyPickup = computed(() =>
 const settingsForCurrentPickupMode = computed(() =>
   settingsVisibleForCurrentPickupMode(settings.value, reservationOnlyPickup.value)
 );
-const groups = computed(() => [...new Set(settingsForCurrentPickupMode.value.map((entry) => entry.group))]);
+const groups = computed(() =>
+  orderSystemSettingsGroups([
+    ...new Set(settingsForCurrentPickupMode.value.map((entry) => entry.group))
+  ])
+);
 const dirtyKeys = computed(() =>
   Object.keys(formValues).filter((key) => formValues[key] !== originalValues.value[key])
 );
@@ -124,8 +138,8 @@ const applySnapshot = (snapshot: SystemSettingsSnapshot) => {
 
   originalValues.value = nextValues;
 
-  if (!activeGroup.value || !snapshot.settings.some((entry) => entry.group === activeGroup.value)) {
-    activeGroup.value = snapshot.settings[0]?.group ?? "";
+  if (!activeGroup.value || !groups.value.some((group) => group === activeGroup.value)) {
+    activeGroup.value = groups.value[0] ?? "";
   }
 };
 
@@ -336,8 +350,14 @@ const shouldHideSensitiveTextarea = (entry: SystemSettingEntry) =>
   Boolean(formValues[entry.key]) &&
   !isKeyRevealed(entry.key);
 
+const isDeploymentManagedEntry = (entry: SystemSettingEntry) =>
+  isDeploymentManagedRuntimeSetting(entry.key) ||
+  (isProductionRuntime.value && isProductionManagedRuntimeSetting(entry.key));
+
 const canEditEntry = (entry: SystemSettingEntry) =>
-  canUpdateSettings.value && (!entry.sensitive || canViewSensitiveSettings.value);
+  canUpdateSettings.value &&
+  (!entry.sensitive || canViewSensitiveSettings.value) &&
+  !isDeploymentManagedEntry(entry);
 
 const requestLeaveDecision = () =>
   new Promise<LeaveDecision>((resolve) => {
@@ -639,9 +659,11 @@ onBeforeUnmount(() => {
               <p v-if="entry.group === '示例设置'" class="admin-copy settings-page__field-description">
                 {{ entry.description }}
               </p>
-              <p v-else class="admin-copy settings-page__field-description">
-                按对应服务提供的信息填写；详细约束请查阅系统设置说明。
-              </p>
+              <template v-else>
+                <p class="admin-copy settings-page__field-description">
+                  {{ getSystemSettingOperatorDescription(entry) }}
+                </p>
+              </template>
               <div class="settings-page__field-pills">
                 <span class="admin-pill" :class="fieldPillClass(entry)">{{ fieldPillText(entry) }}</span>
                 <span v-if="entry.sensitive" class="admin-pill admin-pill--neutral">敏感项</span>
@@ -706,6 +728,15 @@ onBeforeUnmount(() => {
 
               <p v-if="entry.sensitive && !canViewSensitiveSettings" class="admin-copy settings-page__example">
                 当前账号没有查看或修改敏感配置的权限。
+              </p>
+
+              <p
+                v-if="isDeploymentManagedEntry(entry)"
+                class="admin-copy settings-page__deployment-note"
+              >
+                {{ isProductionManagedRuntimeSetting(entry.key)
+                  ? "当前实际运行环境为生产，此项由发布流程管理，后台仅供查看。"
+                  : "此项由发布流程管理，后台仅供查看。" }}
               </p>
 
               <p v-if="entry.exampleValue && entry.exampleValue !== formValues[entry.key]" class="admin-copy settings-page__example">
@@ -1040,6 +1071,10 @@ onBeforeUnmount(() => {
 
 .settings-page__field-description {
   line-height: 1.55;
+}
+
+.settings-page__deployment-note {
+  color: #7a520b;
 }
 
 .settings-page__input-wrap {

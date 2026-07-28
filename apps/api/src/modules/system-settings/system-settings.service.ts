@@ -67,6 +67,7 @@ const liveRuntimeStorageBoundaryKeys = new Set([
   "VM_DATA_PLANE",
   "VM_DATA_ROOT",
   "VM_DATA_PLANE_ID",
+  "VM_PLATFORM_TENANT_NAME",
   "API_DATA_FILE",
   "SYSTEM_LOG_FILE",
   "UPLOAD_DIR",
@@ -175,7 +176,7 @@ export class SystemSettingsService {
       changedKeys.some((key) => liveRuntimeStorageBoundaryKeys.has(key))
     ) {
       throw new BadRequestException(
-        "运行中不能切换运行数据、审计、上传、备份或金融租约路径；必须先停止 API 和运行数据维护命令，再通过受控配置变更统一修改并重启。"
+        "运行中不能切换运行数据、当前实例身份、审计、上传、备份或金融租约路径；必须先停止 API 和运行数据维护命令，再通过受控配置变更统一修改并重启。"
       );
     }
 

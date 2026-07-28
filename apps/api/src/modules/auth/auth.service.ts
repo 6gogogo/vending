@@ -780,6 +780,12 @@ export class AuthService {
       throw new BadRequestException("人工验证码用途不受支持。");
     }
 
+    if (payload.purpose === "app-login" && !targetUser.mobileProfileCompleted) {
+      throw new BadRequestException(
+        "目标账号尚未完成资料审核，不能签发 APP 登录人工验证码。"
+      );
+    }
+
     const code = String(payload.code ?? "").trim();
 
     if (!/^\d{6}$/u.test(code)) {
