@@ -38,17 +38,21 @@ import {
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const repositoryRoot = realpathSync(resolve(dirname(currentFilePath), ".."));
-const runnerPath = resolve(
-  repositoryRoot,
-  "scripts",
-  "first-backoffice-password-maintenance-runner.mjs"
-);
 const systemctlPath = "/usr/bin/systemctl";
 const busctlPath = "/usr/bin/busctl";
 const loginctlPath = "/usr/bin/loginctl";
 const gitPath = "/usr/bin/git";
 const HEALTH_URL = "http://127.0.0.1:8100/api/health";
 const HEALTH_TIMEOUT_MS = 45_000;
+const controlledFileNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const firstBackofficePasswordMaintenanceOperation = Object.freeze({
+  operation: "首次后台密码维护",
+  runnerFileName: "first-backoffice-password-maintenance-runner.mjs",
+  dropInName: "95-first-backoffice-password-maintenance.conf",
+  lockFileName: "vending-first-backoffice-password-maintenance.lock",
+  failureMessage: "首次后台密码维护未完成；密码未成功初始化或前置校验失败。",
+  successMessage: "首次后台密码维护完成，API 已恢复并通过本机健康检查。"
+});
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -366,11 +370,11 @@ const waitForLocalHealth = async () => {
   throw new Error("API 服务已启动，但本机 /api/health 未在恢复窗口内返回 200。");
 };
 
-const assertCurrentRepositoryMatchesService = () => {
+const assertCurrentRepositoryMatchesService = (operation) => {
   const workingDirectory = realpathSync(systemctlValue("WorkingDirectory"));
 
   if (workingDirectory !== repositoryRoot) {
-    throw new Error("必须从当前受管 API 服务的工作目录启动首次后台密码维护。");
+    throw new Error(`必须从当前受管 API 服务的工作目录启动${operation}。`);
   }
 
   if (systemctlValue("LoadState") !== "loaded") {
@@ -401,18 +405,26 @@ const assertCurrentRepositoryMatchesService = () => {
   return workingDirectory;
 };
 
-const resolveVerifiedRunnerPath = () => {
+const resolveVerifiedRunnerPath = (runnerFileName, operation) => {
+  if (
+    !controlledFileNamePattern.test(runnerFileName) ||
+    !runnerFileName.endsWith(".mjs")
+  ) {
+    throw new Error("维护运行器必须是受控 scripts 目录中的 .mjs 文件。");
+  }
+
+  const runnerPath = resolve(repositoryRoot, "scripts", runnerFileName);
   const metadata = lstatSync(runnerPath);
 
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new Error("首次后台密码维护运行器必须是受管工作树中的普通文件。");
+    throw new Error(`${operation}运行器必须是受管工作树中的普通文件。`);
   }
 
   const verifiedRunnerPath = realpathSync(runnerPath);
   const scriptsDirectory = realpathSync(resolve(repositoryRoot, "scripts"));
 
   if (dirname(verifiedRunnerPath) !== scriptsDirectory) {
-    throw new Error("首次后台密码维护运行器不能解析到受管 scripts 目录之外。");
+    throw new Error(`${operation}运行器不能解析到受管 scripts 目录之外。`);
   }
 
   return verifiedRunnerPath;
@@ -438,26 +450,47 @@ const isVerifiedDropIn = (dropInPath, expectedHash) => {
   }
 };
 
-const main = async () => {
+export const runBackofficePasswordMaintenance = async ({
+  operation,
+  runnerFileName,
+  dropInName,
+  lockFileName,
+  failureMessage,
+  successMessage
+}) => {
+  if (
+    typeof operation !== "string" ||
+    !operation ||
+    !controlledFileNamePattern.test(dropInName) ||
+    !dropInName.endsWith(".conf") ||
+    !controlledFileNamePattern.test(lockFileName) ||
+    !lockFileName.endsWith(".lock") ||
+    typeof failureMessage !== "string" ||
+    typeof successMessage !== "string"
+  ) {
+    throw new Error("后台密码维护操作配置无效，已拒绝执行。");
+  }
+
   if (process.argv.length !== 2) {
-    throw new Error("首次后台密码维护命令不接受任何参数。");
+    throw new Error(`${operation}命令不接受任何参数。`);
   }
 
   if (process.platform !== "linux") {
-    throw new Error("首次后台密码维护只能在 Spark Linux 主机运行。");
+    throw new Error(`${operation}只能在 Spark Linux 主机运行。`);
   }
 
   const ttyPath = assertInteractiveLocalTerminal();
-  const workingDirectory = assertCurrentRepositoryMatchesService();
+  const workingDirectory = assertCurrentRepositoryMatchesService(operation);
   const runtimeDirectory = `/run/user/${process.getuid()}`;
   const plan = resolveFirstBackofficeMaintenancePlan({
     runtimeDirectory,
     workingDirectory,
     nodeExecutable: realpathSync(process.execPath),
-    runnerPath: resolveVerifiedRunnerPath(),
-    ttyPath
+    runnerPath: resolveVerifiedRunnerPath(runnerFileName, operation),
+    ttyPath,
+    dropInName
   });
-  const lockPath = resolve(runtimeDirectory, "vending-first-backoffice-password-maintenance.lock");
+  const lockPath = resolve(runtimeDirectory, lockFileName);
   const temporaryDropInPath = `${plan.dropInPath}.${process.pid}.tmp`;
   const expectedDropInHash = hash(plan.contents);
   let lockCreated = false;
@@ -551,7 +584,7 @@ const main = async () => {
 
     if (result.status !== 0 || result.signal) {
       await cancellationCoordinator.ensureJobStopped();
-      maintenanceFailure = new Error("首次后台密码维护未完成；密码未成功初始化或前置校验失败。");
+      maintenanceFailure = new Error(failureMessage);
     } else {
       await waitForStoppedService();
       cancellationCoordinator.markJobStopped();
@@ -607,10 +640,18 @@ const main = async () => {
     throw maintenanceFailure;
   }
 
-  console.log("首次后台密码维护完成，API 已恢复并通过本机健康检查。");
+  console.log(successMessage);
 };
 
-void main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isDirectExecution =
+  process.argv[1] &&
+  realpathSync(resolve(process.argv[1])) === realpathSync(currentFilePath);
+
+if (isDirectExecution) {
+  void runBackofficePasswordMaintenance(
+    firstBackofficePasswordMaintenanceOperation
+  ).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

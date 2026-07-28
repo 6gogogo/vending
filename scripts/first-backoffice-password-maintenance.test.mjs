@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import {
+  ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME,
   MAINTENANCE_DROP_IN_NAME,
   LOGIND_COMMAND_ENVIRONMENT,
   assertLocalGraphicalLogindSession,
@@ -53,6 +54,70 @@ test("首次后台密码初始化使用 API tsconfig 装载装饰器脚本", () 
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
+test("admin 密码恢复脚本拒绝参数，避免从命令行接收口令", () => {
+  const command = resolveTypeScriptMaintenanceCommand({
+    tsxCliPath: resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    tsconfigPath: resolve(repositoryRoot, "apps", "api", "tsconfig.json"),
+    scriptPath: resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "recover-admin-backoffice-password.ts"
+    ),
+    args: ["--probe"]
+  });
+  const result = spawnSync(process.execPath, command, {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /本命令不接受参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
+test("admin 密码恢复维护入口固定运行器且拒绝命令行参数", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(
+        repositoryRoot,
+        "scripts",
+        "run-recover-admin-backoffice-password-maintenance.mjs"
+      ),
+      "--probe"
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /admin 后台密码恢复命令不接受任何参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
+test("首次初始化维护入口仍可直接启动并拒绝命令行参数", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(repositoryRoot, "scripts", "run-first-backoffice-password-maintenance.mjs"),
+      "--probe"
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /首次后台密码维护命令不接受任何参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
 test("本机首次后台密码维护计划只覆盖执行与终端配置，不注入环境变量", () => {
   const plan = resolveFirstBackofficeMaintenancePlan({
     runtimeDirectory: "/run/user/1000",
@@ -83,6 +148,32 @@ test("本机首次后台密码维护计划只覆盖执行与终端配置，不�
   assert.doesNotMatch(plan.contents, /^TTY(?:Path|Reset|VHangup|VTDisallocate)=/mu);
   assert.doesNotMatch(plan.contents, /^Environment(?:File)?=/mu);
   assert.doesNotMatch(plan.contents, /(?:password|code|secret)=/iu);
+});
+
+test("admin 密码恢复使用独立受控 drop-in，不与首次初始化路径重叠", () => {
+  const plan = resolveFirstBackofficeMaintenancePlan({
+    runtimeDirectory: "/run/user/1000",
+    workingDirectory: "/home/fivegogogo/vending/current",
+    nodeExecutable: "/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/node",
+    runnerPath:
+      "/home/fivegogogo/vending/current/scripts/recover-admin-backoffice-password-maintenance-runner.mjs",
+    ttyPath: "/dev/pts/8",
+    dropInName: ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME
+  });
+
+  assert.equal(
+    plan.dropInPath,
+    "/run/user/1000/systemd/user/vending-api-candidate.service.d/96-admin-backoffice-password-recovery.conf"
+  );
+  assert.notEqual(
+    ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME,
+    MAINTENANCE_DROP_IN_NAME
+  );
+  assert.match(
+    plan.contents,
+    /^ExecStart=\/home\/fivegogogo\/.nvm\/versions\/node\/v22\.22\.2\/bin\/node \/home\/fivegogogo\/vending\/current\/scripts\/recover-admin-backoffice-password-maintenance-runner\.mjs$/mu
+  );
+  assert.doesNotMatch(plan.contents, /^Environment(?:File)?=/mu);
 });
 
 test("会话验证固定走系统总线并使用最小子进程环境", () => {
@@ -144,6 +235,14 @@ test("本机首次后台密码维护计划拒绝非伪终端、相对路径和�
         nodeExecutable: "/usr/bin/node;unexpected"
       }),
     /绝对路径/u
+  );
+  assert.throws(
+    () =>
+      resolveFirstBackofficeMaintenancePlan({
+        ...options,
+        dropInName: "../unexpected.conf"
+      }),
+    /drop-in 名称/u
   );
 });
 

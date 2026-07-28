@@ -3,6 +3,8 @@ import { posix as path } from "node:path";
 export const API_SERVICE_UNIT = "vending-api-candidate.service";
 export const MAINTENANCE_DROP_IN_NAME =
   "95-first-backoffice-password-maintenance.conf";
+export const ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME =
+  "96-admin-backoffice-password-recovery.conf";
 export const LOGIND_COMMAND_ENVIRONMENT = Object.freeze({
   PATH: "/usr/bin:/bin",
   LANG: "C",
@@ -12,6 +14,7 @@ export const resolveSystemBusctlArguments = (args) => ["--system", ...args];
 
 const safeSystemdPathPattern = /^\/[A-Za-z0-9._/+@:-]+$/u;
 const localPseudoTerminalPattern = /^\/dev\/pts\/\d+$/u;
+const maintenanceDropInNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\.conf$/u;
 const sessionScopePattern = /(?:^|\/)session-([A-Za-z0-9_-]+)\.scope(?:\/|$)/gmu;
 const logindSessionIdPattern = /^[A-Za-z0-9_-]+$/u;
 const numericUserIdPattern = /^\d+$/u;
@@ -59,6 +62,16 @@ const assertLocalPseudoTerminal = (value) => {
 
   if (!localPseudoTerminalPattern.test(normalized)) {
     throw new Error("首次后台密码维护只能使用服务器 VNC 本机伪终端。");
+  }
+
+  return normalized;
+};
+
+const assertMaintenanceDropInName = (value) => {
+  const normalized = String(value ?? "").trim();
+
+  if (!maintenanceDropInNamePattern.test(normalized)) {
+    throw new Error("维护 drop-in 名称必须是受控的 .conf 文件名。");
   }
 
   return normalized;
@@ -439,19 +452,21 @@ export const resolveFirstBackofficeMaintenancePlan = ({
   workingDirectory,
   nodeExecutable,
   runnerPath,
-  ttyPath
+  ttyPath,
+  dropInName = MAINTENANCE_DROP_IN_NAME
 }) => {
   const safeRuntimeDirectory = assertSafeSystemdPath(runtimeDirectory, "XDG_RUNTIME_DIR");
   const safeWorkingDirectory = assertSafeSystemdPath(workingDirectory, "API 工作目录");
   const safeNodeExecutable = assertSafeSystemdPath(nodeExecutable, "Node 可执行文件");
   const safeRunnerPath = assertSafeSystemdPath(runnerPath, "维护运行器");
   const safeTtyPath = assertLocalPseudoTerminal(ttyPath);
+  const safeDropInName = assertMaintenanceDropInName(dropInName);
   const runtimeSystemdDirectory = path.join(safeRuntimeDirectory, "systemd", "user");
   const dropInDirectory = path.join(
     runtimeSystemdDirectory,
     `${API_SERVICE_UNIT}.d`
   );
-  const dropInPath = path.join(dropInDirectory, MAINTENANCE_DROP_IN_NAME);
+  const dropInPath = path.join(dropInDirectory, safeDropInName);
 
   assertPathWithin(safeRuntimeDirectory, runtimeSystemdDirectory, "systemd 运行时目录");
   assertPathWithin(safeRuntimeDirectory, dropInDirectory, "维护 drop-in 目录");

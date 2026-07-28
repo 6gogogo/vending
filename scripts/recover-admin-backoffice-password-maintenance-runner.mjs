@@ -6,25 +6,21 @@ import { runBackofficePasswordMaintenanceRunner } from "./backoffice-password-ma
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const repositoryRoot = realpathSync(resolve(dirname(currentFilePath), ".."));
-const passwordInitializationScriptPath = resolve(
+const passwordRecoveryScriptPath = resolve(
   repositoryRoot,
   "apps",
   "api",
   "src",
   "scripts",
-  "initialize-first-backoffice-password.ts"
+  "recover-admin-backoffice-password.ts"
 );
 
-const main = () => {
-  runBackofficePasswordMaintenanceRunner({
-    operation: "首次后台密码维护",
-    passwordScriptPath: passwordInitializationScriptPath,
-    backupLabel: "pre-first-backoffice-password"
-  });
-};
-
 try {
-  main();
+  runBackofficePasswordMaintenanceRunner({
+    operation: "admin 后台密码恢复",
+    passwordScriptPath: passwordRecoveryScriptPath,
+    backupLabel: "pre-admin-backoffice-password-recovery"
+  });
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

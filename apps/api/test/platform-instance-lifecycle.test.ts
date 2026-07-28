@@ -13,6 +13,7 @@ import { AppModule } from "../src/app.module";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { SmartVmGateway } from "../src/modules/devices/smartvm.gateway";
 import { UsersService } from "../src/modules/users/users.service";
+import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
 const temporaryDirectories: string[] = [];
 const originalEnvironment = {
@@ -44,14 +45,11 @@ const startApiWithDataFile = async (dataFile: string) => {
   app.setGlobalPrefix("api");
   // 与公网单层反向代理一致：仅在受信代理后使用 X-Forwarded-Host 还原实例域名。
   app.set("trust proxy", 1);
-  await app.listen(0, "127.0.0.1");
-
-  const address = app.getHttpServer().address();
-  assert.ok(address && typeof address === "object");
+  const port = await listenOnFetchSafeLoopbackPort(app);
 
   return {
     app,
-    baseUrl: `http://127.0.0.1:${address.port}/api`,
+    baseUrl: `http://127.0.0.1:${port}/api`,
     store: app.get(InMemoryStoreService),
     dataFile
   };

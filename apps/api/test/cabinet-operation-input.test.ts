@@ -16,6 +16,7 @@ import {
 } from "../src/common/validation/cabinet-operation-input";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { SmartVmGateway } from "../src/modules/devices/smartvm.gateway";
+import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
 const temporaryDirectories: string[] = [];
 const originalEnvironment = {
@@ -85,7 +86,7 @@ test("柜机操作真实路由统一返回 400，且失败请求不会产生事�
 
   const app = await NestFactory.create(AppModule, { logger: ["error"] });
   app.setGlobalPrefix("api");
-  await app.listen(0, "127.0.0.1");
+  const port = await listenOnFetchSafeLoopbackPort(app);
 
   try {
     const store = app.get(InMemoryStoreService);
@@ -106,9 +107,7 @@ test("柜机操作真实路由统一返回 400，且失败请求不会产生事�
     }) as typeof gateway.openDoor;
 
     const token = store.createSession(user);
-    const address = app.getHttpServer().address();
-    assert.ok(address && typeof address === "object");
-    const baseUrl = `http://127.0.0.1:${address.port}/api`;
+    const baseUrl = `http://127.0.0.1:${port}/api`;
     const openBase = {
       phone: user.phone,
       deviceCode: device.deviceCode,

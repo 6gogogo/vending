@@ -10,6 +10,7 @@ import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "../src/app.module";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
+import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
 const temporaryDirectories: string[] = [];
 const originalEnvironment = {
@@ -42,14 +43,11 @@ const startApiWithDataFile = async (dataFile: string) => {
 
   const app = await NestFactory.create(AppModule, { logger: ["error"] });
   app.setGlobalPrefix("api");
-  await app.listen(0, "127.0.0.1");
-
-  const address = app.getHttpServer().address();
-  assert.ok(address && typeof address === "object");
+  const port = await listenOnFetchSafeLoopbackPort(app);
 
   return {
     app,
-    baseUrl: `http://127.0.0.1:${address.port}/api`,
+    baseUrl: `http://127.0.0.1:${port}/api`,
     dataFile,
     store: app.get(InMemoryStoreService)
   };

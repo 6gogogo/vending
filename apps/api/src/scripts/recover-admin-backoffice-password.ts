@@ -5,25 +5,35 @@ import { resolveRuntimeStoragePaths } from "../common/store/persistence.js";
 import { assertRuntimePathsSafe } from "../common/store/runtime-path-safety.js";
 import { SystemAuditLogService } from "../common/store/system-audit-log.service.js";
 import {
-  assertFirstBackofficePasswordTarget,
-  initializeFirstBackofficePassword
+  assertAdminBackofficePasswordRecoveryTarget,
+  recoverAdminBackofficePassword
 } from "../modules/auth/first-backoffice-password.js";
-import { assertFirstBackofficePasswordMaintenanceServiceContext } from "./first-backoffice-password-maintenance-context.js";
+import { assertBackofficePasswordMaintenanceServiceContext } from "./first-backoffice-password-maintenance-context.js";
 import {
   assertInteractiveLocalPasswordTerminal,
-  readConfirmedPassword
+  readConfirmedPassword,
+  readHiddenLine
 } from "./local-tty-password-input.js";
+
+const assertRecoveryConfirmation = async () => {
+  const confirmation = await readHiddenLine(
+    "输入 RESET ADMIN 确认恢复唯一 admin 后台账号（输入不回显）："
+  );
+
+  if (confirmation !== "RESET ADMIN") {
+    throw new Error("恢复确认文本不匹配，未修改任何数据。");
+  }
+};
 
 const main = async () => {
   if (process.argv.length !== 2) {
-    throw new Error("本命令不接受参数；新密码只能从服务器 VNC 本机终端安全输入。");
+    throw new Error("本命令不接受参数；恢复密码只能从服务器 VNC 本机终端安全输入。");
   }
 
-  assertInteractiveLocalPasswordTerminal("首次后台密码");
-  assertFirstBackofficePasswordMaintenanceServiceContext();
+  assertInteractiveLocalPasswordTerminal("admin 后台密码恢复");
+  assertBackofficePasswordMaintenanceServiceContext();
 
   const dataPlane = resolveRuntimeDataPlane();
-
   const runtimePaths = resolveRuntimeStoragePaths();
   assertRuntimePathsSafe({
     dataFile: runtimePaths.dataFile,
@@ -33,67 +43,68 @@ const main = async () => {
     financialLeaseFile: runtimePaths.financialLeaseFile
   });
 
-  // 在输入密码前做只读预检，避免账号已被修改时让操作员无谓输入机密。
-  assertFirstBackofficePasswordTarget(new InMemoryStoreService());
+  // 先做只读预检，避免目标账号无效时索取任何口令或恢复确认。
+  assertAdminBackofficePasswordRecoveryTarget(new InMemoryStoreService());
+  await assertRecoveryConfirmation();
   const password = await readConfirmedPassword({
-    prompt: "为 admin 设置首次后台密码（输入不回显）：",
-    confirmationPrompt: "再次输入同一密码确认："
+    prompt: "为唯一 admin 设置恢复密码（输入不回显）：",
+    confirmationPrompt: "再次输入同一恢复密码确认："
   });
   const financialWriter = acquireFinancialSingleWriterForMaintenance();
 
   try {
     const store = new InMemoryStoreService();
-    // 取得租约后再次检查，防止预检与实际写入之间被其他维护操作抢先修改。
-    assertFirstBackofficePasswordTarget(store);
+    // 取得单写租约后再次校验，避免预检和写入之间的目标状态变化。
+    assertAdminBackofficePasswordRecoveryTarget(store);
 
     const auditLog = new SystemAuditLogService();
     const operation = auditLog.beginCriticalIntent({
       method: "SYSTEM",
-      path: "/internal/backoffice/initialize-first-password",
+      path: "/internal/backoffice/recover-admin-password",
       metadata: {
-        action: "initialize-first-backoffice-password",
+        action: "recover-admin-backoffice-password",
         username: "admin",
         dataPlane,
-        inputMethod: "local-tty"
+        recoveryMethod: "local-tty"
       }
     });
 
     try {
-      const result = initializeFirstBackofficePassword(store, password);
+      const result = recoverAdminBackofficePassword(store, password);
       store.persist();
 
       if (
         !auditLog.completeCriticalOperation(operation, {
           method: "SYSTEM",
-          path: "/internal/backoffice/initialize-first-password",
+          path: "/internal/backoffice/recover-admin-password",
           statusCode: 200,
           durationMs: Math.max(0, Date.now() - operation.startedAt),
           outcome: "completed",
           metadata: {
-            action: "initialize-first-backoffice-password",
+            action: "recover-admin-backoffice-password",
             username: result.credential.username,
             dataPlane,
-            inputMethod: "local-tty",
+            recoveryMethod: "local-tty",
             revokedSessionCount: result.revokedSessionCount
           }
         })
       ) {
-        throw new Error("首次后台密码初始化完成记录写入失败；请保留现场并检查系统审计日志。");
+        throw new Error("admin 密码恢复完成记录写入失败；请保留现场并检查系统审计日志。");
       }
 
-      console.log("admin 首次后台密码已初始化；默认密码已失效。请重新启动 API 后使用新密码登录。");
+      console.log("admin 后台密码已恢复；全部旧会话已撤销。请等待 API 恢复后使用新密码登录。");
     } catch (error) {
       auditLog.completeCriticalOperation(operation, {
         method: "SYSTEM",
-        path: "/internal/backoffice/initialize-first-password",
+        path: "/internal/backoffice/recover-admin-password",
         statusCode: 500,
         durationMs: Math.max(0, Date.now() - operation.startedAt),
         outcome: "failed",
         metadata: {
-          action: "initialize-first-backoffice-password",
+          action: "recover-admin-backoffice-password",
           username: "admin",
           dataPlane,
-          inputMethod: "local-tty"
+          recoveryMethod: "local-tty"
         }
       });
       throw error;

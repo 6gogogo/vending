@@ -15,6 +15,7 @@ import { InMemoryStoreService } from "../src/common/store/in-memory-store.servic
 import { DevicesService } from "../src/modules/devices/devices.service";
 import { UsersController } from "../src/modules/users/users.controller";
 import { UsersService } from "../src/modules/users/users.service";
+import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
 const temporaryDirectories: string[] = [];
 const originalEnvironment = {
@@ -67,7 +68,7 @@ test("PATCH /api/users/batch 命中批量接口而不是动态用户参数路由
   process.env.ENABLE_TEST_DEVICE_BOOTSTRAP = "false";
   const app = await NestFactory.create(AppModule, { logger: ["error"] });
   app.setGlobalPrefix("api");
-  await app.listen(0, "127.0.0.1");
+  const port = await listenOnFetchSafeLoopbackPort(app);
 
   try {
     const store = app.get(InMemoryStoreService);
@@ -81,10 +82,7 @@ test("PATCH /api/users/batch 命中批量接口而不是动态用户参数路由
     assert.ok(actor);
     assert.ok(target);
     const token = store.createSession(actor);
-    const address = app.getHttpServer().address();
-    assert.ok(address && typeof address === "object");
-
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/users/batch`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/users/batch`, {
       method: "PATCH",
       headers: {
         authorization: `Bearer ${token}`,
@@ -117,7 +115,7 @@ test("POST /api/users 拒绝未定义角色且不落库", async () => {
   process.env.ENABLE_TEST_DEVICE_BOOTSTRAP = "false";
   const app = await NestFactory.create(AppModule, { logger: ["error"] });
   app.setGlobalPrefix("api");
-  await app.listen(0, "127.0.0.1");
+  const port = await listenOnFetchSafeLoopbackPort(app);
 
   try {
     const store = app.get(InMemoryStoreService);
@@ -131,10 +129,7 @@ test("POST /api/users 拒绝未定义角色且不落库", async () => {
     const token = store.createBackofficeSession(actor, "admin", store.getDefaultTenantId());
     const beforeUsers = structuredClone(store.users);
     const beforeLogs = structuredClone(store.logs);
-    const address = app.getHttpServer().address();
-    assert.ok(address && typeof address === "object");
-
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/users`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/users`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,

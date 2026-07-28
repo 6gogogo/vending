@@ -14,7 +14,9 @@ import type { VerificationPurpose } from "../src/common/store/persistence";
 import { AuthController } from "../src/modules/auth/auth.controller";
 import {
   initializeFirstBackofficePassword,
-  MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH
+  MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH,
+  MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH,
+  recoverAdminBackofficePassword
 } from "../src/modules/auth/first-backoffice-password";
 import { verifyAdminPassword } from "../src/modules/auth/admin-password.utils";
 import { AuthService } from "../src/modules/auth/auth.service";
@@ -776,6 +778,49 @@ test("全真模拟 manual 模式只接受后台签发短期码，不接受静态
   assert.equal(
     await service.verifyCode(targetUser.phone, "654321", "app-login"),
     true
+  );
+});
+
+test("本机 admin 密码恢复允许非默认账号、仅恢复唯一 admin 并撤销旧会话", () => {
+  const store = createIsolatedStore();
+  const initialPassword = "662931";
+  initializeFirstBackofficePassword(store, initialPassword);
+  const credential = store.findBackofficeCredentialByUsername("admin");
+  const user = store.users.find((entry) => entry.id === credential?.userId);
+  assert.ok(credential);
+  assert.ok(user);
+
+  const existingSession = store.createBackofficeSession(user, credential.role, credential.tenantId);
+  const recoveredPassword = "993216";
+  assert.equal(MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH, 6);
+  const result = recoverAdminBackofficePassword(store, recoveredPassword);
+
+  assert.equal(result.credential.username, "admin");
+  assert.equal(result.credential.role, "admin");
+  assert.equal(result.credential.usesDefaultPassword, false);
+  assert.equal(
+    verifyAdminPassword(
+      recoveredPassword,
+      result.credential.passwordSalt,
+      result.credential.passwordHash
+    ),
+    true
+  );
+  assert.equal(store.getSession(existingSession), undefined);
+  assert.ok(
+    store.logs.some(
+      (entry) =>
+        entry.type === "recover-admin-backoffice-password" &&
+        entry.metadata?.recoveryMethod === "local-tty"
+    )
+  );
+  assert.throws(
+    () =>
+      recoverAdminBackofficePassword(
+        createIsolatedStore(),
+        "x".repeat(MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH - 1)
+      ),
+    /至少需要/u
   );
 });
 

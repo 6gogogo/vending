@@ -5,6 +5,7 @@ export const FIRST_BACKOFFICE_USERNAME = "admin";
 // 已由产品负责人明确授权：首个公网后台管理员允许使用 6 位密码。
 // 密码仍只能通过服务器 VNC 本机的非回显终端输入，不能经参数、环境变量或网络接口传入。
 export const MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH = 6;
+export const MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH = 6;
 
 const DEFAULT_FIRST_BACKOFFICE_PASSWORD = "admin";
 
@@ -55,6 +56,32 @@ export const assertFirstBackofficePasswordTarget = (
   return { user, credential };
 };
 
+/**
+ * 只供服务器 VNC 本机受控维护器恢复唯一的 admin 后台账号。
+ * 这不是通用找回能力：不接受用户名参数，也不能由 HTTP、环境变量或命令行调用。
+ */
+export const assertAdminBackofficePasswordRecoveryTarget = (
+  store: FirstPasswordStore
+): FirstBackofficePasswordTarget => {
+  const credential = store.findBackofficeCredentialByUsername(FIRST_BACKOFFICE_USERNAME);
+
+  if (
+    !credential ||
+    credential.username !== FIRST_BACKOFFICE_USERNAME ||
+    credential.role !== "admin"
+  ) {
+    throw new Error("唯一 admin 后台账号不存在或角色不匹配，已拒绝恢复。");
+  }
+
+  const user = store.users.find((entry) => entry.id === credential.userId);
+
+  if (!user || !store.isUserValidForBackofficeRole(user, credential.role)) {
+    throw new Error("admin 后台账号不存在、已停用或角色不匹配，已拒绝恢复。");
+  }
+
+  return { user, credential };
+};
+
 export const initializeFirstBackofficePassword = (
   store: FirstPasswordStore,
   rawPassword: string
@@ -94,6 +121,59 @@ export const initializeFirstBackofficePassword = (
       username: updatedCredential.username,
       backofficeRole: updatedCredential.role,
       initializationMethod: "local-tty",
+      revokedSessionCount,
+      undoState: "not_undoable"
+    }
+  });
+
+  return {
+    user,
+    credential: updatedCredential,
+    revokedSessionCount
+  };
+};
+
+export const recoverAdminBackofficePassword = (
+  store: FirstPasswordStore,
+  rawPassword: string
+) => {
+  const password = rawPassword.trim();
+
+  if (password.length < MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH) {
+    throw new Error(
+      `admin 恢复密码至少需要 ${MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH} 位。`
+    );
+  }
+
+  const { user, credential } = assertAdminBackofficePasswordRecoveryTarget(store);
+  const passwordHash = hashAdminPassword(password);
+  const updatedCredential = store.upsertBackofficeCredential({
+    ...credential,
+    passwordSalt: passwordHash.salt,
+    passwordHash: passwordHash.hash,
+    usesDefaultPassword: false,
+    passwordUpdatedAt: new Date().toISOString()
+  });
+
+  const revokedSessionCount = store.revokeSessionsForUser(user.id);
+  store.logOperation({
+    category: "admin",
+    type: "recover-admin-backoffice-password",
+    status: "success",
+    actor: {
+      type: "system",
+      id: "local-tty-maintenance",
+      name: "本机 admin 密码恢复"
+    },
+    primarySubject: {
+      type: "user",
+      id: user.id,
+      label: user.name
+    },
+    metadata: {
+      username: updatedCredential.username,
+      backofficeRole: updatedCredential.role,
+      recoveryMethod: "local-tty",
       revokedSessionCount,
       undoState: "not_undoable"
     }
