@@ -215,6 +215,32 @@ test("首次初始化在要求输入密码前先取得金融单写租约", () =>
   );
 });
 
+test("admin 密码恢复在要求确认或输入密码前先取得金融单写租约", () => {
+  const source = readFileSync(
+    resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "recover-admin-backoffice-password.ts"
+    ),
+    "utf8"
+  );
+  const leasePosition = source.indexOf(
+    "const financialWriter = acquireFinancialSingleWriterForMaintenance()"
+  );
+
+  assert.ok(
+    leasePosition < source.indexOf("await assertRecoveryConfirmation()"),
+    "金融单写租约必须在恢复确认前取得"
+  );
+  assert.ok(
+    leasePosition < source.indexOf("const password = await readConfirmedPassword"),
+    "金融单写租约必须在恢复密码输入前取得"
+  );
+});
+
 test("预检文案不把 API 恢复误称为绝对零写入", () => {
   const preflightScript = readFileSync(
     resolve(

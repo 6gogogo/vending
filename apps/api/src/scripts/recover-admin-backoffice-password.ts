@@ -45,14 +45,15 @@ const main = async () => {
 
   // 先做只读预检，避免目标账号无效时索取任何口令或恢复确认。
   assertAdminBackofficePasswordRecoveryTarget(new InMemoryStoreService());
-  await assertRecoveryConfirmation();
-  const password = await readConfirmedPassword({
-    prompt: "为唯一 admin 设置恢复密码（输入不回显）：",
-    confirmationPrompt: "再次输入同一恢复密码确认："
-  });
+  // 先取得写租约，避免租约不可用时仍要求操作员输入恢复确认或机密。
   const financialWriter = acquireFinancialSingleWriterForMaintenance();
 
   try {
+    await assertRecoveryConfirmation();
+    const password = await readConfirmedPassword({
+      prompt: "为唯一 admin 设置恢复密码（输入不回显）：",
+      confirmationPrompt: "再次输入同一恢复密码确认："
+    });
     const store = new InMemoryStoreService();
     // 取得单写租约后再次校验，避免预检和写入之间的目标状态变化。
     assertAdminBackofficePasswordRecoveryTarget(store);
