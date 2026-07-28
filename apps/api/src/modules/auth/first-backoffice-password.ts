@@ -1,11 +1,15 @@
 import type { InMemoryStoreService } from "../../common/store/in-memory-store.service.js";
 import { hashAdminPassword, verifyAdminPassword } from "./admin-password.utils.js";
+import {
+  MIN_PRIMARY_BACKOFFICE_ADMIN_PASSWORD_LENGTH,
+  PRIMARY_BACKOFFICE_ADMIN_USERNAME
+} from "./backoffice-password-policy.js";
 
-export const FIRST_BACKOFFICE_USERNAME = "admin";
+export const FIRST_BACKOFFICE_USERNAME = PRIMARY_BACKOFFICE_ADMIN_USERNAME;
 // 已由产品负责人明确授权：首个公网后台管理员允许使用 6 位密码。
 // 密码仍只能通过服务器 VNC 本机的非回显终端输入，不能经参数、环境变量或网络接口传入。
-export const MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH = 6;
-export const MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH = 6;
+export const MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH = MIN_PRIMARY_BACKOFFICE_ADMIN_PASSWORD_LENGTH;
+export const MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH = MIN_PRIMARY_BACKOFFICE_ADMIN_PASSWORD_LENGTH;
 
 const DEFAULT_FIRST_BACKOFFICE_PASSWORD = "admin";
 

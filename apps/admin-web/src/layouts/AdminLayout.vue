@@ -220,6 +220,10 @@ const togglePasswordPanel = () => {
   }
 };
 
+const passwordMinimumLength = computed(() =>
+  sessionStore.auth?.username === "admin" && sessionStore.user?.backofficeRole === "admin" ? 6 : 8
+);
+
 const submitPasswordChange = async () => {
   passwordMessage.value = null;
 
@@ -231,10 +235,10 @@ const submitPasswordChange = async () => {
     return;
   }
 
-  if (passwordForm.newPassword.trim().length < 8) {
+  if (passwordForm.newPassword.trim().length < passwordMinimumLength.value) {
     passwordMessage.value = {
       type: "error",
-      text: "新密码至少需要 8 位。"
+      text: `新密码至少需要 ${passwordMinimumLength.value} 位。`
     };
     return;
   }
@@ -400,7 +404,7 @@ const isActive = (target: string) => {
               class="admin-input"
               type="password"
               autocomplete="new-password"
-              placeholder="新密码至少 8 位"
+              :placeholder="`新密码至少 ${passwordMinimumLength} 位`"
             />
           </label>
           <label class="admin-field">

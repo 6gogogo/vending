@@ -476,7 +476,7 @@ test("旧管理员密码接口变更密码时同样旋转会话", async () => {
   assert.equal(authService.getAdminSession(changed.token).token, changed.token);
 });
 
-test("新设和修改后台密码至少八位，既有短密码仍可登录后迁移", async () => {
+test("唯一 admin 可验证当前密码后改为六位，其他后台账号仍至少八位", async () => {
   const store = createIsolatedStore();
   const authService = createAuthService(store);
 
@@ -489,10 +489,22 @@ test("新设和修改后台密码至少八位，既有短密码仍可登录后�
 
   const legacyBackoffice = await authService.backofficeLogin("admin", "admin");
   assert.throws(
-    () => authService.changeBackofficePassword(legacyBackoffice.token, "admin", "1234567"),
-    /至少需要 8 位/
+    () => authService.changeBackofficePassword(legacyBackoffice.token, "错误的当前密码", "123456"),
+    /当前密码不正确/
   );
   assert.ok(store.getSession(legacyBackoffice.token));
+  assert.throws(
+    () => authService.changeBackofficePassword(legacyBackoffice.token, "admin", "12345"),
+    /至少需要 6 位/
+  );
+  assert.ok(store.getSession(legacyBackoffice.token));
+  const updatedBackoffice = authService.changeBackofficePassword(
+    legacyBackoffice.token,
+    "admin",
+    "123456"
+  );
+  assert.equal(store.getSession(legacyBackoffice.token), undefined);
+  assert.ok(store.getSession(updatedBackoffice.token));
 
   const superAdmin = await authService.backofficeLogin("super", "super123");
   const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
@@ -531,8 +543,9 @@ test("新设和修改后台密码至少八位，既有短密码仍可登录后�
     })
   );
 
+  const refreshedLegacyAdmin = await authService.adminPasswordLogin("admin", "admin");
   const migrated = authService.changeAdminPassword(
-    legacyAdmin.token,
+    refreshedLegacyAdmin.token,
     "admin",
     "12345678"
   );

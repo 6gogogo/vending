@@ -36,6 +36,10 @@ import { AccessRulesService } from "../access-rules/access-rules.service";
 import { RegistrationApplicationsService } from "../registration-applications/registration-applications.service";
 import { UsersService } from "../users/users.service";
 import { hashAdminPassword, verifyAdminPassword } from "./admin-password.utils";
+import {
+  getBackofficePasswordMinimumLength,
+  MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH
+} from "./backoffice-password-policy";
 import { VerificationCodeService } from "./verification-code.service";
 
 interface AdminSessionResult {
@@ -55,7 +59,7 @@ interface AdminSessionResult {
 }
 
 type BackofficeSessionResult = BackofficeSessionSnapshot;
-const MIN_ADMIN_PASSWORD_LENGTH = 8;
+const MIN_ADMIN_PASSWORD_LENGTH = MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH;
 const MAX_MANUAL_VERIFICATION_FAILURES = 5;
 
 @Injectable()
@@ -695,8 +699,10 @@ export class AuthService {
 
     const normalizedPassword = newPassword.trim();
 
-    if (normalizedPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
-      throw new BadRequestException(`新密码至少需要 ${MIN_ADMIN_PASSWORD_LENGTH} 位。`);
+    const minimumPasswordLength = getBackofficePasswordMinimumLength(credential);
+
+    if (normalizedPassword.length < minimumPasswordLength) {
+      throw new BadRequestException(`新密码至少需要 ${minimumPasswordLength} 位。`);
     }
 
     if (normalizedPassword === currentPassword.trim()) {
