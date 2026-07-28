@@ -437,6 +437,13 @@ test("首次后台密码初始化允许六位密码、仅允许默认 admin，�
     verifyAdminPassword(password, result.credential.passwordSalt, result.credential.passwordHash),
     true
   );
+  const legacyCredential = store.findAdminCredentialByUsername("admin");
+  assert.ok(legacyCredential);
+  assert.equal(legacyCredential.usesDefaultPassword, false);
+  assert.equal(
+    verifyAdminPassword(password, legacyCredential.passwordSalt, legacyCredential.passwordHash),
+    true
+  );
   assert.equal(store.getSession(existingSession), undefined);
   assert.ok(
     store.logs.some(
@@ -457,6 +464,36 @@ test("首次后台密码初始化允许六位密码、仅允许默认 admin，�
       ),
     /至少需要/
   );
+});
+
+test("启动时会修复旧 admin 凭据仍标记默认密码的历史状态", () => {
+  const store = createIsolatedStore();
+  const password = "904281";
+  initializeFirstBackofficePassword(store, password);
+
+  const legacyCredential = store.findAdminCredentialByUsername("admin");
+  assert.ok(legacyCredential);
+  legacyCredential.usesDefaultPassword = true;
+  store.persist();
+
+  const restarted = new InMemoryStoreService();
+  const repairedLegacyCredential = restarted.findAdminCredentialByUsername("admin");
+  assert.ok(repairedLegacyCredential);
+  assert.equal(repairedLegacyCredential.usesDefaultPassword, false);
+  assert.equal(
+    verifyAdminPassword(
+      password,
+      repairedLegacyCredential.passwordSalt,
+      repairedLegacyCredential.passwordHash
+    ),
+    true
+  );
+  assert.equal(restarted.flushBootstrapPersistence(), true);
+
+  const reloaded = new InMemoryStoreService();
+  const persistedLegacyCredential = reloaded.findAdminCredentialByUsername("admin");
+  assert.ok(persistedLegacyCredential);
+  assert.equal(persistedLegacyCredential.usesDefaultPassword, false);
 });
 
 test("本机 admin 维护会先验证当前密码，再允许已初始化账号改为六位并撤销旧会话", () => {
@@ -501,6 +538,13 @@ test("本机 admin 维护会先验证当前密码，再允许已初始化账号�
     ),
     true
   );
+  const legacyCredential = store.findAdminCredentialByUsername("admin");
+  assert.ok(legacyCredential);
+  assert.equal(legacyCredential.usesDefaultPassword, false);
+  assert.equal(
+    verifyAdminPassword(updatedPassword, legacyCredential.passwordSalt, legacyCredential.passwordHash),
+    true
+  );
   assert.equal(store.getSession(existingSession), undefined);
   assert.ok(
     store.logs.some(
@@ -536,6 +580,8 @@ test("旧管理员密码接口变更密码时同样旋转会话", async () => {
   assert.equal(store.getSession(first.token), undefined);
   assert.equal(store.getSession(second.token), undefined);
   assert.equal(authService.getAdminSession(changed.token).token, changed.token);
+  const synchronizedBackoffice = await authService.backofficeLogin("admin", "new-admin-password");
+  assert.equal(synchronizedBackoffice.user.id, changed.user.id);
 });
 
 test("唯一 admin 可验证当前密码后改为六位，其他后台账号仍至少八位", async () => {
@@ -556,21 +602,25 @@ test("唯一 admin 可验证当前密码后改为六位，其他后台账号仍�
   assert.equal(store.getSession(legacyAdmin.token), undefined);
   assert.ok(store.getSession(updatedLegacyAdmin.token));
 
-  const legacyBackoffice = await authService.backofficeLogin("admin", "admin");
+  await assert.rejects(
+    () => authService.backofficeLogin("admin", "admin"),
+    /账号或密码不正确/
+  );
+  const legacyBackoffice = await authService.backofficeLogin("admin", "123456");
   assert.throws(
-    () => authService.changeBackofficePassword(legacyBackoffice.token, "错误的当前密码", "123456"),
+    () => authService.changeBackofficePassword(legacyBackoffice.token, "错误的当前密码", "654321"),
     /当前密码不正确/
   );
   assert.ok(store.getSession(legacyBackoffice.token));
   assert.throws(
-    () => authService.changeBackofficePassword(legacyBackoffice.token, "admin", "12345"),
+    () => authService.changeBackofficePassword(legacyBackoffice.token, "123456", "12345"),
     /至少需要 6 位/
   );
   assert.ok(store.getSession(legacyBackoffice.token));
   const updatedBackoffice = authService.changeBackofficePassword(
     legacyBackoffice.token,
-    "admin",
-    "123456"
+    "123456",
+    "654321"
   );
   assert.equal(store.getSession(legacyBackoffice.token), undefined);
   assert.ok(store.getSession(updatedBackoffice.token));
@@ -612,10 +662,14 @@ test("唯一 admin 可验证当前密码后改为六位，其他后台账号仍�
     })
   );
 
-  const refreshedLegacyAdmin = await authService.adminPasswordLogin("admin", "123456");
+  await assert.rejects(
+    () => authService.adminPasswordLogin("admin", "123456"),
+    /账号或密码不正确/
+  );
+  const refreshedLegacyAdmin = await authService.adminPasswordLogin("admin", "654321");
   const migrated = authService.changeAdminPassword(
     refreshedLegacyAdmin.token,
-    "123456",
+    "654321",
     "12345678"
   );
   assert.ok(store.getSession(migrated.token));

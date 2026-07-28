@@ -1041,10 +1041,12 @@ export class InMemoryStoreService {
 
     if (existing) {
       Object.assign(existing, record);
+      this.synchronizeLinkedAdminCredentials(record.userId, "legacy");
       return existing;
     }
 
     this.adminCredentials.unshift(record);
+    this.synchronizeLinkedAdminCredentials(record.userId, "legacy");
     return record;
   }
 
@@ -1083,10 +1085,16 @@ export class InMemoryStoreService {
 
     if (existing) {
       Object.assign(existing, normalizedRecord);
+      if (normalizedRecord.role === "admin") {
+        this.synchronizeLinkedAdminCredentials(normalizedRecord.userId, "backoffice");
+      }
       return existing;
     }
 
     this.backofficeCredentials.unshift(normalizedRecord);
+    if (normalizedRecord.role === "admin") {
+      this.synchronizeLinkedAdminCredentials(normalizedRecord.userId, "backoffice");
+    }
     return normalizedRecord;
   }
 
@@ -2658,7 +2666,54 @@ export class InMemoryStoreService {
         this.getDefaultTenantId()
       ) || changed;
 
+    changed = this.synchronizeLinkedAdminCredentials(adminUser.id) || changed;
+
     return changed;
+  }
+
+  /**
+   * 旧 admin 登录兼容记录与当前 admin 后台记录共用同一用户时，密码状态必须一致。
+   * 显式密码写入指定其权威来源；启动归一化只修复“默认/已改密”不一致，避免覆盖两个都已改密的历史记录。
+   */
+  private synchronizeLinkedAdminCredentials(
+    userId: string,
+    sourceKind?: "legacy" | "backoffice"
+  ) {
+    const legacyCredential = this.findAdminCredentialByUserId(userId);
+    const backofficeCredential = this.findBackofficeCredentialByUserId(userId, "admin");
+
+    if (!legacyCredential || !backofficeCredential) {
+      return false;
+    }
+
+    if (!sourceKind && legacyCredential.usesDefaultPassword === backofficeCredential.usesDefaultPassword) {
+      return false;
+    }
+
+    const source =
+      sourceKind === "legacy"
+        ? legacyCredential
+        : sourceKind === "backoffice"
+          ? backofficeCredential
+          : legacyCredential.usesDefaultPassword
+            ? backofficeCredential
+            : legacyCredential;
+    const target = source === legacyCredential ? backofficeCredential : legacyCredential;
+
+    if (
+      target.passwordSalt === source.passwordSalt &&
+      target.passwordHash === source.passwordHash &&
+      target.usesDefaultPassword === source.usesDefaultPassword &&
+      target.passwordUpdatedAt === source.passwordUpdatedAt
+    ) {
+      return false;
+    }
+
+    target.passwordSalt = source.passwordSalt;
+    target.passwordHash = source.passwordHash;
+    target.usesDefaultPassword = source.usesDefaultPassword;
+    target.passwordUpdatedAt = source.passwordUpdatedAt;
+    return true;
   }
 
   private ensureDefaultTenantAdminPermissions(userId: string) {
