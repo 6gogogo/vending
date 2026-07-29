@@ -608,6 +608,63 @@ export const createEmptyPersistedState = (
   };
 };
 
+const readPlatformTenantHostname = (instanceUrl: unknown) => {
+  if (typeof instanceUrl !== "string" || !instanceUrl.trim()) {
+    return undefined;
+  }
+
+  try {
+    return new URL(instanceUrl).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * 早期模拟快照会保留当时的默认实例 URL；公网入口迁移后，App 会在验证码校验前
+ * 因 Host 找不到实例而返回 404。只对既有固定默认实例做一次保守校正：若它已暂停，
+ * 或其他实例已声明当前公网 Host，则不改写，继续由实例隔离规则拒绝请求。
+ */
+const reconcileSimulationDefaultTenantPublicHost = (
+  tenants: PlatformTenantRecord[]
+) => {
+  const expectedTenant = createSimulationPlatformTenant();
+  const [defaultTenant, ...otherTenants] = tenants;
+
+  if (
+    defaultTenant?.id !== expectedTenant.id ||
+    defaultTenant.code !== expectedTenant.code ||
+    defaultTenant.status === "paused"
+  ) {
+    return tenants;
+  }
+
+  const expectedHostname = readPlatformTenantHostname(expectedTenant.instanceUrl);
+
+  if (
+    !expectedHostname ||
+    readPlatformTenantHostname(defaultTenant.instanceUrl) === expectedHostname
+  ) {
+    return tenants;
+  }
+
+  if (
+    otherTenants.some(
+      (tenant) => readPlatformTenantHostname(tenant?.instanceUrl) === expectedHostname
+    )
+  ) {
+    return tenants;
+  }
+
+  return [
+    {
+      ...defaultTenant,
+      instanceUrl: expectedTenant.instanceUrl
+    },
+    ...otherTenants
+  ];
+};
+
 const normalizePersistedState = (
   raw: Partial<PersistedStoreState>,
   options: {
@@ -637,6 +694,11 @@ const normalizePersistedState = (
       : dataPlane === "simulation"
         ? "legacy-simulation"
         : "live-bootstrap-pending";
+  const sourcePlatformTenants = raw.platformTenants ?? fallbackState.platformTenants;
+  const platformTenants =
+    dataPlane === "simulation"
+      ? reconcileSimulationDefaultTenantPublicHost(sourcePlatformTenants)
+      : sourcePlatformTenants;
 
   return {
     dataPlane,
@@ -678,7 +740,7 @@ const normalizePersistedState = (
       ...entry,
       metadata: sanitizeOperationLogCallbackMetadata(entry.metadata)
     })),
-    platformTenants: raw.platformTenants ?? fallbackState.platformTenants,
+    platformTenants,
     verificationCodes: raw.verificationCodes ?? fallbackState.verificationCodes,
     manualVerificationGrants:
       raw.manualVerificationGrants ?? fallbackState.manualVerificationGrants,
@@ -845,6 +907,7 @@ export const readPersistedStateWithMetadata = (): PersistedStateReadResult | und
       raw.instanceId !== normalized.instanceId ||
       raw.initializationSource !== normalized.initializationSource ||
       raw.platformTenants === undefined ||
+      raw.platformTenants !== normalized.platformTenants ||
       raw.manualVerificationGrants === undefined
   };
 };

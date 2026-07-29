@@ -2,7 +2,7 @@ import "reflect-metadata";
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -11,6 +11,7 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 
 import { AppModule } from "../src/app.module";
+import { createSeededPersistedState } from "../src/common/store/persistence";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { SmartVmGateway } from "../src/modules/devices/smartvm.gateway";
 import { UsersService } from "../src/modules/users/users.service";
@@ -61,6 +62,42 @@ const startApi = async () => {
   temporaryDirectories.push(directory);
   return startApiWithDataFile(join(directory, "store.json"));
 };
+
+test("旧模拟快照会在 App 登录前修复默认实例的公网 Host 绑定", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-legacy-public-app-login-"));
+  temporaryDirectories.push(directory);
+  const dataFile = join(directory, "store.json");
+  const state = createSeededPersistedState();
+  const defaultTenant = state.platformTenants[0];
+  assert.ok(defaultTenant);
+  defaultTenant.instanceUrl = "https://legacy-public.example.test";
+  writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  const { app, baseUrl, store } = await startApiWithDataFile(dataFile);
+
+  try {
+    const phone = "18800000999";
+    const code = store.issueVerificationCode(phone, "app-login");
+    const response = await fetch(`${baseUrl}/auth/app-login`, {
+      method: "POST",
+      headers: {
+        "x-forwarded-host": "vending.5gogogo.top",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ phone, code })
+    });
+    const payload = (await response.json()) as { data?: { state?: string } };
+
+    assert.equal(response.status, 201);
+    assert.equal(payload.data?.state, "not_registered");
+    assert.equal(
+      store.platformTenants[0]?.instanceUrl,
+      "https://vending.5gogogo.top"
+    );
+  } finally {
+    await app.close();
+  }
+});
 
 const createProviderToken = (store: InMemoryStoreService) => {
   const credential = store.backofficeCredentials.find((entry) => entry.role === "super_admin");

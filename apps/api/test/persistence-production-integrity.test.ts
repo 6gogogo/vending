@@ -277,6 +277,115 @@ test("生产模拟平面在受控启动时补齐历史人工验证码签发集�
   );
 });
 
+test("模拟快照在不占用其他实例域名时修复默认实例的公网入口绑定", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-simulation-tenant-host-repair-"));
+  const dataFile = join(directory, "store.json");
+  const state = createSeededPersistedState();
+  const defaultTenant = state.platformTenants[0];
+  assert.ok(defaultTenant);
+  defaultTenant.instanceUrl = "https://legacy-public.example.test";
+  state.platformTenants.push({
+    id: "tenant-b",
+    code: "other",
+    name: "其他模拟实例",
+    status: "active",
+    instanceUrl: "https://other.example.test",
+    createdAt: "2026-01-01T00:00:00.000Z"
+  });
+  writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "",
+      API_DATA_FILE: dataFile,
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      const loaded = readPersistedStateWithMetadata();
+      assert.ok(loaded);
+      assert.equal(
+        loaded.state.platformTenants[0]?.instanceUrl,
+        "https://vending.5gogogo.top"
+      );
+      assert.equal(
+        loaded.state.platformTenants[1]?.instanceUrl,
+        "https://other.example.test"
+      );
+      assert.equal(loaded.requiresDataPlaneRewrite, true);
+    }
+  );
+});
+
+test("模拟快照不抢占已由其他实例声明的公网入口，也不恢复已暂停默认实例", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-simulation-tenant-host-boundary-"));
+  const dataFile = join(directory, "store.json");
+  const state = createSeededPersistedState();
+  const defaultTenant = state.platformTenants[0];
+  assert.ok(defaultTenant);
+  defaultTenant.instanceUrl = "https://legacy-public.example.test";
+  state.platformTenants.push({
+    id: "tenant-b",
+    code: "public-owner",
+    name: "公网入口所属实例",
+    status: "active",
+    instanceUrl: "https://vending.5gogogo.top",
+    createdAt: "2026-01-01T00:00:00.000Z"
+  });
+  writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "",
+      API_DATA_FILE: dataFile,
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      const loaded = readPersistedStateWithMetadata();
+      assert.ok(loaded);
+      assert.equal(
+        loaded.state.platformTenants[0]?.instanceUrl,
+        "https://legacy-public.example.test"
+      );
+      assert.equal(loaded.requiresDataPlaneRewrite, false);
+    }
+  );
+
+  const pausedState = createSeededPersistedState();
+  const pausedDefaultTenant = pausedState.platformTenants[0];
+  assert.ok(pausedDefaultTenant);
+  pausedDefaultTenant.status = "paused";
+  pausedDefaultTenant.instanceUrl = "https://legacy-public.example.test";
+  writeFileSync(dataFile, `${JSON.stringify(pausedState, null, 2)}\n`, "utf8");
+
+  withEnvironment(
+    {
+      VM_DATA_PLANE: "simulation",
+      VM_DATA_ROOT: "",
+      VM_DATA_PLANE_ID: "",
+      API_DATA_FILE: dataFile,
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      const loaded = readPersistedStateWithMetadata();
+      assert.ok(loaded);
+      assert.equal(
+        loaded.state.platformTenants[0]?.instanceUrl,
+        "https://legacy-public.example.test"
+      );
+      assert.equal(loaded.requiresDataPlaneRewrite, false);
+    }
+  );
+});
+
 test("模拟平面拒绝人工验证码签发集合的非数组值", (t) => {
   const directory = mkdtempSync(join(tmpdir(), "vm-invalid-manual-grants-"));
   const dataFile = join(directory, "store.json");
