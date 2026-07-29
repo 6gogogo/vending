@@ -152,6 +152,21 @@ assert.doesNotMatch(
   /模拟服务|服务状态待确认|runtimeStatusLabel/,
   "后台登录页不得展示运行平面自述"
 );
+assert.match(
+  adminLoginSource,
+  /grid-template-columns: minmax\(0, 1fr\)/,
+  "后台登录页必须固定可收缩的单列网格，避免窄屏按内容撑宽"
+);
+assert.match(
+  adminLoginSource,
+  /width: min\(420px, calc\(100vw - var\(--login-shell-gutter\)\)\)/,
+  "后台登录卡必须在窄屏按视口扣除边距后收缩"
+);
+assert.match(
+  adminLoginSource,
+  /--login-shell-gutter: 36px/,
+  "后台登录页在手机宽度必须保留左右安全边距"
+);
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
 assert.match(
   adminRouterSource,

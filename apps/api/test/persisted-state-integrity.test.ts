@@ -43,6 +43,53 @@ test("持久化状态完整性校验接受默认业务快照", () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("默认密码凭据告警按脱敏存储类别与后台角色分组", () => {
+  const state = createRawState();
+  const users = state.users as Array<Record<string, unknown>>;
+  assert.ok(users[0]?.id);
+  assert.ok(users[1]?.id);
+  state.adminCredentials = [
+    {
+      userId: users[0].id,
+      username: "legacy-default-credential",
+      passwordSalt: "salt",
+      passwordHash: "hash",
+      usesDefaultPassword: true,
+      passwordUpdatedAt: "2026-07-29T00:00:00.000Z"
+    }
+  ];
+  state.backofficeCredentials = [
+    {
+      userId: users[0].id,
+      username: "provider-default-credential",
+      role: "super_admin",
+      passwordSalt: "salt",
+      passwordHash: "hash",
+      usesDefaultPassword: true,
+      passwordUpdatedAt: "2026-07-29T00:00:00.000Z"
+    },
+    {
+      userId: users[1].id,
+      username: "merchant-default-credential",
+      role: "merchant",
+      passwordSalt: "salt",
+      passwordHash: "hash",
+      usesDefaultPassword: true,
+      passwordUpdatedAt: "2026-07-29T00:00:00.000Z"
+    }
+  ];
+
+  const result = validatePersistedState(state);
+
+  assert.deepEqual(result.errors, []);
+  assert.ok(
+    result.warnings.includes(
+      "仍有 3 个默认密码凭据（旧管理员兼容凭据 1 条；服务提供商超级管理员 1 条；商户 1 条），公网投放前应改密或移除。"
+    )
+  );
+  assert.equal(result.warnings.some((warning) => /用户名|账号/.test(warning)), false);
+});
+
 test("仅兼容历史模拟快照缺失人工验证码签发集合", () => {
   const simulationState = createRawState();
   delete simulationState.manualVerificationGrants;

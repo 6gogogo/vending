@@ -57,6 +57,12 @@ const LIVE_INITIALIZATION_SOURCES = new Set([
   "live-bootstrap-pending",
   "live-bootstrap"
 ]);
+const DEFAULT_BACKOFFICE_CREDENTIAL_ROLE_LABELS = [
+  ["super_admin", "服务提供商超级管理员"],
+  ["admin", "实例管理员"],
+  ["merchant", "商户"],
+  ["restocker", "补货员"]
+] as const;
 
 export interface PersistedStateValidationResult {
   summary: Record<string, number>;
@@ -70,6 +76,57 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const countArray = (state: Record<string, unknown>, key: string) => {
   const value = state[key];
   return Array.isArray(value) ? value.length : 0;
+};
+
+const summarizeDefaultCredentialWarnings = (state: Record<string, unknown>) => {
+  const legacyCredentials = Array.isArray(state.adminCredentials) ? state.adminCredentials : [];
+  const backofficeCredentials = Array.isArray(state.backofficeCredentials)
+    ? state.backofficeCredentials
+    : [];
+  const legacyCount = legacyCredentials.filter(
+    (entry) => isRecord(entry) && entry.usesDefaultPassword === true
+  ).length;
+  const roleCounts = new Map<string, number>();
+
+  for (const credential of backofficeCredentials) {
+    if (!isRecord(credential) || credential.usesDefaultPassword !== true) {
+      continue;
+    }
+
+    const role = typeof credential.role === "string" ? credential.role : "other";
+    roleCounts.set(role, (roleCounts.get(role) ?? 0) + 1);
+  }
+
+  const details: string[] = [];
+
+  if (legacyCount > 0) {
+    details.push(`旧管理员兼容凭据 ${legacyCount} 条`);
+  }
+
+  for (const [role, label] of DEFAULT_BACKOFFICE_CREDENTIAL_ROLE_LABELS) {
+    const count = roleCounts.get(role) ?? 0;
+
+    if (count > 0) {
+      details.push(`${label} ${count} 条`);
+      roleCounts.delete(role);
+    }
+  }
+
+  const otherBackofficeCount = Array.from(roleCounts.values()).reduce(
+    (total, count) => total + count,
+    0
+  );
+
+  if (otherBackofficeCount > 0) {
+    details.push(`其他后台角色 ${otherBackofficeCount} 条`);
+  }
+
+  return {
+    count: legacyCount + backofficeCredentials.filter(
+      (entry) => isRecord(entry) && entry.usesDefaultPassword === true
+    ).length,
+    details
+  };
 };
 
 const validateUniqueField = (
@@ -770,21 +827,12 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
     }
   }
 
-  const defaultCredentialCount = ["adminCredentials", "backofficeCredentials"].reduce((count, key) => {
-    const credentials = parsed[key];
+  const defaultCredentialWarning = summarizeDefaultCredentialWarnings(parsed);
 
-    if (!Array.isArray(credentials)) {
-      return count;
-    }
-
-    return (
-      count +
-      credentials.filter((entry) => isRecord(entry) && entry.usesDefaultPassword === true).length
+  if (defaultCredentialWarning.count > 0) {
+    result.warnings.push(
+      `仍有 ${defaultCredentialWarning.count} 个默认密码凭据（${defaultCredentialWarning.details.join("；")}），公网投放前应改密或移除。`
     );
-  }, 0);
-
-  if (defaultCredentialCount > 0) {
-    result.warnings.push(`仍有 ${defaultCredentialCount} 个默认密码凭据，公网投放前应改密或移除。`);
   }
 
   result.summary = {

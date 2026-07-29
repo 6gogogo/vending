@@ -78,10 +78,12 @@ const submit = async () => {
 
 <style scoped>
 .login-shell {
+  --login-shell-gutter: 48px;
   position: relative;
   isolation: isolate;
   min-height: 100vh;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 24px;
   overflow: hidden;
@@ -118,7 +120,10 @@ const submit = async () => {
 
 .login-panel {
   position: relative;
-  width: min(420px, 100%);
+  width: min(420px, calc(100vw - var(--login-shell-gutter)));
+  max-width: 100%;
+  min-width: 0;
+  justify-self: center;
   display: grid;
   gap: 14px;
   padding: 24px;
@@ -156,6 +161,7 @@ const submit = async () => {
 
 @media (max-width: 560px) {
   .login-shell {
+    --login-shell-gutter: 36px;
     place-items: start center;
     padding: 72px 18px 24px;
   }
