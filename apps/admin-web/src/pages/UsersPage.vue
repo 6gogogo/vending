@@ -364,7 +364,7 @@ const showExtendedUserConfiguration = computed(
     canUpdateReservationSettings.value ||
     sessionStore.can("dashboard:view")
 );
-const isProviderBackoffice = computed(() => sessionStore.user?.backofficeRole === "super_admin");
+const isProviderBackoffice = computed(() => sessionStore.isProviderSuperAdmin);
 const allowedBackofficePermissions = computed(
   () => {
     if (backofficeForm.value.role === "super_admin") {
@@ -2036,7 +2036,7 @@ onMounted(load);
 
         <div v-else class="users-drawer__body">
           <div class="admin-note">
-            正在为 {{ backofficeForm.userName }} 配置 PC 后台登录权限。权限只能从当前账号已拥有的范围内下发，程序提供商账号默认拥有全部权限。
+            正在为 {{ backofficeForm.userName }} 配置 PC 后台登录权限。权限只能从当前实例会话已拥有的范围内下发；服务商需要先进入目标实例后才能配置实例账号。
           </div>
           <label class="admin-field">
             <span class="admin-field__label">后台身份</span>
@@ -2075,7 +2075,7 @@ onMounted(load);
               </button>
             </div>
             <div v-if="backofficeForm.role === 'super_admin'" class="admin-note">
-              程序提供商账号固定拥有全局与实例内全部权限，不需要单独增减。
+              服务商账号的权限由当前服务端会话决定：平台态只能管理实例，进入实例后才获得该实例的业务权限，不需要在此单独增减。
             </div>
             <div class="users-permission-groups">
               <section v-for="group in visiblePermissionGroups" :key="group.title" class="users-permission-group">

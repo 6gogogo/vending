@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import {
-  resolveBackofficePermissions,
+  normalizeBackofficePermissions,
   type BackofficePermission,
   type BackofficeRole,
   type BackofficeScope
@@ -47,6 +47,14 @@ interface AdminSessionState {
   validatedToken?: string;
 }
 
+/**
+ * 后台的可见菜单与路由必须服从当前服务端会话下发的权限集。
+ * 这与角色的理论默认权限不同：服务商在平台态、默认实例和新实例会拿到不同集合。
+ */
+export const resolveBackofficeSessionPermissions = (
+  permissions?: readonly string[]
+): BackofficePermission[] => normalizeBackofficePermissions(permissions);
+
 const readStoredState = (): AdminSessionState => {
   if (typeof window === "undefined") {
     return {};
@@ -74,29 +82,24 @@ export const useAdminSessionStore = defineStore("admin-session", {
     isAuthenticated: (state) => Boolean(state.token && state.user),
     isSuperAdmin: (state) => state.user?.backofficeRole === "super_admin",
     isProvider: (state) => state.user?.scope === "provider",
+    isProviderSuperAdmin: (state) =>
+      state.user?.backofficeRole === "super_admin" && state.user.scope === "provider",
     isAdmin: (state) => state.user?.backofficeRole === "admin",
     isMerchant: (state) => state.user?.backofficeRole === "merchant",
     isRestocker: (state) => state.user?.backofficeRole === "restocker",
-    permissions: (state) =>
-      state.user
-        ? resolveBackofficePermissions(state.user.backofficeRole, state.user.permissions)
-        : [],
+    permissions: (state) => resolveBackofficeSessionPermissions(state.user?.permissions),
     can: (state) => (permission: BackofficePermission) =>
-      state.user
-        ? resolveBackofficePermissions(state.user.backofficeRole, state.user.permissions).includes(permission)
-        : false,
+      resolveBackofficeSessionPermissions(state.user?.permissions).includes(permission),
     canAny: (state) => (permissions: BackofficePermission[]) =>
-      state.user
-        ? permissions.some((permission) =>
-            resolveBackofficePermissions(state.user!.backofficeRole, state.user!.permissions).includes(permission)
-          )
-        : false,
+      permissions.some((permission) =>
+        resolveBackofficeSessionPermissions(state.user?.permissions).includes(permission)
+      ),
     defaultPath: (state) => {
       if (!state.user) {
         return "/login";
       }
 
-      const permissions = resolveBackofficePermissions(state.user.backofficeRole, state.user.permissions);
+      const permissions = resolveBackofficeSessionPermissions(state.user.permissions);
       return defaultBackofficeRoutes.find((entry) => permissions.includes(entry.permission))?.path ?? "/login";
     },
     needsValidation: (state) => Boolean(state.token && state.token !== state.validatedToken)

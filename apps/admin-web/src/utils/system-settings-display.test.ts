@@ -3,6 +3,8 @@ import test from "node:test";
 import type { SystemSettingEntry } from "@vm/shared-types";
 
 import {
+  adjustmentQuotaModeSettingKey,
+  isPaymentOnlySetting,
   isReservationOnlyPickupEnabled,
   orderSystemSettingsGroups,
   settingsVisibleForInstanceAdministration,
@@ -37,18 +39,35 @@ test("预约取货时收起支付专用设置，保留领取和登录设置", ()
     createSetting("VM_FULL_SIMULATION_VERIFICATION_MODE"),
     createSetting("PAYMENT_MODE"),
     createSetting("WECHAT_PAY_APP_ID"),
+    createSetting("SMARTVM_PAYMENT_SUCCESS_PATH"),
     createSetting("VM_FULL_SIMULATION_PAYMENT_MODE")
   ];
 
   assert.deepEqual(
     settingsVisibleForCurrentPickupMode(settings, true).map((entry) => entry.key),
     [
-      "VM_RESERVATION_ONLY_PICKUP",
       "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE",
       "VM_FULL_SIMULATION_VERIFICATION_MODE"
     ]
   );
-  assert.equal(settingsVisibleForCurrentPickupMode(settings, false).length, settings.length);
+  assert.deepEqual(
+    settingsVisibleForCurrentPickupMode(settings, false).map((entry) => entry.key),
+    [
+      "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE",
+      "VM_FULL_SIMULATION_VERIFICATION_MODE",
+      "PAYMENT_MODE",
+      "WECHAT_PAY_APP_ID",
+      "SMARTVM_PAYMENT_SUCCESS_PATH",
+      "VM_FULL_SIMULATION_PAYMENT_MODE"
+    ]
+  );
+});
+
+test("预约取货将柜机支付回调与第三方支付设置一并视为支付专用项", () => {
+  assert.equal(isPaymentOnlySetting("SMARTVM_PAYMENT_SUCCESS_PATH"), true);
+  assert.equal(isPaymentOnlySetting("PAYMENT_MODE"), true);
+  assert.equal(isPaymentOnlySetting("WECHAT_PAY_APP_ID"), true);
+  assert.equal(isPaymentOnlySetting(adjustmentQuotaModeSettingKey), false);
 });
 
 test("示例设置始终作为系统设置的首个入口", () => {

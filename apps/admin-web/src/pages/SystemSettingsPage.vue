@@ -15,6 +15,8 @@ import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 import {
+  adjustmentQuotaModeSettingKey,
+  isPaymentOnlySetting,
   isReservationOnlyPickupEnabled,
   orderSystemSettingsGroups,
   reservationOnlyPickupSettingKey,
@@ -62,6 +64,12 @@ const optionLabel = (key: string) => {
 };
 const reservationOnlyPickup = computed(() =>
   isReservationOnlyPickupEnabled(formValues[reservationOnlyPickupSettingKey])
+);
+const reservationOnlyPickupSetting = computed(() =>
+  settingsByKey.value.get(reservationOnlyPickupSettingKey)
+);
+const adjustmentQuotaModeSetting = computed(() =>
+  settingsByKey.value.get(adjustmentQuotaModeSettingKey)
 );
 const settingsForCurrentPickupMode = computed(() =>
   settingsVisibleForCurrentPickupMode(
@@ -113,31 +121,17 @@ const groupCounts = computed(() =>
     dirtyCount: dirtyKeys.value.filter((key) => settingsByKey.value.get(key)?.group === group).length
   }))
 );
-const verificationModeLabel = computed(() => optionLabel("VM_FULL_SIMULATION_VERIFICATION_MODE"));
 const adjustmentQuotaModeLabel = computed(() => optionLabel("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"));
 const exampleSettingsIntro = computed(() =>
   manualVerificationSettingVisible.value
-    ? "先在“示例设置”选择领取方式、领取差异额度归属和 App 登录验证；其余服务项仅由已授权人员维护。"
-    : "先在“示例设置”选择领取方式和领取差异额度归属；当前 App 登录方式由服务管理员维护。"
+    ? "先确认领取方式、差异额度归属和 App 登录验证，再保存设置。"
+    : "先确认领取方式和差异额度归属，再保存设置。"
 );
 const instanceSettingsIntro = computed(() =>
   manualVerificationSettingVisible.value
-    ? "在这里设置本实例的领取方式和 App 登录；人员额度、预约时段和审核规则请在“人员管理”中维护。"
-    : "在这里设置本实例的领取方式；人员额度、预约时段和审核规则请在“人员管理”中维护。App 登录方式由服务管理员维护。"
+    ? "人员额度、预约时段和审核规则请在“人员管理”中维护。"
+    : "人员额度、预约时段和审核规则请在“人员管理”中维护；App 登录方式由服务管理员维护。"
 );
-const verificationModeDescription = computed(() => {
-  const value = formValues.VM_FULL_SIMULATION_VERIFICATION_MODE;
-
-  if (value === "manual") {
-    return "手动码由实例管理员为已启用人员单独签发，不发送短信。";
-  }
-
-  if (value === "real") {
-    return "登录时由服务自动发送短信验证码。";
-  }
-
-  return "登录时使用模拟验证码完成演练。";
-});
 const paymentSummaryClass = computed(() => {
   const summary = paymentDiagnostics.value?.summary;
 
@@ -278,6 +272,26 @@ const setBooleanValue = (key: string, checked: boolean) => {
   formValues[key] = checked ? "true" : "false";
 };
 
+const setReservationOnlyPickup = (enabled: boolean) => {
+  if (!reservationOnlyPickupSetting.value || !canEditEntry(reservationOnlyPickupSetting.value)) {
+    return;
+  }
+
+  setBooleanValue(reservationOnlyPickupSettingKey, enabled);
+
+  if (!enabled) {
+    return;
+  }
+
+  for (const entry of settings.value) {
+    if (isPaymentOnlySetting(entry.key)) {
+      formValues[entry.key] = originalValues.value[entry.key] ?? entry.value;
+    }
+  }
+
+  clearPaymentDiagnostics();
+};
+
 const isKeyRevealed = (key: string) => revealedKeys.value.has(key);
 
 const toggleReveal = (key: string) => {
@@ -379,6 +393,12 @@ const canEditEntry = (entry: SystemSettingEntry) =>
   (!entry.sensitive || canViewSensitiveSettings.value) &&
   !isDeploymentManagedEntry(entry);
 
+const canEditSetting = (key: string) => {
+  const entry = settingsByKey.value.get(key);
+
+  return Boolean(entry && canEditEntry(entry));
+};
+
 const requestLeaveDecision = () =>
   new Promise<LeaveDecision>((resolve) => {
     resolveLeaveDecision = resolve;
@@ -472,6 +492,9 @@ onBeforeUnmount(() => {
       <div class="admin-note settings-page__note">
         {{ instanceSettingsIntro }}
       </div>
+      <div class="admin-note settings-page__note">
+        运行环境、运行数据、外部服务和密钥由服务管理员维护，本页不会要求实例管理员填写这些内容。
+      </div>
       <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
       </div>
@@ -492,32 +515,58 @@ onBeforeUnmount(() => {
       <section class="admin-panel admin-panel-block settings-page__example-overview">
         <div class="admin-panel__head">
           <div>
-          <span class="admin-kicker">{{ manualVerificationSettingVisible ? "领取与登录" : "领取设置" }}</span>
-            <h3 class="admin-panel__title">{{ manualVerificationSettingVisible ? "先确认这三项" : "先确认这两项" }}</h3>
+            <span class="admin-kicker">领取规则</span>
+            <h3 class="admin-panel__title">先确认领取方式和差异额度</h3>
           </div>
-          <button class="admin-button admin-button--ghost" type="button" @click="setActiveGroup('示例设置')">
-            打开示例设置
-          </button>
         </div>
-        <div class="settings-page__example-grid" :class="{ 'settings-page__example-grid--two': !manualVerificationSettingVisible }">
+        <div class="settings-page__example-grid settings-page__example-grid--two">
           <section class="settings-page__example-card">
             <span class="settings-page__example-label">领取方式</span>
-            <strong>{{ reservationOnlyPickup ? "预约后取货" : "即时领取" }}</strong>
+            <div class="settings-page__choice-group" role="group" aria-label="领取方式">
+              <button
+                class="settings-page__choice"
+                :class="{ 'settings-page__choice--active': reservationOnlyPickup }"
+                type="button"
+                :disabled="!canEditSetting(reservationOnlyPickupSettingKey)"
+                :aria-pressed="reservationOnlyPickup"
+                @click="setReservationOnlyPickup(true)"
+              >
+                预约后取货
+              </button>
+              <button
+                class="settings-page__choice"
+                :class="{ 'settings-page__choice--active': !reservationOnlyPickup }"
+                type="button"
+                :disabled="!canEditSetting(reservationOnlyPickupSettingKey)"
+                :aria-pressed="!reservationOnlyPickup"
+                @click="setReservationOnlyPickup(false)"
+              >
+                即时领取
+              </button>
+            </div>
             <p class="admin-copy">
               {{ reservationOnlyPickup ? "当前流程不需要新建支付单或填写支付参数。" : "即时领取会显示支付相关设置。" }}
             </p>
           </section>
           <section class="settings-page__example-card">
             <span class="settings-page__example-label">领取差异额度</span>
-            <strong>{{ adjustmentQuotaModeLabel }}</strong>
-            <p class="admin-copy">用于处理柜机实际领取数量多于或少于预约数量的情况。</p>
-          </section>
-          <section v-if="manualVerificationSettingVisible" class="settings-page__example-card">
-            <span class="settings-page__example-label">App 登录验证</span>
-            <strong>{{ verificationModeLabel }}</strong>
-            <p class="admin-copy">{{ verificationModeDescription }}</p>
+            <select
+              v-if="adjustmentQuotaModeSetting"
+              v-model="formValues[adjustmentQuotaModeSettingKey]"
+              class="admin-select"
+              :disabled="!canEditSetting(adjustmentQuotaModeSettingKey)"
+            >
+              <option v-for="option in adjustmentQuotaModeSetting.options" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <strong v-else>{{ adjustmentQuotaModeLabel }}</strong>
+            <p class="admin-copy">柜机实际数量与预约不一致时，系统按所选日期计算可领取额度。</p>
           </section>
         </div>
+        <p class="admin-copy settings-page__example-help">
+          修改后请点击“保存设置”。切换为预约取货时，尚未保存的支付项会恢复为原值，不会一并提交。
+        </p>
       </section>
 
       <section v-if="!reservationOnlyPickup" class="admin-panel admin-panel-block payment-diagnostics">
@@ -662,14 +711,9 @@ onBeforeUnmount(() => {
               <div class="settings-page__field-title-line">
                 <span class="settings-page__field-title">{{ entry.label }}</span>
               </div>
-              <p v-if="entry.group === '示例设置'" class="admin-copy settings-page__field-description">
-                {{ entry.description }}
+              <p class="admin-copy settings-page__field-description">
+                {{ getSystemSettingOperatorDescription(entry) }}
               </p>
-              <template v-else>
-                <p class="admin-copy settings-page__field-description">
-                  {{ getSystemSettingOperatorDescription(entry) }}
-                </p>
-              </template>
               <div class="settings-page__field-pills">
                 <span class="admin-pill" :class="fieldPillClass(entry)">{{ fieldPillText(entry) }}</span>
                 <span v-if="entry.sensitive" class="admin-pill admin-pill--neutral">敏感项</span>
@@ -846,6 +890,50 @@ onBeforeUnmount(() => {
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.04em;
+}
+
+.settings-page__choice-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-page__choice {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid #b9c9dc;
+  border-radius: 8px;
+  background: #fff;
+  color: #31465a;
+  font-weight: 800;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.settings-page__choice:hover:not(:disabled) {
+  border-color: #6d94c6;
+  background: #eef5ff;
+}
+
+.settings-page__choice:focus-visible {
+  outline: 3px solid #9bbce6;
+  outline-offset: 2px;
+}
+
+.settings-page__choice--active {
+  border-color: #2f6eaf;
+  background: #e8f2ff;
+  color: #174c80;
+}
+
+.settings-page__choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.settings-page__example-help {
+  margin: 0;
 }
 
 .payment-diagnostics {
@@ -1173,6 +1261,10 @@ onBeforeUnmount(() => {
   .settings-page__secret-box {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .settings-page__choice-group {
+    grid-template-columns: 1fr;
   }
 }
 </style>

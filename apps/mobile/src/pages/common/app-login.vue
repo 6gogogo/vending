@@ -43,6 +43,12 @@ const showVerificationPreview =
 const verificationPresentation = computed(() =>
   resolveAppLoginVerificationPresentation(verificationProvider.value)
 );
+const registrationActionLabel = computed(() =>
+  verificationProvider.value === "manual" ? "未登记？查看管理员建档指引" : "首次使用？去注册"
+);
+const registrationStateActionLabel = computed(() =>
+  verificationProvider.value === "manual" ? "查看管理员建档指引" : "去注册 / 修改资料"
+);
 
 const syncLoginInputAccessibility = async () => {
   await nextTick();
@@ -222,6 +228,11 @@ const submit = async () => {
 };
 
 const goRegister = () => {
+  if (verificationProvider.value === "manual") {
+    uni.navigateTo({ url: "/pages/common/register" });
+    return;
+  }
+
   uni.navigateTo({
     url: `/pages/common/register?phone=${encodeURIComponent(phone.value)}`
   });
@@ -425,7 +436,7 @@ onMounted(() => {
         </view>
 
         <view class="login-footnote">
-          <text class="register-link" @tap="goRegister">首次使用？去注册</text>
+          <text class="register-link" @tap="goRegister">{{ registrationActionLabel }}</text>
         </view>
 
         <view v-if="showVerificationPreview && previewCode" class="debug-box">
@@ -448,7 +459,7 @@ onMounted(() => {
         </view>
 
         <view class="entry-actions">
-          <button class="vm-button" @tap="goRegister">去注册 / 修改资料</button>
+          <button class="vm-button" @tap="goRegister">{{ registrationStateActionLabel }}</button>
           <button v-if="loginState.state !== 'not_registered'" class="vm-button vm-button--ghost" @tap="goReview">
             查看审核状态
           </button>

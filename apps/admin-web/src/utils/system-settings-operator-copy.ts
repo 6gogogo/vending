@@ -42,21 +42,37 @@ export const getEffectiveSystemSettingValues = (
 export const getSystemSettingOperatorDescription = (
   entry: Pick<SystemSettingEntry, "key" | "group">
 ) => {
+  if (entry.key === "VM_RESERVATION_ONLY_PICKUP") {
+    return "开启后，用户须先预约再取货；本页不会显示或要求支付设置。关闭后按即时领取处理。";
+  }
+
+  if (entry.key === "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE") {
+    return "选择柜机实际领取数量与预约不一致时，差额计入哪一天的领取额度。一般保持“自动”。";
+  }
+
+  if (entry.key === "VM_FULL_SIMULATION_VERIFICATION_MODE") {
+    return "选择 App 登录验证方式。手动验证码只能由实例管理员为已启用人员签发。";
+  }
+
+  if (entry.key === "VM_FULL_SIMULATION_PAYMENT_MODE") {
+    return "仅即时领取需要选择支付验证方式；预约取货时此项不会显示。";
+  }
+
   if (isDeploymentManagedRuntimeSetting(entry.key)) {
-    return "由发布流程固定；此处用于确认当前已加载的值，日常验收不需要填写。";
+    return "当前值由服务管理员的发布方案固定，实例管理员无需填写或修改。";
   }
 
   if (isProductionManagedRuntimeSetting(entry.key)) {
-    return "只能选择固定运行环境；公网运行期间由发布流程管理。";
+    return "运行环境由已启用的发布方案决定，实例后台仅供查看。";
   }
 
   if (consistencyKeys.has(entry.key)) {
-    return "保障账目与服务状态一致，请保持当前值；需要调整时由部署人员统一处理。";
+    return "该项由服务管理员固定，用于保证支付和退款记录一致。";
   }
 
   if (entry.group === "运行方式") {
-    return "决定本实例是否连接已授权服务。日常预约取货通常保持当前选择。";
+    return "当前服务方式由服务管理员维护，实例管理员无需在此页设置。";
   }
 
-  return "按服务商或部署资料确认后填写；保存后按页面提示重启或复核。";
+  return "按已确认的业务方案设置；不确定时请联系服务管理员。";
 };

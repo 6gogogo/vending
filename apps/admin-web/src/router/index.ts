@@ -10,6 +10,7 @@ import { useAdminSessionStore } from "../stores/session";
 import { adminApiBaseUrl } from "../api/client";
 import AdminLayout from "../layouts/AdminLayout.vue";
 import AdminLoginPage from "../pages/AdminLoginPage.vue";
+import PublicGuidePage from "../pages/PublicGuidePage.vue";
 import AiWorkspacePage from "../pages/AiWorkspacePage.vue";
 import DataMonitorPage from "../pages/DataMonitorPage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
@@ -51,6 +52,10 @@ export const router = createRouter({
     {
       path: "/login",
       component: AdminLoginPage
+    },
+    {
+      path: "/guide",
+      component: PublicGuidePage
     },
     {
       path: "/",
@@ -234,6 +239,10 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   const sessionStore = useAdminSessionStore();
+
+  if (to.path === "/guide") {
+    return true;
+  }
 
   if (to.path === "/login") {
     if (sessionStore.isAuthenticated) {

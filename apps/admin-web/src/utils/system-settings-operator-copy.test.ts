@@ -38,14 +38,26 @@ test("实际生效的运行环境优先于 .env 编辑值决定生产锁定", ()
 test("高级项默认展示操作说明，不展示实现叙述", () => {
   assert.match(
     getSystemSettingOperatorDescription({ key: "WEB_CONCURRENCY", group: "支付接入" }),
-    /保持当前值/
+    /服务管理员固定/
   );
   assert.match(
     getSystemSettingOperatorDescription({ key: "MAP_WEB_KEY", group: "地图服务" }),
-    /服务商或部署资料/
+    /已确认的业务方案/
   );
   assert.match(
     getSystemSettingOperatorDescription({ key: "NODE_ENV", group: "运行方式" }),
-    /固定运行环境/
+    /运行环境/
+  );
+  assert.match(
+    getSystemSettingOperatorDescription({ key: "VM_RESERVATION_ONLY_PICKUP", group: "示例设置" }),
+    /不会显示或要求支付设置/
+  );
+  assert.match(
+    getSystemSettingOperatorDescription({ key: "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE", group: "示例设置" }),
+    /领取额度/
+  );
+  assert.doesNotMatch(
+    getSystemSettingOperatorDescription({ key: "WEB_CONCURRENCY", group: "支付接入" }),
+    /JSON|cluster|API 工作者/
   );
 });

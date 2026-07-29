@@ -2,9 +2,16 @@
 import { computed, reactive, ref, watch } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 
-import type { RegistrationApplicationProfile, RegistrationPhoneLookup, RegionRecord, UserRole } from "@vm/shared-types";
+import type {
+  RegistrationApplicationProfile,
+  RegistrationPhoneLookup,
+  RegionRecord,
+  UserRole,
+  VerificationProvider
+} from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import { loadMobileRuntimeConfig } from "../../api/runtime-config";
 import FlowSteps from "../../components/ui/FlowSteps.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
@@ -15,6 +22,7 @@ import {
   isVerificationCode,
   normalizeVerificationCode
 } from "../../utils/verification-code";
+import { resolveRegistrationVerificationPresentation } from "../../utils/registration-verification";
 
 const sessionStore = useSessionStore();
 const phone = ref("");
@@ -28,6 +36,7 @@ const regions = ref<RegionRecord[]>([]);
 const selectedRegionId = ref("");
 const lookup = ref<RegistrationPhoneLookup>();
 const lastLookupPhone = ref("");
+const verificationProvider = ref<VerificationProvider>();
 const showVerificationPreview =
   import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
 
@@ -62,6 +71,12 @@ const roleOptions = computed(() =>
 );
 
 const activeRegions = computed(() => regions.value.filter((item) => item.status === "active"));
+const registrationPresentation = computed(() =>
+  resolveRegistrationVerificationPresentation(verificationProvider.value)
+);
+const canSubmitSelfServiceRegistration = computed(
+  () => registrationPresentation.value.canSubmitSelfService
+);
 const regionOptions = computed(() =>
   activeRegions.value.map((item) => ({
     value: item.id,
@@ -139,6 +154,15 @@ const loadRegions = async () => {
   syncRegionFields();
 };
 
+const loadVerificationProvider = async () => {
+  try {
+    const runtimeConfig = await loadMobileRuntimeConfig({ forceRefresh: true });
+    verificationProvider.value = runtimeConfig.verificationProvider;
+  } catch {
+    verificationProvider.value = undefined;
+  }
+};
+
 const queryPhone = async () => {
   const normalizedPhone = phone.value.trim();
 
@@ -167,6 +191,11 @@ const queryPhone = async () => {
 };
 
 const sendCode = async () => {
+  if (!canSubmitSelfServiceRegistration.value) {
+    showOperationFailure(new Error(registrationPresentation.value.detail));
+    return;
+  }
+
   if (!phoneValid.value) {
     showOperationFailure(new Error("请输入 11 位手机号"));
     return;
@@ -185,6 +214,10 @@ const sendCode = async () => {
 };
 
 const validateForm = () => {
+  if (!canSubmitSelfServiceRegistration.value) {
+    throw new Error(registrationPresentation.value.detail);
+  }
+
   syncRegionFields();
 
   if (!phoneValid.value) {
@@ -295,6 +328,14 @@ const goLogin = () => {
   });
 };
 
+const goFeedback = () => {
+  uni.navigateTo({ url: "/pages/common/feedback" });
+};
+
+const goHelp = () => {
+  uni.navigateTo({ url: "/pages/common/help-center" });
+};
+
 watch(
   () => phone.value.trim(),
   (value) => {
@@ -317,6 +358,12 @@ watch(
 );
 
 onLoad(async (query) => {
+  await loadVerificationProvider();
+
+  if (!canSubmitSelfServiceRegistration.value) {
+    return;
+  }
+
   await loadRegions();
 
   if (typeof query.phone === "string" && query.phone) {
@@ -327,8 +374,12 @@ onLoad(async (query) => {
 </script>
 
 <template>
-  <MobileShell eyebrow="注册申请" title="提交注册申请" subtitle="填写必要信息，工作人员审核通过后即可使用。">
-    <GlassCard tone="accent" class="register-card">
+  <MobileShell
+    eyebrow="注册申请"
+    :title="registrationPresentation.title"
+    :subtitle="registrationPresentation.detail"
+  >
+    <GlassCard v-if="canSubmitSelfServiceRegistration" tone="accent" class="register-card">
       <view class="vm-stack">
         <FlowSteps :steps="registerSteps" />
 
@@ -400,7 +451,26 @@ onLoad(async (query) => {
       </view>
     </GlassCard>
 
-    <GlassCard tone="quiet" class="register-card">
+    <GlassCard v-else tone="accent" class="register-card">
+      <view class="vm-stack">
+        <view class="review-guide">
+          <view class="review-guide__head">
+            <MenuIcon name="review" size="sm" tone="accent" />
+            <text class="review-guide__title">人工码办理说明</text>
+          </view>
+          <text class="review-guide__body">当前实例不提供自助注册验证码。请联系实例管理员，由管理员完成账号建档、资料审核和角色分配。</text>
+          <text class="review-guide__body">账号启用后，管理员会签发一条 6 位一次性登录码；请回到登录页完成身份识别。</text>
+        </view>
+
+        <view class="submit-actions">
+          <button class="vm-button" @tap="goLogin">返回登录</button>
+          <button class="vm-button vm-button--ghost" @tap="goHelp">查看使用指引</button>
+          <button class="vm-button vm-button--soft" @tap="goFeedback">联系工作人员</button>
+        </view>
+      </view>
+    </GlassCard>
+
+    <GlassCard v-if="canSubmitSelfServiceRegistration" tone="quiet" class="register-card">
       <view class="vm-stack">
         <view class="section-heading">
           <text class="section-heading__title">选择身份与区域</text>
@@ -474,7 +544,7 @@ onLoad(async (query) => {
       </view>
     </GlassCard>
 
-    <GlassCard tone="quiet" class="register-card">
+    <GlassCard v-if="canSubmitSelfServiceRegistration" tone="quiet" class="register-card">
       <view class="vm-stack">
         <view class="vm-field">
           <text class="vm-field__label">备注（选填）</text>

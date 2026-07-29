@@ -92,6 +92,7 @@ assert.match(resultSource, /不要重复发起开柜/, "开门待确认结果必
 const adminDeviceSource = readSource("apps/admin-web/src/pages/DeviceDetailPage.vue");
 const adminAppSource = readSource("apps/admin-web/src/App.vue");
 const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
+const adminLoginSource = readSource("apps/admin-web/src/pages/AdminLoginPage.vue");
 const adminSystemSettingsPageSource = readSource("apps/admin-web/src/pages/SystemSettingsPage.vue");
 const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
@@ -140,8 +141,11 @@ assert.doesNotMatch(
   "公开配置不得读取或返回验证码凭据、方案、签名、模板或人工码"
 );
 assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
-assert.match(adminAppSource, /adminCopy\.runtime\.simulationBadge/, "管理后台必须持续标明模拟运行状态");
-assert.match(adminCopySource, /模拟服务/, "管理后台模拟状态标识必须集中维护");
+assert.doesNotMatch(
+  adminLoginSource,
+  /模拟服务|服务状态待确认|runtimeStatusLabel/,
+  "后台登录页不得展示运行平面自述"
+);
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
 assert.match(
   adminSystemSettingsPageSource,
@@ -760,15 +764,13 @@ const themeSource = readSource("apps/mobile/src/styles/theme.css");
 const mobileShellSource = readSource("apps/mobile/src/layouts/MobileShell.vue");
 const mobileCopySource = readSource("apps/mobile/src/constants/copy.ts");
 const specialHomeSource = readSource("apps/mobile/src/pages/special/home.vue");
-assert.match(mobileShellSource, /runtimeDataPlane/, "移动端全局壳层必须读取公开运行数据平面");
-assert.match(mobileShellSource, /appCopy\.runtime\.simulationBadge/, "移动端必须持续标明模拟运行状态");
-assert.match(mobileCopySource, /模拟服务/, "移动端模拟状态标识必须集中维护");
-assert.doesNotMatch(mobileCopySource, /验收模拟实例/, "移动端不得向用户展示验收自述");
-assert.match(
+assert.doesNotMatch(
   mobileShellSource,
-  /role="status"[\s\S]+aria-live="polite"/,
-  "移动端模拟状态标识必须向辅助技术声明"
+  /runtimeDataPlane|模拟服务|服务状态待确认|shell__runtime-badge/,
+  "移动端壳层不得展示运行平面自述"
 );
+assert.doesNotMatch(mobileCopySource, /模拟服务|服务状态待确认/, "移动端文案不得保留运行平面自述");
+assert.doesNotMatch(mobileCopySource, /验收模拟实例/, "移动端不得向用户展示验收自述");
 for (const color of ["#9a4f00", "#8f4700", "#a95500", "#ad5700"]) {
   assert.ok(themeSource.includes(color), `主题必须包含已核验的高对比度颜色 ${color}`);
   assert.ok(contrastAgainstWhite(color) >= 4.5, `${color} 上的白字对比度必须至少为 4.5:1`);

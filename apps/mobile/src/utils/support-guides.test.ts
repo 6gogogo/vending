@@ -12,6 +12,8 @@ test("特殊群体帮助中心使用人工码和预约制说明，不保留短�
   assert.ok(pickup);
   assert.match(login.steps.join("\n"), /6 位一次性验证码/);
   assert.match(login.steps.join("\n"), /不发送短信/);
+  assert.match(login.steps.join("\n"), /联系当前实例管理员/);
+  assert.doesNotMatch(login.steps.join("\n"), /未登记的手机号请先提交注册申请/);
   assert.doesNotMatch(login.steps.join("\n"), /等待 60 秒冷却|重新获取验证码/);
   assert.match(pickup.steps.join("\n"), /提交预约取货/);
   assert.match(pickup.steps.join("\n"), /不会创建支付单/);

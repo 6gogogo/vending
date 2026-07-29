@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
+import type { VerificationProvider } from "@vm/shared-types";
+
+import { loadMobileRuntimeConfig } from "../../api/runtime-config";
 import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue";
 import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
@@ -13,6 +17,7 @@ import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
+const verificationProvider = ref<VerificationProvider>();
 
 uiPreferencesStore.hydrate();
 
@@ -29,12 +34,42 @@ const bootstrap = async () => {
   });
 };
 
+const isManualVerification = computed(() => verificationProvider.value === "manual");
+const entrySubtitle = computed(() =>
+  isManualVerification.value
+    ? "已登记用户可使用实例管理员签发的一次性验证码登录；首次使用请联系实例管理员建档。"
+    : "已认证可直接登录，首次使用请提交注册申请。"
+);
+const firstUseSteps = computed(() =>
+  isManualVerification.value
+    ? [
+        "联系当前实例管理员完成账号建档和审核",
+        "获取管理员签发的 6 位一次性验证码",
+        "登录后查看今日额度和开放时段",
+        "选择柜机与物资，提交预约后到柜取货"
+      ]
+    : appCopy.firstUseSteps
+);
+const registrationActionLabel = computed(() =>
+  isManualVerification.value ? "查看管理员建档指引" : "提交注册申请"
+);
+
+const loadVerificationProvider = async () => {
+  try {
+    const runtimeConfig = await loadMobileRuntimeConfig({ forceRefresh: true });
+    verificationProvider.value = runtimeConfig.verificationProvider;
+  } catch {
+    verificationProvider.value = undefined;
+  }
+};
+
 const navigate = (url: string) => {
   uni.navigateTo({ url });
 };
 
 onShow(() => {
-  bootstrap();
+  void bootstrap();
+  void loadVerificationProvider();
 });
 </script>
 
@@ -63,13 +98,13 @@ onShow(() => {
 
         <view class="section-heading">
           <text class="section-heading__title">选择下一步</text>
-          <text class="vm-subtitle">已认证可直接登录，首次使用请提交注册申请。</text>
+          <text class="vm-subtitle">{{ entrySubtitle }}</text>
         </view>
 
         <view class="first-use-card">
           <text class="first-use-card__title">第一次使用怎么走</text>
           <view class="first-use-steps">
-            <view v-for="(step, index) in appCopy.firstUseSteps" :key="step" class="first-use-step">
+            <view v-for="(step, index) in firstUseSteps" :key="step" class="first-use-step">
               <text class="first-use-step__index">{{ index + 1 }}</text>
               <text class="first-use-step__body">{{ step }}</text>
             </view>
@@ -86,7 +121,7 @@ onShow(() => {
           <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/common/register')">
             <view class="action-button__content">
               <MenuIcon name="users" size="sm" tone="neutral" />
-              <text>提交注册申请</text>
+              <text>{{ registrationActionLabel }}</text>
             </view>
           </button>
           <button class="vm-button vm-button--soft action-button" @tap="navigate('/pages/common/feedback')">

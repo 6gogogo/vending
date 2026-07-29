@@ -6,10 +6,6 @@ export const appCopy = {
   loginBody:
     "请使用手机号验证码登录。首次使用可直接提交身份资料，审核通过后自动进入对应角色页面。",
   loginSupport: "若手机号已预先导入系统，首次登录仍需补齐基础资料；新账号提交后会进入审核流程。",
-  runtime: {
-    simulationBadge: "模拟服务",
-    statusPendingBadge: "服务状态待确认"
-  },
   disclaimer: {
     title: "公益智助柜用户免责声明",
     loginGuide: "输入手机号并同意免责声明",
@@ -68,6 +64,6 @@ export const appCopy = {
     "首次使用先提交注册申请",
     "工作人员审核通过后登录",
     "首页查看今日额度和开放时段",
-    "选择柜机、物资并开柜领取"
+    "选择柜机与物资，提交预约后到柜取货"
   ]
 };
