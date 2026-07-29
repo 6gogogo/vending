@@ -97,6 +97,7 @@ const adminSystemSettingsPageSource = readSource("apps/admin-web/src/pages/Syste
 const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
+const merchantBackofficeSource = readSource("apps/admin-web/src/pages/MerchantBackofficePage.vue");
 const publicConfigControllerSource = readSource("apps/api/src/app.controller.ts");
 const sharedTypesSource = readSource("packages/shared-types/src/index.ts");
 const adminPublicConfigSource = readSource("apps/admin-web/src/utils/public-config.ts");
@@ -147,6 +148,36 @@ assert.doesNotMatch(
   "后台登录页不得展示运行平面自述"
 );
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
+assert.match(
+  adminRouterSource,
+  /path: "\/merchant"[\s\S]{0,420}backofficeRoles: \["merchant"\]/,
+  "商家工作台路由必须同时限制商家角色"
+);
+assert.doesNotMatch(
+  merchantBackofficeSource,
+  /adminApi\.alerts\(\)/,
+  "商家工作台不得请求未按商家数据边界过滤的全局告警"
+);
+assert.match(
+  merchantBackofficeSource,
+  /任务由实例管理员统一处理/,
+  "商家工作台必须明确实例任务的处理边界"
+);
+assert.match(
+  merchantBackofficeSource,
+  /暂无可用模板/,
+  "商家工作台必须在没有补货模板时提供明确空态"
+);
+assert.match(
+  merchantBackofficeSource,
+  /class="admin-grid admin-grid--stats-4"/,
+  "商家工作台统计卡必须使用已有响应式四列网格"
+);
+assert.doesNotMatch(
+  merchantBackofficeSource,
+  /admin-grid--four/,
+  "商家工作台不得引用不存在的统计网格样式"
+);
 assert.match(
   adminSystemSettingsPageSource,
   /settingsVisibleForInstanceAdministration/,
@@ -553,6 +584,11 @@ const adminLayoutSource = readSource("apps/admin-web/src/layouts/AdminLayout.vue
 const mobileApiSource = readSource("apps/mobile/src/api/mobile.ts");
 const mobileSettingsSource = readSource("apps/mobile/src/pages/tabs/settings.vue");
 assert.match(adminApiSource, /post<\{ revoked: boolean \}>\("\/auth\/logout"\)/, "后台必须调用服务端退出接口");
+assert.match(
+  adminLayoutSource,
+  /to: "\/merchant"[\s\S]{0,180}roles: \["merchant"\]/,
+  "商家工作台菜单必须同时限制商家角色"
+);
 assert.match(mobileApiSource, /post<\{ revoked: boolean \}>\("\/auth\/logout"\)/, "移动端必须调用服务端退出接口");
 assert.match(adminApiSource, /\{ doorNum, reason \}/, "后台远程开门 API 必须透传原因");
 assert.match(mobileApiSource, /\{ doorNum, reason \}/, "移动端远程开门 API 必须透传原因");

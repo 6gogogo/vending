@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import type { AlertTask, InventoryMovement, MerchantGoodsTemplate, OperationLogRecord } from "@vm/shared-types";
+import type { InventoryMovement, MerchantGoodsTemplate, OperationLogRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 
 const loading = ref(false);
 const errorMessage = ref("");
 const templates = ref<MerchantGoodsTemplate[]>([]);
-const alerts = ref<AlertTask[]>([]);
 const traces = ref<{
   batches: Array<{
     batchId: string;
@@ -42,22 +41,18 @@ const donatedUnits = computed(() =>
 const claimedUnits = computed(() =>
   traces.value?.dailySummary.reduce((sum, entry) => sum + entry.claimedUnits, 0) ?? 0
 );
-const openAlerts = computed(() => alerts.value.filter((entry) => entry.status === "open"));
-
 const load = async () => {
   loading.value = true;
   errorMessage.value = "";
 
   try {
-    const [templateResponse, traceResponse, alertResponse] = await Promise.all([
+    const [templateResponse, traceResponse] = await Promise.all([
       adminApi.merchantTemplates(),
-      adminApi.merchantRestockTraces(),
-      adminApi.alerts()
+      adminApi.merchantRestockTraces()
     ]);
 
     templates.value = templateResponse;
     traces.value = traceResponse;
-    alerts.value = alertResponse;
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "商家后台数据加载失败。";
   } finally {
@@ -82,7 +77,7 @@ onMounted(() => {
   <section class="merchant-page admin-grid">
     <div v-if="errorMessage" class="admin-note merchant-page__error">{{ errorMessage }}</div>
 
-    <section class="admin-grid admin-grid--four">
+    <section class="admin-grid admin-grid--stats-4">
       <article class="admin-panel stat-card">
         <span class="admin-kicker">可用模板</span>
         <strong>{{ activeTemplates.length }}</strong>
@@ -99,9 +94,9 @@ onMounted(() => {
         <span class="admin-copy">来自批次去向追踪</span>
       </article>
       <article class="admin-panel stat-card">
-        <span class="admin-kicker">待处理任务</span>
-        <strong>{{ openAlerts.length }}</strong>
-        <span class="admin-copy">与你相关的告警或反馈</span>
+        <span class="admin-kicker">实例任务</span>
+        <strong aria-label="由实例管理员统一处理">—</strong>
+        <span class="admin-copy">由实例管理员统一处理</span>
       </article>
     </section>
 
@@ -150,7 +145,7 @@ onMounted(() => {
             <h3 class="admin-panel__title">可补货清单</h3>
           </div>
         </div>
-        <div class="admin-list">
+        <div v-if="activeTemplates.length" class="admin-list">
           <div v-for="template in activeTemplates.slice(0, 8)" :key="template.id" class="admin-list__row">
             <div class="admin-list__main">
               <span class="admin-list__title">{{ template.goodsName }}</span>
@@ -159,26 +154,21 @@ onMounted(() => {
             <span class="admin-pill admin-pill--success">可用</span>
           </div>
         </div>
+        <div v-else class="admin-empty">
+          <div class="admin-empty__title">暂无可用模板</div>
+          <div class="admin-empty__body">当前没有启用的补货货品模板。</div>
+        </div>
       </article>
 
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">任务提醒</span>
-            <h3 class="admin-panel__title">待处理事项</h3>
+            <h3 class="admin-panel__title">任务由实例管理员统一处理</h3>
           </div>
         </div>
-        <div class="admin-list">
-          <div v-for="alert in openAlerts.slice(0, 8)" :key="alert.id" class="admin-list__row">
-            <div class="admin-list__main">
-              <span class="admin-list__title">{{ alert.title }}</span>
-              <span class="admin-list__meta">{{ alert.previewDetail || alert.detail }}</span>
-            </div>
-            <span class="admin-pill admin-pill--warning">{{ alert.grade }}</span>
-          </div>
-        </div>
-        <div v-if="!openAlerts.length" class="admin-empty">
-          <div class="admin-empty__title">当前没有待处理任务</div>
+        <div class="admin-empty">
+          <div class="admin-empty__body">当前账号可查看本人补货记录；需要处理任务时请联系实例管理员。</div>
         </div>
       </article>
     </section>

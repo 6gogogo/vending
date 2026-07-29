@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, inject, reactive, ref } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
-import type { BackofficePermission } from "@vm/shared-types";
+import type { BackofficePermission, BackofficeRole } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
-import { useAdminSessionStore } from "../stores/session";
+import { hasBackofficeRouteRole, useAdminSessionStore } from "../stores/session";
 import {
   runtimeStatusLabelInjectionKey
 } from "../utils/runtime-data-plane";
@@ -14,6 +14,7 @@ interface NavItem {
   label: string;
   icon: string;
   permission: BackofficePermission;
+  roles?: readonly BackofficeRole[];
 }
 
 const route = useRoute();
@@ -50,6 +51,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
         to: "/merchant",
         label: "商家工作台",
         permission: "merchant-workbench:view",
+        roles: ["merchant"],
         icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
       }
     ]
@@ -134,7 +136,11 @@ const visibleNavSections = computed(() =>
   navSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => sessionStore.can(item.permission))
+      items: section.items.filter(
+        (item) =>
+          sessionStore.can(item.permission) &&
+          hasBackofficeRouteRole(sessionStore.user?.backofficeRole, item.roles)
+      )
     }))
     .filter((section) => section.items.length > 0)
 );

@@ -7,18 +7,24 @@ import {
 } from "@vm/shared-types";
 
 const storageKey = "vm-admin-session";
-const defaultBackofficeRoutes: Array<{ permission: BackofficePermission; path: string }> = [
-  { permission: "platform-overview:view", path: "/platform" },
-  { permission: "dashboard:view", path: "/dashboard" },
-  { permission: "merchant-workbench:view", path: "/merchant" },
-  { permission: "goods:view", path: "/goods" },
-  { permission: "devices:view", path: "/operations" },
-  { permission: "warehouse:view", path: "/warehouse" },
-  { permission: "users:view", path: "/users" },
-  { permission: "operation-logs:view", path: "/logs" },
-  { permission: "analytics:data-monitor:view", path: "/data-monitor" },
-  { permission: "ai-insights:view", path: "/ai" },
-  { permission: "system-settings:view", path: "/settings" }
+const backofficeRoles = ["super_admin", "admin", "merchant", "restocker"] as const;
+
+const defaultBackofficeRoutes: Array<{
+  permission: BackofficePermission;
+  path: string;
+  roles: readonly BackofficeRole[];
+}> = [
+  { permission: "platform-overview:view", path: "/platform", roles: ["super_admin"] },
+  { permission: "dashboard:view", path: "/dashboard", roles: ["super_admin", "admin"] },
+  { permission: "merchant-workbench:view", path: "/merchant", roles: ["merchant"] },
+  { permission: "devices:view", path: "/operations", roles: ["super_admin", "admin", "merchant", "restocker"] },
+  { permission: "goods:view", path: "/goods", roles: ["super_admin", "admin", "merchant", "restocker"] },
+  { permission: "warehouse:view", path: "/warehouse", roles: ["super_admin", "admin", "merchant"] },
+  { permission: "users:view", path: "/users", roles: ["super_admin", "admin"] },
+  { permission: "operation-logs:view", path: "/logs", roles: ["super_admin", "admin", "merchant"] },
+  { permission: "analytics:data-monitor:view", path: "/data-monitor", roles: ["super_admin", "admin"] },
+  { permission: "ai-insights:view", path: "/ai", roles: ["super_admin", "admin"] },
+  { permission: "system-settings:view", path: "/settings", roles: ["super_admin", "admin"] }
 ];
 
 interface AdminSessionUser {
@@ -54,6 +60,46 @@ interface AdminSessionState {
 export const resolveBackofficeSessionPermissions = (
   permissions?: readonly string[]
 ): BackofficePermission[] => normalizeBackofficePermissions(permissions);
+
+export const isBackofficeRole = (value: unknown): value is BackofficeRole =>
+  typeof value === "string" && (backofficeRoles as readonly string[]).includes(value);
+
+export const hasBackofficeRouteRole = (
+  role: BackofficeRole | undefined,
+  allowedRoles?: readonly BackofficeRole[]
+) => !allowedRoles?.length || Boolean(role && allowedRoles.includes(role));
+
+export const hasBackofficeRouteAccess = (
+  role: BackofficeRole | undefined,
+  grantedPermissions: readonly string[] | undefined,
+  requiredPermissions: readonly BackofficePermission[],
+  allowedRoles?: readonly BackofficeRole[]
+) => {
+  if (!hasBackofficeRouteRole(role, allowedRoles)) {
+    return false;
+  }
+
+  const sessionPermissions = resolveBackofficeSessionPermissions(grantedPermissions);
+  return requiredPermissions.every((permission) => sessionPermissions.includes(permission));
+};
+
+export const resolveBackofficeDefaultPath = (
+  role: BackofficeRole | undefined,
+  permissions?: readonly string[]
+) => {
+  if (!role) {
+    return "/login";
+  }
+
+  const sessionPermissions = resolveBackofficeSessionPermissions(permissions);
+  return (
+    defaultBackofficeRoutes.find(
+      (entry) =>
+        hasBackofficeRouteRole(role, entry.roles) &&
+        sessionPermissions.includes(entry.permission)
+    )?.path ?? "/login"
+  );
+};
 
 const readStoredState = (): AdminSessionState => {
   if (typeof window === "undefined") {
@@ -99,8 +145,10 @@ export const useAdminSessionStore = defineStore("admin-session", {
         return "/login";
       }
 
-      const permissions = resolveBackofficeSessionPermissions(state.user.permissions);
-      return defaultBackofficeRoutes.find((entry) => permissions.includes(entry.permission))?.path ?? "/login";
+      return resolveBackofficeDefaultPath(
+        state.user.backofficeRole,
+        state.user.permissions
+      );
     },
     needsValidation: (state) => Boolean(state.token && state.token !== state.validatedToken)
   },

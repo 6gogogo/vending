@@ -6,7 +6,11 @@ import {
   type BackofficeScope
 } from "@vm/shared-types";
 
-import { useAdminSessionStore } from "../stores/session";
+import {
+  hasBackofficeRouteAccess,
+  isBackofficeRole,
+  useAdminSessionStore
+} from "../stores/session";
 import { adminApiBaseUrl } from "../api/client";
 import AdminLayout from "../layouts/AdminLayout.vue";
 import AdminLoginPage from "../pages/AdminLoginPage.vue";
@@ -46,6 +50,11 @@ const resolveRequiredPermissions = (meta: Record<string, unknown>): BackofficePe
   return Array.from(new Set(required));
 };
 
+const resolveRequiredBackofficeRoles = (meta: Record<string, unknown>): BackofficeRole[] =>
+  Array.isArray(meta.backofficeRoles)
+    ? meta.backofficeRoles.filter(isBackofficeRole)
+    : [];
+
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -84,9 +93,10 @@ export const router = createRouter({
           meta: {
             group: "商家后台",
             eyebrow: "商家工作台",
-            title: "商家补货与订单",
-            description: "查看自己的补货、货品模板、领取去向和待处理任务。",
-            permission: "merchant-workbench:view"
+            title: "商家补货工作台",
+            description: "查看自己的补货批次、货品模板和领取去向。",
+            permission: "merchant-workbench:view",
+            backofficeRoles: ["merchant"]
           }
         },
         {
@@ -311,10 +321,15 @@ router.beforeEach(async (to) => {
   }
 
   const requiredPermissions = resolveRequiredPermissions(to.meta);
+  const requiredRoles = resolveRequiredBackofficeRoles(to.meta);
 
   if (
-    requiredPermissions.length &&
-    !requiredPermissions.every((permission) => sessionStore.can(permission))
+    !hasBackofficeRouteAccess(
+      sessionStore.user?.backofficeRole,
+      sessionStore.user?.permissions,
+      requiredPermissions,
+      requiredRoles
+    )
   ) {
     return resolveDefaultBackofficePath();
   }
