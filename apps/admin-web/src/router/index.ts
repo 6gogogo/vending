@@ -18,7 +18,7 @@ import PublicGuidePage from "../pages/PublicGuidePage.vue";
 import AiWorkspacePage from "../pages/AiWorkspacePage.vue";
 import DataMonitorPage from "../pages/DataMonitorPage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
-import DeviceDetailPage from "../pages/DeviceDetailPage.vue";
+import DeviceWorkspacePage from "../pages/DeviceWorkspacePage.vue";
 import GoodsDetailPage from "../pages/GoodsDetailPage.vue";
 import LogsPage from "../pages/LogsPage.vue";
 import LogDetailPage from "../pages/LogDetailPage.vue";
@@ -84,7 +84,8 @@ export const router = createRouter({
             eyebrow: "全局工作台",
             title: "全局工作台",
             description: "服务商查看当前实例的运行状态与汇总信息。",
-            permission: "platform-overview:view"
+            permission: "platform-overview:view",
+            backofficeRoles: ["super_admin"]
           }
         },
         {
@@ -107,7 +108,8 @@ export const router = createRouter({
             eyebrow: "运营总览",
             title: "运营主控台",
             description: "查看服务覆盖、待办、柜机索引和汇总日志。",
-            permission: "dashboard:view"
+            permission: "dashboard:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -118,7 +120,8 @@ export const router = createRouter({
             eyebrow: "货品总览",
             title: "货品总览与预警模板",
             description: "查看各商品种类数量、柜机分布，并批量设置货品预警模板。",
-            permission: "goods:view"
+            permission: "goods:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -129,7 +132,8 @@ export const router = createRouter({
             eyebrow: "数据监控",
             title: "按日数据监控",
             description: "使用日历与柱状图查看每日服务、货品、事件和日志变化。",
-            permission: "analytics:data-monitor:view"
+            permission: "analytics:data-monitor:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -140,7 +144,8 @@ export const router = createRouter({
             eyebrow: "本地仓库",
             title: "本地仓库与盘点",
             description: "处理本地仓库库存、调拨、盘点和 Excel 导出。",
-            permission: "warehouse:view"
+            permission: "warehouse:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -151,7 +156,8 @@ export const router = createRouter({
             eyebrow: "AI 工作台",
             title: "AI 运营助手",
             description: "生成异常诊断、日报、补货布局建议、反馈草稿和策略建议。",
-            permission: "ai-insights:view"
+            permission: "ai-insights:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -162,7 +168,8 @@ export const router = createRouter({
             eyebrow: "系统设置",
             title: "领取与服务设置",
             description: "设置本实例的领取方式、登录验证和已授权服务。",
-            permission: "system-settings:view"
+            permission: "system-settings:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -173,7 +180,8 @@ export const router = createRouter({
             eyebrow: "货品详情",
             title: "货品批次与阈值设置",
             description: "查看单个货品的批次、来源、保质期和柜机级阈值。",
-            permission: "goods:view"
+            permission: "goods:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -189,7 +197,7 @@ export const router = createRouter({
         },
         {
           path: "/operations/:deviceCode",
-          component: DeviceDetailPage,
+          component: DeviceWorkspacePage,
           meta: {
             group: "总览",
             eyebrow: "柜机详情",
@@ -206,7 +214,8 @@ export const router = createRouter({
             eyebrow: "人员管理",
             title: "人员台账与批量设置",
             description: "按分类检索人员，新增编辑基础信息，并批量绑定用户领取策略模板。",
-            permission: "users:view"
+            permission: "users:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -217,7 +226,8 @@ export const router = createRouter({
             eyebrow: "人员详情",
             title: "单人员详情与操作记录",
             description: "按角色查看人员信息、业务日时段完成情况、记录与手工补扣。",
-            permission: "users:view"
+            permission: "users:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -228,7 +238,8 @@ export const router = createRouter({
             eyebrow: "日志总览",
             title: "系统操作日志",
             description: "按时间倒序查看动作句式日志，并按主体筛选。",
-            permission: "operation-logs:view"
+            permission: "operation-logs:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         },
         {
@@ -239,7 +250,8 @@ export const router = createRouter({
             eyebrow: "日志详情",
             title: "单条日志详情",
             description: "查看时间、动作人、主体对象、结果和详细说明。",
-            permission: "operation-logs:view"
+            permission: "operation-logs:view",
+            backofficeRoles: ["super_admin", "admin"]
           }
         }
       ]

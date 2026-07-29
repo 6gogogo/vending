@@ -423,6 +423,10 @@ export const adminApi = {
     requireAnyBackofficePermission(["devices:view", "warehouse:view"]);
     return adminClient.get<DeviceMonitoringDetail>(`/devices/${deviceCode}/monitoring`);
   },
+  assignedDeviceDetail(deviceCode: string) {
+    requireBackofficePermission("devices:view");
+    return adminClient.get<DeviceRecord>(`/devices/${deviceCode}`);
+  },
   deviceCallbackLogs(deviceCode: string, limit = 20) {
     requireBackofficePermission("operation-logs:view");
     return adminClient.get<CallbackLogRecord[]>("/cabinet-events/callback-logs", {

@@ -18,10 +18,10 @@ const defaultBackofficeRoutes: Array<{
   { permission: "dashboard:view", path: "/dashboard", roles: ["super_admin", "admin"] },
   { permission: "merchant-workbench:view", path: "/merchant", roles: ["merchant"] },
   { permission: "devices:view", path: "/operations", roles: ["super_admin", "admin", "merchant", "restocker"] },
-  { permission: "goods:view", path: "/goods", roles: ["super_admin", "admin", "merchant", "restocker"] },
-  { permission: "warehouse:view", path: "/warehouse", roles: ["super_admin", "admin", "merchant"] },
+  { permission: "goods:view", path: "/goods", roles: ["super_admin", "admin"] },
+  { permission: "warehouse:view", path: "/warehouse", roles: ["super_admin", "admin"] },
   { permission: "users:view", path: "/users", roles: ["super_admin", "admin"] },
-  { permission: "operation-logs:view", path: "/logs", roles: ["super_admin", "admin", "merchant"] },
+  { permission: "operation-logs:view", path: "/logs", roles: ["super_admin", "admin"] },
   { permission: "analytics:data-monitor:view", path: "/data-monitor", roles: ["super_admin", "admin"] },
   { permission: "ai-insights:view", path: "/ai", roles: ["super_admin", "admin"] },
   { permission: "system-settings:view", path: "/settings", roles: ["super_admin", "admin"] }

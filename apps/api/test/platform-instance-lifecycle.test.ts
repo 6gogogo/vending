@@ -1,6 +1,7 @@
 import "reflect-metadata";
 
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -567,6 +568,172 @@ test("服务商进入新实例后只获得隔离启动权限且看不到默认�
       store.findBackofficeCredentialByUserId(defaultMerchant.id, "merchant"),
       originalDefaultMerchantCredential
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test("非默认实例的商家和补货员只能读取各自已分配柜机", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const providerToken = createProviderToken(store);
+    const firstAdminUsername = `tenant-assigned-view-admin-${randomUUID().slice(0, 8)}`;
+    const firstAdminPassword = randomUUID();
+    const createTenantResponse = await fetch(`${baseUrl}/platform/tenants`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${providerToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        code: "tenant-assigned-view",
+        name: "分配柜机验证实例",
+        instanceUrl: "https://tenant-assigned-view.example.test",
+        firstAdmin: {
+          name: "分配柜机实例管理员",
+          phone: "18800000025",
+          username: firstAdminUsername,
+          password: firstAdminPassword
+        }
+      })
+    });
+    const createTenantPayload = (await createTenantResponse.json()) as {
+      data?: { tenant?: { id?: string } };
+    };
+    const tenantId = createTenantPayload.data?.tenant?.id;
+    assert.equal(createTenantResponse.status, 201);
+    assert.ok(tenantId);
+
+    const adminLoginResponse = await fetch(`${baseUrl}/auth/backoffice-login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: firstAdminUsername, password: firstAdminPassword })
+    });
+    const adminLoginPayload = (await adminLoginResponse.json()) as {
+      data?: { token?: string };
+    };
+    const tenantAdminToken = adminLoginPayload.data?.token;
+    assert.equal(adminLoginResponse.status, 201);
+    assert.ok(tenantAdminToken);
+
+    const createDevice = async (deviceCode: string, name: string) => {
+      const response = await fetch(`${baseUrl}/devices`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${tenantAdminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ deviceCode, name, location: "分配柜机验证点" })
+      });
+      const payload = (await response.json()) as {
+        data?: { deviceCode?: string; tenantId?: string };
+      };
+      assert.equal(response.status, 201);
+      assert.equal(payload.data?.deviceCode, deviceCode);
+      assert.equal(payload.data?.tenantId, tenantId);
+    };
+
+    const assignedDeviceCode = "TENANT-ASSIGNED-VIEW-1";
+    const unassignedDeviceCode = "TENANT-ASSIGNED-VIEW-2";
+    await createDevice(assignedDeviceCode, "已分配验证柜机");
+    await createDevice(unassignedDeviceCode, "未分配验证柜机");
+
+    const defaultDevice = store.devices.find(
+      (entry) => store.getDeviceTenantId(entry) === store.getDefaultTenantId()
+    );
+    assert.ok(defaultDevice);
+
+    const createAssignedRoleToken = async (
+      role: "merchant" | "restocker",
+      phone: string
+    ) => {
+      const userResponse = await fetch(`${baseUrl}/users`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${tenantAdminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          role,
+          phone,
+          name: role === "merchant" ? "实例商户柜机查看者" : "实例补货员柜机查看者"
+        })
+      });
+      const userPayload = (await userResponse.json()) as { data?: { id?: string; tenantId?: string } };
+      const userId = userPayload.data?.id;
+      assert.equal(userResponse.status, 201);
+      assert.ok(userId);
+      assert.equal(userPayload.data?.tenantId, tenantId);
+
+      const assignmentResponse = await fetch(
+        `${baseUrl}/users/${encodeURIComponent(userId)}/device-assignment`,
+        {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${tenantAdminToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ deviceCodes: [assignedDeviceCode] })
+        }
+      );
+      assert.equal(assignmentResponse.status, 200);
+
+      const username = `tenant-assigned-view-${role}-${randomUUID().slice(0, 8)}`;
+      const password = randomUUID();
+      const credentialResponse = await fetch(`${baseUrl}/auth/backoffice-credentials`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${tenantAdminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ userId, username, password, role })
+      });
+      assert.equal(credentialResponse.status, 201);
+
+      const loginResponse = await fetch(`${baseUrl}/auth/backoffice-login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const loginPayload = (await loginResponse.json()) as {
+        data?: { token?: string; user?: { backofficeRole?: string; tenantId?: string } };
+      };
+      assert.equal(loginResponse.status, 201);
+      assert.equal(loginPayload.data?.user?.backofficeRole, role);
+      assert.equal(loginPayload.data?.user?.tenantId, tenantId);
+      assert.ok(loginPayload.data?.token);
+      return loginPayload.data!.token!;
+    };
+
+    const merchantToken = await createAssignedRoleToken("merchant", "18800000026");
+    const restockerToken = await createAssignedRoleToken("restocker", "18800000027");
+
+    for (const token of [merchantToken, restockerToken]) {
+      const deviceResponses: Response[] = await Promise.all([
+        fetch(`${baseUrl}/devices/${encodeURIComponent(assignedDeviceCode)}`, {
+          headers: { authorization: `Bearer ${token}` }
+        }),
+        fetch(`${baseUrl}/devices/${encodeURIComponent(unassignedDeviceCode)}`, {
+          headers: { authorization: `Bearer ${token}` }
+        }),
+        fetch(`${baseUrl}/devices/${encodeURIComponent(defaultDevice.deviceCode)}`, {
+          headers: { authorization: `Bearer ${token}` }
+        })
+      ]);
+      const [assignedResponse, unassignedResponse, defaultResponse] = deviceResponses;
+      assert.ok(assignedResponse);
+      assert.ok(unassignedResponse);
+      assert.ok(defaultResponse);
+      const assignedPayload = (await assignedResponse.json()) as {
+        data?: { deviceCode?: string; tenantId?: string };
+      };
+      assert.equal(assignedResponse.status, 200);
+      assert.equal(assignedPayload.data?.deviceCode, assignedDeviceCode);
+      assert.equal(assignedPayload.data?.tenantId, tenantId);
+      assert.equal(unassignedResponse.status, 403);
+      assert.equal(defaultResponse.status, 403);
+    }
   } finally {
     await app.close();
   }

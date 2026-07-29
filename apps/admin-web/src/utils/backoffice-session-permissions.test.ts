@@ -72,6 +72,25 @@ test("商家与补货员按各自角色进入可用的首个后台页面", () =>
   assert.equal(resolveBackofficeDefaultPath("restocker", ["devices:view"]), "/operations");
 });
 
+test("商家和补货员不会因遗留权限落入管理员专属业务域", () => {
+  const legacyPermissions = ["devices:view", "goods:view", "warehouse:view", "operation-logs:view"];
+
+  assert.equal(resolveBackofficeDefaultPath("merchant", legacyPermissions), "/operations");
+  assert.equal(resolveBackofficeDefaultPath("restocker", legacyPermissions), "/operations");
+  assert.equal(
+    hasBackofficeRouteAccess("merchant", ["goods:view"], ["goods:view"], ["super_admin", "admin"]),
+    false
+  );
+  assert.equal(
+    hasBackofficeRouteAccess("restocker", ["operation-logs:view"], ["operation-logs:view"], ["super_admin", "admin"]),
+    false
+  );
+  assert.equal(
+    hasBackofficeRouteAccess("merchant", ["devices:manage"], ["devices:manage"], ["super_admin", "admin"]),
+    false
+  );
+});
+
 test("服务商与实例态超级管理员按会话权限进入对应工作台", () => {
   assert.equal(resolveBackofficeDefaultPath("super_admin", BACKOFFICE_PROVIDER_PERMISSIONS), "/platform");
   assert.equal(

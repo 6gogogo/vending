@@ -97,6 +97,11 @@ const adminSystemSettingsPageSource = readSource("apps/admin-web/src/pages/Syste
 const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
+const roleBoundaryLayoutSource = readSource("apps/admin-web/src/layouts/AdminLayout.vue");
+const adminSessionSource = readSource("apps/admin-web/src/stores/session.ts");
+const adminOperationsSource = readSource("apps/admin-web/src/pages/OperationsPage.vue");
+const deviceWorkspaceSource = readSource("apps/admin-web/src/pages/DeviceWorkspacePage.vue");
+const assignedDeviceDetailPageSource = readSource("apps/admin-web/src/pages/AssignedDeviceDetailPage.vue");
 const merchantBackofficeSource = readSource("apps/admin-web/src/pages/MerchantBackofficePage.vue");
 const publicConfigControllerSource = readSource("apps/api/src/app.controller.ts");
 const sharedTypesSource = readSource("packages/shared-types/src/index.ts");
@@ -152,6 +157,118 @@ assert.match(
   adminRouterSource,
   /path: "\/merchant"[\s\S]{0,420}backofficeRoles: \["merchant"\]/,
   "商家工作台路由必须同时限制商家角色"
+);
+const routeBlock = (path) => {
+  const start = adminRouterSource.indexOf(`path: "${path}"`);
+  const end = adminRouterSource.indexOf("\n        {", start + 1);
+  return start >= 0 ? adminRouterSource.slice(start, end >= 0 ? end : undefined) : "";
+};
+const navBlock = (path) => {
+  const start = roleBoundaryLayoutSource.indexOf(`to: "${path}"`);
+  const end = roleBoundaryLayoutSource.indexOf("\n      {", start + 1);
+  return start >= 0 ? roleBoundaryLayoutSource.slice(start, end >= 0 ? end : undefined) : "";
+};
+for (const path of [
+  "/dashboard",
+  "/goods",
+  "/goods/:goodsId",
+  "/data-monitor",
+  "/warehouse",
+  "/ai",
+  "/settings",
+  "/users",
+  "/users/:userId",
+  "/logs",
+  "/logs/:logId"
+]) {
+  assert.match(
+    routeBlock(path),
+    /backofficeRoles: \["super_admin", "admin"\]/,
+    `${path} 是管理员业务域，路由必须在请求 API 前限制后台角色`
+  );
+}
+assert.match(
+  routeBlock("/platform"),
+  /backofficeRoles: \["super_admin"\]/,
+  "/platform 是服务商业务域，路由必须限制超级管理员角色"
+);
+for (const path of [
+  "/dashboard",
+  "/goods",
+  "/data-monitor",
+  "/warehouse",
+  "/ai",
+  "/settings",
+  "/users",
+  "/logs"
+]) {
+  assert.match(
+    navBlock(path),
+    /roles: \["super_admin", "admin"\]/,
+    `${path} 菜单必须只向管理员角色显示`
+  );
+}
+assert.match(
+  navBlock("/platform"),
+  /roles: \["super_admin"\]/,
+  "/platform 菜单必须只向超级管理员角色显示"
+);
+assert.match(
+  roleBoundaryLayoutSource,
+  /const canViewDataMonitor = computed\(\(\) =>[\s\S]{0,180}hasBackofficeRouteRole\(sessionStore\.user\?\.backofficeRole, \["super_admin", "admin"\]\)/,
+  "顶部数据监控入口必须同时限制管理员角色"
+);
+assert.match(
+  roleBoundaryLayoutSource,
+  /v-if="canViewDataMonitor"[\s\S]{0,80}to="\/data-monitor"/,
+  "顶部数据监控直链必须复用角色受限的可见条件"
+);
+for (const path of ["/goods", "/warehouse", "/logs"]) {
+  const defaultRouteStart = adminSessionSource.indexOf(`path: "${path}"`);
+  const defaultRouteEnd = adminSessionSource.indexOf("\n", defaultRouteStart);
+  const defaultRoute = defaultRouteStart >= 0
+    ? adminSessionSource.slice(defaultRouteStart, defaultRouteEnd >= 0 ? defaultRouteEnd : undefined)
+    : "";
+  assert.doesNotMatch(
+    defaultRoute,
+    /merchant|restocker/,
+    `${path} 不得作为商户或补货员的默认落点`
+  );
+}
+assert.match(
+  routeBlock("/operations/:deviceCode"),
+  /component: DeviceWorkspacePage/,
+  "柜机详情必须按后台角色分流，不能把管理员监控页直接给商户或补货员"
+);
+assert.match(
+  adminApiSource,
+  /assignedDeviceDetail\(deviceCode: string\)[\s\S]{0,180}`\/devices\/\$\{deviceCode\}`/,
+  "商户和补货员柜机详情必须使用服务端已校验分配关系的只读接口"
+);
+assert.match(
+  adminOperationsSource,
+  /v-if="canViewDeviceLogs" class="admin-link" :to="`\/logs\?subjectType=device&subjectId=\$\{device\.deviceCode\}`"/,
+  "柜机列表不得向无日志访问权的角色展示日志入口"
+);
+assert.match(
+  adminOperationsSource,
+  /const canManageDevices = computed\(\(\) =>[\s\S]{0,180}hasBackofficeRouteRole\(sessionStore\.user\?\.backofficeRole, \["super_admin", "admin"\]\)/,
+  "柜机新增、编辑和删除必须同时要求管理员角色，不能只依赖可误授的权限"
+);
+assert.match(
+  deviceWorkspaceSource,
+  /<AssignedDeviceDetailPage v-if="usesAssignedDeviceWorkspace" \/>/,
+  "商户和补货员进入柜机详情时必须改用受限工作台"
+);
+assert.match(
+  assignedDeviceDetailPageSource,
+  /adminApi\.assignedDeviceDetail\(String\(route\.params\.deviceCode\)\)/,
+  "受限柜机工作台必须请求已分配柜机详情接口"
+);
+assert.doesNotMatch(
+  assignedDeviceDetailPageSource,
+  /adminApi\.(?:deviceDetail|refreshDevice|remoteOpenDevice|goodsCatalog|deviceCallbackLogs|systemAuditLogs)/,
+  "受限柜机工作台不得触发管理员监控、远程操作或审计接口"
 );
 assert.doesNotMatch(
   merchantBackofficeSource,

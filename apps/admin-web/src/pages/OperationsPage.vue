@@ -4,7 +4,7 @@ import { RouterLink } from "vue-router";
 import type { DeviceRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
-import { useAdminSessionStore } from "../stores/session";
+import { hasBackofficeRouteRole, useAdminSessionStore } from "../stores/session";
 import { formatDateTime, formatNowInBeijing } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
@@ -12,7 +12,14 @@ type DrawerMode = "" | "create-device" | "edit-device";
 
 const devices = ref<DeviceRecord[]>([]);
 const sessionStore = useAdminSessionStore();
-const canManageDevices = computed(() => sessionStore.can("devices:manage"));
+const canManageDevices = computed(() =>
+  sessionStore.can("devices:manage") &&
+  hasBackofficeRouteRole(sessionStore.user?.backofficeRole, ["super_admin", "admin"])
+);
+const canViewDeviceLogs = computed(() =>
+  sessionStore.can("operation-logs:view") &&
+  hasBackofficeRouteRole(sessionStore.user?.backofficeRole, ["super_admin", "admin"])
+);
 const loading = ref(false);
 const lastUpdatedAt = ref("");
 const loadError = ref("");
@@ -453,7 +460,7 @@ onUnmounted(() => {
             编辑柜机
           </button>
           <RouterLink class="admin-link" :to="`/operations/${device.deviceCode}`">详情</RouterLink>
-          <RouterLink class="admin-link" :to="`/logs?subjectType=device&subjectId=${device.deviceCode}`">日志</RouterLink>
+          <RouterLink v-if="canViewDeviceLogs" class="admin-link" :to="`/logs?subjectType=device&subjectId=${device.deviceCode}`">日志</RouterLink>
         </div>
       </article>
     </section>
