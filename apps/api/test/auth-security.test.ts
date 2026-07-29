@@ -19,6 +19,10 @@ import {
   MIN_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH,
   recoverAdminBackofficePassword
 } from "../src/modules/auth/first-backoffice-password";
+import {
+  initializeFirstSuperAdminPassword,
+  MIN_FIRST_SUPER_ADMIN_PASSWORD_LENGTH
+} from "../src/modules/auth/first-super-admin-password";
 import { verifyAdminPassword } from "../src/modules/auth/admin-password.utils";
 import { AuthService } from "../src/modules/auth/auth.service";
 import { VerificationCodeService } from "../src/modules/auth/verification-code.service";
@@ -463,6 +467,60 @@ test("首次后台密码初始化允许六位密码、仅允许默认 admin，�
         "x".repeat(MIN_FIRST_BACKOFFICE_PASSWORD_LENGTH - 1)
       ),
     /至少需要/
+  );
+});
+
+test("服务商超级管理员首次改密只处理固定默认账号、保持常规八位规则并撤销旧会话", () => {
+  const store = createIsolatedStore();
+  const candidates = store.backofficeCredentials.filter((credential) =>
+    store.isDefaultSuperAdminBootstrapCredential(credential)
+  );
+  assert.equal(candidates.length, 1);
+  const [credential] = candidates;
+  const user = store.users.find((entry) => entry.id === credential.userId);
+  assert.ok(user);
+  assert.equal(credential.role, "super_admin");
+  assert.equal(credential.tenantId, undefined);
+
+  const renamedStore = createIsolatedStore();
+  const renamedCredential = renamedStore.backofficeCredentials.find((entry) =>
+    renamedStore.isDefaultSuperAdminBootstrapCredential(entry)
+  );
+  assert.ok(renamedCredential);
+  renamedCredential.username = "renamed-super-admin";
+  assert.equal(renamedStore.isDefaultSuperAdminBootstrapCredential(renamedCredential), false);
+
+  const existingSession = store.createBackofficeSession(user, credential.role, credential.tenantId);
+  const password = "s".repeat(MIN_FIRST_SUPER_ADMIN_PASSWORD_LENGTH);
+  assert.equal(MIN_FIRST_SUPER_ADMIN_PASSWORD_LENGTH, 8);
+  const result = initializeFirstSuperAdminPassword(store, password);
+
+  assert.equal(result.credential.role, "super_admin");
+  assert.equal(result.credential.usesDefaultPassword, false);
+  assert.equal(store.isDefaultSuperAdminBootstrapCredential(result.credential), false);
+  assert.equal(
+    verifyAdminPassword(password, result.credential.passwordSalt, result.credential.passwordHash),
+    true
+  );
+  assert.equal(store.getSession(existingSession), undefined);
+  assert.ok(
+    store.logs.some(
+      (entry) =>
+        entry.type === "initialize-first-super-admin-password" &&
+        entry.metadata?.initializationMethod === "local-tty"
+    )
+  );
+  assert.throws(
+    () => initializeFirstSuperAdminPassword(store, password),
+    /不处于可首次改密的默认状态/u
+  );
+  assert.throws(
+    () =>
+      initializeFirstSuperAdminPassword(
+        createIsolatedStore(),
+        "x".repeat(MIN_FIRST_SUPER_ADMIN_PASSWORD_LENGTH - 1)
+      ),
+    /至少需要/u
   );
 });
 

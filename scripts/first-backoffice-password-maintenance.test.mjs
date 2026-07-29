@@ -119,6 +119,52 @@ test("首次初始化维护入口仍可直接启动并拒绝命令行参数", ()
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
+test("服务商超级管理员首次密码维护入口固定运行器且拒绝命令行参数", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(
+        repositoryRoot,
+        "scripts",
+        "run-first-super-admin-password-maintenance.mjs"
+      ),
+      "--probe"
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /服务商超级管理员首次密码维护命令不接受任何参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
+test("服务商超级管理员首次密码维护脚本使用 API tsconfig 装载并拒绝参数", () => {
+  const command = resolveTypeScriptMaintenanceCommand({
+    tsxCliPath: resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    tsconfigPath: resolve(repositoryRoot, "apps", "api", "tsconfig.json"),
+    scriptPath: resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "initialize-first-super-admin-password.ts"
+    ),
+    args: ["--probe"]
+  });
+  const result = spawnSync(process.execPath, command, {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /本命令不接受参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
 test("首次后台密码预检入口拒绝命令行参数，避免注入密码或运行模式", () => {
   const result = spawnSync(
     process.execPath,
@@ -141,6 +187,28 @@ test("首次后台密码预检入口拒绝命令行参数，避免注入密码�
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
+test("服务商超级管理员首次密码预检入口拒绝命令行参数", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(
+        repositoryRoot,
+        "scripts",
+        "run-first-super-admin-password-maintenance-preflight.mjs"
+      ),
+      "--probe"
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /服务商超级管理员首次密码维护预检命令不接受任何参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
 test("首次后台密码预检脚本使用 API tsconfig 装载并拒绝参数", () => {
   const command = resolveTypeScriptMaintenanceCommand({
     tsxCliPath: resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
@@ -152,6 +220,30 @@ test("首次后台密码预检脚本使用 API tsconfig 装载并拒绝参数", 
       "src",
       "scripts",
       "verify-first-backoffice-password-maintenance.ts"
+    ),
+    args: ["--probe"]
+  });
+  const result = spawnSync(process.execPath, command, {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /本命令不接受参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
+test("服务商超级管理员首次密码预检脚本使用 API tsconfig 装载并拒绝参数", () => {
+  const command = resolveTypeScriptMaintenanceCommand({
+    tsxCliPath: resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    tsconfigPath: resolve(repositoryRoot, "apps", "api", "tsconfig.json"),
+    scriptPath: resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "verify-first-super-admin-password-maintenance.ts"
     ),
     args: ["--probe"]
   });
@@ -213,6 +305,29 @@ test("首次初始化在要求输入密码前先取得金融单写租约", () =>
       source.indexOf("password = await readConfirmedPassword"),
     "金融单写租约必须在密码输入前取得"
   );
+});
+
+test("服务商超级管理员首次改密在要求输入密码前先取得金融单写租约", () => {
+  const source = readFileSync(
+    resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "initialize-first-super-admin-password.ts"
+    ),
+    "utf8"
+  );
+  const leasePosition = source.indexOf(
+    "const financialWriter = acquireFinancialSingleWriterForMaintenance()"
+  );
+  const targetPosition = source.indexOf("assertFirstSuperAdminPasswordTarget(store)");
+  const passwordPromptPosition = source.indexOf("password = await readConfirmedPassword");
+
+  assert.ok(leasePosition >= 0);
+  assert.ok(targetPosition > leasePosition);
+  assert.ok(passwordPromptPosition > targetPosition);
 });
 
 test("已初始化 admin 的本机维护会先校验当前密码，再请求新密码", () => {
@@ -382,6 +497,41 @@ test("首次后台密码预检使用独立受控 drop-in，并保持同一 VNC T
   assert.doesNotMatch(plan.contents, /(?:password|code|secret)=/iu);
 });
 
+test("服务商超级管理员首次改密与预检使用独立受控 drop-in，不注入环境变量", () => {
+  const maintenancePlan = resolveFirstBackofficeMaintenancePlan({
+    runtimeDirectory: "/run/user/1000",
+    workingDirectory: "/home/fivegogogo/vending/current",
+    nodeExecutable: "/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/node",
+    runnerPath:
+      "/home/fivegogogo/vending/current/scripts/first-super-admin-password-maintenance-runner.mjs",
+    ttyPath: "/dev/pts/8",
+    dropInName: "98-first-super-admin-password-maintenance.conf"
+  });
+  const preflightPlan = resolveFirstBackofficeMaintenancePlan({
+    runtimeDirectory: "/run/user/1000",
+    workingDirectory: "/home/fivegogogo/vending/current",
+    nodeExecutable: "/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/node",
+    runnerPath:
+      "/home/fivegogogo/vending/current/scripts/first-super-admin-password-maintenance-preflight-runner.mjs",
+    ttyPath: "/dev/pts/8",
+    dropInName: "99-first-super-admin-password-maintenance-preflight.conf"
+  });
+
+  assert.equal(
+    maintenancePlan.dropInPath,
+    "/run/user/1000/systemd/user/vending-api-candidate.service.d/98-first-super-admin-password-maintenance.conf"
+  );
+  assert.equal(
+    preflightPlan.dropInPath,
+    "/run/user/1000/systemd/user/vending-api-candidate.service.d/99-first-super-admin-password-maintenance-preflight.conf"
+  );
+  assert.notEqual(maintenancePlan.dropInPath, preflightPlan.dropInPath);
+  assert.doesNotMatch(maintenancePlan.contents, /^Environment(?:File)?=/mu);
+  assert.doesNotMatch(preflightPlan.contents, /^Environment(?:File)?=/mu);
+  assert.doesNotMatch(maintenancePlan.contents, /(?:password|code|secret)=/iu);
+  assert.doesNotMatch(preflightPlan.contents, /(?:password|code|secret)=/iu);
+});
+
 test("会话验证固定走系统总线并使用最小子进程环境", () => {
   assert.deepEqual(LOGIND_COMMAND_ENVIRONMENT, {
     PATH: "/usr/bin:/bin",
@@ -417,6 +567,14 @@ test("旧的直接首次密码初始化 npm 入口已移除", () => {
   assert.equal(
     rootPackage.scripts["preflight:first-backoffice-password:maintenance"],
     "node scripts/run-first-backoffice-password-maintenance-preflight.mjs"
+  );
+  assert.equal(
+    rootPackage.scripts["init:first-super-admin-password:maintenance"],
+    "node scripts/run-first-super-admin-password-maintenance.mjs"
+  );
+  assert.equal(
+    rootPackage.scripts["preflight:first-super-admin-password:maintenance"],
+    "node scripts/run-first-super-admin-password-maintenance-preflight.mjs"
   );
 });
 

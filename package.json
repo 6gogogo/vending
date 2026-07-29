@@ -13,6 +13,8 @@
     "init:live-data": "npm run data:init:live --workspace @vm/api",
     "init:first-backoffice-password:maintenance": "node scripts/run-first-backoffice-password-maintenance.mjs",
     "preflight:first-backoffice-password:maintenance": "node scripts/run-first-backoffice-password-maintenance-preflight.mjs",
+    "init:first-super-admin-password:maintenance": "node scripts/run-first-super-admin-password-maintenance.mjs",
+    "preflight:first-super-admin-password:maintenance": "node scripts/run-first-super-admin-password-maintenance-preflight.mjs",
     "recover:admin-backoffice-password:maintenance": "node scripts/run-recover-admin-backoffice-password-maintenance.mjs",
     "init:all-data:keep-uploads": "npm run data:init:empty --workspace @vm/api -- --keep-uploads",
     "backup:api-data": "npm run data:backup --workspace @vm/api --",

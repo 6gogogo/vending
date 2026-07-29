@@ -50,7 +50,10 @@ import {
   type WarehouseRecord
 } from "@vm/shared-types";
 
-import { hashAdminPassword } from "../../modules/auth/admin-password.utils";
+import {
+  hashAdminPassword,
+  verifyAdminPassword
+} from "../../modules/auth/admin-password.utils";
 import {
   createCallbackReplayFingerprint,
   summarizeCallbackPayload
@@ -1092,6 +1095,33 @@ export class InMemoryStoreService {
   findBackofficeCredentialByUserId(userId: string, role?: BackofficeRole) {
     return this.backofficeCredentials.find(
       (entry) => entry.userId === userId && (!role || entry.role === role)
+    );
+  }
+
+  /**
+   * 仅供受控 VNC 本机首次改密维护识别模拟平面中的内建服务商账号。
+   * 不暴露默认口令，也不允许调用方指定用户名、用户、租户或角色。
+   */
+  isDefaultSuperAdminBootstrapCredential(credential: BackofficeCredentialRecord) {
+    const user = this.users.find((entry) => entry.id === credential.userId);
+
+    return Boolean(
+      (credential.userId === DEFAULT_SUPER_ADMIN_USER_ID ||
+        credential.userId === LEGACY_SUPER_ADMIN_USER_ID) &&
+        credential.username === DEFAULT_SUPER_ADMIN_USERNAME &&
+        credential.role === "super_admin" &&
+        credential.tenantId === undefined &&
+        credential.usesDefaultPassword &&
+        user &&
+        user.role === "admin" &&
+        user.status === "active" &&
+        user.tags.includes(SUPER_ADMIN_TAG) &&
+        user.tags.includes(HIDDEN_BACKOFFICE_USER_TAG) &&
+        verifyAdminPassword(
+          DEFAULT_SUPER_ADMIN_PASSWORD,
+          credential.passwordSalt,
+          credential.passwordHash
+        )
     );
   }
 
