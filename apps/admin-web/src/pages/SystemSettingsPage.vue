@@ -469,6 +469,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="admin-toolbar settings-page__actions">
+          <RouterLink class="admin-button admin-button--ghost settings-page__guide-link" to="/guide">查看操作说明</RouterLink>
           <button class="admin-button admin-button--ghost" type="button" :disabled="loading || saving" @click="loadSettings">
             {{ loading ? "刷新中" : "刷新" }}
           </button>
@@ -490,10 +491,7 @@ onBeforeUnmount(() => {
         当前账号只有查看权限，不能修改或保存系统设置。
       </div>
       <div class="admin-note settings-page__note">
-        {{ instanceSettingsIntro }}
-      </div>
-      <div class="admin-note settings-page__note">
-        运行环境、运行数据、外部服务和密钥由服务管理员维护，本页不会要求实例管理员填写这些内容。
+        {{ instanceSettingsIntro }}运行环境、运行数据、外部服务和密钥由服务管理员维护，本页无需填写这些内容。
       </div>
       <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
@@ -930,6 +928,10 @@ onBeforeUnmount(() => {
 .settings-page__choice:disabled {
   cursor: not-allowed;
   opacity: 0.62;
+}
+
+.settings-page__guide-link {
+  text-decoration: none;
 }
 
 .settings-page__example-help {

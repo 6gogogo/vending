@@ -103,6 +103,7 @@ const adminOperationsSource = readSource("apps/admin-web/src/pages/OperationsPag
 const deviceWorkspaceSource = readSource("apps/admin-web/src/pages/DeviceWorkspacePage.vue");
 const assignedDeviceDetailPageSource = readSource("apps/admin-web/src/pages/AssignedDeviceDetailPage.vue");
 const merchantBackofficeSource = readSource("apps/admin-web/src/pages/MerchantBackofficePage.vue");
+const systemSettingsPageSource = readSource("apps/admin-web/src/pages/SystemSettingsPage.vue");
 const publicConfigControllerSource = readSource("apps/api/src/app.controller.ts");
 const sharedTypesSource = readSource("packages/shared-types/src/index.ts");
 const adminPublicConfigSource = readSource("apps/admin-web/src/utils/public-config.ts");
@@ -168,6 +169,21 @@ assert.match(
   "后台登录页在手机宽度必须保留左右安全边距"
 );
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
+assert.match(
+  systemSettingsPageSource,
+  /<RouterLink class="admin-button admin-button--ghost settings-page__guide-link" to="\/guide">查看操作说明<\/RouterLink>/,
+  "系统设置页必须提供独立的详细操作说明入口"
+);
+assert.match(
+  systemSettingsPageSource,
+  /getSystemSettingOperatorDescription\(entry\)/,
+  "系统设置页必须显示短操作提示"
+);
+assert.doesNotMatch(
+  systemSettingsPageSource,
+  /\{\{\s*entry\.description\s*\}\}/,
+  "系统设置页不得直接展示部署配置原始说明"
+);
 assert.match(
   adminRouterSource,
   /path: "\/merchant"[\s\S]{0,420}backofficeRoles: \["merchant"\]/,
