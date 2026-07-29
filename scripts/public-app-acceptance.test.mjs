@@ -140,7 +140,6 @@ test("受控公网验收仅使用正式接口，并在成功后取消预约和�
   const report = [];
   const inputs = {
     adminPassword: "test-admin-password",
-    testPhone: "18800000001",
     manualCode: "314159"
   };
 
@@ -198,16 +197,43 @@ test("受控公网验收仅使用正式接口，并在成功后取消预约和�
     "fixture-device"
   );
 
+  const fixturePhone = calls.find((call) => call.path === "/api/users")?.body?.phone;
+  assert.match(fixturePhone, /^1\d{10}$/u);
+
   const emitted = JSON.stringify(report);
   for (const sensitiveValue of [
     inputs.adminPassword,
-    inputs.testPhone,
+    fixturePhone,
     inputs.manualCode,
     "backoffice-session-token",
     "app-session-token"
   ]) {
     assert.doesNotMatch(emitted, new RegExp(sensitiveValue, "u"));
   }
+});
+
+test("受控公网验收从运行参考号生成未回显的自建夹具手机号", async () => {
+  const { calls, fetchImpl } = createFixtureFetch();
+  const report = [];
+  const inputs = {
+    adminPassword: "test-admin-password",
+    manualCode: "314159"
+  };
+
+  await runPublicAppAcceptance({
+    fetchImpl,
+    publicApiBaseUrl,
+    inputs,
+    createRunReference: () => "f0f0f0f0-0000-4000-8000-000000000006",
+    report: (event) => report.push(event)
+  });
+
+  const fixturePhone = calls.find((call) => call.path === "/api/users")?.body?.phone;
+  assert.match(fixturePhone, /^1\d{10}$/u);
+  const appLoginCalls = calls.filter((call) => call.path === "/api/auth/app-login");
+  assert.equal(appLoginCalls.length, 2);
+  assert.ok(appLoginCalls.every((call) => call.body?.phone === fixturePhone));
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(fixturePhone, "u"));
 });
 
 test("不符合隔离手动码前提时，在任何认证或写入前关闭式停止", async () => {
@@ -219,7 +245,6 @@ test("不符合隔离手动码前提时，在任何认证或写入前关闭式�
         publicApiBaseUrl,
         inputs: {
           adminPassword: "test-admin-password",
-          testPhone: "18800000001",
           manualCode: "314159"
         },
         fetchImpl: async (url, init = {}) => {
@@ -277,7 +302,6 @@ test("维护中柜机不会被当作可预约候选，且不会创建夹具", as
         publicApiBaseUrl,
         inputs: {
           adminPassword: "test-admin-password",
-          testPhone: "18800000001",
           manualCode: "314159"
         },
         createRunReference: () => "f0f0f0f0-0000-4000-8000-000000000002"
@@ -311,7 +335,6 @@ test("签码后登录失败时接受撤销接口的 201，并清理已创建夹�
         publicApiBaseUrl,
         inputs: {
           adminPassword: "test-admin-password",
-          testPhone: "18800000001",
           manualCode: "314159"
         },
         createRunReference: () => "f0f0f0f0-0000-4000-8000-000000000003"
@@ -349,7 +372,6 @@ test("创建人员响应无法确认时不猜测删除对象，只给出非敏�
         publicApiBaseUrl,
         inputs: {
           adminPassword: "test-admin-password",
-          testPhone: "18800000001",
           manualCode: "314159"
         },
         createRunReference: () => reference
@@ -384,7 +406,6 @@ test("取消预约未确认时保留夹具，不删除仍有有效预约的用�
         publicApiBaseUrl,
         inputs: {
           adminPassword: "test-admin-password",
-          testPhone: "18800000001",
           manualCode: "314159"
         }
       }),

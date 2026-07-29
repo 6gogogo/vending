@@ -59,9 +59,15 @@ export const printPublicAppAcceptanceFailure = (error, output = process.stderr) 
     typeof error?.recoveryReference === "string" && /^[a-f0-9-]{16,64}$/u.test(error.recoveryReference)
       ? error.recoveryReference
       : undefined;
+  const status =
+    Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599
+      ? error.status
+      : undefined;
   output.write(
     stage
-      ? `${operation}未完成：步骤“${stage}”未通过；不会输出输入内容。${
+      ? `${operation}未完成：步骤“${stage}”未通过（${
+          status === undefined ? "未取得可确认的 HTTP 状态" : `HTTP ${status}`
+        }）；不会输出输入内容。${
           recoveryReference ? `请记录非敏感运行参考号：${recoveryReference}。` : ""
         }\n`
       : `${operation}未完成：前置校验或受控接口步骤未通过；不会输出输入内容。\n`
@@ -80,14 +86,13 @@ export const executePublicAppAcceptance = async () => {
     }
   });
   process.stdout.write(
-    "将只走已有 HTTPS 业务接口，创建后清理本次测试夹具；不操作库存、柜机、支付或系统设置。操作审计会保留。\n"
+    "将只走已有 HTTPS 业务接口，自动生成并清理本次测试夹具；不操作库存、柜机、支付或系统设置。操作审计会保留。\n"
   );
 
   const adminPassword = await readHiddenLine("请输入后台管理员密码（不回显）：");
-  const testPhone = await readHiddenLine("请输入本次专用测试手机号（不回显）：");
   const manualCode = await readHiddenLine("请输入本次 6 位人工验证码（不回显）：");
   const result = await runPublicAppAcceptance({
-    inputs: { adminPassword, testPhone, manualCode },
+    inputs: { adminPassword, manualCode },
     report: ({ stage, outcome }) => {
       const label = outcome === "passed" ? "通过" : "未通过";
       process.stdout.write(`验收步骤：${stage}（${label}）。\n`);

@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+PATH=/usr/bin:/bin
+export PATH
+
+if [ "$#" -ne 0 ]; then
+  printf '%s\n' '受控公网 App 验收不接受任何参数。' >&2
+  exit 64
+fi
+
+[ "$(/usr/bin/id -u)" -eq 0 ] || {
+  printf '%s\n' '受控公网 App 验收必须由固定 sudo 规则启动。' >&2
+  exit 1
+}
+
+exec /usr/bin/env -i \
+  PATH=/usr/bin:/bin \
+  LANG=C \
+  LC_ALL=C \
+  /usr/bin/node \
+  --no-addons \
+  /usr/local/lib/vending-public-app-acceptance/v2/vending-public-app-acceptance-bootstrap.mjs

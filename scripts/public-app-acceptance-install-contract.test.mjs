@@ -46,3 +46,21 @@ test("固定启动器清空环境、使用系统 Node，并且 sudo 规则禁止
   assert.match(bootstrap, /dropToServiceUser\(\{ identity: resolveServiceUserIdentity\(\) \}\)/u);
   assert.match(bootstrap, /module\.printPublicAppAcceptanceFailure\(error\)/u);
 });
+
+test("v2 升级器只接受已核验 v1，并原子切换固定启动器且保留回退", () => {
+  const source = readSource("deploy/public-app-acceptance/upgrade-root-owned-runtime-v2.sh");
+  const wrapper = readSource("deploy/public-app-acceptance/v2/vending-public-app-acceptance");
+
+  assert.match(source, /V1_ROOT=\$INSTALL_PARENT\/v1/u);
+  assert.match(source, /V2_ROOT=\$INSTALL_PARENT\/v2/u);
+  assert.match(source, /WRAPPER_BACKUP=\$INSTALL_PARENT\/v1-wrapper-before-v2/u);
+  assert.match(source, /expected_wrapper_hash=.*SOURCE_DIR\/v1\/vending-public-app-acceptance/u);
+  assert.match(source, /actual_sudoers_hash=.*SUDOERS_PATH/u);
+  assert.match(source, /\/usr\/bin\/mv -- "\$WRAPPER_PATH" "\$WRAPPER_BACKUP"/u);
+  assert.match(source, /\/usr\/bin\/mv -- "\$STAGING_WRAPPER" "\$WRAPPER_PATH"/u);
+  assert.match(source, /rollback_committed_upgrade/u);
+  assert.match(source, /\\"schema\\":\\"vending-public-app-acceptance-runtime\/v2\\"/u);
+  assert.match(source, /\\"version\\":\\"v2\\"/u);
+  assert.match(wrapper, /\/usr\/local\/lib\/vending-public-app-acceptance\/v2\/vending-public-app-acceptance-bootstrap\.mjs/u);
+  assert.doesNotMatch(source, /\/usr\/bin\/mv -- "\$STAGING_SUDOERS"/u);
+});

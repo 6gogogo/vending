@@ -4,8 +4,42 @@ import * as nativeFs from "node:fs";
 import * as nativePath from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const RUNTIME_VERSION = "v1";
-export const RUNTIME_ROOT = "/usr/local/lib/vending-public-app-acceptance/v1";
+const runtimeInstallParent = "/usr/local/lib/vending-public-app-acceptance";
+const supportedRuntimeVersionPattern = /^v[1-9]\d*$/u;
+
+export const resolveRuntimeConfiguration = ({
+  currentFilePath = fileURLToPath(import.meta.url),
+  platform = process.platform,
+  pathApi = nativePath
+} = {}) => {
+  const fallbackVersion = "v1";
+  const fallback = {
+    runtimeVersion: fallbackVersion,
+    runtimeRoot: `${runtimeInstallParent}/${fallbackVersion}`
+  };
+
+  if (platform !== "linux") {
+    return fallback;
+  }
+
+  const resolvedCurrentFile = pathApi.resolve(String(currentFilePath ?? ""));
+  const runtimeRoot = pathApi.dirname(resolvedCurrentFile);
+  const runtimeVersion = pathApi.basename(runtimeRoot);
+
+  if (
+    pathApi.dirname(runtimeRoot) !== runtimeInstallParent ||
+    !supportedRuntimeVersionPattern.test(runtimeVersion)
+  ) {
+    return fallback;
+  }
+
+  return { runtimeVersion, runtimeRoot };
+};
+
+const defaultRuntimeConfiguration = resolveRuntimeConfiguration();
+
+export const RUNTIME_VERSION = defaultRuntimeConfiguration.runtimeVersion;
+export const RUNTIME_ROOT = defaultRuntimeConfiguration.runtimeRoot;
 export const BOOTSTRAP_FILE_NAME = "vending-public-app-acceptance-bootstrap.mjs";
 export const MANIFEST_FILE_NAME = "manifest.json";
 export const MANIFEST_DIGEST_FILE_NAME = "manifest.sha256";
@@ -18,7 +52,7 @@ export const REQUIRED_RUNTIME_FILES = Object.freeze([
   "first-backoffice-password-maintenance.mjs"
 ]);
 
-const manifestSchema = "vending-public-app-acceptance-runtime/v1";
+const manifestSchemaPrefix = "vending-public-app-acceptance-runtime";
 const rootFileMode = 0o600;
 const rootRuntimeDirectoryMode = 0o700;
 const rootDirectoryModeMask = 0o022;
@@ -132,11 +166,11 @@ const parseManifest = ({ fs, manifestPath, manifestDigestPath }) => {
   }
 };
 
-const assertManifestContract = ({ manifest, runtimeRoot }) => {
+const assertManifestContract = ({ manifest, runtimeRoot, runtimeVersion }) => {
   if (
     !manifest ||
-    manifest.schema !== manifestSchema ||
-    manifest.version !== RUNTIME_VERSION ||
+    manifest.schema !== `${manifestSchemaPrefix}/${runtimeVersion}` ||
+    manifest.version !== runtimeVersion ||
     !safeCommitPattern.test(String(manifest.sourceCommit ?? "")) ||
     manifest.runtimeRoot !== runtimeRoot ||
     manifest.entrypoint !== BOOTSTRAP_FILE_NAME ||
@@ -163,24 +197,33 @@ const assertManifestContract = ({ manifest, runtimeRoot }) => {
 export const assertSealedRuntime = ({
   fs = nativeFs,
   pathApi = nativePath,
-  runtimeRoot = RUNTIME_ROOT,
+  runtimeRoot = undefined,
+  runtimeVersion = undefined,
   currentFilePath = fileURLToPath(import.meta.url),
   execPath = process.execPath,
   platform = process.platform,
   uid = process.getuid(),
   environment = process.env
 } = {}) => {
+  const resolvedRuntimeConfiguration = resolveRuntimeConfiguration({
+    currentFilePath,
+    platform,
+    pathApi
+  });
+  const selectedRuntimeRoot = runtimeRoot ?? resolvedRuntimeConfiguration.runtimeRoot;
+  const selectedRuntimeVersion = runtimeVersion ?? resolvedRuntimeConfiguration.runtimeVersion;
+
   if (platform !== "linux" || uid !== 0) {
     fail("root_bootstrap_linux_required");
   }
 
-  const resolvedRuntimeRoot = fs.realpathSync(runtimeRoot);
-  if (resolvedRuntimeRoot !== runtimeRoot) {
+  const resolvedRuntimeRoot = fs.realpathSync(selectedRuntimeRoot);
+  if (resolvedRuntimeRoot !== selectedRuntimeRoot) {
     fail("fixed_runtime_path_required");
   }
 
   const resolvedCurrentFile = fs.realpathSync(currentFilePath);
-  const expectedBootstrapPath = pathApi.join(runtimeRoot, BOOTSTRAP_FILE_NAME);
+  const expectedBootstrapPath = pathApi.join(selectedRuntimeRoot, BOOTSTRAP_FILE_NAME);
   if (resolvedCurrentFile !== expectedBootstrapPath) {
     fail("fixed_entrypoint_path_required");
   }
@@ -191,18 +234,22 @@ export const assertSealedRuntime = ({
   }
 
   assertTrustedNodeBinary({ fs, pathApi, execPath });
-  assertRootPrivateRuntimeDirectory(fs.lstatSync(runtimeRoot));
-  assertRootOwnedDirectoryChain({ fs, pathApi, directoryPath: runtimeRoot });
+  assertRootPrivateRuntimeDirectory(fs.lstatSync(selectedRuntimeRoot));
+  assertRootOwnedDirectoryChain({ fs, pathApi, directoryPath: selectedRuntimeRoot });
 
-  const manifestPath = pathApi.join(runtimeRoot, MANIFEST_FILE_NAME);
-  const manifestDigestPath = pathApi.join(runtimeRoot, MANIFEST_DIGEST_FILE_NAME);
+  const manifestPath = pathApi.join(selectedRuntimeRoot, MANIFEST_FILE_NAME);
+  const manifestDigestPath = pathApi.join(selectedRuntimeRoot, MANIFEST_DIGEST_FILE_NAME);
   assertRootOwnedRegularFile(fs.lstatSync(manifestPath));
   assertRootOwnedRegularFile(fs.lstatSync(manifestDigestPath));
   const manifest = parseManifest({ fs, manifestPath, manifestDigestPath });
-  assertManifestContract({ manifest, runtimeRoot });
+  assertManifestContract({
+    manifest,
+    runtimeRoot: selectedRuntimeRoot,
+    runtimeVersion: selectedRuntimeVersion
+  });
 
   for (const fileName of REQUIRED_RUNTIME_FILES) {
-    const filePath = pathApi.join(runtimeRoot, fileName);
+    const filePath = pathApi.join(selectedRuntimeRoot, fileName);
     assertRootOwnedRegularFile(fs.lstatSync(filePath));
     if (sha256(fs.readFileSync(filePath)) !== manifest.files[fileName]) {
       fail("runtime_file_hash_mismatch");
@@ -210,8 +257,8 @@ export const assertSealedRuntime = ({
   }
 
   return {
-    runtimeRoot,
-    entryPath: pathApi.join(runtimeRoot, RUNTIME_ENTRY_FILE_NAME)
+    runtimeRoot: selectedRuntimeRoot,
+    entryPath: pathApi.join(selectedRuntimeRoot, RUNTIME_ENTRY_FILE_NAME)
   };
 };
 

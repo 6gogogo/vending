@@ -31,21 +31,25 @@ const assertExactPublicApiBaseUrl = (value) => {
 
 const assertInputs = (inputs) => {
   const adminPassword = asString(inputs?.adminPassword);
-  const testPhone = asString(inputs?.testPhone);
   const manualCode = asString(inputs?.manualCode);
 
   if (!adminPassword) {
     throw new Error("本机后台密码不能为空。");
   }
-  if (!/^1\d{10}$/u.test(testPhone)) {
-    throw new Error("本机验收手机号格式无效。");
-  }
-
   if (!/^\d{6}$/u.test(manualCode)) {
     throw new Error("人工验证码必须为 6 位数字。");
   }
 
-  return { adminPassword, testPhone, manualCode };
+  return { adminPassword, manualCode };
+};
+
+const createAcceptanceTestPhone = (runReference) => {
+  const compactReference = runReference.replace(/-/gu, "");
+  const suffix = (BigInt(`0x${compactReference.slice(-16)}`) % 10_000_000_000n)
+    .toString()
+    .padStart(10, "0");
+
+  return `1${suffix}`;
 };
 
 const reportStage = (report, stage, outcome) => {
@@ -397,12 +401,13 @@ export const runPublicAppAcceptance = async ({
   report = undefined
 } = {}) => {
   const apiBaseUrl = assertExactPublicApiBaseUrl(publicApiBaseUrl);
-  const { adminPassword, testPhone, manualCode } = assertInputs(inputs);
+  const { adminPassword, manualCode } = assertInputs(inputs);
   const { request } = createRequestClient({ fetchImpl, publicApiBaseUrl: apiBaseUrl });
   const runReference = asString(createRunReference());
   if (!/^[a-f0-9-]{16,64}$/u.test(runReference)) {
     throw new Error("受控公网验收运行参考号无效。");
   }
+  const testPhone = createAcceptanceTestPhone(runReference);
   let adminToken;
   let appToken;
   let userId;

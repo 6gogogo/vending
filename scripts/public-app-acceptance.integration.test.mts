@@ -171,7 +171,6 @@ test("受控公网验收模块通过真实隔离 API 完成 App 登录、预约�
     const result = await runPublicAppAcceptance({
       inputs: {
         adminPassword: "isolated-runner-password",
-        testPhone: "18800000012",
         manualCode: "314159"
       },
       fetchImpl: (url, init) => {
@@ -189,7 +188,10 @@ test("受控公网验收模块通过真实隔离 API 完成 App 登录、预约�
       fixtureRemoved: true
     });
     assert.ok(report.some((entry) => entry.stage === "核验人工码已消费" && entry.outcome === "passed"));
-    assert.equal(store.users.some((entry) => entry.phone === "18800000012"), false);
+    assert.equal(
+      store.users.some((entry) => entry.name.startsWith("公网验收专用账号-")),
+      false
+    );
     assert.equal(
       store.reservations.filter((entry) => entry.status === "active").length,
       baselineActiveReservationCount
@@ -522,7 +524,6 @@ test("混合过期库存和已超时预约时保留既有可预约库存，并�
     const result = await runPublicAppAcceptance({
       inputs: {
         adminPassword: "isolated-mixed-stock-password",
-        testPhone: "18800000013",
         manualCode: "271828"
       },
       fetchImpl: async (url, init) => {

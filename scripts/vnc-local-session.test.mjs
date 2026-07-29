@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -100,11 +102,19 @@ test("仓库源码不能直接作为生产口令入口运行", () => {
   assert.match(result.stderr, /已封存的本机运行器/u);
 });
 
+test("封存运行器不再要求人工输入测试手机号", () => {
+  const source = readFileSync(resolve(import.meta.dirname, "run-public-app-acceptance.mjs"), "utf8");
+
+  assert.match(source, /自动生成并清理本次测试夹具/u);
+  assert.doesNotMatch(source, /请输入本次专用测试手机号/u);
+});
+
 test("已核验运行器的业务失败只输出安全阶段和非敏感参考号", () => {
   let output = "";
   printPublicAppAcceptanceFailure(
     {
       stage: "创建自建验收夹具",
+      status: 400,
       recoveryReference: "f0f0f0f0-0000-4000-8000-000000000005",
       message: "不应显示的底层内容"
     },
@@ -116,6 +126,7 @@ test("已核验运行器的业务失败只输出安全阶段和非敏感参考�
   );
 
   assert.match(output, /创建自建验收夹具/u);
+  assert.match(output, /HTTP 400/u);
   assert.match(output, /f0f0f0f0-0000-4000-8000-000000000005/u);
   assert.doesNotMatch(output, /底层内容/u);
 });

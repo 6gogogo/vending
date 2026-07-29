@@ -9,37 +9,42 @@ import {
   MANIFEST_FILE_NAME,
   REQUIRED_RUNTIME_FILES,
   RUNTIME_ROOT,
+  RUNTIME_VERSION,
   SealedRuntimeError,
   assertSealedRuntime,
-  dropToServiceUser
+  dropToServiceUser,
+  resolveRuntimeConfiguration
 } from "../deploy/public-app-acceptance/v1/vending-public-app-acceptance-bootstrap.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
-const createSealedRuntimeFixture = () => {
+const createSealedRuntimeFixture = ({
+  runtimeRoot = RUNTIME_ROOT,
+  runtimeVersion = RUNTIME_VERSION
+} = {}) => {
   const fileContents = new Map(
     REQUIRED_RUNTIME_FILES.map((fileName) => [
-      path.join(RUNTIME_ROOT, fileName),
+      path.join(runtimeRoot, fileName),
       Buffer.from(`sealed:${fileName}`, "utf8")
     ])
   );
   const manifest = {
-    schema: "vending-public-app-acceptance-runtime/v1",
-    version: "v1",
+    schema: `vending-public-app-acceptance-runtime/${runtimeVersion}`,
+    version: runtimeVersion,
     sourceCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    runtimeRoot: RUNTIME_ROOT,
+    runtimeRoot,
     entrypoint: BOOTSTRAP_FILE_NAME,
     files: Object.fromEntries(
       REQUIRED_RUNTIME_FILES.map((fileName) => {
-        const filePath = path.join(RUNTIME_ROOT, fileName);
+        const filePath = path.join(runtimeRoot, fileName);
         return [fileName, sha256(fileContents.get(filePath))];
       })
     )
   };
   const rawManifest = Buffer.from(JSON.stringify(manifest), "utf8");
-  fileContents.set(path.join(RUNTIME_ROOT, MANIFEST_FILE_NAME), rawManifest);
+  fileContents.set(path.join(runtimeRoot, MANIFEST_FILE_NAME), rawManifest);
   fileContents.set(
-    path.join(RUNTIME_ROOT, MANIFEST_DIGEST_FILE_NAME),
+    path.join(runtimeRoot, MANIFEST_DIGEST_FILE_NAME),
     Buffer.from(`${sha256(rawManifest)}\n`, "utf8")
   );
 
@@ -79,7 +84,7 @@ const createSealedRuntimeFixture = () => {
       if (fileContents.has(targetPath)) {
         return rootFileMetadata;
       }
-      if (targetPath === RUNTIME_ROOT) {
+      if (targetPath === runtimeRoot) {
         return runtimeDirectoryMetadata;
       }
       return directoryMetadata;
@@ -96,17 +101,23 @@ const createSealedRuntimeFixture = () => {
   return { fs, fileContents };
 };
 
-const assertFixture = (fixture, overrides = {}) =>
-  assertSealedRuntime({
+const assertFixture = (fixture, overrides = {}) => {
+  const runtimeRoot = overrides.runtimeRoot ?? RUNTIME_ROOT;
+  const runtimeVersion = overrides.runtimeVersion ?? RUNTIME_VERSION;
+
+  return assertSealedRuntime({
     fs: fixture.fs,
     pathApi: path,
-    currentFilePath: path.join(RUNTIME_ROOT, BOOTSTRAP_FILE_NAME),
+    runtimeRoot,
+    runtimeVersion,
+    currentFilePath: path.join(runtimeRoot, BOOTSTRAP_FILE_NAME),
     execPath: "/usr/bin/node",
     platform: "linux",
     uid: 0,
     environment: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" },
     ...overrides
   });
+};
 
 test("已封存运行器在固定路径、root 文件链和完整 SHA-256 清单通过后才放行", () => {
   const fixture = createSealedRuntimeFixture();
@@ -114,6 +125,32 @@ test("已封存运行器在固定路径、root 文件链和完整 SHA-256 清单
   assert.deepEqual(assertFixture(fixture), {
     runtimeRoot: RUNTIME_ROOT,
     entryPath: path.join(RUNTIME_ROOT, "run-public-app-acceptance.mjs")
+  });
+});
+
+test("v2 只从固定 root 私有路径解析，并核验 v2 清单", () => {
+  const v2Root = "/usr/local/lib/vending-public-app-acceptance/v2";
+  assert.deepEqual(
+    resolveRuntimeConfiguration({
+      currentFilePath: path.join(v2Root, BOOTSTRAP_FILE_NAME),
+      platform: "linux",
+      pathApi: path
+    }),
+    { runtimeVersion: "v2", runtimeRoot: v2Root }
+  );
+  assert.deepEqual(
+    resolveRuntimeConfiguration({
+      currentFilePath: "/tmp/v2/vending-public-app-acceptance-bootstrap.mjs",
+      platform: "linux",
+      pathApi: path
+    }),
+    { runtimeVersion: "v1", runtimeRoot: RUNTIME_ROOT }
+  );
+
+  const fixture = createSealedRuntimeFixture({ runtimeRoot: v2Root, runtimeVersion: "v2" });
+  assert.deepEqual(assertFixture(fixture, { runtimeRoot: v2Root, runtimeVersion: "v2" }), {
+    runtimeRoot: v2Root,
+    entryPath: path.join(v2Root, "run-public-app-acceptance.mjs")
   });
 });
 
