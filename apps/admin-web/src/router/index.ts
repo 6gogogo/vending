@@ -202,7 +202,7 @@ export const router = createRouter({
             group: "总览",
             eyebrow: "柜机详情",
             title: "单柜机值守页",
-            description: "查看门状态、库存、事件、日志并执行刷新或远程开门。",
+            description: "按当前账号权限查看柜机状态与库存；仅管理员可执行管理和远程操作。",
             permission: "devices:view"
           }
         },

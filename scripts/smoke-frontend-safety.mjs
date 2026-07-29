@@ -241,6 +241,16 @@ assert.match(
   "柜机详情必须按后台角色分流，不能把管理员监控页直接给商户或补货员"
 );
 assert.match(
+  routeBlock("/operations/:deviceCode"),
+  /description: "按当前账号权限查看柜机状态与库存；仅管理员可执行管理和远程操作。"/,
+  "柜机详情说明必须与商户和补货员的受限能力一致"
+);
+assert.doesNotMatch(
+  routeBlock("/operations/:deviceCode"),
+  /事件、日志并执行刷新或远程开门/,
+  "柜机详情说明不得向商户或补货员承诺不可用的管理员操作"
+);
+assert.match(
   adminApiSource,
   /assignedDeviceDetail\(deviceCode: string\)[\s\S]{0,180}`\/devices\/\$\{deviceCode\}`/,
   "商户和补货员柜机详情必须使用服务端已校验分配关系的只读接口"
