@@ -70,10 +70,10 @@ test("预约取货将柜机支付回调与第三方支付设置一并视为支�
   assert.equal(isPaymentOnlySetting(adjustmentQuotaModeSettingKey), false);
 });
 
-test("示例设置始终作为系统设置的首个入口", () => {
+test("实例设置始终作为系统设置的首个入口", () => {
   assert.deepEqual(
-    orderSystemSettingsGroups(["运行方式", "地图服务", "示例设置", "短信服务"]),
-    ["示例设置", "运行方式", "地图服务", "短信服务"]
+    orderSystemSettingsGroups(["运行方式", "地图服务", "实例设置", "短信服务"]),
+    ["实例设置", "运行方式", "地图服务", "短信服务"]
   );
 });
 

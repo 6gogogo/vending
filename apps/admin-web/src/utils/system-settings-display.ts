@@ -2,7 +2,7 @@ import type { SystemSettingEntry } from "@vm/shared-types";
 
 export const reservationOnlyPickupSettingKey = "VM_RESERVATION_ONLY_PICKUP";
 export const adjustmentQuotaModeSettingKey = "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE";
-export const exampleSettingsGroup = "示例设置";
+export const instanceSettingsGroup = "实例设置";
 
 const instanceOperatorSettingKeys = new Set([
   "VM_RESERVATION_ONLY_PICKUP",
@@ -72,11 +72,11 @@ export const orderSystemSettingsGroups = (groups: string[]) =>
       return 0;
     }
 
-    if (left === exampleSettingsGroup) {
+    if (left === instanceSettingsGroup) {
       return -1;
     }
 
-    if (right === exampleSettingsGroup) {
+    if (right === instanceSettingsGroup) {
       return 1;
     }
 

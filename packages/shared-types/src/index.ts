@@ -490,6 +490,7 @@ export interface PlatformTenantUsageSummary {
 
 export interface PlatformOverviewSnapshot {
   generatedAt: string;
+  provisioningMode: "online" | "deployment";
   totals: {
     tenants: number;
     activeTenants: number;

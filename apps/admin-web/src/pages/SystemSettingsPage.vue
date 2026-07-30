@@ -680,7 +680,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="admin-note settings-page__note">
-          建议先完成“示例设置”。其他服务事项请联系服务管理员协助处理。
+          建议先完成“实例设置”。其他服务事项请联系服务管理员协助处理。
         </div>
       </aside>
 

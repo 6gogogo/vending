@@ -86,7 +86,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_PAYMENT_MODE: {
-    group: "示例设置",
+    group: "实例设置",
     label: "非预约领取：支付验证",
     description: "仅在关闭预约取货后选择即时领取的支付处理方式。预约取货开启时无需设置，也不会创建新的支付单。",
     inputType: "select",
@@ -97,7 +97,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_FULL_SIMULATION_VERIFICATION_MODE: {
-    group: "示例设置",
+    group: "实例设置",
     label: "App 登录验证方式",
     description: "选择 App 登录的验证方式。手动设置验证码由当前实例管理员在人员页为已启用账号签发，6 位、短期且只能使用一次。",
     inputType: "select",
@@ -131,7 +131,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     restartRequired: true
   },
   VM_RESERVATION_ONLY_PICKUP: {
-    group: "示例设置",
+    group: "实例设置",
     label: "预约取货",
     description: "开启后，用户先预约再取货；当前领取流程不需要支付配置。关闭后按即时领取方式处理。",
     inputType: "boolean",
@@ -340,7 +340,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "path"
   },
   SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: {
-    group: "示例设置",
+    group: "实例设置",
     label: "领取差异的额度归属",
     description: "当柜机实际数量与预约不一致时，选择差异计入哪一天的可领取额度。建议保留“自动”。",
     inputType: "select",

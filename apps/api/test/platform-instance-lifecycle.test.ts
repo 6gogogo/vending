@@ -881,8 +881,18 @@ test("服务商平台会话只能访问平台能力，未进入实例时不能�
         authorization: `Bearer ${token}`
       }
     });
+    const overviewResponse = await fetch(`${baseUrl}/platform/overview`, {
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    });
+    const overviewPayload = (await overviewResponse.json()) as {
+      data?: { provisioningMode?: string };
+    };
 
     assert.equal(devicesResponse.status, 403);
+    assert.equal(overviewResponse.status, 200);
+    assert.equal(overviewPayload.data?.provisioningMode, "online");
   } finally {
     await app.close();
   }

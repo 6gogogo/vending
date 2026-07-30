@@ -49,11 +49,11 @@ test("高级项默认展示操作说明，不展示实现叙述", () => {
     /运行环境/
   );
   assert.match(
-    getSystemSettingOperatorDescription({ key: "VM_RESERVATION_ONLY_PICKUP", group: "示例设置" }),
+    getSystemSettingOperatorDescription({ key: "VM_RESERVATION_ONLY_PICKUP", group: "实例设置" }),
     /不会显示或要求支付设置/
   );
   assert.match(
-    getSystemSettingOperatorDescription({ key: "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE", group: "示例设置" }),
+    getSystemSettingOperatorDescription({ key: "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE", group: "实例设置" }),
     /领取额度/
   );
   assert.doesNotMatch(

@@ -356,6 +356,7 @@ export class PlatformService {
 
     return {
       generatedAt: new Date().toISOString(),
+      provisioningMode: this.store.isLiveDataPlane() ? "deployment" : "online",
       totals: {
         tenants: tenants.length,
         activeTenants: tenants.filter((entry) => entry.tenant.status === "active").length,

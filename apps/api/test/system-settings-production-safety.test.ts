@@ -114,7 +114,7 @@ test("隔离演练可显式将系统设置写入自身临时配置文件", () =>
   }
 });
 
-test("示例设置将领取和 App 验证选项集中展示，运行环境只能从模板选项选择", () => {
+test("实例设置将领取和 App 验证选项集中展示，运行环境只能从模板选项选择", () => {
   const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-example-options-"));
   const envFilePath = join(directory, ".env");
   const settings = {
@@ -141,9 +141,9 @@ test("示例设置将领取和 App 验证选项集中展示，运行环境只能
       "test",
       "production"
     ]);
-    assert.equal(entries.get("VM_RESERVATION_ONLY_PICKUP")?.group, "示例设置");
-    assert.equal(entries.get("VM_FULL_SIMULATION_VERIFICATION_MODE")?.group, "示例设置");
-    assert.equal(entries.get("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE")?.group, "示例设置");
+    assert.equal(entries.get("VM_RESERVATION_ONLY_PICKUP")?.group, "实例设置");
+    assert.equal(entries.get("VM_FULL_SIMULATION_VERIFICATION_MODE")?.group, "实例设置");
+    assert.equal(entries.get("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE")?.group, "实例设置");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

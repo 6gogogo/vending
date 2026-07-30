@@ -62,7 +62,16 @@ const editForm = reactive<PlatformTenantUpdatePayload>({
 
 const tenants = computed(() => overview.value?.tenants ?? []);
 const totals = computed(() => overview.value?.totals);
-const canCreateTenant = computed(() => sessionStore.can("platform-tenants:manage"));
+const canCreateTenant = computed(
+  () =>
+    sessionStore.can("platform-tenants:manage") &&
+    overview.value?.provisioningMode === "online"
+);
+const requiresDeploymentProvisioning = computed(
+  () =>
+    sessionStore.can("platform-tenants:manage") &&
+    overview.value?.provisioningMode === "deployment"
+);
 const editingTenant = computed(() =>
   tenants.value.find((entry) => entry.tenant.id === editingTenantId.value)
 );
@@ -263,6 +272,20 @@ onMounted(() => {
         <strong>{{ totals?.pendingTasks ?? 0 }}</strong>
         <span class="admin-copy">跨实例汇总</span>
       </article>
+    </section>
+
+    <section v-if="requiresDeploymentProvisioning" class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">实例开通</p>
+          <h3 class="admin-page__section-title">正式实例按独立数据平面开通</h3>
+        </div>
+      </div>
+      <div class="admin-panel admin-panel-block">
+        <div class="admin-note">
+          当前平台运行在正式数据平面。已有实例可在下方维护和进入；新增正式实例需要先完成独立数据根、域名、首管理员和生产门禁配置，不能在当前实例的数据面中直接追加。
+        </div>
+      </div>
     </section>
 
     <section v-if="canCreateTenant" class="admin-page__section">
