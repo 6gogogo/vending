@@ -20,7 +20,8 @@ const allowedArgumentNames = new Set([
   "target-env",
   "data-root",
   "data-plane-id",
-  "tenant-name"
+  "tenant-name",
+  "public-base-url"
 ]);
 const dataPlaneIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u;
 const assignmentPattern = /^(?:export\s+)?([A-Z][A-Z0-9_]*)=(.*)$/u;
@@ -143,24 +144,21 @@ const assertPrivateRegularSource = (filePath) => {
 };
 
 const assertRequiredInheritedConfiguration = (values) => {
-  const requiredKeys = [
-    "PUBLIC_BASE_URL",
-    "CORS_ORIGINS",
-    "AMAP_WEB_KEY",
-    "AMAP_SECURITY_JS_CODE"
-  ];
+  const requiredKeys = ["AMAP_WEB_KEY", "AMAP_SECURITY_JS_CODE"];
 
   for (const key of requiredKeys) {
     if (!decodeEnvValue(values.get(key))) {
       throw new Error(`来源配置缺少正式实例必需项：${key}。`);
     }
   }
+};
 
+const normalizePublicBaseUrl = (rawValue) => {
   let publicBaseUrl;
   try {
-    publicBaseUrl = new URL(decodeEnvValue(values.get("PUBLIC_BASE_URL")));
+    publicBaseUrl = new URL(String(rawValue).trim());
   } catch {
-    throw new Error("来源 PUBLIC_BASE_URL 不是有效 URL。");
+    throw new Error("公网入口不是有效 URL。");
   }
 
   if (
@@ -168,10 +166,13 @@ const assertRequiredInheritedConfiguration = (values) => {
     publicBaseUrl.username ||
     publicBaseUrl.password ||
     publicBaseUrl.search ||
-    publicBaseUrl.hash
+    publicBaseUrl.hash ||
+    publicBaseUrl.pathname !== "/"
   ) {
-    throw new Error("正式实例 PUBLIC_BASE_URL 必须是无凭据、查询或片段的 HTTPS 根地址。");
+    throw new Error("正式实例公网入口必须是无凭据、路径、查询或片段的 HTTPS 根地址。");
   }
+
+  return publicBaseUrl.origin;
 };
 
 const writePrivateFileAtomically = (targetPath, content) => {
@@ -228,6 +229,9 @@ const main = () => {
   const dataRoot = resolve(argumentsByName.get("data-root")).replaceAll("\\", "/");
   const dataPlaneId = argumentsByName.get("data-plane-id").trim();
   const tenantName = argumentsByName.get("tenant-name").trim();
+  const publicBaseUrl = normalizePublicBaseUrl(
+    argumentsByName.get("public-base-url")
+  );
 
   if (sourceEnv === targetEnv) {
     throw new Error("来源配置与目标配置不能是同一个文件。");
@@ -270,6 +274,8 @@ const main = () => {
     VM_DATA_ROOT: dataRoot,
     VM_DATA_PLANE_ID: dataPlaneId,
     VM_PLATFORM_TENANT_NAME: tenantName,
+    PUBLIC_BASE_URL: publicBaseUrl,
+    CORS_ORIGINS: publicBaseUrl,
     VM_RESERVATION_ONLY_PICKUP: "true",
     WEB_CONCURRENCY: "1",
     API_INSTANCE_COUNT: "1",
