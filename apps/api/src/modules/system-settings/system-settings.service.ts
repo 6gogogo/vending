@@ -12,6 +12,7 @@ import type {
 } from "@vm/shared-types";
 
 import {
+  assertPaymentDisablementStoreSafety,
   assertProductionConfigurationSafety,
   isProductionRuntime
 } from "../../common/config/production-safety";
@@ -20,6 +21,7 @@ import {
   runtimeDataPlaneExternalIntegrationKeys
 } from "../../common/config/runtime-data-plane-policy";
 import { appendSystemAuditLog, resolveApiEnvFile } from "../../common/store/persistence";
+import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import {
   PrivateConfigWriteError,
   writePrivateConfigFileAtomically
@@ -85,7 +87,10 @@ export class SystemSettingsService {
     runtimeAdapter?: SystemSettingsRuntimeAdapter,
     @Optional()
     @Inject(SystemAuditLogService)
-    auditLog?: SystemAuditLogService
+    auditLog?: SystemAuditLogService,
+    @Optional()
+    @Inject(InMemoryStoreService)
+    private readonly store?: InMemoryStoreService
   ) {
     this.envFilePath = runtimeAdapter?.envFilePath ?? resolveApiEnvFile();
     this.hasManagedLiveConfigWriter = Boolean(runtimeAdapter?.envFilePath);
@@ -203,6 +208,7 @@ export class SystemSettingsService {
       } as unknown as ConfigService;
 
       assertProductionConfigurationSafety(candidateConfigService);
+      assertPaymentDisablementStoreSafety(candidateConfigService, this.store);
     }
 
     const restartRequiredKeys = changedKeys.filter(

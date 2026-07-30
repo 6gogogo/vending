@@ -7,6 +7,7 @@ import test from "node:test";
 import { ServiceUnavailableException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 
+import type { InMemoryStoreService } from "../src/common/store/in-memory-store.service.js";
 import { SystemAuditLogService } from "../src/common/store/system-audit-log.service.js";
 import { resolveApiEnvFile } from "../src/common/store/persistence.js";
 import { SystemSettingsService } from "../src/modules/system-settings/system-settings.service.js";
@@ -485,6 +486,63 @@ test("生产环境合法支付关键配置仅持久化并标记需重启，不�
       setCalls.some(([key]) => key === "WECHAT_PAY_API_BASE_URL"),
       false
     );
+  } finally {
+    if (previousAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnv;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("已有支付账本的正式实例不能通过系统设置关闭支付", () => {
+  const settings = {
+    ...validPaymentSettings,
+    VM_RESERVATION_ONLY_PICKUP: "false"
+  };
+  const runtimeValues = new Map(Object.entries(settings));
+  const configService = {
+    get: (key: string) => runtimeValues.get(key),
+    set: (key: string, value: string) => runtimeValues.set(key, value)
+  } as unknown as ConfigService;
+  const store = {
+    paymentOrders: [{ id: "payment-existing" }],
+    paymentRefunds: []
+  } as unknown as InMemoryStoreService;
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-disable-payment-"));
+  const envFilePath = join(directory, ".env");
+  const originalContent = encodeEnv(settings);
+  writeFileSync(envFilePath, originalContent, "utf8");
+  const service = new SystemSettingsService(
+    configService,
+    {
+      envFilePath,
+      appendAuditLog: () => ""
+    },
+    undefined,
+    store
+  );
+  const previousAppEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "production";
+
+  try {
+    assert.throws(
+      () =>
+        service.updateSettings(
+          {
+            values: {
+              VM_RESERVATION_ONLY_PICKUP: "true",
+              PAYMENT_MODE: "disabled",
+              PAYMENT_RECONCILIATION_ENABLED: "false",
+              VERIFICATION_CODE_PROVIDER: "manual"
+            }
+          },
+          { includeSensitiveValues: true }
+        ),
+      /已有支付或退款账本，不能关闭支付配置/
+    );
+    assert.equal(readFileSync(envFilePath, "utf8"), originalContent);
   } finally {
     if (previousAppEnv === undefined) {
       delete process.env.APP_ENV;

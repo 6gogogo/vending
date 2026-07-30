@@ -11,6 +11,10 @@ import {
   RUNTIME_DATA_ROOT_ENV_KEY,
   RUNTIME_PLATFORM_TENANT_NAME_ENV_KEY
 } from "./runtime-data-plane";
+import {
+  isReservationOnlyPickup,
+  RESERVATION_ONLY_PICKUP_ENV_KEY
+} from "./reservation-only-pickup";
 
 export { isProductionRuntime } from "./runtime-environment";
 
@@ -129,6 +133,7 @@ const requireConfigs = (configService: ConfigService, keys: readonly string[]) =
 
 export const productionPaymentSafetyCriticalKeys = [
   "PUBLIC_BASE_URL",
+  RESERVATION_ONLY_PICKUP_ENV_KEY,
   "PAYMENT_MODE",
   "PAYMENT_MOCK_ENABLED",
   "FINANCIAL_SINGLE_WRITER_ENABLED",
@@ -209,12 +214,25 @@ export const assertProductionPaymentSafety = (configService: ConfigService) => {
 
   const paymentMode = readConfig(configService, "PAYMENT_MODE")?.toLowerCase();
   const legacyPaymentMockEnabled = readConfig(configService, "PAYMENT_MOCK_ENABLED");
+  const reservationOnly = isReservationOnlyPickup({
+    [RESERVATION_ONLY_PICKUP_ENV_KEY]: readConfig(
+      configService,
+      RESERVATION_ONLY_PICKUP_ENV_KEY
+    )
+  });
+  const paymentDisabled = paymentMode === "disabled";
 
-  if (paymentMode) {
+  if (paymentDisabled && !reservationOnly) {
+    throw new BadRequestException(
+      "PAYMENT_MODE=disabled 只允许用于预约取货模式。"
+    );
+  }
+
+  if (paymentMode && !paymentDisabled) {
     if (paymentMode !== "real") {
       throw new BadRequestException("生产环境必须显式设置 PAYMENT_MODE=real。");
     }
-  } else if (!isFalsey(legacyPaymentMockEnabled)) {
+  } else if (!paymentDisabled && !isFalsey(legacyPaymentMockEnabled)) {
     throw new BadRequestException("生产环境必须显式设置 PAYMENT_MODE=real，或兼容设置 PAYMENT_MOCK_ENABLED=false。");
   }
 
@@ -224,7 +242,10 @@ export const assertProductionPaymentSafety = (configService: ConfigService) => {
     );
   }
 
-  if (!isTruthy(readConfig(configService, "PAYMENT_RECONCILIATION_ENABLED"))) {
+  if (
+    !paymentDisabled &&
+    !isTruthy(readConfig(configService, "PAYMENT_RECONCILIATION_ENABLED"))
+  ) {
     throw new BadRequestException(
       "真实支付必须显式设置 PAYMENT_RECONCILIATION_ENABLED=true。"
     );
@@ -246,6 +267,10 @@ export const assertProductionPaymentSafety = (configService: ConfigService) => {
     throw new BadRequestException(
       "JSON 账本阶段不能使用 PM2 cluster 多实例，NODE_APP_INSTANCE 只能为空或 0。"
     );
+  }
+
+  if (paymentDisabled) {
+    return;
   }
 
   requireConfigs(configService, [
@@ -405,8 +430,13 @@ export const assertProductionConfigurationSafety = (
     configService,
     "VERIFICATION_CODE_PROVIDER"
   );
-  if (verificationProvider !== "aliyun_pnvs") {
-    throw new BadRequestException("生产环境必须使用阿里云 PNVS 真实短信验证码服务。");
+  if (
+    verificationProvider !== "aliyun_pnvs" &&
+    verificationProvider !== "manual"
+  ) {
+    throw new BadRequestException(
+      "生产环境验证码必须使用阿里云 PNVS，或仅接受后台签发的一次性人工验证码。"
+    );
   }
 
   if (
@@ -417,12 +447,14 @@ export const assertProductionConfigurationSafety = (
     throw new BadRequestException("生产环境不能开启验证码预览。");
   }
 
-  requireConfigs(configService, [
-    "ALIYUN_PNVS_ACCESS_KEY_ID",
-    "ALIYUN_PNVS_ACCESS_KEY_SECRET",
-    "ALIYUN_PNVS_SIGN_NAME",
-    "ALIYUN_PNVS_TEMPLATE_CODE"
-  ]);
+  if (verificationProvider === "aliyun_pnvs") {
+    requireConfigs(configService, [
+      "ALIYUN_PNVS_ACCESS_KEY_ID",
+      "ALIYUN_PNVS_ACCESS_KEY_SECRET",
+      "ALIYUN_PNVS_SIGN_NAME",
+      "ALIYUN_PNVS_TEMPLATE_CODE"
+    ]);
+  }
   assertProductionSmartVmSafety(configService);
   assertProductionPaymentSafety(configService);
 
@@ -430,6 +462,37 @@ export const assertProductionConfigurationSafety = (
     isTruthy(readConfig(configService, "ALLOW_DEFAULT_BACKOFFICE_LOGIN"))
   ) {
     throw new BadRequestException("生产环境不能允许默认后台密码登录。");
+  }
+};
+
+type PaymentLedgerStore = Pick<
+  InMemoryStoreService,
+  "paymentOrders" | "paymentRefunds"
+>;
+
+export const assertPaymentDisablementStoreSafety = (
+  configService: ConfigService,
+  store?: PaymentLedgerStore
+) => {
+  const paymentMode = readConfig(configService, "PAYMENT_MODE")?.toLowerCase();
+
+  if (paymentMode !== "disabled") {
+    return;
+  }
+
+  if (!store) {
+    throw new BadRequestException(
+      "无法核验当前实例的支付与退款账本，已拒绝关闭支付配置。"
+    );
+  }
+
+  if (
+    (store.paymentOrders?.length ?? 0) > 0 ||
+    (store.paymentRefunds?.length ?? 0) > 0
+  ) {
+    throw new BadRequestException(
+      "当前实例已有支付或退款账本，不能关闭支付配置；请保留真实支付配置用于历史账务处理。"
+    );
   }
 };
 
@@ -482,6 +545,7 @@ export const assertProductionSafety = (
   }
 
   assertProductionConfigurationSafety(configService);
+  assertPaymentDisablementStoreSafety(configService, store);
 
   if (!auditLog.isReady()) {
     throw new BadRequestException("系统审计日志未就绪。");

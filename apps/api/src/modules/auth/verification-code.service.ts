@@ -286,11 +286,13 @@ export class VerificationCodeService {
 
     if (!raw || raw === "mock") {
       provider = "mock";
+    } else if (raw === "manual") {
+      provider = "manual";
     } else if (raw === "aliyun_pnvs") {
       provider = "aliyun_pnvs";
     } else {
       throw new InternalServerErrorException(
-        "VERIFICATION_CODE_PROVIDER 只能设置为 mock 或 aliyun_pnvs。"
+        "VERIFICATION_CODE_PROVIDER 只能设置为 mock、manual 或 aliyun_pnvs。"
       );
     }
 

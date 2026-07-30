@@ -51,6 +51,17 @@ const liveSettings = {
   ALLOW_UNSIGNED_SMARTVM_CALLBACKS: "false"
 };
 
+const reservationOnlyLiveSettings = {
+  ...liveSettings,
+  VM_RESERVATION_ONLY_PICKUP: "true",
+  PAYMENT_MODE: "disabled",
+  VERIFICATION_CODE_PROVIDER: "manual",
+  ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
+  ALIYUN_PNVS_SIGN_NAME: undefined,
+  ALIYUN_PNVS_TEMPLATE_CODE: undefined
+};
+
 const fullSimulationSettings = {
   VM_DATA_PLANE: "simulation",
   VM_DATA_ROOT: "runtime-data/full-simulation-test",
@@ -244,6 +255,64 @@ test("全真模拟启用真实 PNVS 时必须在保存或启动前发现缺失�
         VM_FULL_SIMULATION_VERIFICATION_MODE: "real"
       }),
     /全真模拟启用真实 PNVS 时必须配置/
+  );
+});
+
+test("预约制真实数据平面可以显式关闭支付，非预约制不得关闭", () => {
+  assert.doesNotThrow(() =>
+    assertRuntimeDataPlaneExternalIntegrationPolicy(
+      reservationOnlyLiveSettings
+    )
+  );
+
+  const payments = new PaymentsService(
+    {
+      paymentOrders: [],
+      paymentRefunds: []
+    } as unknown as InMemoryStoreService,
+    new ConfigService(reservationOnlyLiveSettings),
+    {} as CabinetEventsService,
+    {} as InventoryOrdersService
+  );
+  const diagnostics = payments.getPaymentDiagnostics();
+  assert.equal(diagnostics.requestedMode, "disabled");
+  assert.equal(diagnostics.summary.effectiveMode, "disabled");
+  assert.equal(diagnostics.summary.mockPaymentEndpointEnabled, false);
+  assert.equal(diagnostics.providers.every((entry) => entry.blockers.length === 0), true);
+
+  assert.throws(
+    () =>
+      assertRuntimeDataPlaneExternalIntegrationPolicy({
+        ...reservationOnlyLiveSettings,
+        VM_RESERVATION_ONLY_PICKUP: "false"
+      }),
+    /PAYMENT_MODE=disabled 只允许用于预约取货模式/
+  );
+});
+
+test("真实数据平面可只接受后台签发的一次性人工验证码", () => {
+  assert.doesNotThrow(() =>
+    assertRuntimeDataPlaneExternalIntegrationPolicy(
+      reservationOnlyLiveSettings
+    )
+  );
+
+  const verification = new VerificationCodeService(
+    new ConfigService(reservationOnlyLiveSettings),
+    {} as InMemoryStoreService
+  );
+  assert.deepEqual(verification.getRuntimeConfig(), {
+    provider: "manual",
+    previewEnabled: false
+  });
+
+  assert.throws(
+    () =>
+      assertRuntimeDataPlaneExternalIntegrationPolicy({
+        ...reservationOnlyLiveSettings,
+        VERIFICATION_CODE_PREVIEW_ENABLED: "true"
+      }),
+    /人工验证码时必须关闭 VERIFICATION_CODE_PREVIEW_ENABLED/
   );
 });
 

@@ -289,6 +289,10 @@ const setReservationOnlyPickup = (enabled: boolean) => {
     }
   }
 
+  if (settingsByKey.value.has("PAYMENT_MODE")) {
+    formValues.PAYMENT_MODE = "disabled";
+  }
+
   clearPaymentDiagnostics();
 };
 
@@ -319,6 +323,10 @@ const inputTypeFor = (entry: SystemSettingEntry) => {
 };
 
 const paymentRuntimeModeLabel = (mode: PaymentRuntimeMode) => {
+  if (mode === "disabled") {
+    return "已关闭";
+  }
+
   if (mode === "real") {
     return "严格真实";
   }
@@ -331,6 +339,10 @@ const paymentRuntimeModeLabel = (mode: PaymentRuntimeMode) => {
 };
 
 const paymentEffectiveModeLabel = (mode: PaymentEffectiveMode | "mixed") => {
+  if (mode === "disabled") {
+    return "不启用支付";
+  }
+
   if (mode === "real") {
     return "真实支付";
   }

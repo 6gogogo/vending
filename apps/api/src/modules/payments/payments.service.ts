@@ -987,11 +987,13 @@ export class PaymentsService {
       auto: "自动",
       mock: "强制模拟",
       real: "严格真实",
+      disabled: "已关闭",
       mixed: "混合"
     };
     const effectiveModeLabels: Record<PaymentEffectiveMode | "mixed", string> = {
       mock: "模拟支付",
       real: "真实支付",
+      disabled: "不启用支付",
       mixed: "混合"
     };
     const lines = [
@@ -4780,6 +4782,12 @@ export class PaymentsService {
     const setting = this.resolvePaymentModeSetting();
     const missingKeys = this.getMissingProviderReadinessKeys(provider);
 
+    if (setting.mode === "disabled") {
+      throw new BadRequestException(
+        "当前实例已关闭支付功能，不创建新的支付单或付款人身份授权。"
+      );
+    }
+
     if (setting.mode === "mock") {
       return {
         simulated: true,
@@ -4828,7 +4836,7 @@ export class PaymentsService {
     const paymentModeRaw = this.getConfigValue("PAYMENT_MODE")?.toLowerCase();
 
     if (paymentModeRaw) {
-      if (["auto", "mock", "real"].includes(paymentModeRaw)) {
+      if (["auto", "mock", "real", "disabled"].includes(paymentModeRaw)) {
         return {
           mode: paymentModeRaw as PaymentRuntimeMode,
           source: "PAYMENT_MODE",
@@ -4836,7 +4844,9 @@ export class PaymentsService {
         };
       }
 
-      throw new BadRequestException("PAYMENT_MODE 只能设置为 auto、mock 或 real。");
+      throw new BadRequestException(
+        "PAYMENT_MODE 只能设置为 auto、mock、real 或 disabled。"
+      );
     }
 
     const legacyPaymentMockEnabled = this.getConfigValue("PAYMENT_MOCK_ENABLED")?.toLowerCase();
@@ -4878,6 +4888,12 @@ export class PaymentsService {
     ) {
       throw new BadRequestException("当前为预约取货模式，不创建新的支付单或付款人身份授权。");
     }
+
+    if (this.resolvePaymentModeSetting().mode === "disabled") {
+      throw new BadRequestException(
+        "当前实例已关闭支付功能，不创建新的支付单或付款人身份授权。"
+      );
+    }
   }
 
   private isSimulatedPaymentOrder(order: PaymentOrderRecord) {
@@ -4888,14 +4904,20 @@ export class PaymentsService {
     provider: PaymentProvider,
     setting: PaymentModeSetting
   ): PaymentProviderDiagnostics {
-    const missingRequiredKeys = this.getMissingProviderReadinessKeys(provider);
-    const readyForRealPayment = missingRequiredKeys.length === 0;
+    const missingRequiredKeys =
+      setting.mode === "disabled"
+        ? []
+        : this.getMissingProviderReadinessKeys(provider);
+    const readyForRealPayment =
+      setting.mode !== "disabled" && missingRequiredKeys.length === 0;
     const warnings: string[] = [];
     const blockers: string[] = [];
     let effectiveMode: PaymentEffectiveMode = "real";
     let simulatedReason: string | undefined;
 
-    if (setting.mode === "mock") {
+    if (setting.mode === "disabled") {
+      effectiveMode = "disabled";
+    } else if (setting.mode === "mock") {
       effectiveMode = "mock";
       simulatedReason = "支付运行模式为强制模拟，本渠道不会发起真实扣款。";
     } else if (setting.mode === "auto" && !readyForRealPayment) {
@@ -5003,6 +5025,9 @@ export class PaymentsService {
         VM_SIMULATION_PROFILE: this.getConfigValue("VM_SIMULATION_PROFILE"),
         VM_FULL_SIMULATION_ENABLED: this.getConfigValue("VM_FULL_SIMULATION_ENABLED"),
         VM_FULL_SIMULATION_PAYMENT_MODE: this.getConfigValue("VM_FULL_SIMULATION_PAYMENT_MODE"),
+        VM_RESERVATION_ONLY_PICKUP: this.getConfigValue(
+          "VM_RESERVATION_ONLY_PICKUP"
+        ),
         PAYMENT_MODE: this.getConfigValue("PAYMENT_MODE")
       });
     } catch (error) {

@@ -13,6 +13,10 @@ import {
   resolveFullSimulationExternalMode,
   fullSimulationExternalModeKeys
 } from "./full-simulation-mode";
+import {
+  isReservationOnlyPickup,
+  RESERVATION_ONLY_PICKUP_ENV_KEY
+} from "./reservation-only-pickup";
 
 export const runtimeDataPlaneExternalIntegrationKeys = [
   RUNTIME_DATA_PLANE_ENV_KEY,
@@ -21,6 +25,7 @@ export const runtimeDataPlaneExternalIntegrationKeys = [
   FULL_SIMULATION_PROFILE_ENV_KEY,
   FULL_SIMULATION_ENABLED_ENV_KEY,
   ...fullSimulationExternalModeKeys,
+  RESERVATION_ONLY_PICKUP_ENV_KEY,
   "PAYMENT_MODE",
   "VERIFICATION_CODE_PROVIDER",
   "VERIFICATION_CODE_PREVIEW_ENABLED",
@@ -110,6 +115,21 @@ const requirePaymentMode = (
   }
 
   const normalizedMode = normalize(paymentMode);
+  const reservationOnly = isReservationOnlyPickup({
+    [RESERVATION_ONLY_PICKUP_ENV_KEY]:
+      settings[RESERVATION_ONLY_PICKUP_ENV_KEY]
+  });
+
+  if (normalizedMode === "disabled") {
+    if (!reservationOnly) {
+      throw new RuntimeDataPlanePolicyError(
+        "PAYMENT_MODE=disabled 只允许用于预约取货模式。"
+      );
+    }
+
+    return;
+  }
+
   const expectedMode = dataPlane === "live" ? "real" : "mock";
 
   if (normalizedMode !== expectedMode) {
@@ -154,9 +174,19 @@ const requireVerificationPolicy = (
     return;
   }
 
+  if (normalizedProvider === "manual") {
+    if (isTruthy(previewEnabled)) {
+      throw new RuntimeDataPlanePolicyError(
+        "真实数据平面使用人工验证码时必须关闭 VERIFICATION_CODE_PREVIEW_ENABLED。"
+      );
+    }
+
+    return;
+  }
+
   if (normalizedProvider !== "aliyun_pnvs") {
     throw new RuntimeDataPlanePolicyError(
-      "真实数据平面只能设置 VERIFICATION_CODE_PROVIDER=aliyun_pnvs。"
+      "真实数据平面只能设置 VERIFICATION_CODE_PROVIDER=aliyun_pnvs 或 manual。"
     );
   }
 

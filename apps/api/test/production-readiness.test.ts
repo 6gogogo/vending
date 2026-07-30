@@ -49,6 +49,30 @@ const validProductionConfig: Record<string, string> = {
   ALLOW_DEFAULT_BACKOFFICE_LOGIN: "false"
 };
 
+const reservationOnlyProductionConfig: Record<string, string | undefined> = {
+  ...validProductionConfig,
+  VM_RESERVATION_ONLY_PICKUP: "true",
+  PAYMENT_MODE: "disabled",
+  PAYMENT_RECONCILIATION_ENABLED: "false",
+  VERIFICATION_CODE_PROVIDER: "manual",
+  ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
+  ALIYUN_PNVS_SIGN_NAME: undefined,
+  ALIYUN_PNVS_TEMPLATE_CODE: undefined,
+  WECHAT_PAY_APP_ID: undefined,
+  WECHAT_MINI_APP_SECRET: undefined,
+  WECHAT_PAY_MCH_ID: undefined,
+  WECHAT_PAY_API_V3_KEY: undefined,
+  WECHAT_PAY_MERCHANT_PRIVATE_KEY: undefined,
+  WECHAT_PAY_MERCHANT_CERT_SERIAL_NO: undefined,
+  WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: undefined,
+  WECHAT_PAY_PLATFORM_PUBLIC_KEY: undefined,
+  ALIPAY_APP_ID: undefined,
+  ALIPAY_SELLER_ID: undefined,
+  ALIPAY_APP_PRIVATE_KEY: undefined,
+  ALIPAY_PUBLIC_KEY: undefined
+};
+
 const createController = (
   config: Record<string, string | undefined> = validProductionConfig,
   overrides: Record<string, unknown> = {}
@@ -185,6 +209,25 @@ test("生产就绪健康契约仅在完整生产门禁通过时返回最小成�
         message: "成功",
         data: { status: "就绪" }
       });
+    }
+  );
+});
+
+test("预约制正式实例在人工码和支付关闭配置下通过生产就绪门禁", () => {
+  withRuntimeEnvironment(
+    {
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      assert.deepEqual(
+        createController(reservationOnlyProductionConfig).productionReadiness(),
+        {
+          code: 200,
+          message: "成功",
+          data: { status: "就绪" }
+        }
+      );
     }
   );
 });

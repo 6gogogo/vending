@@ -136,8 +136,8 @@ export type PaymentProvider = "wechat" | "alipay";
 export type PaymentPhase = "pre_open" | "post_settlement";
 export type PaymentStatus = "created" | "pending" | "paid" | "failed" | "closed" | "refunded";
 export type PaymentRefundStatus = "pending" | "success" | "failed";
-export type PaymentRuntimeMode = "auto" | "mock" | "real";
-export type PaymentEffectiveMode = "mock" | "real";
+export type PaymentRuntimeMode = "auto" | "mock" | "real" | "disabled";
+export type PaymentEffectiveMode = "mock" | "real" | "disabled";
 export type ReservationStatus = "active" | "fulfilled" | "cancelled" | "expired";
 
 export type GoodsCategory = "food" | "drink" | "daily";

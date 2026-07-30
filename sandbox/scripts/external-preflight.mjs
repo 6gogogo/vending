@@ -370,7 +370,7 @@ const resolvePaymentModeSetting = (config) => {
   const paymentModeRaw = readConfig(config, "PAYMENT_MODE")?.toLowerCase();
 
   if (paymentModeRaw) {
-    if (["auto", "mock", "real"].includes(paymentModeRaw)) {
+    if (["auto", "mock", "real", "disabled"].includes(paymentModeRaw)) {
       return {
         ok: true,
         mode: paymentModeRaw,
@@ -381,7 +381,7 @@ const resolvePaymentModeSetting = (config) => {
 
     return {
       ok: false,
-      message: "PAYMENT_MODE 只能设置为 auto、mock 或 real。"
+      message: "PAYMENT_MODE 只能设置为 auto、mock、real 或 disabled。"
     };
   }
 
@@ -565,23 +565,37 @@ const buildOfflinePaymentDiagnostics = (config) => {
   }
 
   const providers = paymentProviders.map((providerConfig) => {
-    const missingRequiredKeys = validateKeyPresence(config, providerConfig.requiredKeys);
+    const missingRequiredKeys =
+      setting.mode === "disabled"
+        ? []
+        : validateKeyPresence(config, providerConfig.requiredKeys);
 
-    if (providerConfig.provider === "wechat" && !readConfig(config, "WECHAT_MINI_APP_SECRET")) {
+    if (
+      setting.mode !== "disabled" &&
+      providerConfig.provider === "wechat" &&
+      !readConfig(config, "WECHAT_MINI_APP_SECRET")
+    ) {
       missingRequiredKeys.push("WECHAT_MINI_APP_SECRET");
     }
 
-    if (!readConfig(config, providerConfig.notifyKey) && !readConfig(config, "PUBLIC_BASE_URL")) {
+    if (
+      setting.mode !== "disabled" &&
+      !readConfig(config, providerConfig.notifyKey) &&
+      !readConfig(config, "PUBLIC_BASE_URL")
+    ) {
       missingRequiredKeys.push(`${providerConfig.notifyKey} 或 PUBLIC_BASE_URL`);
     }
 
-    const readyForRealPayment = missingRequiredKeys.length === 0;
+    const readyForRealPayment =
+      setting.mode !== "disabled" && missingRequiredKeys.length === 0;
     let effectiveMode = "real";
     const warnings = [];
     const blockers = [];
     let simulatedReason;
 
-    if (setting.mode === "mock") {
+    if (setting.mode === "disabled") {
+      effectiveMode = "disabled";
+    } else if (setting.mode === "mock") {
       effectiveMode = "mock";
       simulatedReason = "支付运行模式为强制模拟，本渠道不会发起真实扣款。";
     } else if (setting.mode === "auto" && !readyForRealPayment) {
@@ -702,9 +716,11 @@ const checkProductionSafety = (config, options) => {
   checks.push(
     verificationProvider === "aliyun_pnvs"
       ? pass("验证码供应商", "VERIFICATION_CODE_PROVIDER=aliyun_pnvs。")
-      : fail("验证码供应商", "公网或预发布外部服务必须使用真实短信验证码服务。", [
-          `当前 VERIFICATION_CODE_PROVIDER=${verificationProvider ?? "(未设置)"}`
-        ])
+      : verificationProvider === "manual"
+        ? pass("验证码供应商", "仅接受后台签发的一次性人工验证码。")
+        : fail("验证码供应商", "公网或预发布必须使用 PNVS 或后台签发的一次性人工验证码。", [
+            `当前 VERIFICATION_CODE_PROVIDER=${verificationProvider ?? "(未设置)"}`
+          ])
   );
 
   const previewEnabled = isTruthy(readConfig(config, "VERIFICATION_CODE_PREVIEW_ENABLED"));
@@ -731,16 +747,21 @@ const checkProductionSafety = (config, options) => {
   );
 
   const paymentMode = resolvePaymentModeSetting(config);
+  const reservationOnly = isTruthy(
+    readConfig(config, "VM_RESERVATION_ONLY_PICKUP")
+  );
   if (!paymentMode.ok) {
     checks.push(fail("支付运行模式", paymentMode.message));
   } else {
     checks.push(
       paymentMode.mode === "real"
         ? pass("支付运行模式", `支付运行模式为严格真实（来源 ${paymentMode.source}）。`)
-        : fail("支付运行模式", "公网或预发布外部服务预检要求真实支付模式。", [
-            `当前模式=${paymentMode.mode}`,
-            `来源=${paymentMode.source}`
-          ])
+        : paymentMode.mode === "disabled" && reservationOnly
+          ? pass("支付运行模式", "预约取货已关闭新支付链路。")
+          : fail("支付运行模式", "即时领取要求真实支付；关闭支付只允许用于预约取货。", [
+              `当前模式=${paymentMode.mode}`,
+              `来源=${paymentMode.source}`
+            ])
     );
   }
 
@@ -948,17 +969,36 @@ const checkSms = async (config, options) => {
   const endpoint = readConfig(config, "ALIYUN_PNVS_ENDPOINT") ?? "dypnsapi.aliyuncs.com";
 
   checks.push(
-    provider === "aliyun_pnvs"
-      ? pass("短信验证码供应商", "验证码供应商已切到阿里云 PNVS。")
-      : fail("短信验证码供应商", "外部服务预检要求 VERIFICATION_CODE_PROVIDER=aliyun_pnvs。", [
-          `当前=${provider ?? "(未设置)"}`
-        ])
-  );
-
-  checks.push(
     previewEnabled
       ? fail("短信验证码预览", "验证码预览仍开启，公网响应可能泄露验证码。")
       : pass("短信验证码预览", "验证码预览已关闭。")
+  );
+
+  if (provider === "manual") {
+    checks.unshift(
+      pass(
+        "人工验证码供应商",
+        "当前仅接受后台签发、短期有效且单次消费的人工验证码。"
+      )
+    );
+    checks.push(
+      options.sendSms
+        ? fail("真实短信发送", "人工验证码模式不发送短信，不能使用 --send-sms。")
+        : skip("真实短信发送", "人工验证码模式无需配置或发送短信。")
+    );
+    return createSection(
+      "登录验证",
+      "检查后台签发的一次性人工验证码模式。",
+      checks
+    );
+  }
+
+  checks.unshift(
+    provider === "aliyun_pnvs"
+      ? pass("短信验证码供应商", "验证码供应商已切到阿里云 PNVS。")
+      : fail("短信验证码供应商", "外部服务预检要求 VERIFICATION_CODE_PROVIDER=aliyun_pnvs 或 manual。", [
+          `当前=${provider ?? "(未设置)"}`
+        ])
   );
 
   const missing = validateKeyPresence(config, aliyunPnvsRequiredVerificationKeys);
@@ -1026,6 +1066,34 @@ const checkPayment = async (config) => {
   }
 
   const diagnostics = offlineDiagnostics.diagnostics;
+  const reservationOnly = isTruthy(
+    readConfig(config, "VM_RESERVATION_ONLY_PICKUP")
+  );
+
+  if (diagnostics.requestedMode === "disabled") {
+    checks.push(
+      reservationOnly
+        ? pass(
+            "支付运行模式",
+            "预约取货已显式关闭新支付链路，无需填写微信或支付宝商户配置。"
+          )
+        : fail(
+            "支付运行模式",
+            "PAYMENT_MODE=disabled 只允许用于预约取货模式。"
+          )
+    );
+    checks.push(
+      skip(
+        "支付渠道外部预检",
+        "当前不创建支付单，跳过微信与支付宝密钥、回调和连通性检查。"
+      )
+    );
+    return createSection(
+      "支付配置",
+      "预约取货关闭支付时，仅验证关闭条件。",
+      checks
+    );
+  }
 
   checks.push(
     diagnostics.summary.strictRealEnabled

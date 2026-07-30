@@ -107,6 +107,30 @@ const readyAuditLog = {
   isReady: () => true
 };
 
+const reservationOnlyProductionConfig = {
+  ...validProductionConfig,
+  VM_RESERVATION_ONLY_PICKUP: "true",
+  PAYMENT_MODE: "disabled",
+  PAYMENT_RECONCILIATION_ENABLED: "false",
+  VERIFICATION_CODE_PROVIDER: "manual",
+  ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
+  ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
+  ALIYUN_PNVS_SIGN_NAME: undefined,
+  ALIYUN_PNVS_TEMPLATE_CODE: undefined,
+  WECHAT_PAY_APP_ID: undefined,
+  WECHAT_MINI_APP_SECRET: undefined,
+  WECHAT_PAY_MCH_ID: undefined,
+  WECHAT_PAY_API_V3_KEY: undefined,
+  WECHAT_PAY_MERCHANT_PRIVATE_KEY: undefined,
+  WECHAT_PAY_MERCHANT_CERT_SERIAL_NO: undefined,
+  WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: undefined,
+  WECHAT_PAY_PLATFORM_PUBLIC_KEY: undefined,
+  ALIPAY_APP_ID: undefined,
+  ALIPAY_SELLER_ID: undefined,
+  ALIPAY_APP_PRIVATE_KEY: undefined,
+  ALIPAY_PUBLIC_KEY: undefined
+};
+
 test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁", () => {
   const previousNodeEnv = process.env.NODE_ENV;
   const previousAppEnv = process.env.APP_ENV;
@@ -330,6 +354,67 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
         invalidCase.name
       );
     }
+  } finally {
+    if (previousNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+
+    if (previousAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnv;
+    }
+  }
+});
+
+test("全新预约制正式实例无需支付渠道配置，但仍拒绝账本或模式漂移", () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousAppEnv = process.env.APP_ENV;
+  process.env.NODE_ENV = "production";
+  process.env.APP_ENV = "production";
+
+  try {
+    assert.doesNotThrow(() =>
+      assertProductionSafety(
+        createConfigService(reservationOnlyProductionConfig),
+        emptyCredentialStore as never,
+        readyAuditLog as never
+      )
+    );
+
+    assert.throws(
+      () =>
+        assertProductionSafety(
+          createConfigService({
+            ...reservationOnlyProductionConfig,
+            VM_RESERVATION_ONLY_PICKUP: "false"
+          }),
+          emptyCredentialStore as never,
+          readyAuditLog as never
+        ),
+      /PAYMENT_MODE=disabled 只允许用于预约取货模式/
+    );
+
+    assert.throws(
+      () =>
+        assertProductionSafety(
+          createConfigService(reservationOnlyProductionConfig),
+          {
+            ...emptyCredentialStore,
+            paymentOrders: [
+              {
+                id: "existing-real-payment",
+                status: "paid",
+                metadata: { simulated: false }
+              }
+            ]
+          } as never,
+          readyAuditLog as never
+        ),
+      /已有支付或退款账本.*不能关闭支付配置/
+    );
   } finally {
     if (previousNodeEnv === undefined) {
       delete process.env.NODE_ENV;

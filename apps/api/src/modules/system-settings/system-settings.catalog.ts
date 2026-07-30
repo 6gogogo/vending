@@ -350,9 +350,10 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   PAYMENT_MODE: {
     label: "支付运行模式",
-    description: "auto 会在配置或付款人身份不完整时使用本地模拟；mock 强制模拟；real 为严格真实支付，缺配置直接报错。",
+    description: "预约取货可关闭支付；即时领取可使用模拟、自动或严格真实支付。",
     inputType: "select",
     options: [
+      { label: "关闭支付（仅预约取货）", value: "disabled" },
       { label: "自动：缺配置时模拟", value: "auto" },
       { label: "强制模拟支付", value: "mock" },
       { label: "严格真实支付", value: "real" }
@@ -593,10 +594,11 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   VERIFICATION_CODE_PROVIDER: {
     label: "验证码服务",
-    description: "mock 为本地验证码；aliyun_pnvs 为阿里云号码认证短信验证码。真实平面必须使用 aliyun_pnvs。",
+    description: "mock 为本地验证码；manual 仅接受后台签发的一次性人工验证码；aliyun_pnvs 使用阿里云号码认证短信。",
     inputType: "select",
     options: [
       { label: "本地模拟", value: "mock" },
+      { label: "后台签发一次性人工验证码", value: "manual" },
       { label: "阿里云号码认证（PNVS）", value: "aliyun_pnvs" }
     ],
     required: true
