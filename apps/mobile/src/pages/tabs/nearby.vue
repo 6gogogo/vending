@@ -16,12 +16,19 @@ import { getErrorMessage } from "../../utils/error-message";
 import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils/receivable-goods";
 import {
   isStockOperatorRole,
+  resolveTabIconPath,
   syncRoleTabBar
 } from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
 
-const DEFAULT_MARKER_ICON = "/static/tabs/device.png";
-const ACTIVE_MARKER_ICON = "/static/tabs/device-active.png";
+const DEFAULT_MARKER_ICON = resolveTabIconPath(
+  "static/tabs/device.png",
+  import.meta.env.BASE_URL || "/"
+);
+const ACTIVE_MARKER_ICON = resolveTabIconPath(
+  "static/tabs/device-active.png",
+  import.meta.env.BASE_URL || "/"
+);
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
