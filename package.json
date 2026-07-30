@@ -11,6 +11,7 @@
     "init:api-data": "npm run data:init --workspace @vm/api",
     "init:all-data": "npm run data:init:empty --workspace @vm/api --",
     "init:live-data": "npm run data:init:live --workspace @vm/api",
+    "prepare:live-reservation-config": "node scripts/prepare-reservation-live-config.mjs",
     "init:first-backoffice-password:maintenance": "node scripts/run-first-backoffice-password-maintenance.mjs",
     "preflight:first-backoffice-password:maintenance": "node scripts/run-first-backoffice-password-maintenance-preflight.mjs",
     "init:first-super-admin-password:maintenance": "node scripts/run-first-super-admin-password-maintenance.mjs",
@@ -66,10 +67,11 @@
     "test:vnc-nginx-edge-contract": "node --test scripts/verify-vnc-nginx-edge-contract.test.mjs",
     "test:vending-spark-vhost-cutover": "node --test scripts/vending-spark-vhost-cutover.test.mjs",
     "test:first-backoffice-password-maintenance": "node --test scripts/first-backoffice-password-maintenance.test.mjs",
+    "test:prepare-live-reservation-config": "node --test scripts/prepare-reservation-live-config.test.mjs",
     "test:vending-public-ingress-root-action": "node --test scripts/vending-public-ingress-root-action.test.mjs",
     "test:public-app-acceptance": "node --test scripts/public-app-acceptance.test.mjs scripts/vnc-local-session.test.mjs scripts/public-app-acceptance-sealed-runtime.test.mjs scripts/public-app-acceptance-install-contract.test.mjs && tsx --tsconfig apps/api/tsconfig.json --test scripts/public-app-acceptance.integration.test.mts",
     "smoke:frontend-safety": "node scripts/smoke-frontend-safety.mjs",
-    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety && npm run test:public-web && npm run test:private-api-relay && npm run test:public-edge-relay && npm run test:public-http-entry-redirect && npm run test:vnc-nginx-edge-contract && npm run test:vending-spark-vhost-cutover && npm run test:first-backoffice-password-maintenance && npm run test:vending-public-ingress-root-action && npm run test:public-app-acceptance",
+    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety && npm run test:public-web && npm run test:private-api-relay && npm run test:public-edge-relay && npm run test:public-http-entry-redirect && npm run test:vnc-nginx-edge-contract && npm run test:vending-spark-vhost-cutover && npm run test:first-backoffice-password-maintenance && npm run test:prepare-live-reservation-config && npm run test:vending-public-ingress-root-action && npm run test:public-app-acceptance",
     "check:local:full": "npm run check:local && npm run build && npm run build:mobile:weixin && npm run build:mobile:alipay && npm run build:mobile:app",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

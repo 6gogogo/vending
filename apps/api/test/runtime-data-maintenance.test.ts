@@ -858,6 +858,145 @@ test("真实初始化在取得租约或写入前拒绝混有历史审计证据�
   assert.equal(readFileSync(auditFile, "utf8"), '{"event":"historical-evidence"}\n');
 });
 
+test("真实初始化可只迁入现有非默认服务商与首管理员凭据散列", (t) => {
+  const targetRoot = mkdtempSync(join(tmpdir(), "vm-live-init-credential-target-"));
+  const sourceRoot = mkdtempSync(join(tmpdir(), "vm-live-init-credential-source-"));
+  const sourceFile = join(sourceRoot, "store.json");
+  const sourceState = createSeededPersistedState("simulation-credential-source");
+  const sourceTenantId = sourceState.platformTenants[0]!.id;
+  sourceState.users.unshift(
+    {
+      id: "provider-source-user",
+      role: "admin",
+      phone: "13911111111",
+      name: "来源服务商",
+      status: "active",
+      regionName: "系统管理",
+      neighborhood: "系统管理",
+      tags: ["hidden-backoffice", "super-admin"],
+      mobileProfileCompleted: false
+    },
+    {
+      id: "tenant-admin-source-user",
+      tenantId: sourceTenantId,
+      role: "admin",
+      phone: "13911111112",
+      name: "来源实例管理员",
+      status: "active",
+      regionName: "实例运营",
+      neighborhood: "实例运营",
+      tags: ["实例管理员"],
+      mobileProfileCompleted: true
+    }
+  );
+  sourceState.backofficeCredentials.push(
+    {
+      userId: "provider-source-user",
+      username: "provider-source",
+      role: "super_admin",
+      passwordSalt: "provider-source-salt",
+      passwordHash: "provider-source-hash",
+      usesDefaultPassword: false,
+      passwordUpdatedAt: "2026-07-30T00:00:00.000Z"
+    },
+    {
+      userId: "tenant-admin-source-user",
+      username: "tenant-admin-source",
+      role: "admin",
+      tenantId: sourceTenantId,
+      passwordSalt: "tenant-admin-source-salt",
+      passwordHash: "tenant-admin-source-hash",
+      usesDefaultPassword: false,
+      passwordUpdatedAt: "2026-07-30T00:00:00.000Z"
+    }
+  );
+  const providerCredential = sourceState.backofficeCredentials.find(
+    (entry) => entry.role === "super_admin"
+  );
+  const tenantAdminCredential = sourceState.backofficeCredentials.find(
+    (entry) => entry.role === "admin"
+  );
+
+  assert.ok(providerCredential);
+  assert.ok(tenantAdminCredential);
+  const sourceContent = `${JSON.stringify(sourceState, null, 2)}\n`;
+  writeFileSync(sourceFile, sourceContent, { encoding: "utf8", mode: 0o600 });
+  chmodSync(sourceFile, 0o600);
+  t.after(() => {
+    rmSync(targetRoot, { recursive: true, force: true });
+    rmSync(sourceRoot, { recursive: true, force: true });
+  });
+
+  const result = runScript(
+    initializeLiveDataScript,
+    ["--confirm-live-initialization"],
+    {
+      ...process.env,
+      NODE_ENV: "test",
+      APP_ENV: "",
+      VM_DATA_PLANE: "live",
+      VM_DATA_ROOT: targetRoot,
+      VM_DATA_PLANE_ID: "xiaoguidai-live-test",
+      VM_PLATFORM_TENANT_NAME: "小柜大爱",
+      PUBLIC_BASE_URL: "https://vending.example.com",
+      API_DATA_FILE: "",
+      SYSTEM_LOG_FILE: "",
+      UPLOAD_DIR: "",
+      API_BACKUP_DIR: "",
+      FINANCIAL_SINGLE_WRITER_LEASE_FILE: "",
+      VM_INITIAL_CREDENTIAL_SOURCE_DATA_FILE: sourceFile,
+      VM_INITIAL_SUPER_ADMIN_USERNAME: providerCredential.username,
+      VM_INITIAL_TENANT_ADMIN_USERNAME: tenantAdminCredential.username,
+      VM_INITIAL_SUPER_ADMIN_PASSWORD: "",
+      VM_INITIAL_SUPER_ADMIN_PHONE: "",
+      VM_INITIAL_SUPER_ADMIN_NAME: ""
+    }
+  );
+
+  assertSucceeded(result);
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(
+      `${providerCredential.username}|${tenantAdminCredential.username}|provider-source|tenant-admin-source`,
+      "u"
+    )
+  );
+  assert.equal(readFileSync(sourceFile, "utf8"), sourceContent);
+
+  const targetState = JSON.parse(
+    readFileSync(join(targetRoot, "store.json"), "utf8")
+  ) as ReturnType<typeof createSeededPersistedState>;
+  assert.equal(targetState.dataPlane, "live");
+  assert.equal(targetState.instanceId, "xiaoguidai-live-test");
+  assert.equal(targetState.initializationSource, "live-bootstrap");
+  assert.equal(targetState.platformTenants.length, 1);
+  assert.equal(targetState.platformTenants[0]?.name, "小柜大爱");
+  assert.equal(targetState.platformTenants[0]?.serviceMode, "production");
+  assert.equal(targetState.users.length, 2);
+  assert.equal(targetState.backofficeCredentials.length, 2);
+  assert.equal(targetState.adminCredentials.length, 0);
+  assert.equal(targetState.goodsCatalog.length, 0);
+  assert.equal(targetState.devices.length, 0);
+  assert.equal(targetState.paymentOrders.length, 0);
+  assert.equal(targetState.reservations.length, 0);
+
+  const importedProvider = targetState.backofficeCredentials.find(
+    (entry) => entry.role === "super_admin"
+  );
+  const importedTenantAdmin = targetState.backofficeCredentials.find(
+    (entry) => entry.role === "admin"
+  );
+  assert.equal(importedProvider?.passwordSalt, providerCredential.passwordSalt);
+  assert.equal(importedProvider?.passwordHash, providerCredential.passwordHash);
+  assert.equal(importedProvider?.usesDefaultPassword, false);
+  assert.equal(importedProvider?.tenantId, undefined);
+  assert.equal(importedTenantAdmin?.passwordSalt, tenantAdminCredential.passwordSalt);
+  assert.equal(importedTenantAdmin?.passwordHash, tenantAdminCredential.passwordHash);
+  assert.equal(importedTenantAdmin?.usesDefaultPassword, false);
+  assert.equal(importedTenantAdmin?.tenantId, "xiaoguidai-live-test");
+  assert.equal(importedTenantAdmin?.permissions, undefined);
+});
+
 test("清空脚本在写入前拒绝 UPLOAD_DIR 与运行数据路径重叠", (t) => {
   const runtime = createIsolatedRuntime();
   t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
