@@ -37,7 +37,7 @@ export class RegistrationApplicationsService {
     const matchingTenants = hostname
       ? this.store.platformTenants.filter(
           (tenant) =>
-            tenant.status !== "paused" &&
+            this.store.isPlatformTenantOperationalInCurrentDataPlane(tenant.id) &&
             this.readInstanceHostname(tenant.instanceUrl) === hostname
         )
       : [];
@@ -61,7 +61,7 @@ export class RegistrationApplicationsService {
       hostname &&
       publicBaseHostname === hostname &&
       defaultTenant &&
-      defaultTenant.status !== "paused"
+      this.store.isPlatformTenantOperationalInCurrentDataPlane(defaultTenant.id)
     ) {
       return defaultTenant.id;
     }
@@ -69,7 +69,10 @@ export class RegistrationApplicationsService {
     if (
       !isProductionRuntime() &&
       !this.store.isLiveDataPlane() &&
-      (!hostname || this.isLoopbackHostname(hostname))
+      (!hostname || this.isLoopbackHostname(hostname)) &&
+      this.store.isPlatformTenantOperationalInCurrentDataPlane(
+        this.store.getDefaultTenantId()
+      )
     ) {
       return this.store.getDefaultTenantId();
     }

@@ -48,6 +48,7 @@ export class PlatformService {
 
     const code = payload.code?.trim().toLowerCase();
     const name = payload.name?.trim();
+    const serviceMode = payload.serviceMode ?? "simulation";
     const status = payload.status ?? "trial";
     const instanceUrl = this.normalizeInstanceUrl(payload.instanceUrl);
     const contactName = payload.contactName?.trim() || undefined;
@@ -66,9 +67,15 @@ export class PlatformService {
       throw new BadRequestException("客户实例名称需为 1 至 100 个字符的单行文本。");
     }
 
+    if (serviceMode !== "simulation" && serviceMode !== "production") {
+      throw new BadRequestException("请选择模拟服务或正式服务。");
+    }
+
     if (status !== "active" && status !== "trial" && status !== "paused") {
       throw new BadRequestException("请选择有效的客户实例状态。");
     }
+
+    this.assertServiceModeCanUseStatus(serviceMode, status);
 
     if (contactPhone && !phonePattern.test(contactPhone)) {
       throw new BadRequestException("实例联系人手机号格式不正确。");
@@ -120,6 +127,7 @@ export class PlatformService {
       id: this.store.createId("tenant"),
       code,
       name,
+      serviceMode,
       status,
       instanceUrl,
       contactName,
@@ -171,6 +179,7 @@ export class PlatformService {
       metadata: {
         tenantId: tenant.id,
         tenantCode: tenant.code,
+        serviceMode: tenant.serviceMode,
         username: credential.username,
         undoState: "not_undoable"
       }
@@ -233,6 +242,8 @@ export class PlatformService {
     if (status !== "active" && status !== "trial" && status !== "paused") {
       throw new BadRequestException("请选择有效的客户实例状态。");
     }
+
+    this.assertServiceModeCanUseStatus(tenant.serviceMode, status);
 
     if (contactPhone && !phonePattern.test(contactPhone)) {
       throw new BadRequestException("实例联系人手机号格式不正确。");
@@ -367,6 +378,21 @@ export class PlatformService {
     key: keyof PlatformTenantUsageSummary["metrics"]
   ) {
     return tenants.reduce((sum, entry) => sum + entry.metrics[key], 0);
+  }
+
+  private assertServiceModeCanUseStatus(
+    serviceMode: PlatformTenantRecord["serviceMode"],
+    status: PlatformTenantRecord["status"]
+  ) {
+    if (
+      serviceMode === "production" &&
+      status === "active" &&
+      !this.store.isLiveDataPlane()
+    ) {
+      throw new ConflictException(
+        "正式服务需在绑定的真实数据平面通过生产门禁后才能标记为运行中。"
+      );
+    }
   }
 
   private resolveAlertTenantId(alert: AlertTask) {

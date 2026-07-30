@@ -368,6 +368,7 @@ export interface BackofficeSessionSnapshot {
     scope: BackofficeScope;
     tenantId?: string;
     tenantName?: string;
+    tenantServiceMode?: PlatformTenantServiceMode;
     permissions: BackofficePermission[];
     name: string;
     phone: string;
@@ -421,11 +422,13 @@ export interface ManualVerificationGrantSnapshot {
 }
 
 export type PlatformTenantStatus = "active" | "trial" | "paused";
+export type PlatformTenantServiceMode = "simulation" | "production";
 
 export interface PlatformTenantRecord {
   id: string;
   code: string;
   name: string;
+  serviceMode: PlatformTenantServiceMode;
   status: PlatformTenantStatus;
   instanceUrl?: string;
   contactName?: string;
@@ -437,6 +440,7 @@ export interface PlatformTenantRecord {
 export interface PlatformTenantCreatePayload {
   code: string;
   name: string;
+  serviceMode?: PlatformTenantServiceMode;
   status?: PlatformTenantStatus;
   instanceUrl?: string;
   contactName?: string;

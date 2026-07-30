@@ -63,6 +63,7 @@ test("旧真实快照补齐人员实例归属后可正常登录，不依赖模�
       id: environment.VM_DATA_PLANE_ID,
       code: "current",
       name: environment.VM_PLATFORM_TENANT_NAME,
+      serviceMode: "production",
       status: "active",
       instanceUrl: environment.PUBLIC_BASE_URL,
       createdAt: "2026-01-01T00:00:00.000Z"

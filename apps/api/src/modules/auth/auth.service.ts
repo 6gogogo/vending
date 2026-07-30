@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   Inject,
@@ -339,6 +340,7 @@ export class AuthService {
       throw new UnauthorizedException("手机号或验证码不正确。");
     }
 
+    this.assertTenantOperational(this.store.getUserTenantId(user));
     const token = this.store.createSession(user);
 
     return {
@@ -400,6 +402,7 @@ export class AuthService {
     }
 
     this.assertDefaultCredentialAllowed(credential.usesDefaultPassword);
+    this.assertTenantOperational(this.store.getUserTenantId(user));
     this.clearPasswordLoginAccountFailures(username);
 
     return this.createAdminSessionSnapshot(user);
@@ -430,6 +433,7 @@ export class AuthService {
     }
 
     this.assertDefaultCredentialAllowed(credential.usesDefaultPassword);
+    this.assertTenantOperational(credential.tenantId);
     this.clearPasswordLoginAccountFailures(username);
 
     return this.createBackofficeSessionSnapshot(user, credential.role, undefined, credential);
@@ -562,6 +566,15 @@ export class AuthService {
 
     if (tenant.status === "paused") {
       throw new ForbiddenException("目标客户实例已暂停，暂不能进入。");
+    }
+
+    if (
+      tenant.serviceMode === "production" &&
+      (!this.store.isLiveDataPlane() || tenant.status !== "active")
+    ) {
+      throw new ConflictException(
+        "正式服务实例需完成生产开通并在真实数据平面运行后才能进入。"
+      );
     }
 
     const nextToken = this.store.createBackofficeSession(
@@ -1580,6 +1593,13 @@ export class AuthService {
       throw new UnauthorizedException("当前登录态已失效，请重新登录。");
     }
 
+    try {
+      this.assertTenantOperational(session.tenantId);
+    } catch (error) {
+      this.store.revokeSession(resolvedToken);
+      throw error;
+    }
+
     const tenant = this.store.findPlatformTenantById(session.tenantId);
 
     return {
@@ -1591,6 +1611,7 @@ export class AuthService {
         scope: this.store.getBackofficeScope(backofficeRole, session.tenantId),
         tenantId: session.tenantId,
         tenantName: tenant?.name,
+        tenantServiceMode: tenant?.serviceMode,
         permissions: this.store.getBackofficeSessionPermissions(session),
         name: user.name,
         phone: user.phone,
@@ -1604,9 +1625,12 @@ export class AuthService {
     };
   }
 
-  private createSessionSnapshot(user: UserRecord, token = this.store.createSession(user)): MobileSessionSnapshot {
+  private createSessionSnapshot(user: UserRecord, token?: string): MobileSessionSnapshot {
+    this.assertTenantOperational(this.store.getUserTenantId(user));
+    const resolvedToken = token ?? this.store.createSession(user);
+
     return {
-      token,
+      token: resolvedToken,
       user: {
         id: user.id,
         role: user.role,
@@ -1616,6 +1640,26 @@ export class AuthService {
       },
       quota: this.accessRulesService.getQuotaSummaryForUser(user)
     };
+  }
+
+  private assertTenantOperational(tenantId?: string) {
+    if (!tenantId) {
+      return;
+    }
+
+    const tenant = this.store.findPlatformTenantById(tenantId);
+
+    if (!tenant) {
+      throw new UnauthorizedException("当前账号所属实例无效，请联系服务提供商。");
+    }
+
+    if (tenant.status === "paused") {
+      throw new ForbiddenException("目标客户实例已暂停，暂不能登录。");
+    }
+
+    if (!this.store.isPlatformTenantOperationalInCurrentDataPlane(tenant.id)) {
+      throw new ConflictException("当前客户实例尚未在匹配的运行环境完成开通。");
+    }
   }
 
   private applyProfileToUser(user: UserRecord, profile: RegistrationApplicationProfile, role: UserRole) {

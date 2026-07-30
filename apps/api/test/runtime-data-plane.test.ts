@@ -86,6 +86,34 @@ test("真实平面的唯一客户实例由部署配置绑定，模拟平面继�
     createSimulationPlatformTenant().instanceUrl,
     "https://vending.5gogogo.top"
   );
+  assert.doesNotThrow(() =>
+    assertLivePlatformTenantConfiguration(
+      [
+        {
+          id: "live-tenant-test",
+          name: "真实租户测试实例",
+          instanceUrl: "https://live-tenant.example.test",
+          serviceMode: "production"
+        }
+      ],
+      environment
+    )
+  );
+  assert.throws(
+    () =>
+      assertLivePlatformTenantConfiguration(
+        [
+          {
+            id: "live-tenant-test",
+            name: "真实租户测试实例",
+            instanceUrl: "https://live-tenant.example.test",
+            serviceMode: "simulation"
+          }
+        ],
+        environment
+      ),
+    /必须标记为正式服务/
+  );
   assert.throws(
     () =>
       assertLivePlatformTenantConfiguration(

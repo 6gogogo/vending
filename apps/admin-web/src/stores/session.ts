@@ -34,6 +34,7 @@ interface AdminSessionUser {
   scope: BackofficeScope;
   tenantId?: string;
   tenantName?: string;
+  tenantServiceMode?: "simulation" | "production";
   permissions?: BackofficePermission[];
   name: string;
   phone: string;

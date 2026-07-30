@@ -40,6 +40,7 @@ export const createSimulationPlatformTenant = (): PlatformTenantRecord => ({
   id: "tenant-a",
   code: "current",
   name: "公益智助柜当前实例",
+  serviceMode: "simulation",
   status: "active",
   instanceUrl: "https://vending.5gogogo.top",
   contactName: "实例管理员",
@@ -140,6 +141,10 @@ export const assertLivePlatformTenantConfiguration = (
     throw new Error(
       `真实数据平面的客户实例名称必须与 ${RUNTIME_PLATFORM_TENANT_NAME_ENV_KEY} 一致。`
     );
+  }
+
+  if (record.serviceMode !== undefined && record.serviceMode !== "production") {
+    throw new Error("真实数据平面的客户实例必须标记为正式服务。");
   }
 };
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import type {
@@ -17,6 +17,11 @@ import {
   validatePlatformTenantDraft,
   validatePlatformTenantUpdateDraft
 } from "../utils/backoffice-provisioning";
+import {
+  resolveTenantEntryAction,
+  resolveTenantLifecycleLabel,
+  resolveWorkspaceServiceLabel
+} from "../utils/workspace-service-label";
 
 const router = useRouter();
 const sessionStore = useAdminSessionStore();
@@ -33,6 +38,7 @@ const provisioned = ref<PlatformTenantProvisioningResult>();
 const createForm = reactive<PlatformTenantCreatePayload>({
   code: "",
   name: "",
+  serviceMode: "production",
   status: "trial",
   instanceUrl: "",
   contactName: "",
@@ -61,15 +67,25 @@ const editingTenant = computed(() =>
   tenants.value.find((entry) => entry.tenant.id === editingTenantId.value)
 );
 
-const statusLabel = (status: "active" | "trial" | "paused") => {
-  if (status === "active") return "运行中";
-  if (status === "trial") return "试运行";
-  return "已暂停";
-};
+watch(
+  () => createForm.serviceMode,
+  (serviceMode) => {
+    if (serviceMode === "production" && createForm.status === "active") {
+      createForm.status = "trial";
+    }
+  }
+);
+
+const serviceModeLabel = (serviceMode: "simulation" | "production") =>
+  resolveWorkspaceServiceLabel({
+    scope: "tenant",
+    tenantServiceMode: serviceMode
+  });
 
 const resetCreateForm = () => {
   createForm.code = "";
   createForm.name = "";
+  createForm.serviceMode = "production";
   createForm.status = "trial";
   createForm.instanceUrl = "";
   createForm.contactName = "";
@@ -165,6 +181,7 @@ const createTenant = async () => {
     const result = await adminApi.createPlatformTenant({
       code: createForm.code.trim().toLowerCase(),
       name: createForm.name.trim(),
+      serviceMode: createForm.serviceMode,
       status: createForm.status,
       instanceUrl: createForm.instanceUrl.trim() || undefined,
       contactName: createForm.contactName.trim() || undefined,
@@ -180,7 +197,10 @@ const createTenant = async () => {
     provisioned.value = result;
     actionMessage.value = {
       type: "success",
-      text: `实例“${result.tenant.name}”及首管理员已原子创建。密码不会在页面再次显示。`
+      text:
+        result.tenant.serviceMode === "production"
+          ? `正式实例“${result.tenant.name}”及首管理员资料已保存，完成生产开通后才可登录。密码不会在页面再次显示。`
+          : `模拟实例“${result.tenant.name}”及首管理员已创建，可进入实例开始演练。密码不会在页面再次显示。`
     };
     resetCreateForm();
     await load();
@@ -255,7 +275,7 @@ onMounted(() => {
 
       <form class="admin-panel admin-panel-block platform-create" @submit.prevent="createTenant">
         <div class="admin-note">
-          实例、首管理员人员记录和后台凭据会在同一事务边界内保存；任何一步失败都不会留下半成品。
+          服务类型决定实例是正式运营还是模拟演练；运行状态用于控制该实例当前是否开放。实例、首管理员人员记录和后台凭据会一起保存，任何一步失败都不会留下半成品。
         </div>
         <div class="platform-create__grid">
           <label class="admin-field">
@@ -280,10 +300,24 @@ onMounted(() => {
             />
           </label>
           <label class="admin-field">
+            <span class="admin-field__label">服务类型</span>
+            <select v-model="createForm.serviceMode" class="admin-select" required>
+              <option value="production">正式服务</option>
+              <option value="simulation">模拟服务</option>
+            </select>
+            <small class="admin-field__hint">
+              正式服务按独立生产门禁开通；模拟服务仅用于演练，不接入真实资金与柜机。
+            </small>
+          </label>
+          <label class="admin-field">
             <span class="admin-field__label">运行状态</span>
             <select v-model="createForm.status" class="admin-select">
-              <option value="trial">试运行</option>
-              <option value="active">运行中</option>
+              <option value="trial">
+                {{ createForm.serviceMode === "production" ? "待开通" : "演练中" }}
+              </option>
+              <option value="active" :disabled="createForm.serviceMode === 'production'">
+                运行中
+              </option>
               <option value="paused">暂停</option>
             </select>
           </label>
@@ -378,7 +412,12 @@ onMounted(() => {
         </div>
         <div v-if="provisioned" class="admin-note">
           首管理员账号：{{ provisioned.firstAdmin.username }} ·
-          实例：{{ provisioned.tenant.name }}。请通过安全渠道交付首次密码。
+          实例：{{ provisioned.tenant.name }}。
+          {{
+            provisioned.tenant.serviceMode === "production"
+              ? "请先完成生产开通，再通过安全渠道交付入口和首次密码。"
+              : "请通过安全渠道交付首次密码。"
+          }}
         </div>
         <button class="admin-button platform-create__submit" type="submit" :disabled="creating">
           {{ creating ? "创建中..." : "创建实例与首管理员" }}
@@ -390,7 +429,7 @@ onMounted(() => {
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">客户实例</p>
-          <h3 class="admin-page__section-title">选择实例后进入其独立管理范围</h3>
+          <h3 class="admin-page__section-title">进入已开通实例的独立管理范围</h3>
         </div>
         <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
           {{ loading ? "刷新中" : "刷新" }}
@@ -411,7 +450,7 @@ onMounted(() => {
           <thead>
             <tr>
               <th>公司实例</th>
-              <th>状态</th>
+              <th>服务 / 状态</th>
               <th>柜机</th>
               <th>人员</th>
               <th>库存/领取</th>
@@ -426,9 +465,22 @@ onMounted(() => {
                 <span class="admin-table__subtext">{{ entry.tenant.code }} · {{ entry.tenant.instanceUrl ?? "未配置实例地址" }}</span>
               </td>
               <td>
-                <span class="admin-pill" :class="entry.tenant.status === 'active' ? 'admin-pill--success' : entry.tenant.status === 'trial' ? 'admin-pill--warning' : 'admin-pill--neutral'">
-                  {{ statusLabel(entry.tenant.status) }}
-                </span>
+                <div class="platform-service-status">
+                  <span
+                    class="admin-pill"
+                    :class="entry.tenant.serviceMode === 'production' ? 'admin-pill--success' : 'admin-pill--warning'"
+                  >
+                    {{ serviceModeLabel(entry.tenant.serviceMode) }}
+                  </span>
+                  <span class="admin-pill" :class="entry.tenant.status === 'active' ? 'admin-pill--success' : entry.tenant.status === 'trial' ? 'admin-pill--warning' : 'admin-pill--neutral'">
+                    {{
+                      resolveTenantLifecycleLabel({
+                        serviceMode: entry.tenant.serviceMode,
+                        status: entry.tenant.status
+                      })
+                    }}
+                  </span>
+                </div>
               </td>
               <td>{{ entry.metrics.onlineDevices }}/{{ entry.metrics.devices }}</td>
               <td>{{ entry.metrics.users }} 人 / 商家 {{ entry.metrics.merchants }}</td>
@@ -445,10 +497,17 @@ onMounted(() => {
                   </button>
                   <button
                     class="admin-button admin-button--ghost"
-                    :disabled="Boolean(enteringTenantId) || entry.tenant.status === 'paused'"
+                    :disabled="
+                      Boolean(enteringTenantId) ||
+                      resolveTenantEntryAction(entry.tenant).disabled
+                    "
                     @click="enterTenant(entry.tenant.id, entry.tenant.name)"
                   >
-                    {{ enteringTenantId === entry.tenant.id ? "进入中..." : entry.tenant.status === "paused" ? "实例已暂停" : "进入实例" }}
+                    {{
+                      enteringTenantId === entry.tenant.id
+                        ? "进入中..."
+                        : resolveTenantEntryAction(entry.tenant).label
+                    }}
                   </button>
                 </div>
               </td>
@@ -457,7 +516,7 @@ onMounted(() => {
         </table>
         <div v-else class="admin-empty">
           <div class="admin-empty__title">{{ loading ? "正在加载客户实例" : "暂无客户实例" }}</div>
-          <div class="admin-empty__body">请先创建客户实例与首管理员，再进入实例配置角色、柜机和权限。</div>
+          <div class="admin-empty__body">请先创建客户实例与首管理员；正式实例完成生产开通后才能进入。</div>
         </div>
       </article>
     </section>
@@ -483,10 +542,30 @@ onMounted(() => {
             <input v-model="editForm.name" class="admin-input" maxlength="100" required />
           </label>
           <label class="admin-field">
+            <span class="admin-field__label">服务类型</span>
+            <input
+              class="admin-input"
+              :value="serviceModeLabel(editingTenant.tenant.serviceMode)"
+              readonly
+              aria-readonly="true"
+            />
+          </label>
+          <label class="admin-field">
             <span class="admin-field__label">运行状态</span>
             <select v-model="editForm.status" class="admin-select">
-              <option value="trial">试运行</option>
-              <option value="active">运行中</option>
+              <option value="trial">
+                {{
+                  editingTenant.tenant.serviceMode === "production"
+                    ? "待开通"
+                    : "演练中"
+                }}
+              </option>
+              <option
+                value="active"
+                :disabled="editingTenant.tenant.serviceMode === 'production'"
+              >
+                运行中
+              </option>
               <option value="paused">暂停</option>
             </select>
           </label>
@@ -545,6 +624,18 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.platform-service-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-field__hint {
+  color: var(--admin-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .platform-create__admin {

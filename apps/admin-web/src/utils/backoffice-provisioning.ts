@@ -1,8 +1,15 @@
-import type { BackofficeRole, VerificationProvider } from "@vm/shared-types";
+import type {
+  BackofficeRole,
+  PlatformTenantServiceMode,
+  PlatformTenantStatus,
+  VerificationProvider
+} from "@vm/shared-types";
 
 export interface PlatformTenantDraftForValidation {
   code: string;
   name: string;
+  serviceMode: PlatformTenantServiceMode;
+  status: PlatformTenantStatus;
   contactPhone?: string;
   firstAdmin: {
     name: string;
@@ -54,6 +61,14 @@ export const validatePlatformTenantDraft = (
 
   if (!name || [...name].length > 100 || /[\r\n]/u.test(name)) {
     return "实例名称需为 1 至 100 个字符的单行文本。";
+  }
+
+  if (draft.serviceMode !== "simulation" && draft.serviceMode !== "production") {
+    return "请选择模拟服务或正式服务。";
+  }
+
+  if (draft.serviceMode === "production" && draft.status === "active") {
+    return "正式服务需完成生产开通后才能标记为运行中。";
   }
 
   if (contactPhone && !phonePattern.test(contactPhone)) {

@@ -99,6 +99,12 @@ const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
 const roleBoundaryLayoutSource = readSource("apps/admin-web/src/layouts/AdminLayout.vue");
 const adminSessionSource = readSource("apps/admin-web/src/stores/session.ts");
+const workspaceServiceLabelSource = readSource(
+  "apps/admin-web/src/utils/workspace-service-label.ts"
+);
+const platformOverviewSource = readSource(
+  "apps/admin-web/src/pages/PlatformOverviewPage.vue"
+);
 const adminOperationsSource = readSource("apps/admin-web/src/pages/OperationsPage.vue");
 const deviceWorkspaceSource = readSource("apps/admin-web/src/pages/DeviceWorkspacePage.vue");
 const assignedDeviceDetailPageSource = readSource("apps/admin-web/src/pages/AssignedDeviceDetailPage.vue");
@@ -147,7 +153,26 @@ assert.doesNotMatch(
   /ALIYUN_PNVS_(?:ACCESS_KEY|SIGN_NAME|TEMPLATE_CODE|SCHEME_NAME)|VERIFICATION_CODE_MANUAL_VALUE/,
   "公开配置不得读取或返回验证码凭据、方案、签名、模板或人工码"
 );
-assert.match(adminAppSource, /runtimeDataPlane/, "管理后台必须读取公开运行数据平面");
+assert.doesNotMatch(
+  adminAppSource,
+  /runtimeDataPlane|loadPublicRuntimeConfig/,
+  "管理后台根组件不得再用全局运行数据平面给账号身份贴标签"
+);
+assert.match(
+  roleBoundaryLayoutSource,
+  /resolveWorkspaceServiceLabel\(\{[\s\S]{0,160}scope: sessionStore\.user\?\.scope,[\s\S]{0,160}tenantServiceMode: sessionStore\.user\?\.tenantServiceMode/,
+  "后台工作区服务标签必须由服务端会话作用域和实例服务类型决定"
+);
+assert.match(
+  workspaceServiceLabelSource,
+  /input\.scope === "provider"[\s\S]{0,100}return "正式服务商平台"/,
+  "服务商平台身份必须始终显示为正式服务商平台"
+);
+assert.match(
+  platformOverviewSource,
+  /<option value="production">正式服务<\/option>[\s\S]{0,100}<option value="simulation">模拟服务<\/option>/,
+  "服务商创建实例时必须可明确选择正式服务或模拟服务"
+);
 assert.doesNotMatch(
   adminLoginSource,
   /模拟服务|服务状态待确认|runtimeStatusLabel/,
@@ -369,9 +394,9 @@ assert.match(
   "批量删除请求必须把已确认人数交给服务端复核"
 );
 assert.match(
-  adminAppSource,
-  /role="status"[\s\S]+aria-live="polite"/,
-  "模拟实例标识必须向辅助技术声明"
+  roleBoundaryLayoutSource,
+  /role="status"[\s\S]{0,100}\{\{\s*workspaceServiceLabel\s*\}\}/,
+  "当前工作区的服务身份必须向辅助技术声明"
 );
 const amapLoaderSource = readSource("apps/admin-web/src/utils/amap-loader.ts");
 const amapPickerSource = readSource("apps/admin-web/src/components/AmapLocationPicker.vue");

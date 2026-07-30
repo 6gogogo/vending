@@ -337,6 +337,7 @@ export class InMemoryStoreService {
       id: tenant.id,
       code: "current",
       name: tenant.name,
+      serviceMode: "production",
       status: "active",
       instanceUrl: tenant.instanceUrl,
       contactName: "实例管理员",
@@ -937,6 +938,20 @@ export class InMemoryStoreService {
     return tenantId ? this.platformTenants.find((entry) => entry.id === tenantId) : undefined;
   }
 
+  isPlatformTenantOperationalInCurrentDataPlane(tenantId?: string) {
+    const tenant = this.findPlatformTenantById(tenantId);
+
+    if (!tenant || tenant.status === "paused") {
+      return false;
+    }
+
+    if (this.isLiveDataPlane()) {
+      return tenant.serviceMode === "production" && tenant.status === "active";
+    }
+
+    return tenant.serviceMode === "simulation";
+  }
+
   getUserTenantId(user: UserRecord) {
     // 构造阶段会迁移明确的旧单实例记录。运行期仍无 tenantId 的人员属于歧义
     // 隔离记录：调用方只能得到 undefined，不能把凭据或默认实例当作归属证明。
@@ -1002,6 +1017,14 @@ export class InMemoryStoreService {
     }
 
     const user = this.users.find((entry) => entry.id === session.userId);
+
+    if (
+      session.tenantId &&
+      !this.isPlatformTenantOperationalInCurrentDataPlane(session.tenantId)
+    ) {
+      this.sessions.delete(session.token);
+      return undefined;
+    }
 
     if (!session.backofficeRole && session.role === "admin") {
       const mobileAdminCredential = this.findAdminCredentialByUserId(session.userId);
@@ -1156,7 +1179,8 @@ export class InMemoryStoreService {
           draft.tenantId)
     );
     const tenantInvalid = Boolean(
-      draft && !this.findPlatformTenantById(draft.tenantId)
+      draft &&
+        !this.isPlatformTenantOperationalInCurrentDataPlane(draft.tenantId)
     );
 
     if (

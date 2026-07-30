@@ -105,6 +105,7 @@ test("非生产 live 平面也拒绝不完整状态，绝不以模拟种子回�
         id: "live-read-test",
         code: "current",
         name: "真实读取测试实例",
+        serviceMode: "production",
         status: "active",
         instanceUrl: "https://live-read.example.test",
         createdAt: "2026-01-01T00:00:00.000Z"
@@ -158,6 +159,7 @@ test("真实平面由受控初始化持久化唯一当前租户，并在启动�
       id: environment.VM_DATA_PLANE_ID,
       code: "current",
       name: environment.VM_PLATFORM_TENANT_NAME,
+      serviceMode: "production",
       status: "active",
       instanceUrl: environment.PUBLIC_BASE_URL,
       contactName: "实例管理员",
@@ -171,6 +173,7 @@ test("真实平面由受控初始化持久化唯一当前租户，并在启动�
         id: environment.VM_DATA_PLANE_ID,
         code: "current",
         name: environment.VM_PLATFORM_TENANT_NAME,
+        serviceMode: "production",
         status: "active",
         instanceUrl: environment.PUBLIC_BASE_URL,
         contactName: "实例管理员",
@@ -288,6 +291,7 @@ test("模拟快照在不占用其他实例域名时修复默认实例的公网�
     id: "tenant-b",
     code: "other",
     name: "其他模拟实例",
+    serviceMode: "simulation",
     status: "active",
     instanceUrl: "https://other.example.test",
     createdAt: "2026-01-01T00:00:00.000Z"
@@ -331,6 +335,7 @@ test("模拟快照不抢占已由其他实例声明的公网入口，也不恢�
     id: "tenant-b",
     code: "public-owner",
     name: "公网入口所属实例",
+    serviceMode: "simulation",
     status: "active",
     instanceUrl: "https://vending.5gogogo.top",
     createdAt: "2026-01-01T00:00:00.000Z"

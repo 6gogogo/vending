@@ -666,6 +666,38 @@ const reconcileSimulationDefaultTenantPublicHost = (
   ];
 };
 
+const normalizePlatformTenantServiceModes = (
+  tenants: PlatformTenantRecord[],
+  dataPlane: RuntimeDataPlane
+) => {
+  let changed = false;
+  const normalized = tenants.map((tenant) => {
+    const serviceMode = (tenant as Partial<PlatformTenantRecord>).serviceMode;
+
+    if (serviceMode !== undefined && serviceMode !== "simulation" && serviceMode !== "production") {
+      throw new Error("客户实例服务模式无效，已拒绝启动。");
+    }
+
+    if (dataPlane === "live" && serviceMode === "simulation") {
+      throw new Error("真实数据平面的客户实例不能标记为模拟服务。");
+    }
+
+    if (serviceMode) {
+      return tenant;
+    }
+
+    changed = true;
+    const inferredServiceMode: PlatformTenantRecord["serviceMode"] =
+      dataPlane === "live" ? "production" : "simulation";
+    return {
+      ...tenant,
+      serviceMode: inferredServiceMode
+    };
+  });
+
+  return changed ? normalized : tenants;
+};
+
 const normalizePersistedState = (
   raw: Partial<PersistedStoreState>,
   options: {
@@ -695,7 +727,10 @@ const normalizePersistedState = (
       : dataPlane === "simulation"
         ? "legacy-simulation"
         : "live-bootstrap-pending";
-  const sourcePlatformTenants = raw.platformTenants ?? fallbackState.platformTenants;
+  const sourcePlatformTenants = normalizePlatformTenantServiceModes(
+    raw.platformTenants ?? fallbackState.platformTenants,
+    dataPlane
+  );
   const platformTenants =
     dataPlane === "simulation"
       ? reconcileSimulationDefaultTenantPublicHost(sourcePlatformTenants)

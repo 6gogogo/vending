@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { computed, inject, reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import type { BackofficePermission, BackofficeRole } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import { hasBackofficeRouteRole, useAdminSessionStore } from "../stores/session";
-import {
-  runtimeStatusLabelInjectionKey
-} from "../utils/runtime-data-plane";
+import { resolveWorkspaceServiceLabel } from "../utils/workspace-service-label";
 
 interface NavItem {
   to: string;
@@ -24,7 +22,12 @@ const showPasswordPanel = ref(false);
 const passwordBusy = ref(false);
 const logoutBusy = ref(false);
 const exitInstanceBusy = ref(false);
-const runtimeStatusLabel = inject(runtimeStatusLabelInjectionKey, computed(() => ""));
+const workspaceServiceLabel = computed(() =>
+  resolveWorkspaceServiceLabel({
+    scope: sessionStore.user?.scope,
+    tenantServiceMode: sessionStore.user?.tenantServiceMode
+  })
+);
 const passwordMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const passwordForm = reactive({
   currentPassword: "",
@@ -470,8 +473,8 @@ const isActive = (target: string) => {
           <span>{{ currentMeta.eyebrow }}</span>
         </div>
         <div class="workbench__topbar-actions">
-          <span v-if="runtimeStatusLabel" class="workbench__topbar-chip workbench__topbar-chip--runtime" role="status">
-            {{ runtimeStatusLabel }}
+          <span class="workbench__topbar-chip workbench__topbar-chip--runtime" role="status">
+            {{ workspaceServiceLabel }}
           </span>
           <span class="workbench__topbar-chip">业务日 {{ todayLabel }}</span>
           <span v-if="sessionStore.user?.tenantName" class="workbench__topbar-chip">

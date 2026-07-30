@@ -70,6 +70,7 @@ test("旧模拟快照会在 App 登录前修复默认实例的公网 Host 绑定
   const state = createSeededPersistedState();
   const defaultTenant = state.platformTenants[0];
   assert.ok(defaultTenant);
+  delete (defaultTenant as Partial<typeof defaultTenant>).serviceMode;
   defaultTenant.instanceUrl = "https://legacy-public.example.test";
   writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
@@ -94,6 +95,7 @@ test("旧模拟快照会在 App 登录前修复默认实例的公网 Host 绑定
       store.platformTenants[0]?.instanceUrl,
       "https://vending.5gogogo.top"
     );
+    assert.equal(store.platformTenants[0]?.serviceMode, "simulation");
   } finally {
     await app.close();
   }
@@ -257,6 +259,38 @@ test("服务商原子创建客户实例及首管理员且响应不返回密码",
       users: store.users.length,
       credentials: store.backofficeCredentials.length
     };
+    const createActiveProductionResponse = await fetch(
+      `${baseUrl}/platform/tenants`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          code: "tenant-active-before-live",
+          name: "未通过生产门禁的正式实例",
+          serviceMode: "production",
+          status: "active",
+          firstAdmin: {
+            name: "未创建的首位管理员",
+            phone: "18800000024",
+            username: "tenant-active-before-live-admin",
+            password: "tenant-active-before-live-password"
+          }
+        })
+      }
+    );
+    assert.equal(createActiveProductionResponse.status, 409);
+    assert.deepEqual(
+      {
+        tenants: store.platformTenants.length,
+        users: store.users.length,
+        credentials: store.backofficeCredentials.length
+      },
+      before
+    );
+
     const response = await fetch(`${baseUrl}/platform/tenants`, {
       method: "POST",
       headers: {
@@ -266,6 +300,7 @@ test("服务商原子创建客户实例及首管理员且响应不返回密码",
       body: JSON.stringify({
         code: "tenant-b",
         name: "新客户实例",
+        serviceMode: "production",
         status: "trial",
         instanceUrl: "https://tenant-b.example.test",
         contactName: "实例联系人",
@@ -282,7 +317,7 @@ test("服务商原子创建客户实例及首管理员且响应不返回密码",
     const payload = (await response.json()) as {
       code?: number;
       data?: {
-        tenant?: { id?: string; code?: string };
+        tenant?: { id?: string; code?: string; serviceMode?: string };
         firstAdmin?: {
           userId?: string;
           username?: string;
@@ -297,20 +332,100 @@ test("服务商原子创建客户实例及首管理员且响应不返回密码",
     assert.equal(response.status, 201);
     assert.equal(payload.code, 200);
     assert.equal(payload.data?.tenant?.code, "tenant-b");
+    assert.equal(payload.data?.tenant?.serviceMode, "production");
     assert.equal(payload.data?.firstAdmin?.username, "tenant-b-admin");
     assert.equal(payload.data?.firstAdmin?.tenantId, payload.data?.tenant?.id);
     assert.equal(payload.data?.firstAdmin?.password, undefined);
     assert.equal(payload.data?.firstAdmin?.passwordHash, undefined);
     assert.equal(payload.data?.firstAdmin?.passwordSalt, undefined);
     assert.equal(store.platformTenants.length, before.tenants + 1);
+    assert.equal(store.platformTenants.at(-1)?.serviceMode, "production");
     assert.equal(store.users.length, before.users + 1);
     assert.equal(store.backofficeCredentials.length, before.credentials + 1);
+
+    const activateBeforeLiveResponse = await fetch(
+      `${baseUrl}/platform/tenants/${encodeURIComponent(payload.data?.tenant?.id ?? "")}`,
+      {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "新客户实例",
+          status: "active",
+          instanceUrl: "https://tenant-b.example.test",
+          contactName: "实例联系人",
+          contactPhone: "18800000001",
+          planName: "正式服务"
+        })
+      }
+    );
+    assert.equal(activateBeforeLiveResponse.status, 409);
+    assert.equal(store.platformTenants.at(-1)?.status, "trial");
+
+    const enterBeforeLiveResponse = await fetch(
+      `${baseUrl}/platform/tenants/${encodeURIComponent(payload.data?.tenant?.id ?? "")}/enter`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`
+        }
+      }
+    );
+    assert.equal(enterBeforeLiveResponse.status, 409);
+    assert.ok(store.getBackofficeSessionUser(token));
 
     const credential = store.backofficeCredentials.find(
       (entry) => entry.username === "tenant-b-admin"
     );
     assert.equal(credential?.tenantId, payload.data?.tenant?.id);
-    assert.ok(store.users.some((entry) => entry.id === credential?.userId));
+    const firstAdmin = store.users.find((entry) => entry.id === credential?.userId);
+    assert.ok(firstAdmin);
+
+    const directLoginBeforeLiveResponse = await fetch(
+      `${baseUrl}/auth/backoffice-login`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          username: "tenant-b-admin",
+          password: "tenant-b-password"
+        })
+      }
+    );
+    assert.equal(directLoginBeforeLiveResponse.status, 409);
+
+    const staleTenantToken = store.createBackofficeSession(
+      firstAdmin,
+      "admin",
+      payload.data?.tenant?.id
+    );
+    const staleSessionResponse = await fetch(
+      `${baseUrl}/auth/backoffice-session`,
+      {
+        headers: {
+          authorization: `Bearer ${staleTenantToken}`
+        }
+      }
+    );
+    assert.equal(staleSessionResponse.status, 401);
+    assert.equal(store.sessions.has(staleTenantToken), false);
+
+    const publicAppBeforeLiveResponse = await fetch(`${baseUrl}/auth/app-login`, {
+      method: "POST",
+      headers: {
+        "x-forwarded-host": "tenant-b.example.test",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        phone: "18800000002",
+        code: "123456"
+      })
+    });
+    assert.equal(publicAppBeforeLiveResponse.status, 404);
 
     const afterProvisioning = {
       tenants: store.platformTenants.length,
@@ -744,6 +859,7 @@ test("服务商平台会话只能访问平台能力，未进入实例时不能�
         user?: {
           scope?: string;
           tenantId?: string;
+          tenantServiceMode?: string;
           permissions?: string[];
         };
       };
@@ -832,6 +948,7 @@ test("服务商进入和退出当前实例时切换互斥会话作用域并撤�
         user?: {
           scope?: string;
           tenantId?: string;
+          tenantServiceMode?: string;
           permissions?: string[];
         };
       };
@@ -843,6 +960,7 @@ test("服务商进入和退出当前实例时切换互斥会话作用域并撤�
     assert.notEqual(tenantToken, providerToken);
     assert.equal(enterPayload.data?.user?.scope, "tenant");
     assert.equal(enterPayload.data?.user?.tenantId, tenantId);
+    assert.equal(enterPayload.data?.user?.tenantServiceMode, "simulation");
     assert.equal(enterPayload.data?.user?.permissions?.includes("devices:view"), true);
     assert.equal(
       enterPayload.data?.user?.permissions?.includes("platform-overview:view"),
@@ -876,6 +994,7 @@ test("服务商进入和退出当前实例时切换互斥会话作用域并撤�
         user?: {
           scope?: string;
           tenantId?: string;
+          tenantServiceMode?: string;
           permissions?: string[];
         };
       };
@@ -886,6 +1005,7 @@ test("服务商进入和退出当前实例时切换互斥会话作用域并撤�
     assert.ok(nextProviderToken);
     assert.equal(exitPayload.data?.user?.scope, "provider");
     assert.equal(exitPayload.data?.user?.tenantId, undefined);
+    assert.equal(exitPayload.data?.user?.tenantServiceMode, undefined);
     assert.deepEqual(exitPayload.data?.user?.permissions, [
       "platform-overview:view",
       "platform-tenants:view",

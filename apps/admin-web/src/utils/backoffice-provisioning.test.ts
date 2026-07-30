@@ -18,6 +18,8 @@ test("客户实例草稿同时校验编码、手机号和首管理员密码", ()
     validatePlatformTenantDraft({
       code: "tenant-demo",
       name: "公益智助柜测试实例",
+      serviceMode: "production",
+      status: "trial",
       contactPhone: "18800000001",
       firstAdmin: {
         name: "测试管理员",
@@ -32,6 +34,8 @@ test("客户实例草稿同时校验编码、手机号和首管理员密码", ()
     validatePlatformTenantDraft({
       code: "A",
       name: "公益智助柜测试实例",
+      serviceMode: "simulation",
+      status: "active",
       contactPhone: "",
       firstAdmin: {
         name: "测试管理员",
@@ -46,6 +50,8 @@ test("客户实例草稿同时校验编码、手机号和首管理员密码", ()
     validatePlatformTenantDraft({
       code: "tenant-demo",
       name: "公益智助柜测试实例",
+      serviceMode: "simulation",
+      status: "trial",
       contactPhone: "",
       firstAdmin: {
         name: "测试管理员",
@@ -55,6 +61,38 @@ test("客户实例草稿同时校验编码、手机号和首管理员密码", ()
       }
     }),
     "首管理员后台密码至少需要 12 位。"
+  );
+  assert.equal(
+    validatePlatformTenantDraft({
+      code: "tenant-demo",
+      name: "公益智助柜测试实例",
+      serviceMode: "invalid" as "production",
+      status: "trial",
+      contactPhone: "",
+      firstAdmin: {
+        name: "测试管理员",
+        phone: "18800000002",
+        username: "tenant-demo-admin",
+        password: "safe-password-123"
+      }
+    }),
+    "请选择模拟服务或正式服务。"
+  );
+  assert.equal(
+    validatePlatformTenantDraft({
+      code: "tenant-demo",
+      name: "公益智助柜测试实例",
+      serviceMode: "production",
+      status: "active",
+      contactPhone: "",
+      firstAdmin: {
+        name: "测试管理员",
+        phone: "18800000002",
+        username: "tenant-demo-admin",
+        password: "safe-password-123"
+      }
+    }),
+    "正式服务需完成生产开通后才能标记为运行中。"
   );
 });
 
