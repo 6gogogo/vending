@@ -430,6 +430,9 @@ export class UsersService {
       [{ user, nextRole: payload.role, nextStatus: payload.status }],
       actorUserId
     );
+    this.assertTenantsKeepActiveAdmin([
+      { user, nextRole: payload.role, nextStatus: payload.status }
+    ]);
     const before = structuredClone(user);
     const roleWillChange = payload.role !== undefined && payload.role !== user.role;
 
@@ -744,6 +747,9 @@ export class UsersService {
     this.assertActorKeepsOwnAccess(
       targetUsers.map((user) => ({ user, nextStatus: payload.patch.status })),
       actorUserId
+    );
+    this.assertTenantsKeepActiveAdmin(
+      targetUsers.map((user) => ({ user, nextStatus: payload.patch.status }))
     );
     const shouldUpdateRegion =
       payload.patch.regionId !== undefined ||
@@ -1431,6 +1437,54 @@ export class UsersService {
     }
   }
 
+  private assertTenantsKeepActiveAdmin(
+    changes: Array<{
+      user: UserRecord;
+      nextRole?: UserRole;
+      nextStatus?: UserRecord["status"];
+    }>
+  ) {
+    const affectedTenantIds = new Set(
+      changes
+        .filter(
+          ({ user, nextRole, nextStatus }) =>
+            user.role === "admin" &&
+            user.status === "active" &&
+            ((nextRole !== undefined && nextRole !== "admin") ||
+              (nextStatus !== undefined && nextStatus !== "active"))
+        )
+        .map(({ user }) => this.store.getUserTenantId(user))
+    );
+
+    if (!affectedTenantIds.size) {
+      return;
+    }
+
+    const changesByUserId = new Map(changes.map((change) => [change.user.id, change]));
+    for (const tenantId of affectedTenantIds) {
+      const keepsActiveAdmin = this.store.users.some((user) => {
+        if (
+          this.store.getUserTenantId(user) !== tenantId ||
+          this.store.isHiddenBackofficeUser(user)
+        ) {
+          return false;
+        }
+
+        const change = changesByUserId.get(user.id);
+        return (
+          (change?.nextRole ?? user.role) === "admin" &&
+          (change?.nextStatus ?? user.status) === "active"
+        );
+      });
+
+      if (!keepsActiveAdmin) {
+        throw new BadRequestException(
+          "每个客户实例至少需要保留一名启用的实例管理员。"
+        );
+      }
+    }
+  }
+
   private assertBatchRemovePayload(payload: unknown) {
     const body = this.requirePlainObject(payload, "批量删除请求体");
     this.assertOnlyFields(body, ["userIds", "confirmedCount"], "批量删除");
@@ -1459,21 +1513,9 @@ export class UsersService {
       throw new BadRequestException("不能删除当前登录账号。");
     }
 
-    const activeAdminIds = new Set(
-      this.store.users
-        .filter(
-          (entry) =>
-            entry.role === "admin" &&
-            entry.status === "active" &&
-            !this.store.isHiddenBackofficeUser(entry)
-        )
-        .map((entry) => entry.id)
+    this.assertTenantsKeepActiveAdmin(
+      users.map((user) => ({ user, nextStatus: "inactive" }))
     );
-    const removedActiveAdminCount = users.filter((user) => activeAdminIds.has(user.id)).length;
-
-    if (removedActiveAdminCount > 0 && activeAdminIds.size - removedActiveAdminCount < 1) {
-      throw new BadRequestException("至少需要保留一个启用的管理员账号。");
-    }
   }
 
   private assertManualAdjustmentPayload(payload: unknown) {

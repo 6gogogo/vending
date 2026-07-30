@@ -17,8 +17,24 @@ export interface PlatformTenantUpdateDraftForValidation {
   contactPhone?: string;
 }
 
+export interface BackofficePasswordResetDraftForValidation {
+  username: string;
+  phone: string;
+  code: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+export interface SupervisorPasswordResetDraftForValidation {
+  username: string;
+  newPassword: string;
+  confirmPassword: string;
+  reason: string;
+}
+
 const tenantCodePattern = /^[a-z0-9][a-z0-9-]{1,49}$/u;
 const phonePattern = /^1\d{10}$/u;
+const verificationCodePattern = /^\d{4,8}$/u;
 
 export const validatePlatformTenantDraft = (
   draft: PlatformTenantDraftForValidation
@@ -99,6 +115,70 @@ export const validatePlatformTenantUpdateDraft = (
     } catch {
       return "实例地址必须是有效的完整 URL。";
     }
+  }
+
+  return undefined;
+};
+
+export const backofficePasswordMinimumLengthForUsername = (username: string) =>
+  username.trim().toLowerCase() === "admin" ? 6 : 8;
+
+const validateBackofficeNewPassword = (draft: {
+  username: string;
+  newPassword: string;
+  confirmPassword: string;
+}) => {
+  const minimumPasswordLength = backofficePasswordMinimumLengthForUsername(draft.username);
+  const newPassword = draft.newPassword.trim();
+
+  if (newPassword.length < minimumPasswordLength) {
+    return `该后台账号的新密码至少需要 ${minimumPasswordLength} 位。`;
+  }
+
+  if (newPassword !== draft.confirmPassword.trim()) {
+    return "两次输入的新密码不一致。";
+  }
+
+  return undefined;
+};
+
+export const validateBackofficePasswordResetDraft = (
+  draft: BackofficePasswordResetDraftForValidation
+): string | undefined => {
+  const username = draft.username.trim().toLowerCase();
+  const phone = draft.phone.trim();
+  const code = draft.code.trim();
+
+  if (!username || username.length > 100 || /[\r\n]/u.test(username)) {
+    return "请输入有效的后台登录账号。";
+  }
+
+  if (!phonePattern.test(phone)) {
+    return "请输入账号绑定的 11 位手机号。";
+  }
+
+  if (!verificationCodePattern.test(code)) {
+    return "验证码需为 4 至 8 位数字。";
+  }
+
+  return validateBackofficeNewPassword({
+    username,
+    newPassword: draft.newPassword,
+    confirmPassword: draft.confirmPassword
+  });
+};
+
+export const validateSupervisorPasswordResetDraft = (
+  draft: SupervisorPasswordResetDraftForValidation
+): string | undefined => {
+  const passwordValidationMessage = validateBackofficeNewPassword(draft);
+  if (passwordValidationMessage) {
+    return passwordValidationMessage;
+  }
+
+  const reason = draft.reason.trim();
+  if (!reason || [...reason].length > 500) {
+    return "请填写密码重置原因，且不能超过 500 个字符。";
   }
 
   return undefined;

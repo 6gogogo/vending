@@ -78,33 +78,33 @@ export const BACKOFFICE_TENANT_BOOTSTRAP_PERMISSIONS = [
   "backoffice-credentials:manage"
 ] as const satisfies readonly BackofficePermission[];
 
+export const BACKOFFICE_MERCHANT_PERMISSIONS = [
+  "merchant-workbench:view",
+  "merchant-workbench:manage",
+  "goods:view",
+  "warehouse:view",
+  "devices:view",
+  "operation-logs:view"
+] as const satisfies readonly BackofficePermission[];
+
+export const BACKOFFICE_RESTOCKER_PERMISSIONS = [
+  "goods:view",
+  "devices:view",
+  "devices:operate"
+] as const satisfies readonly BackofficePermission[];
+
 export const BACKOFFICE_ROLE_ALLOWED_PERMISSIONS = {
   super_admin: BACKOFFICE_PERMISSIONS,
   admin: BACKOFFICE_TENANT_PERMISSIONS,
-  merchant: BACKOFFICE_TENANT_PERMISSIONS,
-  restocker: [
-    "goods:view",
-    "devices:view",
-    "devices:operate"
-  ]
+  merchant: BACKOFFICE_MERCHANT_PERMISSIONS,
+  restocker: BACKOFFICE_RESTOCKER_PERMISSIONS
 } satisfies Record<BackofficeRole, readonly BackofficePermission[]>;
 
 export const BACKOFFICE_ROLE_DEFAULT_PERMISSIONS = {
   super_admin: BACKOFFICE_PERMISSIONS,
   admin: BACKOFFICE_TENANT_PERMISSIONS,
-  merchant: [
-    "merchant-workbench:view",
-    "merchant-workbench:manage",
-    "goods:view",
-    "warehouse:view",
-    "devices:view",
-    "operation-logs:view"
-  ],
-  restocker: [
-    "goods:view",
-    "devices:view",
-    "devices:operate"
-  ]
+  merchant: BACKOFFICE_MERCHANT_PERMISSIONS,
+  restocker: BACKOFFICE_RESTOCKER_PERMISSIONS
 } satisfies Record<BackofficeRole, readonly BackofficePermission[]>;
 
 export const isBackofficePermission = (permission: string): permission is BackofficePermission =>

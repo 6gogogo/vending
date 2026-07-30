@@ -176,12 +176,6 @@ const isInsideProviderTenant = computed(
     sessionStore.user?.backofficeRole === "super_admin" &&
     sessionStore.user?.scope === "tenant"
 );
-const canClaimInitialProviderAccount = computed(
-  () =>
-    sessionStore.user?.backofficeRole === "admin" &&
-    sessionStore.auth?.username === "admin"
-);
-
 const roleLabel = computed(() => {
   if (sessionStore.user?.backofficeRole === "restocker") {
     return "补货员";
@@ -192,7 +186,7 @@ const roleLabel = computed(() => {
   }
 
   if (sessionStore.user?.backofficeRole === "admin") {
-    return "客户管理员";
+    return "实例管理员";
   }
 
   return isInsideProviderTenant.value ? "服务商（实例内）" : "服务商";
@@ -403,13 +397,6 @@ const isActive = (target: string) => {
         <div v-if="sessionStore.auth?.usesDefaultPassword" class="admin-note workbench__password-warning">
           当前仍在使用默认密码，建议立即修改。
         </div>
-        <RouterLink
-          v-if="canClaimInitialProviderAccount"
-          class="admin-button admin-button--ghost"
-          to="/provider-setup"
-        >
-          开通服务商账号
-        </RouterLink>
         <button
           v-if="isInsideProviderTenant"
           class="admin-button"

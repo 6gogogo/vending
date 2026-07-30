@@ -41,6 +41,7 @@ import type {
   PlatformTenantProvisioningResult,
   PlatformTenantRecord,
   PlatformTenantUpdatePayload,
+  PublicRuntimeConfig,
   RegionRecord,
   RegistrationApplication,
   ReservationSettings,
@@ -98,18 +99,29 @@ export const adminApi = {
   backofficeLogin(username: string, password: string) {
     return adminClient.post<AdminLoginResponse>("/auth/backoffice-login", { username, password });
   },
-  changeAdminPassword(payload: { currentPassword: string; newPassword: string }) {
-    return adminClient.patch<AdminLoginResponse>("/auth/backoffice-password", payload);
+  publicRuntimeConfig() {
+    return adminClient.get<PublicRuntimeConfig>("/public-config");
   },
-  claimInitialProviderAccount(payload: {
-    currentAdminPassword: string;
+  requestBackofficePasswordResetCode(phone: string) {
+    return adminClient.post<{
+      phone: string;
+      expiresInSeconds: number;
+      provider: "mock" | "aliyun_pnvs" | "manual";
+    }>("/auth/request-code", {
+      phone,
+      scene: "password-reset"
+    });
+  },
+  resetOwnBackofficePassword(payload: {
     username: string;
+    phone: string;
+    code: string;
     newPassword: string;
   }) {
-    return adminClient.post<{ username: string; passwordUpdatedAt: string }>(
-      "/auth/claim-initial-provider-account",
-      payload
-    );
+    return adminClient.post<{ reset: boolean }>("/auth/backoffice-password-reset", payload);
+  },
+  changeAdminPassword(payload: { currentPassword: string; newPassword: string }) {
+    return adminClient.patch<AdminLoginResponse>("/auth/backoffice-password", payload);
   },
   session() {
     return adminClient.get<AdminLoginResponse>("/auth/backoffice-session");
@@ -131,6 +143,18 @@ export const adminApi = {
   backofficeCredentials() {
     requireBackofficePermission("backoffice-credentials:manage");
     return adminClient.get<BackofficeCredentialSnapshot[]>("/auth/backoffice-credentials");
+  },
+  resetBackofficePasswordAsProvider(payload: {
+    userId: string;
+    role: BackofficeRole;
+    newPassword: string;
+    reason: string;
+  }) {
+    requireBackofficePermission("backoffice-credentials:manage");
+    return adminClient.post<BackofficeCredentialSnapshot>(
+      "/auth/backoffice-password-reset-as-super-admin",
+      payload
+    );
   },
   issueManualVerificationCode(payload: {
     userId: string;

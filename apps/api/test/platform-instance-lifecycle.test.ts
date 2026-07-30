@@ -120,6 +120,28 @@ const createDefaultAdminToken = (store: InMemoryStoreService) => {
   return store.createBackofficeSession(user, credential.role, credential.tenantId);
 };
 
+test("实例管理员侧不存在向上认领服务商账号的接口", async () => {
+  const { app, baseUrl } = await startApi();
+
+  try {
+    const response = await fetch(`${baseUrl}/auth/claim-initial-provider-account`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        currentAdminPassword: "irrelevant",
+        username: "forbidden-provider",
+        newPassword: "irrelevant-password"
+      })
+    });
+
+    assert.equal(response.status, 404);
+  } finally {
+    await app.close();
+  }
+});
+
 test("服务商原子创建客户实例及首管理员且响应不返回密码", async () => {
   const { app, baseUrl, store } = await startApi();
 
@@ -220,6 +242,78 @@ test("服务商原子创建客户实例及首管理员且响应不返回密码",
       },
       afterProvisioning
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test("每个客户实例始终保留至少一名启用的实例管理员", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const providerToken = createProviderToken(store);
+    const createResponse = await fetch(`${baseUrl}/platform/tenants`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${providerToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        code: "tenant-admin-continuity",
+        name: "管理员连续性实例",
+        firstAdmin: {
+          name: "连续性首管理员",
+          phone: "18800000031",
+          username: "tenant-admin-continuity-owner",
+          password: "tenant-admin-continuity-password"
+        }
+      })
+    });
+    const createPayload = (await createResponse.json()) as {
+      data?: {
+        tenant?: { id?: string };
+        firstAdmin?: { userId?: string };
+      };
+    };
+    const tenantId = createPayload.data?.tenant?.id;
+    const firstAdminUserId = createPayload.data?.firstAdmin?.userId;
+    assert.equal(createResponse.status, 201);
+    assert.ok(tenantId);
+    assert.ok(firstAdminUserId);
+
+    const enterResponse = await fetch(`${baseUrl}/platform/tenants/${tenantId}/enter`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${providerToken}`
+      }
+    });
+    const enterPayload = (await enterResponse.json()) as {
+      data?: { token?: string };
+    };
+    const tenantProviderToken = enterPayload.data?.token;
+    assert.equal(enterResponse.status, 201);
+    assert.ok(tenantProviderToken);
+
+    const request = (method: "PATCH" | "DELETE", body?: Record<string, unknown>) =>
+      fetch(`${baseUrl}/users/${firstAdminUserId}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${tenantProviderToken}`,
+          ...(body ? { "content-type": "application/json" } : {})
+        },
+        body: body ? JSON.stringify(body) : undefined
+      });
+
+    const deactivateResponse = await request("PATCH", { status: "inactive" });
+    const demoteResponse = await request("PATCH", { role: "merchant" });
+    const deleteResponse = await request("DELETE");
+
+    assert.equal(deactivateResponse.status, 400);
+    assert.equal(demoteResponse.status, 400);
+    assert.equal(deleteResponse.status, 400);
+    const firstAdmin = store.users.find((entry) => entry.id === firstAdminUserId);
+    assert.equal(firstAdmin?.role, "admin");
+    assert.equal(firstAdmin?.status, "active");
   } finally {
     await app.close();
   }
@@ -1578,11 +1672,10 @@ test("新实例首管理员可完成补货员和商户的账号签发与柜机�
       merchantUserId,
       "tenant-role-flow-merchant",
       "tenant-role-flow-merchant-password",
-      ["devices:view", "devices:operate"]
+      ["devices:view"]
     );
     assert.deepEqual(merchantSession.permissions, [
-      "devices:view",
-      "devices:operate"
+      "devices:view"
     ]);
 
     for (const token of [restockerSession.token, merchantSession.token]) {

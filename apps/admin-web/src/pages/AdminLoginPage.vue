@@ -49,7 +49,7 @@ const submit = async () => {
           class="admin-input"
           name="username"
           autocomplete="username"
-          placeholder="请输入管理员账号"
+          placeholder="请输入后台登录账号"
         />
       </label>
 
@@ -71,7 +71,10 @@ const submit = async () => {
         {{ busyLabel }}
       </button>
 
-      <RouterLink class="login-panel__guide" to="/guide">查看按身份操作指引</RouterLink>
+      <div class="login-panel__links">
+        <RouterLink class="login-panel__guide" to="/forgot-password">忘记密码</RouterLink>
+        <RouterLink class="login-panel__guide" to="/guide">查看按身份操作指引</RouterLink>
+      </div>
     </form>
   </section>
 </template>
@@ -149,7 +152,6 @@ const submit = async () => {
 }
 
 .login-panel__guide {
-  justify-self: start;
   color: var(--admin-accent-strong);
   font-weight: 700;
   text-decoration: none;
@@ -157,6 +159,13 @@ const submit = async () => {
 
 .login-panel__guide:hover {
   text-decoration: underline;
+}
+
+.login-panel__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px 18px;
 }
 
 @media (max-width: 560px) {

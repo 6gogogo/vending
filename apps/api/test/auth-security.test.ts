@@ -524,57 +524,6 @@ test("服务商超级管理员首次改密只处理固定默认账号、保持�
   );
 });
 
-test("初始实例管理员凭当前密码可一次性开通服务商账号，且不返回密码", async () => {
-  const store = createIsolatedStore();
-  const authService = createAuthService(store);
-  const initialAdmin = await authService.backofficeLogin("admin", "admin");
-  const currentAdminPassword = "admin-current-password";
-  const refreshedAdmin = authService.changeBackofficePassword(
-    initialAdmin.token,
-    "admin",
-    currentAdminPassword
-  );
-
-  const claimed = authService.claimInitialProviderAccount(refreshedAdmin.token, {
-    currentAdminPassword,
-    username: "provider-owner",
-    newPassword: "provider-owner-password"
-  });
-
-  assert.deepEqual(Object.keys(claimed).sort(), ["passwordUpdatedAt", "username"]);
-  assert.equal(claimed.username, "provider-owner");
-  const credential = store.findBackofficeCredentialByUsername("provider-owner");
-  assert.ok(credential);
-  assert.equal(credential.role, "super_admin");
-  assert.equal(credential.usesDefaultPassword, false);
-  assert.equal(
-    store.backofficeCredentials.some((entry) => store.isDefaultSuperAdminBootstrapCredential(entry)),
-    false
-  );
-  const providerSession = await authService.backofficeLogin(
-    "provider-owner",
-    "provider-owner-password"
-  );
-  assert.equal(providerSession.user.backofficeRole, "super_admin");
-  assert.equal(providerSession.user.scope, "provider");
-  assert.ok(
-    store.logs.some(
-      (entry) =>
-        entry.type === "claim-initial-provider-account" &&
-        entry.metadata?.claimMethod === "primary-admin-current-password"
-    )
-  );
-  assert.throws(
-    () =>
-      authService.claimInitialProviderAccount(refreshedAdmin.token, {
-        currentAdminPassword,
-        username: "another-provider",
-        newPassword: "another-provider-password"
-      }),
-    /已经开通/
-  );
-});
-
 test("启动时会修复旧 admin 凭据仍标记默认密码的历史状态", () => {
   const store = createIsolatedStore();
   const password = "904281";
@@ -896,6 +845,26 @@ test("普通后台管理员不能重置其他账号密码，通用账号配置�
   );
 });
 
+test("实例管理员不能把人员管理等管理员权限授予商户账号", async () => {
+  const store = createIsolatedStore();
+  const authService = createAuthService(store);
+  const admin = await authService.backofficeLogin("admin", "admin");
+  const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
+  assert.ok(merchantCredential);
+
+  assert.throws(
+    () =>
+      authService.createBackofficeCredential(admin.token, {
+        userId: merchantCredential.userId,
+        username: merchantCredential.username,
+        role: "merchant",
+        tenantId: merchantCredential.tenantId,
+        permissions: ["merchant-workbench:view", "users:manage"]
+      }),
+    /不能发放目标后台身份不允许的权限/
+  );
+});
+
 test("账号本人通过手机号验证码重置后台密码会撤销旧会话", async () => {
   const store = createIsolatedStore();
   const verificationCodes = createVerificationCodeService(store);
@@ -915,6 +884,27 @@ test("账号本人通过手机号验证码重置后台密码会撤销旧会话",
   assert.equal(store.getSession(merchant.token), undefined);
   const refreshedMerchant = await authService.backofficeLogin("merchant", "merchant-owner-reset");
   assert.equal(refreshedMerchant.user.id, merchant.user.id);
+});
+
+test("初始实例管理员通过绑定手机号找回密码时沿用已授权的六位密码策略", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const admin = await authService.backofficeLogin("admin", "admin");
+  const issued = await verificationCodes.requestCode(admin.user.phone, "password-reset");
+  assert.ok(issued.previewCode);
+
+  const result = await authService.resetOwnBackofficePassword({
+    username: "admin",
+    phone: admin.user.phone,
+    code: issued.previewCode,
+    newPassword: "654321"
+  });
+
+  assert.deepEqual(result, { reset: true });
+  assert.equal(store.getSession(admin.token), undefined);
+  const refreshedAdmin = await authService.backofficeLogin("admin", "654321");
+  assert.equal(refreshedAdmin.user.id, admin.user.id);
 });
 
 test("删除用户时立即撤销关联会话和资料草稿", () => {

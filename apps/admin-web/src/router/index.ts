@@ -14,6 +14,7 @@ import {
 import { adminApiBaseUrl } from "../api/client";
 import AdminLayout from "../layouts/AdminLayout.vue";
 import AdminLoginPage from "../pages/AdminLoginPage.vue";
+import BackofficePasswordResetPage from "../pages/BackofficePasswordResetPage.vue";
 import PublicGuidePage from "../pages/PublicGuidePage.vue";
 import AiWorkspacePage from "../pages/AiWorkspacePage.vue";
 import DataMonitorPage from "../pages/DataMonitorPage.vue";
@@ -25,7 +26,6 @@ import LogDetailPage from "../pages/LogDetailPage.vue";
 import MerchantBackofficePage from "../pages/MerchantBackofficePage.vue";
 import OperationsPage from "../pages/OperationsPage.vue";
 import PlatformOverviewPage from "../pages/PlatformOverviewPage.vue";
-import InitialProviderAccountPage from "../pages/InitialProviderAccountPage.vue";
 import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
 import SystemSettingsPage from "../pages/SystemSettingsPage.vue";
 import UserDetailPage from "../pages/UserDetailPage.vue";
@@ -64,6 +64,10 @@ export const router = createRouter({
       component: AdminLoginPage
     },
     {
+      path: "/forgot-password",
+      component: BackofficePasswordResetPage
+    },
+    {
       path: "/guide",
       component: PublicGuidePage
     },
@@ -87,17 +91,6 @@ export const router = createRouter({
             description: "服务商查看当前实例的运行状态与汇总信息。",
             permission: "platform-overview:view",
             backofficeRoles: ["super_admin"]
-          }
-        },
-        {
-          path: "/provider-setup",
-          component: InitialProviderAccountPage,
-          meta: {
-            group: "服务商开通",
-            eyebrow: "首次开通",
-            title: "开通服务商平台账号",
-            description: "由初始实例管理员一次性开通服务商平台账号。",
-            backofficeRoles: ["admin"]
           }
         },
         {
@@ -274,7 +267,7 @@ export const router = createRouter({
 router.beforeEach(async (to) => {
   const sessionStore = useAdminSessionStore();
 
-  if (to.path === "/guide") {
+  if (to.path === "/guide" || to.path === "/forgot-password") {
     return true;
   }
 

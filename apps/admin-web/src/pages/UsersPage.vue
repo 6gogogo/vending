@@ -25,8 +25,10 @@ import AmapLocationPicker from "../components/AmapLocationPicker.vue";
 import { adminCopy } from "../constants/copy";
 import { useAdminSessionStore } from "../stores/session";
 import {
+  backofficePasswordMinimumLengthForUsername,
   isManualVerificationCode,
-  manualCodeFromRandomValue
+  manualCodeFromRandomValue,
+  validateSupervisorPasswordResetDraft
 } from "../utils/backoffice-provisioning";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
@@ -38,6 +40,7 @@ type DrawerMode =
   | "create-policy"
   | "edit-policy"
   | "backoffice-account"
+  | "supervisor-password-reset"
   | "device-assignment"
   | "manual-code";
 const weekdayOptions = [
@@ -88,6 +91,16 @@ interface DeviceAssignmentFormState {
   deviceCodes: string[];
 }
 
+interface SupervisorPasswordResetFormState {
+  userId: string;
+  userName: string;
+  username: string;
+  role: BackofficeRole;
+  newPassword: string;
+  confirmPassword: string;
+  reason: string;
+}
+
 interface ManualVerificationFormState {
   userId: string;
   userName: string;
@@ -104,7 +117,7 @@ interface ReservationFormState {
 
 const backofficeRoleLabels: Record<BackofficeRole, string> = {
   super_admin: "服务提供商",
-  admin: "管理员",
+  admin: "实例管理员",
   merchant: "商家",
   restocker: "补货员"
 };
@@ -226,6 +239,16 @@ const createEmptyDeviceAssignmentForm = (): DeviceAssignmentFormState => ({
   deviceCodes: []
 });
 
+const createEmptySupervisorPasswordResetForm = (): SupervisorPasswordResetFormState => ({
+  userId: "",
+  userName: "",
+  username: "",
+  role: "admin",
+  newPassword: "",
+  confirmPassword: "",
+  reason: ""
+});
+
 const createEmptyManualVerificationForm = (): ManualVerificationFormState => ({
   userId: "",
   userName: "",
@@ -250,6 +273,7 @@ const registrationApplicationsError = ref("");
 const saving = ref(false);
 const reservationSaving = ref(false);
 const deviceAssignmentSaving = ref(false);
+const supervisorPasswordResetSaving = ref(false);
 const manualCodeSaving = ref(false);
 const revokingManualGrantId = ref("");
 const manualCodeIssued = ref(false);
@@ -279,6 +303,9 @@ const userForm = ref<UserFormState>({ role: "special", phone: "", name: "", stat
 const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: "", quantity: 1 }] });
 const backofficeForm = ref<BackofficeFormState>(createEmptyBackofficeForm());
 const deviceAssignmentForm = ref<DeviceAssignmentFormState>(createEmptyDeviceAssignmentForm());
+const supervisorPasswordResetForm = ref<SupervisorPasswordResetFormState>(
+  createEmptySupervisorPasswordResetForm()
+);
 const manualVerificationForm = ref<ManualVerificationFormState>(
   createEmptyManualVerificationForm()
 );
@@ -334,8 +361,10 @@ const currentDrawerTitle = computed(() =>
         ? "新增每日物资模板"
         : drawerMode.value === "edit-policy"
           ? "编辑每日物资模板"
-          : drawerMode.value === "backoffice-account"
+      : drawerMode.value === "backoffice-account"
             ? "后台账号权限"
+            : drawerMode.value === "supervisor-password-reset"
+              ? "由服务提供商重置密码"
             : drawerMode.value === "device-assignment"
               ? "分配可管理柜机"
               : drawerMode.value === "manual-code"
@@ -346,6 +375,7 @@ const isUserMutating = computed(
   () =>
     saving.value ||
     deviceAssignmentSaving.value ||
+    supervisorPasswordResetSaving.value ||
     manualCodeSaving.value ||
     Boolean(removingUserId.value)
 );
@@ -365,6 +395,11 @@ const showExtendedUserConfiguration = computed(
     sessionStore.can("dashboard:view")
 );
 const isProviderBackoffice = computed(() => sessionStore.isProviderSuperAdmin);
+const isProviderTenantSession = computed(
+  () =>
+    sessionStore.user?.backofficeRole === "super_admin" &&
+    sessionStore.user?.scope === "tenant"
+);
 const allowedBackofficePermissions = computed(
   () => {
     if (backofficeForm.value.role === "super_admin") {
@@ -443,7 +478,7 @@ const formatRole = (role: UserRecord["role"]) =>
       ? "商家"
       : role === "restocker"
         ? "补货员"
-        : "管理员";
+        : "实例管理员";
 const formatLedgerStatus = (status?: UserLedgerStatus) => status === "unregistered" ? "未注册" : status === "quota_unclaimed" ? "物资未领取" : status === "quota_partial" ? "部分领取" : status === "quota_complete" ? "全部领取" : "已注册";
 const ledgerStatusTone = (status?: UserLedgerStatus) => status === "quota_complete" ? "admin-pill--success" : status === "quota_partial" || status === "unregistered" ? "admin-pill--warning" : "admin-pill--neutral";
 const registrationLabel = (user: UserRecord) => (user.ledgerStatus === "unregistered" ? "未注册" : "已注册");
@@ -520,6 +555,16 @@ const backofficeCredentialForUser = (user: UserRecord, role = defaultBackofficeR
   backofficeCredentials.value.find(
     (credential) => credential.userId === user.id && credential.role === role
   );
+
+const canSupervisorResetPassword = (user: UserRecord) => {
+  const credential = backofficeCredentialForUser(user);
+  return Boolean(
+    isProviderTenantSession.value &&
+    user.status === "active" &&
+    credential &&
+    credential.role !== "super_admin"
+  );
+};
 
 const backofficeStatusLabel = (user: UserRecord) => {
   if (!isBackofficeEligibleUser(user)) {
@@ -751,7 +796,7 @@ const reviewApplication = async (applicationId: string, decision: "approved" | "
 
   const application = registrationApplications.value.find((entry) => entry.id === applicationId);
   const applicantName = application?.profile.merchantName || application?.profile.name || application?.phone || applicationId;
-  const roleName = application?.requestedRole === "special" ? "用户" : application?.requestedRole === "merchant" ? "商家" : "管理员";
+  const roleName = application?.requestedRole === "special" ? "用户" : application?.requestedRole === "merchant" ? "商家" : "实例管理员";
   const confirmed = window.confirm(
     [
       decision === "approved" ? "请确认通过注册申请：" : "请确认驳回注册申请：",
@@ -826,6 +871,22 @@ const openBackofficeAccount = (user: UserRecord) => {
   drawerMode.value = "backoffice-account";
 };
 
+const openSupervisorPasswordReset = (user: UserRecord) => {
+  const credential = backofficeCredentialForUser(user);
+  if (!credential || !canSupervisorResetPassword(user)) {
+    return;
+  }
+
+  supervisorPasswordResetForm.value = {
+    ...createEmptySupervisorPasswordResetForm(),
+    userId: user.id,
+    userName: user.name,
+    username: credential.username,
+    role: credential.role
+  };
+  drawerMode.value = "supervisor-password-reset";
+};
+
 const openDeviceAssignment = (user: UserRecord) => {
   if (!isDeviceAssignableUser(user)) {
     return;
@@ -871,6 +932,7 @@ const closeDrawer = () => {
   editingPolicyId.value = "";
   backofficeForm.value = createEmptyBackofficeForm();
   deviceAssignmentForm.value = createEmptyDeviceAssignmentForm();
+  supervisorPasswordResetForm.value = createEmptySupervisorPasswordResetForm();
   manualVerificationForm.value = createEmptyManualVerificationForm();
   manualCodeIssued.value = false;
 };
@@ -923,7 +985,9 @@ const submitUserForm = async (configureAccess = false) => {
 
 const submitBackofficeAccount = async () => {
   const username = backofficeForm.value.username.trim();
-  const password = backofficeForm.value.password.trim();
+  const password = backofficeForm.value.hasExistingCredential
+    ? ""
+    : backofficeForm.value.password.trim();
   const hadExistingCredential = backofficeForm.value.hasExistingCredential;
 
   if (!username) {
@@ -931,10 +995,10 @@ const submitBackofficeAccount = async () => {
     return;
   }
 
-  if ((!backofficeForm.value.hasExistingCredential || password) && password.length < 8) {
+  if (!backofficeForm.value.hasExistingCredential && password.length < 8) {
     showActionMessage(
       "error",
-      `后台账号保存失败：${backofficeForm.value.hasExistingCredential ? "重置" : "首次"}密码至少需要 8 位。`
+      "后台账号保存失败：首次密码至少需要 8 位。"
     );
     return;
   }
@@ -1034,6 +1098,41 @@ const removeSelectedUsers = async () => {
     );
   } finally {
     removingSelectedUsers.value = false;
+  }
+};
+
+const submitSupervisorPasswordReset = async () => {
+  const validationMessage = validateSupervisorPasswordResetDraft(
+    supervisorPasswordResetForm.value
+  );
+  if (validationMessage) {
+    showActionMessage("error", `密码重置失败：${validationMessage}`);
+    return;
+  }
+
+  supervisorPasswordResetSaving.value = true;
+  actionMessage.value = null;
+  try {
+    const targetName = supervisorPasswordResetForm.value.userName;
+    await adminApi.resetBackofficePasswordAsProvider({
+      userId: supervisorPasswordResetForm.value.userId,
+      role: supervisorPasswordResetForm.value.role,
+      newPassword: supervisorPasswordResetForm.value.newPassword.trim(),
+      reason: supervisorPasswordResetForm.value.reason.trim()
+    });
+    closeDrawer();
+    await load();
+    showActionMessage(
+      "success",
+      `已重置 ${targetName} 的后台密码，并撤销该账号原有登录会话。`
+    );
+  } catch (error) {
+    showActionMessage(
+      "error",
+      `密码重置失败：${readErrorMessage(error, "请稍后重试")}`
+    );
+  } finally {
+    supervisorPasswordResetSaving.value = false;
   }
 };
 
@@ -1518,7 +1617,7 @@ onMounted(load);
           <div v-for="item in filteredApplications" :key="item.id" class="admin-list__row users-review-row">
             <div class="admin-list__main">
               <span class="admin-list__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</span>
-              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : item.requestedRole === "restocker" ? "补货员" : "管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
+              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : item.requestedRole === "restocker" ? "补货员" : "实例管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
               <span class="admin-table__subtext">{{ item.requestedRole === "special" ? `${item.profile.regionName || "待补充区域"}${item.profile.note ? ` · ${item.profile.note}` : ""}` : item.requestedRole === "merchant" ? `${item.profile.contactName || "待补充联系人"} · ${item.profile.address || "待补充地址"}` : `${item.profile.organization || "待补充单位"} · ${item.profile.title || "待补充职务"}` }}</span>
               <span v-if="item.reviewReason" class="users-review-row__reason">驳回原因：{{ item.reviewReason }}</span>
             </div>
@@ -1687,6 +1786,14 @@ onMounted(load);
                     >
                       {{ backofficeCredentialForUser(user) ? "配置权限" : "开通后台" }}
                     </button>
+                    <button
+                      v-if="canSupervisorResetPassword(user)"
+                      class="admin-text-button"
+                      type="button"
+                      @click="openSupervisorPasswordReset(user)"
+                    >
+                      代重置密码
+                    </button>
                   </td>
                   <td>
                     <span class="admin-table__strong">{{ assignedDeviceSummary(user) }}</span>
@@ -1823,7 +1930,7 @@ onMounted(load);
               <option value="special">特殊群体</option>
               <option value="merchant">商家</option>
               <option value="restocker">补货员</option>
-              <option value="admin">管理员</option>
+              <option value="admin">实例管理员</option>
             </select>
           </label>
           <label class="admin-field">
@@ -1982,6 +2089,60 @@ onMounted(load);
           </button>
         </div>
 
+        <div v-else-if="drawerMode === 'supervisor-password-reset'" class="users-drawer__body">
+          <div class="admin-note">
+            正在为当前实例的 {{ supervisorPasswordResetForm.userName }} 重置后台密码。该操作会撤销目标账号的全部现有登录会话，并写入服务提供商操作审计。
+          </div>
+          <label class="admin-field">
+            <span class="admin-field__label">后台登录账号</span>
+            <input
+              class="admin-input"
+              :value="supervisorPasswordResetForm.username"
+              readonly
+              aria-readonly="true"
+            />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">新密码</span>
+            <input
+              v-model="supervisorPasswordResetForm.newPassword"
+              class="admin-input"
+              type="password"
+              autocomplete="new-password"
+              :minlength="backofficePasswordMinimumLengthForUsername(supervisorPasswordResetForm.username)"
+              :placeholder="`至少 ${backofficePasswordMinimumLengthForUsername(supervisorPasswordResetForm.username)} 位`"
+            />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">再次输入新密码</span>
+            <input
+              v-model="supervisorPasswordResetForm.confirmPassword"
+              class="admin-input"
+              type="password"
+              autocomplete="new-password"
+              :minlength="backofficePasswordMinimumLengthForUsername(supervisorPasswordResetForm.username)"
+              placeholder="请再次输入新密码"
+            />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">重置原因</span>
+            <textarea
+              v-model="supervisorPasswordResetForm.reason"
+              class="admin-textarea"
+              maxlength="500"
+              rows="4"
+              placeholder="例如：实例管理员无法通过绑定手机号完成自助找回"
+            />
+          </label>
+          <button
+            class="admin-button"
+            :disabled="supervisorPasswordResetSaving"
+            @click="submitSupervisorPasswordReset"
+          >
+            {{ supervisorPasswordResetSaving ? "重置中" : "确认重置并撤销旧会话" }}
+          </button>
+        </div>
+
         <div v-else-if="drawerMode === 'create-policy' || drawerMode === 'edit-policy'" class="users-drawer__body">
           <label class="admin-field">
             <span class="admin-field__label">模板名称</span>
@@ -2055,15 +2216,18 @@ onMounted(load);
             <span class="admin-field__label">登录账号</span>
             <input v-model="backofficeForm.username" class="admin-input" placeholder="建议使用手机号或工号" />
           </label>
-          <label class="admin-field">
+          <label v-if="!backofficeForm.hasExistingCredential" class="admin-field">
             <span class="admin-field__label">{{ backofficeForm.hasExistingCredential ? "重置密码（选填）" : "首次密码" }}</span>
             <input
               v-model="backofficeForm.password"
               class="admin-input"
               type="password"
-              :placeholder="backofficeForm.hasExistingCredential ? '留空则不修改当前密码' : '至少 8 位'"
+              placeholder="至少 8 位"
             />
           </label>
+          <div v-else class="admin-note">
+            此处只维护后台身份和权限，不修改已有密码。账号本人可在登录页选择“忘记密码”；服务提供商进入本实例后可执行受审计的代重置。
+          </div>
           <div class="admin-field">
             <span class="admin-field__label">权限配置</span>
             <div class="admin-toolbar users-permission-toolbar">
