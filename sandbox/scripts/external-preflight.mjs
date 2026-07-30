@@ -1,5 +1,11 @@
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,7 +83,7 @@ const stripQuotes = (value) => {
   return trimmed;
 };
 
-const parseEnvFile = (filePath) => {
+export const parseEnvFile = (filePath) => {
   if (!existsSync(filePath)) {
     return {};
   }
@@ -102,7 +108,7 @@ const parseEnvFile = (filePath) => {
     const key = normalizedLine.slice(0, separatorIndex).trim();
     const value = stripQuotes(normalizedLine.slice(separatorIndex + 1));
 
-    if (!key || value === "") {
+    if (!key) {
       continue;
     }
 
@@ -1504,7 +1510,15 @@ const main = async () => {
   }
 };
 
-main().catch((error) => {
-  console.error(`外部服务预检脚本执行失败：${extractErrorMessage(error)}`);
-  process.exitCode = 1;
-});
+const invokedScriptPath =
+  process.argv[1] && existsSync(process.argv[1])
+    ? realpathSync(process.argv[1])
+    : undefined;
+const currentScriptPath = realpathSync(fileURLToPath(import.meta.url));
+
+if (invokedScriptPath === currentScriptPath) {
+  main().catch((error) => {
+    console.error(`外部服务预检脚本执行失败：${extractErrorMessage(error)}`);
+    process.exitCode = 1;
+  });
+}

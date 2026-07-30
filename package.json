@@ -57,6 +57,7 @@
     "sandbox:settlement": "node sandbox/scripts/simulate-settlement.mjs",
     "sandbox:sign": "node sandbox/scripts/generate-signature.mjs sandbox/fixtures/open-door.sample.json",
     "start:public-web": "node scripts/serve-public-web.mjs",
+    "test:external-preflight": "node --test sandbox/scripts/external-preflight.test.mjs",
     "test:public-web": "node --test scripts/serve-public-web.test.mjs",
     "start:private-api-relay": "node scripts/serve-private-api-relay.mjs",
     "test:private-api-relay": "node --test scripts/serve-private-api-relay.test.mjs",
@@ -71,7 +72,7 @@
     "test:vending-public-ingress-root-action": "node --test scripts/vending-public-ingress-root-action.test.mjs",
     "test:public-app-acceptance": "node --test scripts/public-app-acceptance.test.mjs scripts/vnc-local-session.test.mjs scripts/public-app-acceptance-sealed-runtime.test.mjs scripts/public-app-acceptance-install-contract.test.mjs && tsx --tsconfig apps/api/tsconfig.json --test scripts/public-app-acceptance.integration.test.mts",
     "smoke:frontend-safety": "node scripts/smoke-frontend-safety.mjs",
-    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety && npm run test:public-web && npm run test:private-api-relay && npm run test:public-edge-relay && npm run test:public-http-entry-redirect && npm run test:vnc-nginx-edge-contract && npm run test:vending-spark-vhost-cutover && npm run test:first-backoffice-password-maintenance && npm run test:prepare-live-reservation-config && npm run test:vending-public-ingress-root-action && npm run test:public-app-acceptance",
+    "check:local": "npm run typecheck && npm test --workspace @vm/api && npm test --workspace @vm/mobile && npm test --workspace @vm/admin-web && npm run smoke:inventory --workspace @vm/api && npm run smoke:defensive --workspace @vm/api && npm run smoke:frontend-safety && npm run test:external-preflight && npm run test:public-web && npm run test:private-api-relay && npm run test:public-edge-relay && npm run test:public-http-entry-redirect && npm run test:vnc-nginx-edge-contract && npm run test:vending-spark-vhost-cutover && npm run test:first-backoffice-password-maintenance && npm run test:prepare-live-reservation-config && npm run test:vending-public-ingress-root-action && npm run test:public-app-acceptance",
     "check:local:full": "npm run check:local && npm run build && npm run build:mobile:weixin && npm run build:mobile:alipay && npm run build:mobile:app",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }
