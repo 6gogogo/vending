@@ -164,3 +164,51 @@ test("预约制正式配置拒绝非 HTTPS 根入口", (t) => {
     );
   }
 });
+
+test("根级真实初始化命令透传显式确认参数", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-live-init-command-"));
+  const npmCli = process.env.npm_execpath;
+  assert.ok(npmCli, "测试必须由 npm 脚本启动");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const childEnv = {
+    ...process.env,
+    NODE_ENV: "test",
+    APP_ENV: "",
+    VM_TEST_ISOLATED_ENV: "true",
+    VM_DATA_PLANE: "live",
+    VM_DATA_ROOT: join(directory, "live-data"),
+    VM_DATA_PLANE_ID: "live-command-contract",
+    API_DATA_FILE: "",
+    SYSTEM_LOG_FILE: "",
+    UPLOAD_DIR: "",
+    API_BACKUP_DIR: "",
+    FINANCIAL_SINGLE_WRITER_LEASE_FILE: "",
+    VM_INITIAL_SUPER_ADMIN_USERNAME: "",
+    VM_INITIAL_SUPER_ADMIN_PASSWORD: "",
+    VM_INITIAL_SUPER_ADMIN_PHONE: "",
+    VM_INITIAL_SUPER_ADMIN_NAME: "",
+    VM_INITIAL_CREDENTIAL_SOURCE_DATA_FILE: "",
+    VM_INITIAL_TENANT_ADMIN_USERNAME: ""
+  };
+  const result = spawnSync(
+    process.execPath,
+    [
+      npmCli,
+      "run",
+      "init:live-data",
+      "--",
+      "--confirm-live-initialization"
+    ],
+    {
+      cwd: resolve("."),
+      env: childEnv,
+      encoding: "utf8"
+    }
+  );
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(output, /已阻止初始化真实数据平面/u);
+  assert.match(output, /缺少受控初始化配置：VM_INITIAL_SUPER_ADMIN_USERNAME/u);
+});
