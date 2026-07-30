@@ -5,19 +5,26 @@ import { useRouter } from "vue-router";
 import type {
   PlatformOverviewSnapshot,
   PlatformTenantCreatePayload,
-  PlatformTenantProvisioningResult
+  PlatformTenantProvisioningResult,
+  PlatformTenantUpdatePayload,
+  PlatformTenantUsageSummary
 } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
-import { validatePlatformTenantDraft } from "../utils/backoffice-provisioning";
+import {
+  validatePlatformTenantDraft,
+  validatePlatformTenantUpdateDraft
+} from "../utils/backoffice-provisioning";
 
 const router = useRouter();
 const sessionStore = useAdminSessionStore();
 const loading = ref(false);
 const creating = ref(false);
+const updating = ref(false);
 const enteringTenantId = ref("");
+const editingTenantId = ref("");
 const errorMessage = ref("");
 const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const overview = ref<PlatformOverviewSnapshot>();
@@ -38,10 +45,21 @@ const createForm = reactive<PlatformTenantCreatePayload>({
     password: ""
   }
 });
+const editForm = reactive<PlatformTenantUpdatePayload>({
+  name: "",
+  status: "trial",
+  instanceUrl: "",
+  contactName: "",
+  contactPhone: "",
+  planName: ""
+});
 
 const tenants = computed(() => overview.value?.tenants ?? []);
 const totals = computed(() => overview.value?.totals);
 const canCreateTenant = computed(() => sessionStore.can("platform-tenants:manage"));
+const editingTenant = computed(() =>
+  tenants.value.find((entry) => entry.tenant.id === editingTenantId.value)
+);
 
 const statusLabel = (status: "active" | "trial" | "paused") => {
   if (status === "active") return "运行中";
@@ -61,6 +79,62 @@ const resetCreateForm = () => {
   createForm.firstAdmin.phone = "";
   createForm.firstAdmin.username = "";
   createForm.firstAdmin.password = "";
+};
+
+const resetEditForm = () => {
+  editingTenantId.value = "";
+  editForm.name = "";
+  editForm.status = "trial";
+  editForm.instanceUrl = "";
+  editForm.contactName = "";
+  editForm.contactPhone = "";
+  editForm.planName = "";
+};
+
+const startEdit = (entry: PlatformTenantUsageSummary) => {
+  actionMessage.value = null;
+  editingTenantId.value = entry.tenant.id;
+  editForm.name = entry.tenant.name;
+  editForm.status = entry.tenant.status;
+  editForm.instanceUrl = entry.tenant.instanceUrl ?? "";
+  editForm.contactName = entry.tenant.contactName ?? "";
+  editForm.contactPhone = entry.tenant.contactPhone ?? "";
+  editForm.planName = entry.tenant.planName ?? "";
+};
+
+const updateTenant = async () => {
+  if (!editingTenantId.value || updating.value) {
+    return;
+  }
+
+  actionMessage.value = null;
+  const validationMessage = validatePlatformTenantUpdateDraft(editForm);
+  if (validationMessage) {
+    actionMessage.value = { type: "error", text: validationMessage };
+    return;
+  }
+
+  updating.value = true;
+  try {
+    const tenant = await adminApi.updatePlatformTenant(editingTenantId.value, {
+      name: editForm.name.trim(),
+      status: editForm.status,
+      instanceUrl: editForm.instanceUrl.trim() || undefined,
+      contactName: editForm.contactName.trim() || undefined,
+      contactPhone: editForm.contactPhone.trim() || undefined,
+      planName: editForm.planName.trim() || undefined
+    });
+    resetEditForm();
+    actionMessage.value = { type: "success", text: `实例“${tenant.name}”资料已更新。` };
+    await load();
+  } catch (error) {
+    actionMessage.value = {
+      type: "error",
+      text: error instanceof Error ? error.message : "客户实例资料更新失败。"
+    };
+  } finally {
+    updating.value = false;
+  }
 };
 
 const load = async () => {
@@ -361,13 +435,22 @@ onMounted(() => {
               <td>{{ entry.metrics.inventoryUnits }} 件 / 领取 {{ entry.metrics.pickupCount }}</td>
               <td class="admin-code">{{ entry.lastActivityAt ? formatDateTime(entry.lastActivityAt) : "-" }}</td>
               <td>
-                <button
-                  class="admin-button admin-button--ghost"
-                  :disabled="Boolean(enteringTenantId) || entry.tenant.status === 'paused'"
-                  @click="enterTenant(entry.tenant.id, entry.tenant.name)"
-                >
-                  {{ enteringTenantId === entry.tenant.id ? "进入中..." : entry.tenant.status === "paused" ? "实例已暂停" : "进入实例" }}
-                </button>
+                <div class="platform-row-actions">
+                  <button
+                    class="admin-button admin-button--ghost"
+                    :disabled="!canCreateTenant || updating"
+                    @click="startEdit(entry)"
+                  >
+                    维护实例
+                  </button>
+                  <button
+                    class="admin-button admin-button--ghost"
+                    :disabled="Boolean(enteringTenantId) || entry.tenant.status === 'paused'"
+                    @click="enterTenant(entry.tenant.id, entry.tenant.name)"
+                  >
+                    {{ enteringTenantId === entry.tenant.id ? "进入中..." : entry.tenant.status === "paused" ? "实例已暂停" : "进入实例" }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -377,6 +460,65 @@ onMounted(() => {
           <div class="admin-empty__body">请先创建客户实例与首管理员，再进入实例配置角色、柜机和权限。</div>
         </div>
       </article>
+    </section>
+
+    <section v-if="editingTenant" class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">实例维护</p>
+          <h3 class="admin-page__section-title">维护 {{ editingTenant.tenant.name }}</h3>
+        </div>
+      </div>
+      <form class="admin-panel admin-panel-block platform-create" @submit.prevent="updateTenant">
+        <div class="admin-note">
+          实例编码和首管理员保持不变。暂停实例会阻止服务商再次进入该实例，现有业务记录不会删除。
+        </div>
+        <div class="platform-create__grid">
+          <label class="admin-field">
+            <span class="admin-field__label">实例编码</span>
+            <input class="admin-input" :value="editingTenant.tenant.code" readonly aria-readonly="true" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">实例名称</span>
+            <input v-model="editForm.name" class="admin-input" maxlength="100" required />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">运行状态</span>
+            <select v-model="editForm.status" class="admin-select">
+              <option value="trial">试运行</option>
+              <option value="active">运行中</option>
+              <option value="paused">暂停</option>
+            </select>
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">实例地址（选填）</span>
+            <input v-model="editForm.instanceUrl" class="admin-input" type="url" placeholder="https://example.com" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">联系人（选填）</span>
+            <input v-model="editForm.contactName" class="admin-input" maxlength="100" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">联系人手机号（选填）</span>
+            <input v-model="editForm.contactPhone" class="admin-input" inputmode="numeric" maxlength="11" autocomplete="off" />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">服务方案（选填）</span>
+            <input v-model="editForm.planName" class="admin-input" maxlength="100" />
+          </label>
+        </div>
+        <div v-if="actionMessage?.type === 'error'" class="admin-alert admin-alert--danger" role="alert">
+          {{ actionMessage.text }}
+        </div>
+        <div class="platform-row-actions">
+          <button class="admin-button" type="submit" :disabled="updating">
+            {{ updating ? "保存中..." : "保存实例资料" }}
+          </button>
+          <button class="admin-button admin-button--ghost" type="button" :disabled="updating" @click="resetEditForm">
+            取消
+          </button>
+        </div>
+      </form>
     </section>
   </section>
 </template>
@@ -420,6 +562,12 @@ onMounted(() => {
 
 .platform-table-wrap {
   overflow-x: auto;
+}
+
+.platform-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .platform-overview__error {

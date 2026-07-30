@@ -272,6 +272,74 @@ test("实例创建持久化失败时租户、首管理员、凭据和日志全�
   }
 });
 
+test("服务商可维护模拟客户实例资料和状态，普通实例管理员不能修改", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const providerToken = createProviderToken(store);
+    const tenant = store.platformTenants[0];
+    assert.ok(tenant);
+
+    const response = await fetch(
+      `${baseUrl}/platform/tenants/${encodeURIComponent(tenant.id)}`,
+      {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${providerToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "已维护客户实例",
+          status: "paused",
+          instanceUrl: "https://managed-tenant.example.test",
+          contactName: "实例负责人",
+          contactPhone: "18800000011",
+          planName: "标准服务"
+        })
+      }
+    );
+    const payload = (await response.json()) as {
+      code?: number;
+      data?: { name?: string; status?: string; instanceUrl?: string };
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.code, 200);
+    assert.equal(payload.data?.name, "已维护客户实例");
+    assert.equal(payload.data?.status, "paused");
+    assert.equal(payload.data?.instanceUrl, "https://managed-tenant.example.test");
+    assert.equal(store.platformTenants[0]?.status, "paused");
+    assert.ok(
+      store.logs.some(
+        (entry) =>
+          entry.type === "update-platform-tenant" &&
+          entry.metadata?.tenantId === tenant.id &&
+          entry.metadata?.status === "paused"
+      )
+    );
+
+    const defaultAdminToken = createDefaultAdminToken(store);
+    const forbiddenResponse = await fetch(
+      `${baseUrl}/platform/tenants/${encodeURIComponent(tenant.id)}`,
+      {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${defaultAdminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "不应修改",
+          status: "active"
+        })
+      }
+    );
+    assert.equal(forbiddenResponse.status, 403);
+    assert.equal(store.platformTenants[0]?.name, "已维护客户实例");
+  } finally {
+    await app.close();
+  }
+});
+
 test("服务商平台会话只能访问平台能力，未进入实例时不能读取业务数据", async () => {
   const { app, baseUrl, store } = await startApi();
 

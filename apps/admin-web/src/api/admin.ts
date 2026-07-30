@@ -40,6 +40,7 @@ import type {
   PlatformTenantCreatePayload,
   PlatformTenantProvisioningResult,
   PlatformTenantRecord,
+  PlatformTenantUpdatePayload,
   RegionRecord,
   RegistrationApplication,
   ReservationSettings,
@@ -99,6 +100,16 @@ export const adminApi = {
   },
   changeAdminPassword(payload: { currentPassword: string; newPassword: string }) {
     return adminClient.patch<AdminLoginResponse>("/auth/backoffice-password", payload);
+  },
+  claimInitialProviderAccount(payload: {
+    currentAdminPassword: string;
+    username: string;
+    newPassword: string;
+  }) {
+    return adminClient.post<{ username: string; passwordUpdatedAt: string }>(
+      "/auth/claim-initial-provider-account",
+      payload
+    );
   },
   session() {
     return adminClient.get<AdminLoginResponse>("/auth/backoffice-session");
@@ -161,6 +172,13 @@ export const adminApi = {
   createPlatformTenant(payload: PlatformTenantCreatePayload) {
     requireBackofficePermission("platform-tenants:manage");
     return adminClient.post<PlatformTenantProvisioningResult>("/platform/tenants", payload);
+  },
+  updatePlatformTenant(tenantId: string, payload: PlatformTenantUpdatePayload) {
+    requireBackofficePermission("platform-tenants:manage");
+    return adminClient.patch<PlatformTenantRecord>(
+      `/platform/tenants/${encodeURIComponent(tenantId)}`,
+      payload
+    );
   },
   enterPlatformTenant(tenantId: string) {
     requireBackofficePermission("platform-tenants:view");

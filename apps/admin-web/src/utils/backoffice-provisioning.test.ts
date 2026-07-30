@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   isManualVerificationCode,
   manualCodeFromRandomValue,
-  validatePlatformTenantDraft
+  validatePlatformTenantDraft,
+  validatePlatformTenantUpdateDraft
 } from "./backoffice-provisioning";
 
 test("客户实例草稿同时校验编码、手机号和首管理员密码", () => {
@@ -49,6 +50,33 @@ test("客户实例草稿同时校验编码、手机号和首管理员密码", ()
       }
     }),
     "首管理员后台密码至少需要 12 位。"
+  );
+});
+
+test("客户实例维护草稿校验名称、状态、联系人和地址", () => {
+  assert.equal(
+    validatePlatformTenantUpdateDraft({
+      name: "公益智助柜社区实例",
+      status: "active",
+      contactPhone: "18800000001",
+      instanceUrl: "https://tenant.example.test"
+    }),
+    undefined
+  );
+  assert.equal(
+    validatePlatformTenantUpdateDraft({
+      name: "",
+      status: "active"
+    }),
+    "实例名称需为 1 至 100 个字符的单行文本。"
+  );
+  assert.equal(
+    validatePlatformTenantUpdateDraft({
+      name: "公益智助柜社区实例",
+      status: "active",
+      instanceUrl: "https://user:password@tenant.example.test"
+    }),
+    "实例地址必须是不含账号、查询参数或片段的 HTTP(S) URL。"
   );
 });
 

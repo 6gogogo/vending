@@ -5,12 +5,16 @@ import {
   Headers,
   Inject,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards
 } from "@nestjs/common";
 
-import type { PlatformTenantCreatePayload } from "@vm/shared-types";
+import type {
+  PlatformTenantCreatePayload,
+  PlatformTenantUpdatePayload
+} from "@vm/shared-types";
 
 import { ok } from "../../common/dto/api-response";
 import {
@@ -53,6 +57,20 @@ export class PlatformController {
     return ok(
       this.platformService.createTenantWithFirstAdmin(body, request.authUser),
       "客户实例及首管理员已创建。"
+    );
+  }
+
+  @Patch("tenants/:tenantId")
+  @AllowedBackofficeRoles("super_admin")
+  @AllowedBackofficePermissions("platform-tenants:manage")
+  updateTenant(
+    @Param("tenantId") tenantId: string,
+    @Body() body: PlatformTenantUpdatePayload,
+    @Req() request: { authUser?: { id: string; name: string } }
+  ) {
+    return ok(
+      this.platformService.updateTenant(tenantId, body, request.authUser),
+      "客户实例资料已更新。"
     );
   }
 

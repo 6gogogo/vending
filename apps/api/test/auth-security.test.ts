@@ -524,6 +524,57 @@ test("服务商超级管理员首次改密只处理固定默认账号、保持�
   );
 });
 
+test("初始实例管理员凭当前密码可一次性开通服务商账号，且不返回密码", async () => {
+  const store = createIsolatedStore();
+  const authService = createAuthService(store);
+  const initialAdmin = await authService.backofficeLogin("admin", "admin");
+  const currentAdminPassword = "admin-current-password";
+  const refreshedAdmin = authService.changeBackofficePassword(
+    initialAdmin.token,
+    "admin",
+    currentAdminPassword
+  );
+
+  const claimed = authService.claimInitialProviderAccount(refreshedAdmin.token, {
+    currentAdminPassword,
+    username: "provider-owner",
+    newPassword: "provider-owner-password"
+  });
+
+  assert.deepEqual(Object.keys(claimed).sort(), ["passwordUpdatedAt", "username"]);
+  assert.equal(claimed.username, "provider-owner");
+  const credential = store.findBackofficeCredentialByUsername("provider-owner");
+  assert.ok(credential);
+  assert.equal(credential.role, "super_admin");
+  assert.equal(credential.usesDefaultPassword, false);
+  assert.equal(
+    store.backofficeCredentials.some((entry) => store.isDefaultSuperAdminBootstrapCredential(entry)),
+    false
+  );
+  const providerSession = await authService.backofficeLogin(
+    "provider-owner",
+    "provider-owner-password"
+  );
+  assert.equal(providerSession.user.backofficeRole, "super_admin");
+  assert.equal(providerSession.user.scope, "provider");
+  assert.ok(
+    store.logs.some(
+      (entry) =>
+        entry.type === "claim-initial-provider-account" &&
+        entry.metadata?.claimMethod === "primary-admin-current-password"
+    )
+  );
+  assert.throws(
+    () =>
+      authService.claimInitialProviderAccount(refreshedAdmin.token, {
+        currentAdminPassword,
+        username: "another-provider",
+        newPassword: "another-provider-password"
+      }),
+    /已经开通/
+  );
+});
+
 test("启动时会修复旧 admin 凭据仍标记默认密码的历史状态", () => {
   const store = createIsolatedStore();
   const password = "904281";

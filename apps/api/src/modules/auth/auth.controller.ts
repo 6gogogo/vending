@@ -155,6 +155,21 @@ export class AuthController {
     );
   }
 
+  @Post("claim-initial-provider-account")
+  claimInitialProviderAccount(
+    @Headers("authorization") authorization: string | undefined,
+    @Body()
+    body: { currentAdminPassword: string; username: string; newPassword: string }
+  ) {
+    return ok(
+      this.authService.claimInitialProviderAccount(
+        this.extractBearerToken(authorization),
+        body
+      ),
+      "服务商平台账号已开通。"
+    );
+  }
+
   @Post("backoffice-password-reset")
   async resetOwnBackofficePassword(
     @Body() body: { username: string; phone: string; code: string; newPassword: string }

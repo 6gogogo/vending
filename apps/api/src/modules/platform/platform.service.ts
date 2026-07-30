@@ -13,6 +13,7 @@ import {
   type PlatformTenantCreatePayload,
   type PlatformTenantProvisioningResult,
   type PlatformTenantRecord,
+  type PlatformTenantUpdatePayload,
   type PlatformTenantUsageSummary,
   type UserRecord
 } from "@vm/shared-types";
@@ -201,6 +202,95 @@ export class PlatformService {
         passwordUpdatedAt: credential.passwordUpdatedAt
       }
     };
+  }
+
+  updateTenant(
+    tenantId: string,
+    payload: PlatformTenantUpdatePayload,
+    actor?: { id: string; name: string }
+  ): PlatformTenantRecord {
+    if (this.store.isLiveDataPlane()) {
+      throw new ConflictException("真实数据平面不能在线修改客户实例资料。");
+    }
+
+    const tenant = this.store.findPlatformTenantById(tenantId);
+
+    if (!tenant) {
+      throw new BadRequestException("未找到对应客户实例。");
+    }
+
+    const name = payload.name?.trim();
+    const status = payload.status;
+    const instanceUrl = this.normalizeInstanceUrl(payload.instanceUrl);
+    const contactName = payload.contactName?.trim() || undefined;
+    const contactPhone = payload.contactPhone?.trim() || undefined;
+    const planName = payload.planName?.trim() || undefined;
+
+    if (!name || [...name].length > 100 || /[\r\n]/.test(name)) {
+      throw new BadRequestException("客户实例名称需为 1 至 100 个字符的单行文本。");
+    }
+
+    if (status !== "active" && status !== "trial" && status !== "paused") {
+      throw new BadRequestException("请选择有效的客户实例状态。");
+    }
+
+    if (contactPhone && !phonePattern.test(contactPhone)) {
+      throw new BadRequestException("实例联系人手机号格式不正确。");
+    }
+
+    if (
+      instanceUrl &&
+      this.store.platformTenants.some(
+        (entry) =>
+          entry.id !== tenant.id &&
+          this.readInstanceHostname(entry.instanceUrl) ===
+            this.readInstanceHostname(instanceUrl)
+      )
+    ) {
+      throw new ConflictException("客户实例域名已被占用。");
+    }
+
+    const previous = { ...tenant };
+    Object.assign(tenant, {
+      name,
+      status,
+      instanceUrl,
+      contactName,
+      contactPhone,
+      planName
+    });
+    const operationLog = this.store.logOperation({
+      category: "admin",
+      type: "update-platform-tenant",
+      status: "success",
+      actor: {
+        type: "admin",
+        id: actor?.id ?? "system",
+        name: actor?.name ?? "服务商",
+        role: "admin"
+      },
+      primarySubject: {
+        type: "user",
+        id: tenant.id,
+        label: tenant.name
+      },
+      metadata: {
+        tenantId: tenant.id,
+        tenantCode: tenant.code,
+        status: tenant.status,
+        undoState: "not_undoable"
+      }
+    });
+
+    try {
+      this.store.persist();
+    } catch (error) {
+      Object.assign(tenant, previous);
+      this.store.logs.splice(this.store.logs.indexOf(operationLog), 1);
+      throw error;
+    }
+
+    return tenant;
   }
 
   getOverview(): PlatformOverviewSnapshot {

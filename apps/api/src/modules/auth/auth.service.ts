@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   Inject,
@@ -38,8 +39,10 @@ import { UsersService } from "../users/users.service";
 import { hashAdminPassword, verifyAdminPassword } from "./admin-password.utils";
 import {
   getBackofficePasswordMinimumLength,
-  MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH
+  MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH,
+  PRIMARY_BACKOFFICE_ADMIN_USERNAME
 } from "./backoffice-password-policy";
+import { assertFirstSuperAdminPasswordTarget } from "./first-super-admin-password";
 import { VerificationCodeService } from "./verification-code.service";
 
 interface AdminSessionResult {
@@ -758,6 +761,129 @@ export class AuthService {
       refreshedToken,
       updatedCredential
     );
+  }
+
+  /**
+   * 模拟实例的首位管理员可在首次部署后，以当前密码确认一次性认领服务商账号。
+   * 该入口既不接受匿名请求，也不允许已有服务商账号被覆盖。
+   */
+  claimInitialProviderAccount(
+    token: string | undefined,
+    payload: { currentAdminPassword: string; username: string; newPassword: string }
+  ) {
+    if (this.store.isLiveDataPlane()) {
+      throw new ConflictException("真实数据平面必须在部署初始化时创建服务商账号。");
+    }
+
+    const resolved = this.store.getBackofficeSessionUser(token);
+    const defaultTenantId = this.store.getDefaultTenantId();
+
+    if (
+      !resolved ||
+      resolved.session.backofficeRole !== "admin" ||
+      resolved.session.tenantId !== defaultTenantId
+    ) {
+      throw new ForbiddenException("只有当前模拟实例的初始管理员可以开通服务商账号。");
+    }
+
+    const actorCredential = this.store.findBackofficeCredentialByUserId(
+      resolved.user.id,
+      "admin"
+    );
+
+    if (
+      !actorCredential ||
+      actorCredential.username !== PRIMARY_BACKOFFICE_ADMIN_USERNAME ||
+      actorCredential.tenantId !== defaultTenantId ||
+      actorCredential.usesDefaultPassword
+    ) {
+      throw new ForbiddenException(
+        "请先使用初始管理员账号登录，并在左侧“修改密码”中完成密码更新。"
+      );
+    }
+
+    if (
+      !verifyAdminPassword(
+        payload.currentAdminPassword,
+        actorCredential.passwordSalt,
+        actorCredential.passwordHash
+      )
+    ) {
+      throw new UnauthorizedException("当前管理员密码不正确。");
+    }
+
+    const username = payload.username.trim().toLowerCase();
+    const password = payload.newPassword.trim();
+
+    if (!username || username.length > 100 || /[\r\n]/.test(username)) {
+      throw new BadRequestException("服务商登录账号需为 1 至 100 个字符的单行文本。");
+    }
+
+    if (password.length < MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH) {
+      throw new BadRequestException(
+        `服务商密码至少需要 ${MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH} 位。`
+      );
+    }
+
+    let target: ReturnType<typeof assertFirstSuperAdminPasswordTarget>;
+    try {
+      target = assertFirstSuperAdminPasswordTarget(this.store);
+    } catch {
+      throw new ConflictException("服务商账号已经开通，不能再次认领。");
+    }
+
+    const sameUsername = this.store.findBackofficeCredentialByUsername(username);
+    if (sameUsername && sameUsername !== target.credential) {
+      throw new ConflictException("服务商登录账号已被占用。");
+    }
+
+    const passwordHash = hashAdminPassword(password);
+    const previousCredential = { ...target.credential };
+    const updatedCredential = this.store.upsertBackofficeCredential({
+      ...target.credential,
+      username,
+      passwordSalt: passwordHash.salt,
+      passwordHash: passwordHash.hash,
+      usesDefaultPassword: false,
+      passwordUpdatedAt: new Date().toISOString()
+    });
+    const operationLog = this.store.logOperation({
+      category: "admin",
+      type: "claim-initial-provider-account",
+      status: "success",
+      actor: {
+        type: resolved.user.role,
+        id: resolved.user.id,
+        name: resolved.user.name,
+        role: resolved.user.role
+      },
+      primarySubject: {
+        type: "user",
+        id: target.user.id,
+        label: target.user.name
+      },
+      metadata: {
+        username: updatedCredential.username,
+        backofficeRole: updatedCredential.role,
+        claimMethod: "primary-admin-current-password",
+        undoState: "not_undoable"
+      }
+    });
+
+    try {
+      this.store.persist();
+    } catch (error) {
+      Object.assign(updatedCredential, previousCredential);
+      this.store.logs.splice(this.store.logs.indexOf(operationLog), 1);
+      throw error;
+    }
+
+    this.store.revokeSessionsForUser(target.user.id);
+
+    return {
+      username: updatedCredential.username,
+      passwordUpdatedAt: updatedCredential.passwordUpdatedAt
+    };
   }
 
   issueManualVerificationCode(

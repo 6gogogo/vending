@@ -103,7 +103,7 @@ interface ReservationFormState {
 }
 
 const backofficeRoleLabels: Record<BackofficeRole, string> = {
-  super_admin: "程序提供商",
+  super_admin: "服务提供商",
   admin: "管理员",
   merchant: "商家",
   restocker: "补货员"

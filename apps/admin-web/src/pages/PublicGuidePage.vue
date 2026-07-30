@@ -9,39 +9,41 @@ interface GuideAudience {
   label: string;
   summary: string;
   steps: string[];
-  checks: string[];
+  tips: string[];
 }
 
 const audiences: GuideAudience[] = [
   {
     id: "provider",
     label: "服务提供商",
-    summary: "开通客户实例、进入目标实例，并在平台与实例之间保持清晰的权限边界。",
+    summary: "开通和维护客户实例，再进入目标实例处理该实例的业务。",
     steps: [
-      "使用服务商平台账号登录；首次使用时，先按受控维护流程完成密码设置或更新。",
+      "尚未开通服务商账号时，使用初始实例管理员账号登录，在左侧选择“开通服务商账号”，输入当前管理员密码并设置服务商登录账号和密码。",
+      "使用新服务商账号重新登录，打开“服务商后台 → 全局工作台”。",
       "在“全局工作台”新建客户实例，并一次性建立该实例的首位管理员。",
-      "确认实例名称和首管理员交接信息后，选择“进入实例”。进入后才会出现实例业务菜单。",
-      "需要处理另一个客户或返回平台总览时，先选择“退出实例”；旧实例会话将失效。"
+      "在实例列表选择“维护实例”，更新实例名称、运行状态、地址、联系人和服务方案；暂停不会删除现有记录。",
+      "确认实例名称和首管理员交接信息后，选择“进入实例”。进入后才会出现实例业务菜单；需要处理其他客户时先选择“退出当前实例”。"
     ],
-    checks: [
+    tips: [
+      "服务商账号只在首次开通时创建一次；已经存在时不会被新的开通操作覆盖。",
       "平台账号未进入实例时不能访问柜机、人员、库存等实例业务数据。",
       "进入实例后，只处理当前实例；不要在不同客户之间复用账号或人工码。",
-      "首次密码、会话令牌和人工码均不得通过聊天、截图或工单传递。"
+      "密码、会话令牌和人工码请仅通过安全渠道交付。"
     ]
   },
   {
     id: "tenant-admin",
     label: "实例管理员",
-    summary: "配置预约取货，管理人员与角色，并为 App 已启用账号签发一次性登录码。",
+    summary: "配置领取方式，管理人员、角色和柜机，并为 App 用户签发登录码。",
     steps: [
       "在“领取与服务设置”确认预约取货和额度规则。预约制不创建支付单，也不需要支付配置。",
       "在“人员管理”完成建档、审核和启用；给商户或补货员分配相应后台角色及可操作柜机。",
       "确认柜机在线且有可预约库存，再为已启用的 App 账号签发“APP / 小程序登录”用途的 6 位一次性验证码。",
-      "让用户完成登录和预约后，核对验证码记录已使用、预约已生成；同一验证码再次提交必须被拒绝。"
+      "用户完成登录和预约后，在人员记录、预约和操作日志中查看处理结果。"
     ],
-    checks: [
+    tips: [
       "人工码只能用于当前实例、已启用的既有账号，不能创建账号或替代 PC 后台密码。",
-      "预约制的支付项保持关闭或不显示；出现支付步骤时应先停止验收并核对实例设置。",
+      "预约制下支付项保持关闭或不显示；出现支付步骤时请先检查“预约取货”设置。",
       "人员、角色、柜机分配和操作日志都应由当前实例管理员复核。"
     ]
   },
@@ -55,7 +57,7 @@ const audiences: GuideAudience[] = [
       "提交操作后在记录或日志中核对柜机、数量、时间和处理结果。",
       "发现未被分配的柜机、人员或数据时，不要尝试绕过权限，应联系当前实例管理员。"
     ],
-    checks: [
+    tips: [
       "看不到未分配柜机是权限保护的预期结果，不是页面异常。",
       "商户和补货员不应进入人工码、实例设置或其他实例数据。",
       "涉及库存差异、柜机异常时，保留业务记录并交由管理员处理。"
@@ -64,14 +66,14 @@ const audiences: GuideAudience[] = [
   {
     id: "app-user",
     label: "App 用户",
-    summary: "在人工验证码与预约取货模式下完成登录、预约和到柜领取。",
+    summary: "使用一次性验证码登录，完成预约并在约定时间到柜领取。",
     steps: [
       "未建档时先联系当前实例管理员完成身份资料建档与审核；人工码模式不会发送短信，也不开放自助注册。",
       "从管理员处通过安全渠道获得一条 6 位一次性登录码，在 App 中填写手机号、验证码并勾选免责声明。",
       "登录后选择在线柜机和可预约货品，提交预约取货并核对保留时间。",
       "到达同一柜机后打开当前预约完成领取；预约流程不会要求支付。"
     ],
-    checks: [
+    tips: [
       "验证码过期、撤销、输错达到上限或已经使用后，应联系管理员重新签发。",
       "不要把验证码、手机号或预约截图发到公开群组。",
       "预约超时或柜机异常时，先在当前预约中核对状态，再提交反馈。"
@@ -130,10 +132,10 @@ const selectedAudience = computed(
       </article>
 
       <aside class="public-guide__card">
-        <p class="public-guide__eyebrow">验收要点</p>
-        <h2>完成前确认</h2>
-        <ul class="public-guide__checks">
-          <li v-for="check in selectedAudience.checks" :key="check">{{ check }}</li>
+        <p class="public-guide__eyebrow">操作提示</p>
+        <h2>使用时注意</h2>
+        <ul class="public-guide__tips">
+          <li v-for="tip in selectedAudience.tips" :key="tip">{{ tip }}</li>
         </ul>
       </aside>
     </section>
@@ -143,14 +145,15 @@ const selectedAudience = computed(
         <p class="public-guide__eyebrow">入口说明</p>
         <h2 id="guide-entry-title">从公网入口开始</h2>
         <p>
-          公网入口会跳转到 HTTPS 业务站点。若浏览器提示连接失败，先确认地址栏已完成跳转，再联系服务管理员核对当前发布状态。
+          电脑后台使用 <code>https://vending.5gogogo.top/login</code>，App 使用 <code>https://vending.5gogogo.top/mobile/</code>。
+          从带端口入口访问时会自动跳转到 HTTPS 业务站点。
         </p>
       </article>
       <article class="public-guide__card">
-        <p class="public-guide__eyebrow">截图与留档</p>
-        <h2>按流程保留证据</h2>
+        <p class="public-guide__eyebrow">遇到问题</p>
+        <h2>先找对应管理员</h2>
         <p>
-          截图应覆盖登录页、实例进入、角色受限、人工码签发（遮住隐私内容）、App 登录、预约确认和验证码重放拒绝；不要截取密码、验证码或用户联系方式。
+          App 用户联系当前实例管理员；商户和补货员联系分配其柜机的管理员；服务提供商处理实例开通、状态和跨实例切换。
         </p>
       </article>
     </section>
@@ -277,7 +280,7 @@ const selectedAudience = computed(
 }
 
 .public-guide__steps,
-.public-guide__checks {
+.public-guide__tips {
   display: grid;
   gap: 12px;
   margin: 0;
@@ -291,7 +294,7 @@ const selectedAudience = computed(
   font-weight: 800;
 }
 
-.public-guide__checks li::marker {
+.public-guide__tips li::marker {
   color: var(--admin-info);
 }
 

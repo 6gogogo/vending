@@ -450,6 +450,19 @@ export interface PlatformTenantCreatePayload {
   };
 }
 
+/**
+ * 服务商在平台态维护已有客户实例的资料。
+ * 实例编码和首管理员属于开通记录，不允许通过常规维护页面改写。
+ */
+export interface PlatformTenantUpdatePayload {
+  name: string;
+  status: PlatformTenantStatus;
+  instanceUrl?: string;
+  contactName?: string;
+  contactPhone?: string;
+  planName?: string;
+}
+
 export interface PlatformTenantProvisioningResult {
   tenant: PlatformTenantRecord;
   firstAdmin: BackofficeCredentialSnapshot;
