@@ -16,8 +16,12 @@ import type {
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { toSafeSpreadsheetCell } from "../../common/export/html-workbook";
 import { sanitizeAuditLogEntry } from "../../common/logging/audit-log-sanitizer";
-import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import {
+  InMemoryStoreService,
+  RESERVED_BACKOFFICE_USER_TAGS
+} from "../../common/store/in-memory-store.service";
 import { resolveSystemLogFile } from "../../common/store/persistence";
+import { assertTenantsKeepActiveBackofficeAdmin } from "../../common/store/tenant-admin-continuity";
 import { getBusinessDayKey } from "../../common/time/business-day";
 
 const MAX_SYSTEM_AUDIT_LIMIT = 200;
@@ -334,7 +338,10 @@ export class OperationLogsService {
 
       const user = this.store.users.find((entry) => entry.id === userId);
       if (user) {
-        explicitTenantIds.add(this.store.getUserTenantId(user));
+        const userTenantId = this.store.getUserTenantId(user);
+        if (userTenantId) {
+          explicitTenantIds.add(userTenantId);
+        }
       }
     };
     const addDeviceTenant = (deviceCode?: string) => {
@@ -595,8 +602,34 @@ export class OperationLogsService {
     if (!user || !beforeSnapshot) {
       throw new NotFoundException("未找到可恢复的人员快照。");
     }
+    if (this.store.isControlledProviderUser(user)) {
+      throw new BadRequestException(
+        "服务商根账号不能通过客户实例操作日志修改。"
+      );
+    }
 
-    Object.assign(user, beforeSnapshot);
+    assertTenantsKeepActiveBackofficeAdmin(this.store, [
+      {
+        user,
+        nextRole: beforeSnapshot.role,
+        nextStatus: beforeSnapshot.status
+      }
+    ]);
+    const accessWillChange =
+      user.role !== beforeSnapshot.role || user.status !== beforeSnapshot.status;
+    Object.assign(user, beforeSnapshot, {
+      tenantId: user.tenantId,
+      tags: Array.isArray(beforeSnapshot.tags)
+        ? beforeSnapshot.tags.filter(
+            (tag) =>
+              typeof tag === "string" &&
+              !RESERVED_BACKOFFICE_USER_TAGS.has(tag)
+          )
+        : user.tags
+    });
+    if (accessWillChange) {
+      this.store.revokeSessionsForUser(user.id);
+    }
 
     const undoLog = this.store.logOperation({
       category: "user",

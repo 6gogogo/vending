@@ -31,6 +31,8 @@ export interface VerificationCodeCheckResult {
   tenantId?: string;
   targetUserId?: string;
   manualGrantId?: string;
+  provider?: VerificationProvider;
+  challengeId?: string;
 }
 
 const mainlandPhonePattern = /^1\d{10}$/;
@@ -117,10 +119,27 @@ export class VerificationCodeService {
     code: string,
     purpose: VerificationPurpose = "general"
   ): Promise<VerificationCodeCheckResult> {
+    const checked = await this.checkCodeWithContext(phone, code, purpose);
+
+    if (!checked.verified) {
+      return checked;
+    }
+
+    return {
+      ...checked,
+      verified: this.consumeCheckedCode(phone, purpose, checked)
+    };
+  }
+
+  async checkCodeWithContext(
+    phone: string,
+    code: string,
+    purpose: VerificationPurpose = "general"
+  ): Promise<VerificationCodeCheckResult> {
     const normalizedPhone = this.normalizePhone(phone);
     const normalizedCode = this.normalizeVerificationCode(code);
     const normalizedPurpose = this.normalizePurpose(purpose);
-    const manualGrant = this.store.tryVerifyManualVerificationGrant(
+    const manualGrant = this.store.checkManualVerificationGrant(
       normalizedPhone,
       normalizedCode,
       normalizedPurpose
@@ -131,7 +150,8 @@ export class VerificationCodeService {
         verified: manualGrant.verified,
         tenantId: manualGrant.tenantId,
         targetUserId: manualGrant.targetUserId,
-        manualGrantId: manualGrant.grantId
+        manualGrantId: manualGrant.grantId,
+        provider: "manual"
       };
     }
 
@@ -162,13 +182,10 @@ export class VerificationCodeService {
         return { verified: false };
       }
 
-      // 本地挑战先绑定本应用发码，再以上游 PASS 和单次消费共同决定结果。
       return {
-        verified: this.store.consumeVerificationRequest(
-          normalizedPhone,
-          normalizedPurpose,
-          externalChallengeId
-        )
+        verified: true,
+        provider: "aliyun_pnvs",
+        challengeId: externalChallengeId
       };
     }
 
@@ -177,12 +194,60 @@ export class VerificationCodeService {
     }
 
     return {
-      verified: this.store.verifyCode(
+      verified: this.store.checkCode(
         normalizedPhone,
         normalizedCode,
         normalizedPurpose
+      ),
+      provider: "mock",
+      challengeId: this.store.getVerificationChallengeId(
+        normalizedPhone,
+        normalizedPurpose
       )
     };
+  }
+
+  consumeCheckedCode(
+    phone: string,
+    purpose: VerificationPurpose,
+    checked: VerificationCodeCheckResult,
+    options: { persist?: boolean } = {}
+  ) {
+    if (!checked.verified) {
+      return false;
+    }
+
+    const normalizedPhone = this.normalizePhone(phone);
+    const normalizedPurpose = this.normalizePurpose(purpose);
+
+    if (checked.provider === "manual" && checked.manualGrantId) {
+      return this.store.consumeManualVerificationGrant(
+        normalizedPhone,
+        normalizedPurpose,
+        checked.manualGrantId,
+        options.persist
+      );
+    }
+
+    if (checked.provider === "aliyun_pnvs" && checked.challengeId) {
+      return this.store.consumeVerificationRequest(
+        normalizedPhone,
+        normalizedPurpose,
+        checked.challengeId,
+        options.persist
+      );
+    }
+
+    if (checked.provider === "mock" && checked.challengeId) {
+      return this.store.consumeVerificationRequest(
+        normalizedPhone,
+        normalizedPurpose,
+        checked.challengeId,
+        options.persist
+      );
+    }
+
+    return false;
   }
 
   getRuntimeConfig() {

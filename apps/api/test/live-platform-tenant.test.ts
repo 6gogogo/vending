@@ -6,10 +6,12 @@ import test from "node:test";
 
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service.js";
 import { createEmptyPersistedState } from "../src/common/store/persistence.js";
+import { hashAdminPassword } from "../src/modules/auth/admin-password.utils.js";
+import { AuthService } from "../src/modules/auth/auth.service.js";
 
-const withEnvironment = (
+const withEnvironment = async (
   values: Record<string, string | undefined>,
-  action: () => void
+  action: () => Promise<void> | void
 ) => {
   const previous = new Map(
     Object.keys(values).map((key) => [key, process.env[key]])
@@ -23,7 +25,7 @@ const withEnvironment = (
         process.env[key] = value;
       }
     }
-    action();
+    await action();
   } finally {
     for (const [key, value] of previous) {
       if (value === undefined) {
@@ -35,7 +37,7 @@ const withEnvironment = (
   }
 };
 
-test("真实后台会话以持久化当前租户为准，不依赖模拟 tenant-a", (t) => {
+test("旧真实快照补齐人员实例归属后可正常登录，不依赖模拟 tenant-a", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "vm-live-tenant-session-"));
   const root = join(directory, "live-root");
   const environment = {
@@ -54,7 +56,7 @@ test("真实后台会话以持久化当前租户为准，不依赖模拟 tenant-
   };
   t.after(() => rmSync(directory, { recursive: true, force: true }));
 
-  withEnvironment(environment, () => {
+  await withEnvironment(environment, async () => {
     const state = createEmptyPersistedState();
     state.initializationSource = "live-bootstrap";
     state.platformTenants.push({
@@ -74,13 +76,15 @@ test("真实后台会话以持久化当前租户为准，不依赖模拟 tenant-
       tags: [],
       mobileProfileCompleted: false
     });
+    const password = "live-admin-password";
+    const passwordHash = hashAdminPassword(password);
     state.backofficeCredentials.push({
       userId: "live-admin-user",
       username: "live-admin",
       role: "admin",
       tenantId: environment.VM_DATA_PLANE_ID,
-      passwordSalt: "test-salt",
-      passwordHash: "test-hash",
+      passwordSalt: passwordHash.salt,
+      passwordHash: passwordHash.hash,
       usesDefaultPassword: false,
       passwordUpdatedAt: "2026-01-01T00:00:00.000Z"
     });
@@ -91,12 +95,21 @@ test("真实后台会话以持久化当前租户为准，不依赖模拟 tenant-
     assert.equal(store.getDefaultTenantId(), environment.VM_DATA_PLANE_ID);
     assert.equal(store.listPlatformTenants().length, 1);
     assert.equal(store.listPlatformTenants()[0]?.instanceUrl, environment.PUBLIC_BASE_URL);
+    assert.equal(store.users[0]?.tenantId, environment.VM_DATA_PLANE_ID);
 
-    const token = store.createBackofficeSession(
-      store.users[0]!,
-      "admin",
-      environment.VM_DATA_PLANE_ID
+    const authService = new AuthService(
+      {} as never,
+      {} as never,
+      {} as never,
+      store,
+      {} as never,
+      { get: () => undefined } as never
     );
-    assert.equal(store.getBackofficeSessionUser(token)?.user.id, "live-admin-user");
+    const session = await authService.backofficeLogin(
+      "live-admin",
+      password
+    );
+    assert.equal(session.user.id, "live-admin-user");
+    assert.equal(session.user.tenantId, environment.VM_DATA_PLANE_ID);
   });
 });

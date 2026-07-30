@@ -69,6 +69,7 @@ import {
   isControlledLiveBootstrapProcess,
   type ManualVerificationGrantRecord,
   type PersistedStoreState,
+  PersistedStateWriteError,
   type SessionRecord,
   type VerificationPurpose,
   type VerificationRecord,
@@ -104,8 +105,12 @@ const MAX_VERIFICATION_FAILURES = 5;
 const SESSION_TTL_MS = 24 * 60 * 60_000;
 const DRAFT_SESSION_TTL_MS = 30 * 60_000;
 const NEGATIVE_STOCK_BALANCE_NOTE = "库存透支调整";
-const HIDDEN_BACKOFFICE_USER_TAG = "hidden-backoffice";
-const SUPER_ADMIN_TAG = "super-admin";
+export const HIDDEN_BACKOFFICE_USER_TAG = "hidden-backoffice";
+export const SUPER_ADMIN_TAG = "super-admin";
+export const RESERVED_BACKOFFICE_USER_TAGS = new Set([
+  HIDDEN_BACKOFFICE_USER_TAG,
+  SUPER_ADMIN_TAG
+]);
 const DEFAULT_SUPER_ADMIN_USER_ID = "backoffice-super-admin";
 const LEGACY_SUPER_ADMIN_USER_ID = "admin-root";
 const DEFAULT_SUPER_ADMIN_USERNAME = "super";
@@ -254,6 +259,7 @@ export class InMemoryStoreService {
 
     shouldPersist = this.normalizeRegionsState() || shouldPersist;
     shouldPersist = this.ensureBootstrapAdmin() || shouldPersist;
+    shouldPersist = this.normalizeLegacyUserTenantOwnership() || shouldPersist;
 
     const testDeviceBootstrapRequested = ["1", "true", "yes", "on"].includes(
       (process.env.ENABLE_TEST_DEVICE_BOOTSTRAP ?? "").trim().toLowerCase()
@@ -424,6 +430,7 @@ export class InMemoryStoreService {
     this.verificationCodes.set(this.getVerificationCodeKey(phone, purpose), {
       code,
       purpose,
+      challengeId: this.createSecureToken("challenge"),
       expiresAt,
       requestedAt,
       resendAvailableAt,
@@ -439,13 +446,15 @@ export class InMemoryStoreService {
   ) {
     const now = Date.now();
     const key = this.getVerificationCodeKey(phone, purpose);
+    const challengeId = this.createSecureToken("challenge");
 
     this.verificationCodes.set(key, {
       code: "",
       purpose,
+      challengeId,
       externalChallenge: true,
       externalProvider,
-      externalChallengeId: this.createSecureToken("challenge"),
+      externalChallengeId: challengeId,
       expiresAt: new Date(now + 5 * 60_000).toISOString(),
       requestedAt: new Date(now).toISOString(),
       resendAvailableAt: new Date(now + 60_000).toISOString(),
@@ -514,7 +523,7 @@ export class InMemoryStoreService {
     return structuredClone(record);
   }
 
-  tryVerifyManualVerificationGrant(
+  checkManualVerificationGrant(
     phone: string,
     code: string,
     purpose: VerificationPurpose
@@ -587,6 +596,36 @@ export class InMemoryStoreService {
       return result;
     }
 
+    return {
+      ...result,
+      verified: true
+    };
+  }
+
+  consumeManualVerificationGrant(
+    phone: string,
+    purpose: VerificationPurpose,
+    grantId: string,
+    shouldPersist = true
+  ) {
+    const challengeKey = this.getVerificationCodeKey(phone, purpose);
+    const record = this.findActiveManualVerificationGrant(challengeKey);
+
+    if (
+      !record ||
+      record.manualGrantId !== grantId ||
+      this.isManualVerificationGrantTerminal(record)
+    ) {
+      return false;
+    }
+
+    if (this.expireManualVerificationGrant(record)) {
+      if (shouldPersist) {
+        this.persist();
+      }
+      return false;
+    }
+
     record.consumedAt = new Date().toISOString();
     this.activeManualVerificationGrantIds.delete(challengeKey);
     this.clearManualVerificationSecret(record);
@@ -594,11 +633,30 @@ export class InMemoryStoreService {
       record,
       "consume-manual-verification-code"
     );
-    this.persist();
+    if (shouldPersist) {
+      this.persist();
+    }
+    return true;
+  }
+
+  tryVerifyManualVerificationGrant(
+    phone: string,
+    code: string,
+    purpose: VerificationPurpose
+  ) {
+    const checked = this.checkManualVerificationGrant(phone, code, purpose);
+
+    if (!checked.handled || !checked.verified || !checked.grantId) {
+      return checked;
+    }
 
     return {
-      ...result,
-      verified: true
+      ...checked,
+      verified: this.consumeManualVerificationGrant(
+        phone,
+        purpose,
+        checked.grantId
+      )
     };
   }
 
@@ -652,6 +710,14 @@ export class InMemoryStoreService {
     return this.verificationCodes.get(this.getVerificationCodeKey(phone, purpose));
   }
 
+  getVerificationChallengeId(
+    phone: string,
+    purpose: VerificationPurpose = "general"
+  ) {
+    const record = this.getVerificationRecord(phone, purpose);
+    return record?.challengeId ?? record?.externalChallengeId;
+  }
+
   getExternalVerificationChallengeId(
     phone: string,
     purpose: VerificationPurpose,
@@ -670,7 +736,7 @@ export class InMemoryStoreService {
     return record.externalChallengeId;
   }
 
-  verifyCode(phone: string, code: string, purpose: VerificationPurpose = "general") {
+  checkCode(phone: string, code: string, purpose: VerificationPurpose = "general") {
     const record = this.getVerificationRecord(phone, purpose);
 
     if (!record || !this.canAttemptVerification(phone, purpose)) {
@@ -682,7 +748,15 @@ export class InMemoryStoreService {
       return false;
     }
 
-    return this.consumeVerificationRequest(phone, purpose);
+    return true;
+  }
+
+  verifyCode(phone: string, code: string, purpose: VerificationPurpose = "general") {
+    const challengeId = this.getVerificationChallengeId(phone, purpose);
+    return (
+      this.checkCode(phone, code, purpose) &&
+      this.consumeVerificationRequest(phone, purpose, challengeId)
+    );
   }
 
   canAttemptVerification(
@@ -732,13 +806,16 @@ export class InMemoryStoreService {
   consumeVerificationRequest(
     phone: string,
     purpose: VerificationPurpose = "general",
-    externalChallengeId?: string
+    challengeId?: string,
+    shouldPersist = true
   ) {
     const record = this.getVerificationRecord(phone, purpose);
+    const currentChallengeId =
+      record?.challengeId ?? record?.externalChallengeId;
 
     if (
       !record ||
-      (externalChallengeId && record.externalChallengeId !== externalChallengeId) ||
+      (challengeId !== undefined && currentChallengeId !== challengeId) ||
       !this.canAttemptVerification(phone, purpose)
     ) {
       return false;
@@ -746,10 +823,74 @@ export class InMemoryStoreService {
 
     record.code = "";
     record.consumedAt = new Date().toISOString();
-    if (record.externalChallenge) {
+    if (record.externalChallenge && shouldPersist) {
       this.persist();
     }
     return true;
+  }
+
+  runBackofficePasswordResetTransaction<T>(mutation: () => T): T {
+    const checkpoint = {
+      verificationCodes: Array.from(this.verificationCodes.entries()).map(
+        ([key, record]) =>
+          [key, structuredClone(record)] as [string, VerificationRecord]
+      ),
+      manualVerificationGrants: structuredClone(
+        this.manualVerificationGrants
+      ),
+      activeManualVerificationGrantIds: Array.from(
+        this.activeManualVerificationGrantIds.entries()
+      ),
+      adminCredentials: structuredClone(this.adminCredentials),
+      backofficeCredentials: structuredClone(this.backofficeCredentials),
+      logs: structuredClone(this.logs),
+      sessions: Array.from(this.sessions.entries()).map(
+        ([token, session]) =>
+          [token, structuredClone(session)] as [string, SessionRecord]
+      ),
+      draftSessions: Array.from(this.draftSessions.entries()).map(
+        ([token, session]) =>
+          [token, structuredClone(session)] as [string, DraftSessionRecord]
+      )
+    };
+
+    try {
+      const result = mutation();
+      this.persist();
+      return result;
+    } catch (error) {
+      if (error instanceof PersistedStateWriteError && error.committed) {
+        throw error;
+      }
+
+      this.verificationCodes.clear();
+      for (const [key, record] of checkpoint.verificationCodes) {
+        this.verificationCodes.set(key, record);
+      }
+      this.replaceArray(
+        this.manualVerificationGrants,
+        checkpoint.manualVerificationGrants
+      );
+      this.activeManualVerificationGrantIds.clear();
+      for (const [key, grantId] of checkpoint.activeManualVerificationGrantIds) {
+        this.activeManualVerificationGrantIds.set(key, grantId);
+      }
+      this.replaceArray(this.adminCredentials, checkpoint.adminCredentials);
+      this.replaceArray(
+        this.backofficeCredentials,
+        checkpoint.backofficeCredentials
+      );
+      this.replaceArray(this.logs, checkpoint.logs);
+      this.sessions.clear();
+      for (const [token, session] of checkpoint.sessions) {
+        this.sessions.set(token, session);
+      }
+      this.draftSessions.clear();
+      for (const [token, session] of checkpoint.draftSessions) {
+        this.draftSessions.set(token, session);
+      }
+      throw error;
+    }
   }
 
   createSession(user: UserRecord) {
@@ -797,15 +938,9 @@ export class InMemoryStoreService {
   }
 
   getUserTenantId(user: UserRecord) {
-    if (user.tenantId) {
-      return user.tenantId;
-    }
-
-    const tenantCredential = this.backofficeCredentials.find(
-      (entry) => entry.userId === user.id && entry.role !== "super_admin"
-    );
-
-    return tenantCredential?.tenantId ?? this.getDefaultTenantId();
+    // 构造阶段会迁移明确的旧单实例记录。运行期仍无 tenantId 的人员属于歧义
+    // 隔离记录：调用方只能得到 undefined，不能把凭据或默认实例当作归属证明。
+    return user.tenantId;
   }
 
   getDeviceTenantId(device: DeviceRecord) {
@@ -977,7 +1112,7 @@ export class InMemoryStoreService {
     if (
       !user ||
       !credential ||
-      !this.isUserValidForBackofficeRole(user, session.backofficeRole) ||
+      !this.isBackofficeCredentialValidForUser(user, credential) ||
       (session.backofficeRole === "super_admin"
         ? credential.tenantId !== undefined
         : credential.tenantId !== session.tenantId)
@@ -1181,7 +1316,17 @@ export class InMemoryStoreService {
       return false;
     }
 
-    if (role === "super_admin" || role === "admin") {
+    if (role === "super_admin") {
+      return (
+        this.isControlledProviderUser(user) &&
+        user.role === "admin" &&
+        user.tenantId === undefined &&
+        user.tags.includes(SUPER_ADMIN_TAG) &&
+        user.tags.includes(HIDDEN_BACKOFFICE_USER_TAG)
+      );
+    }
+
+    if (role === "admin") {
       return user.role === "admin";
     }
 
@@ -1190,6 +1335,29 @@ export class InMemoryStoreService {
     }
 
     return user.role === "restocker";
+  }
+
+  isControlledProviderUser(user: UserRecord) {
+    return (
+      user.id === DEFAULT_SUPER_ADMIN_USER_ID ||
+      user.id === LEGACY_SUPER_ADMIN_USER_ID ||
+      user.id.startsWith("live-super-admin")
+    );
+  }
+
+  isBackofficeCredentialValidForUser(
+    user: UserRecord,
+    credential: BackofficeCredentialRecord
+  ) {
+    if (!this.isUserValidForBackofficeRole(user, credential.role)) {
+      return false;
+    }
+
+    if (credential.role === "super_admin") {
+      return credential.tenantId === undefined;
+    }
+
+    return Boolean(user.tenantId) && credential.tenantId === user.tenantId;
   }
 
   isHiddenBackofficeUser(user?: UserRecord) {
@@ -2745,12 +2913,6 @@ export class InMemoryStoreService {
           entry.id === LEGACY_SUPER_ADMIN_USER_ID &&
           entry.role === "admin" &&
           entry.tags.includes(SUPER_ADMIN_TAG)
-      ) ??
-      this.users.find(
-        (entry) =>
-          entry.role === "admin" &&
-          entry.tags.includes(SUPER_ADMIN_TAG) &&
-          entry.tags.includes(HIDDEN_BACKOFFICE_USER_TAG)
       );
 
     if (!superAdminUser) {
@@ -2910,6 +3072,62 @@ export class InMemoryStoreService {
       ) || changed;
 
     changed = this.synchronizeLinkedAdminCredentials(adminUser.id) || changed;
+
+    return changed;
+  }
+
+  /**
+   * 旧单实例快照没有在人员记录上保存 tenantId。只有快照仍明确为单实例时才可将
+   * 普通人员迁移到该唯一实例；多实例缺失归属必须失败关闭，绝不能用待校验凭据
+   * 反向证明其所属实例。
+   */
+  private normalizeLegacyUserTenantOwnership() {
+    let changed = false;
+    const soleTenant = this.platformTenants.length === 1
+      ? this.platformTenants[0]
+      : undefined;
+
+    for (const user of this.users) {
+      if (user.tenantId) {
+        const sanitizedTags = user.tags.filter(
+          (tag) => !RESERVED_BACKOFFICE_USER_TAGS.has(tag)
+        );
+        if (sanitizedTags.length !== user.tags.length) {
+          user.tags = sanitizedTags;
+          changed = true;
+        }
+        continue;
+      }
+
+      const isProviderRoot =
+        this.isControlledProviderUser(user) &&
+        user.role === "admin" &&
+        user.tags.includes(SUPER_ADMIN_TAG) &&
+        user.tags.includes(HIDDEN_BACKOFFICE_USER_TAG) &&
+        this.backofficeCredentials.some(
+          (credential) =>
+            credential.userId === user.id &&
+            credential.role === "super_admin" &&
+            credential.tenantId === undefined
+        );
+
+      if (isProviderRoot) {
+        continue;
+      }
+
+      const sanitizedTags = user.tags.filter(
+        (tag) => !RESERVED_BACKOFFICE_USER_TAGS.has(tag)
+      );
+      if (sanitizedTags.length !== user.tags.length) {
+        user.tags = sanitizedTags;
+        changed = true;
+      }
+
+      if (soleTenant) {
+        user.tenantId = soleTenant.id;
+        changed = true;
+      }
+    }
 
     return changed;
   }

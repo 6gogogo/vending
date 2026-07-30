@@ -7,6 +7,7 @@ import type { VerificationProvider } from "@vm/shared-types";
 import { adminApi } from "../api/admin";
 import {
   backofficePasswordMinimumLengthForUsername,
+  resolveBackofficePasswordResetPreview,
   validateBackofficePasswordResetDraft
 } from "../utils/backoffice-provisioning";
 
@@ -16,6 +17,8 @@ const code = ref("");
 const newPassword = ref("");
 const confirmPassword = ref("");
 const verificationProvider = ref<VerificationProvider>();
+const verificationPreviewEnabled = ref(false);
+const previewCode = ref("");
 const requestingCode = ref(false);
 const resetting = ref(false);
 const cooldownSeconds = ref(0);
@@ -67,8 +70,14 @@ const loadRuntimeConfig = async () => {
   try {
     const config = await adminApi.publicRuntimeConfig();
     verificationProvider.value = config.verificationProvider;
+    verificationPreviewEnabled.value = config.verificationPreviewEnabled === true;
+    if (!verificationPreviewEnabled.value) {
+      previewCode.value = "";
+    }
   } catch {
     verificationProvider.value = undefined;
+    verificationPreviewEnabled.value = false;
+    previewCode.value = "";
   }
 };
 
@@ -79,9 +88,15 @@ const requestCode = async () => {
 
   requestingCode.value = true;
   message.value = undefined;
+  previewCode.value = "";
   try {
     const result = await adminApi.requestBackofficePasswordResetCode(phone.value.trim());
     verificationProvider.value = result.provider;
+    previewCode.value = resolveBackofficePasswordResetPreview({
+      provider: result.provider,
+      previewEnabled: verificationPreviewEnabled.value,
+      previewCode: result.previewCode
+    });
     startCooldown(result.expiresInSeconds);
     message.value = {
       type: "info",
@@ -126,6 +141,7 @@ const resetPassword = async () => {
     });
     clearCooldownTimer();
     code.value = "";
+    previewCode.value = "";
     newPassword.value = "";
     confirmPassword.value = "";
     message.value = {
@@ -159,6 +175,10 @@ onUnmounted(clearCooldownTimer);
 
       <div v-if="isManualMode" class="admin-note">
         当前实例使用人工验证码。请联系同实例另一位管理员签发“后台密码重置”验证码；如果没有其他可登录管理员，请联系服务提供商进入本实例代重置。
+      </div>
+
+      <div v-if="previewCode" class="admin-note" role="status">
+        当前模拟验证码：<strong class="admin-number">{{ previewCode }}</strong>
       </div>
 
       <label class="admin-field">

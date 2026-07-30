@@ -28,6 +28,7 @@ import {
   backofficePasswordMinimumLengthForUsername,
   isManualVerificationCode,
   manualCodeFromRandomValue,
+  resolveEligibleBackofficeRole,
   validateSupervisorPasswordResetDraft
 } from "../utils/backoffice-provisioning";
 import { formatDateTime } from "../utils/datetime";
@@ -544,12 +545,19 @@ function backofficeRolesForUser(user: UserRecord): BackofficeRole[] {
 const isBackofficeEligibleUser = (user: UserRecord) => backofficeRolesForUser(user).length > 0;
 
 const defaultBackofficeRoleForUser = (user: UserRecord): BackofficeRole =>
-  backofficeCredentials.value.find((credential) => credential.userId === user.id)?.role ??
-  backofficeRolesForUser(user)[0] ??
-  (user.role === "merchant" ? "merchant" : "admin");
+  resolveEligibleBackofficeRole(
+    backofficeRolesForUser(user),
+    backofficeCredentials.value
+      .filter((credential) => credential.userId === user.id)
+      .map((credential) => credential.role)
+  ) ?? (user.role === "merchant" ? "merchant" : user.role === "restocker" ? "restocker" : "admin");
 
 const backofficeCredentialsForUser = (user: UserRecord) =>
-  backofficeCredentials.value.filter((credential) => credential.userId === user.id);
+  backofficeCredentials.value.filter(
+    (credential) =>
+      credential.userId === user.id &&
+      backofficeRolesForUser(user).includes(credential.role)
+  );
 
 const backofficeCredentialForUser = (user: UserRecord, role = defaultBackofficeRoleForUser(user)) =>
   backofficeCredentials.value.find(

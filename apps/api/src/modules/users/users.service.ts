@@ -20,12 +20,24 @@ import {
 } from "../../common/policies/special-access-policy.utils";
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { addDaysToDateKey, getBusinessDayKey } from "../../common/time/business-day";
-import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import {
+  InMemoryStoreService,
+  RESERVED_BACKOFFICE_USER_TAGS
+} from "../../common/store/in-memory-store.service";
+import { assertTenantsKeepActiveBackofficeAdmin } from "../../common/store/tenant-admin-continuity";
 import { DevicesService } from "../devices/devices.service";
 
 interface ImportUsersPayload {
   role: Extract<UserRole, "special" | "merchant">;
-  entries: Array<Partial<UserRecord> & Pick<UserRecord, "phone" | "name">>;
+  entries: Array<{
+    phone: string;
+    name: string;
+    neighborhood?: string;
+    regionId?: string;
+    regionName?: string;
+    tags?: string[];
+    quota?: AccessQuota;
+  }>;
 }
 
 interface BatchUpdatePayload {
@@ -65,8 +77,8 @@ export class UsersService {
     return users
       .filter(
         (user) =>
-          (!viewerTenantId || this.store.getUserTenantId(user) === viewerTenantId) &&
-          this.canViewUser(user, viewerBackofficeRole, viewerTenantId)
+          this.canViewUser(user, viewerBackofficeRole, viewerTenantId) &&
+          (!viewerTenantId || this.store.getUserTenantId(user) === viewerTenantId)
       )
       .map((user) => this.decorateUser(user));
   }
@@ -287,6 +299,7 @@ export class UsersService {
     ) {
       throw new BadRequestException("请选择有效的用户状态。");
     }
+    this.assertNoReservedBackofficeTags(payload.tags);
 
     const region = this.resolveRegion(payload.regionId, payload.regionName ?? payload.neighborhood);
     const created: UserRecord = {
@@ -424,13 +437,15 @@ export class UsersService {
     actorTenantId?: string
   ) {
     this.assertUpdateUserPayload(payload);
+    this.assertNoReservedBackofficeTags(payload.tags);
     const user = this.findById(userId);
     this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
+    this.assertNotControlledProviderUser(user);
     this.assertActorKeepsOwnAccess(
       [{ user, nextRole: payload.role, nextStatus: payload.status }],
       actorUserId
     );
-    this.assertTenantsKeepActiveAdmin([
+    assertTenantsKeepActiveBackofficeAdmin(this.store, [
       { user, nextRole: payload.role, nextStatus: payload.status }
     ]);
     const before = structuredClone(user);
@@ -520,6 +535,7 @@ export class UsersService {
   ) {
     const user = this.findById(userId);
     this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
+    this.assertNotControlledProviderUser(user);
     this.assertCanRemoveUsers([user], actorUserId);
 
     return this.removeUserRecord(user, actorUserId);
@@ -540,6 +556,7 @@ export class UsersService {
     const targetUsers = payload.userIds.map((userId) => {
       const user = this.findById(userId);
       this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
+      this.assertNotControlledProviderUser(user);
       return user;
     });
     this.assertCanRemoveUsers(targetUsers, actorUserId);
@@ -639,11 +656,71 @@ export class UsersService {
   }
 
   importUsers(payload: ImportUsersPayload, actorTenantId?: string) {
+    const body = this.requirePlainObject(payload, "用户导入请求体");
+    this.assertOnlyFields(body, ["role", "entries"], "用户导入");
+    if (body.role !== "special" && body.role !== "merchant") {
+      throw new BadRequestException("用户导入只支持特殊群体或商家角色。");
+    }
+    const importRole: ImportUsersPayload["role"] = body.role;
+    if (
+      !Array.isArray(body.entries) ||
+      body.entries.length === 0 ||
+      body.entries.length > 500
+    ) {
+      throw new BadRequestException("用户导入明细必须是 1 至 500 项的数组。");
+    }
+
     const tenantId = actorTenantId ?? this.store.getDefaultTenantId();
-    const normalizedEntries = payload.entries.map((entry) => ({
-      ...entry,
-      phone: String(entry.phone ?? "").trim()
-    }));
+    const normalizedEntries = body.entries.map((rawEntry) => {
+      const entry = this.requirePlainObject(rawEntry, "用户导入明细");
+      this.assertOnlyFields(
+        entry,
+        [
+          "phone",
+          "name",
+          "neighborhood",
+          "regionId",
+          "regionName",
+          "tags",
+          "quota"
+        ],
+        "用户导入明细"
+      );
+      this.assertStringValue(entry.phone, "手机号", 32);
+      this.assertStringValue(entry.name, "用户姓名", 100);
+      for (const [field, label] of [
+        ["neighborhood", "所属区域"],
+        ["regionId", "区域编号"],
+        ["regionName", "区域名称"]
+      ] as const) {
+        if (entry[field] !== undefined) {
+          this.assertStringValue(entry[field], label, 100, true);
+        }
+      }
+      this.assertNoReservedBackofficeTags(entry.tags);
+      if (entry.quota !== undefined) {
+        this.assertAccessQuota(entry.quota);
+      }
+
+      return {
+        phone: (entry.phone as string).trim(),
+        name: (entry.name as string).trim(),
+        neighborhood:
+          typeof entry.neighborhood === "string"
+            ? entry.neighborhood
+            : undefined,
+        regionId:
+          typeof entry.regionId === "string" ? entry.regionId : undefined,
+        regionName:
+          typeof entry.regionName === "string"
+            ? entry.regionName
+            : undefined,
+        tags: Array.isArray(entry.tags)
+          ? [...(entry.tags as string[])]
+          : undefined,
+        quota: entry.quota as AccessQuota | undefined
+      };
+    });
     const incomingPhones = new Set<string>();
 
     for (const entry of normalizedEntries) {
@@ -655,27 +732,51 @@ export class UsersService {
       const existing = this.store.users.find(
         (user) => user.phone === entry.phone
       );
-      if (
-        existing &&
-        this.store.getUserTenantId(existing) !== tenantId
-      ) {
-        throw new BadRequestException("该手机号已绑定其他实例账号。");
+      if (existing) {
+        let existingTenantId: string | undefined;
+        try {
+          existingTenantId = this.store.getUserTenantId(existing);
+        } catch {
+          existingTenantId = undefined;
+        }
+
+        if (
+          this.store.isControlledProviderUser(existing) ||
+          this.store.isHiddenBackofficeUser(existing) ||
+          existingTenantId !== tenantId
+        ) {
+          throw new BadRequestException("该手机号已绑定其他实例账号。");
+        }
+        if (existing.role !== importRole) {
+          throw new BadRequestException("该手机号已绑定其他角色账号。");
+        }
       }
     }
 
     const imported = normalizedEntries.map((entry) => {
       const existing = this.store.users.find(
-        (user) =>
-          user.phone === entry.phone &&
-          this.store.getUserTenantId(user) === tenantId
+        (user) => user.phone === entry.phone
       );
 
       if (existing) {
-        Object.assign(existing, entry, {
-          role: payload.role,
+        Object.assign(existing, {
+          name: entry.name,
+          ...(entry.neighborhood !== undefined
+            ? { neighborhood: entry.neighborhood }
+            : {}),
+          ...(entry.regionId !== undefined
+            ? { regionId: entry.regionId }
+            : {}),
+          ...(entry.regionName !== undefined
+            ? { regionName: entry.regionName }
+            : {}),
+          ...(entry.tags !== undefined ? { tags: [...entry.tags] } : {}),
+          ...(importRole === "special" && entry.quota !== undefined
+            ? { quota: structuredClone(entry.quota) }
+            : {}),
           status: "active",
           mobileProfileCompleted:
-            payload.role === "special"
+            importRole === "special"
               ? existing.mobileProfileCompleted
               : true
         });
@@ -683,9 +784,9 @@ export class UsersService {
       }
 
       const created: UserRecord = {
-        id: this.store.createId(payload.role),
+        id: this.store.createId(importRole),
         tenantId,
-        role: payload.role,
+        role: importRole,
         phone: entry.phone,
         name: entry.name,
         status: "active",
@@ -694,8 +795,7 @@ export class UsersService {
         regionId: entry.regionId,
         regionName: entry.regionName ?? entry.neighborhood,
         quota: entry.quota,
-        merchantProfile: entry.merchantProfile,
-        mobileProfileCompleted: payload.role !== "special"
+        mobileProfileCompleted: importRole !== "special"
       };
 
       this.store.users.push(created);
@@ -708,7 +808,7 @@ export class UsersService {
       status: "success",
       actor: this.getAdminActor(),
       metadata: {
-        role: payload.role,
+        role: importRole,
         count: imported.length
       }
     });
@@ -736,19 +836,22 @@ export class UsersService {
     actorTenantId?: string
   ) {
     this.assertBatchUpdatePayload(payload);
+    this.assertNoReservedBackofficeTags(payload.patch.tags);
     if (new Set(payload.userIds).size !== payload.userIds.length) {
       throw new BadRequestException("批量更新不能包含重复用户。");
     }
     const targetUsers = payload.userIds.map((userId) => {
       const user = this.findById(userId);
       this.assertCanViewUser(user, actorBackofficeRole, actorTenantId);
+      this.assertNotControlledProviderUser(user);
       return user;
     });
     this.assertActorKeepsOwnAccess(
       targetUsers.map((user) => ({ user, nextStatus: payload.patch.status })),
       actorUserId
     );
-    this.assertTenantsKeepActiveAdmin(
+    assertTenantsKeepActiveBackofficeAdmin(
+      this.store,
       targetUsers.map((user) => ({ user, nextStatus: payload.patch.status }))
     );
     const shouldUpdateRegion =
@@ -1350,6 +1453,31 @@ export class UsersService {
     }
   }
 
+  private assertNotControlledProviderUser(user: UserRecord) {
+    if (this.store.isControlledProviderUser(user)) {
+      throw new BadRequestException(
+        "服务商根账号不能通过客户实例人员接口修改。"
+      );
+    }
+  }
+
+  private assertNoReservedBackofficeTags(tags: unknown) {
+    if (tags === undefined) {
+      return;
+    }
+
+    this.assertStringArray(tags, "用户标签", 50, 50);
+    if (
+      (tags as string[]).some((tag) =>
+        RESERVED_BACKOFFICE_USER_TAGS.has(tag)
+      )
+    ) {
+      throw new BadRequestException(
+        "用户标签不能包含服务商身份保留标记。"
+      );
+    }
+  }
+
   private assertUpdateUserPayload(payload: unknown) {
     const body = this.requirePlainObject(payload, "用户更新请求体");
     this.assertOnlyFields(
@@ -1437,54 +1565,6 @@ export class UsersService {
     }
   }
 
-  private assertTenantsKeepActiveAdmin(
-    changes: Array<{
-      user: UserRecord;
-      nextRole?: UserRole;
-      nextStatus?: UserRecord["status"];
-    }>
-  ) {
-    const affectedTenantIds = new Set(
-      changes
-        .filter(
-          ({ user, nextRole, nextStatus }) =>
-            user.role === "admin" &&
-            user.status === "active" &&
-            ((nextRole !== undefined && nextRole !== "admin") ||
-              (nextStatus !== undefined && nextStatus !== "active"))
-        )
-        .map(({ user }) => this.store.getUserTenantId(user))
-    );
-
-    if (!affectedTenantIds.size) {
-      return;
-    }
-
-    const changesByUserId = new Map(changes.map((change) => [change.user.id, change]));
-    for (const tenantId of affectedTenantIds) {
-      const keepsActiveAdmin = this.store.users.some((user) => {
-        if (
-          this.store.getUserTenantId(user) !== tenantId ||
-          this.store.isHiddenBackofficeUser(user)
-        ) {
-          return false;
-        }
-
-        const change = changesByUserId.get(user.id);
-        return (
-          (change?.nextRole ?? user.role) === "admin" &&
-          (change?.nextStatus ?? user.status) === "active"
-        );
-      });
-
-      if (!keepsActiveAdmin) {
-        throw new BadRequestException(
-          "每个客户实例至少需要保留一名启用的实例管理员。"
-        );
-      }
-    }
-  }
-
   private assertBatchRemovePayload(payload: unknown) {
     const body = this.requirePlainObject(payload, "批量删除请求体");
     this.assertOnlyFields(body, ["userIds", "confirmedCount"], "批量删除");
@@ -1513,7 +1593,8 @@ export class UsersService {
       throw new BadRequestException("不能删除当前登录账号。");
     }
 
-    this.assertTenantsKeepActiveAdmin(
+    assertTenantsKeepActiveBackofficeAdmin(
+      this.store,
       users.map((user) => ({ user, nextStatus: "inactive" }))
     );
   }

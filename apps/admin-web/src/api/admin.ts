@@ -107,6 +107,7 @@ export const adminApi = {
       phone: string;
       expiresInSeconds: number;
       provider: "mock" | "aliyun_pnvs" | "manual";
+      previewCode?: string;
     }>("/auth/request-code", {
       phone,
       scene: "password-reset"

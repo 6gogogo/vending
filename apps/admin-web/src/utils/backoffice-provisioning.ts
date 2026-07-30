@@ -1,3 +1,5 @@
+import type { BackofficeRole, VerificationProvider } from "@vm/shared-types";
+
 export interface PlatformTenantDraftForValidation {
   code: string;
   name: string;
@@ -183,6 +185,22 @@ export const validateSupervisorPasswordResetDraft = (
 
   return undefined;
 };
+
+export const resolveEligibleBackofficeRole = (
+  eligibleRoles: readonly BackofficeRole[],
+  credentialRoles: readonly BackofficeRole[]
+) => credentialRoles.find((role) => eligibleRoles.includes(role)) ?? eligibleRoles[0];
+
+export const resolveBackofficePasswordResetPreview = (input: {
+  provider?: VerificationProvider;
+  previewEnabled: boolean;
+  previewCode?: string;
+}) =>
+  input.provider === "mock" &&
+  input.previewEnabled &&
+  verificationCodePattern.test(input.previewCode ?? "")
+    ? input.previewCode ?? ""
+    : "";
 
 export const isManualVerificationCode = (value: string) => /^\d{6}$/u.test(value);
 

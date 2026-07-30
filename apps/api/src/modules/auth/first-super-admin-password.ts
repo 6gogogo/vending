@@ -10,7 +10,7 @@ type FirstSuperAdminPasswordStore = Pick<
   | "users"
   | "backofficeCredentials"
   | "isDefaultSuperAdminBootstrapCredential"
-  | "isUserValidForBackofficeRole"
+  | "isBackofficeCredentialValidForUser"
   | "upsertBackofficeCredential"
   | "revokeSessionsForUser"
   | "logOperation"
@@ -41,7 +41,7 @@ export const assertFirstSuperAdminPasswordTarget = (
   if (
     !user ||
     credential.role !== "super_admin" ||
-    !store.isUserValidForBackofficeRole(user, credential.role)
+    !store.isBackofficeCredentialValidForUser(user, credential)
   ) {
     throw new Error("服务商超级管理员账号不存在、已停用或角色不匹配，已拒绝维护。");
   }

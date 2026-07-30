@@ -17,7 +17,7 @@ type FirstPasswordStore = Pick<
   InMemoryStoreService,
   | "users"
   | "findBackofficeCredentialByUsername"
-  | "isUserValidForBackofficeRole"
+  | "isBackofficeCredentialValidForUser"
   | "upsertBackofficeCredential"
   | "revokeSessionsForUser"
   | "logOperation"
@@ -58,7 +58,7 @@ export const assertFirstBackofficePasswordTarget = (
 
   const user = store.users.find((entry) => entry.id === credential.userId);
 
-  if (!user || !store.isUserValidForBackofficeRole(user, credential.role)) {
+  if (!user || !store.isBackofficeCredentialValidForUser(user, credential)) {
     throw new Error("admin 后台账号不存在、已停用或角色不匹配，已拒绝初始化。");
   }
 
@@ -85,7 +85,7 @@ export const assertAdminBackofficePasswordMaintenanceTarget = (
 
   const user = store.users.find((entry) => entry.id === credential.userId);
 
-  if (!user || !store.isUserValidForBackofficeRole(user, credential.role)) {
+  if (!user || !store.isBackofficeCredentialValidForUser(user, credential)) {
     throw new Error("admin 后台账号不存在、已停用或角色不匹配，已拒绝维护。");
   }
 

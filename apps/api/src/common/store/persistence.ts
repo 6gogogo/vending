@@ -63,6 +63,7 @@ export type PersistedDataPlaneInitializationSource =
 export interface VerificationRecord {
   code: string;
   purpose: VerificationPurpose;
+  challengeId?: string;
   expiresAt: string;
   requestedAt?: string;
   resendAvailableAt?: string;
@@ -925,6 +926,16 @@ export interface PersistedStateFileSystem {
   unlinkSync: (path: string) => void;
 }
 
+export class PersistedStateWriteError extends Error {
+  constructor(
+    message: string,
+    public readonly committed: boolean
+  ) {
+    super(message);
+    this.name = "PersistedStateWriteError";
+  }
+}
+
 const nodePersistedStateFileSystem: PersistedStateFileSystem = {
   mkdirSync,
   openSync,
@@ -957,6 +968,7 @@ export const createPersistedStateWriter = (
     const temporaryPath = `${filePath}.${process.pid}.${createTemporaryToken()}.tmp`;
     let fileDescriptor: number | undefined;
     let directoryDescriptor: number | undefined;
+    let committed = false;
 
     try {
       fileDescriptor = fileSystem.openSync(temporaryPath, "wx", PRIVATE_RUNTIME_FILE_MODE);
@@ -965,6 +977,7 @@ export const createPersistedStateWriter = (
       fileSystem.closeSync(fileDescriptor);
       fileDescriptor = undefined;
       fileSystem.renameSync(temporaryPath, filePath);
+      committed = true;
 
       if (platform !== "win32") {
         directoryDescriptor = fileSystem.openSync(directory, "r");
@@ -974,18 +987,39 @@ export const createPersistedStateWriter = (
       }
     } catch (error) {
       if (fileDescriptor !== undefined) {
-        fileSystem.closeSync(fileDescriptor);
+        try {
+          fileSystem.closeSync(fileDescriptor);
+        } catch {
+          // 保留原始失败；关闭异常同样要求调用方失败关闭。
+        }
       }
 
       if (directoryDescriptor !== undefined) {
-        fileSystem.closeSync(directoryDescriptor);
+        try {
+          fileSystem.closeSync(directoryDescriptor);
+        } catch {
+          // 保留原始失败；目录句柄关闭异常不改变是否已经替换正式文件。
+        }
       }
 
-      if (fileSystem.existsSync(temporaryPath)) {
-        fileSystem.unlinkSync(temporaryPath);
+      if (!committed && fileSystem.existsSync(temporaryPath)) {
+        try {
+          fileSystem.unlinkSync(temporaryPath);
+        } catch {
+          // 暂存文件作为失败现场保留，不能覆盖原始错误。
+        }
       }
 
-      throw error;
+      if (error instanceof PersistedStateWriteError) {
+        throw error;
+      }
+
+      throw new PersistedStateWriteError(
+        committed
+          ? "业务数据已替换，但目录耐久性未确认。"
+          : "业务数据写入未提交。",
+        committed
+      );
     }
 
     return filePath;

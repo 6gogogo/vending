@@ -38,10 +38,12 @@ import { UsersService } from "../users/users.service";
 import { hashAdminPassword, verifyAdminPassword } from "./admin-password.utils";
 import {
   getBackofficePasswordMinimumLength,
-  MIN_PRIMARY_BACKOFFICE_ADMIN_PASSWORD_LENGTH,
   MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH
 } from "./backoffice-password-policy";
-import { VerificationCodeService } from "./verification-code.service";
+import {
+  VerificationCodeService,
+  type VerificationCodeCheckResult
+} from "./verification-code.service";
 
 interface AdminSessionResult {
   token: string;
@@ -419,7 +421,7 @@ export class AuthService {
     const user = this.store.users.find(
       (entry) =>
         entry.id === credential.userId &&
-        this.store.isUserValidForBackofficeRole(entry, credential.role)
+        this.store.isBackofficeCredentialValidForUser(entry, credential)
     );
 
     if (!user || !verifyAdminPassword(password, credential.passwordSalt, credential.passwordHash)) {
@@ -931,23 +933,23 @@ export class AuthService {
   }) {
     const normalizedUsername = payload.username.trim().toLowerCase();
     const normalizedPassword = payload.newPassword.trim();
+    const credential = this.store.findBackofficeCredentialByUsername(normalizedUsername);
+    const minimumPasswordLength = credential
+      ? getBackofficePasswordMinimumLength(credential)
+      : MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH;
 
-    if (
-      !normalizedUsername ||
-      normalizedPassword.length < MIN_PRIMARY_BACKOFFICE_ADMIN_PASSWORD_LENGTH
-    ) {
+    if (!normalizedUsername || normalizedPassword.length < minimumPasswordLength) {
       throw new BadRequestException(
-        `新密码至少需要 ${MIN_PRIMARY_BACKOFFICE_ADMIN_PASSWORD_LENGTH} 位。`
+        `新密码至少需要 ${minimumPasswordLength} 位。`
       );
     }
 
-    const verification = await this.verifyCodeWithContext(
+    const verification = await this.checkCodeWithContext(
       payload.phone,
       payload.code,
       "password-reset"
     );
 
-    const credential = this.store.findBackofficeCredentialByUsername(normalizedUsername);
     const user = credential
       ? this.store.users.find((entry) => entry.id === credential.userId)
       : undefined;
@@ -957,6 +959,7 @@ export class AuthService {
       !credential ||
       !user ||
       user.status !== "active" ||
+      !this.store.isBackofficeCredentialValidForUser(user, credential) ||
       user.phone !== payload.phone.trim() ||
       (verification.targetUserId !== undefined &&
         verification.targetUserId !== user.id) ||
@@ -967,48 +970,58 @@ export class AuthService {
       throw new UnauthorizedException("账号、手机号或验证码不正确。");
     }
 
-    const minimumPasswordLength = getBackofficePasswordMinimumLength(credential);
-    if (normalizedPassword.length < minimumPasswordLength) {
-      throw new BadRequestException(`新密码至少需要 ${minimumPasswordLength} 位。`);
-    }
-
     if (verifyAdminPassword(normalizedPassword, credential.passwordSalt, credential.passwordHash)) {
       throw new BadRequestException("新密码不能与当前密码相同。");
     }
 
     const passwordHash = hashAdminPassword(normalizedPassword);
-    const updatedCredential = this.store.upsertBackofficeCredential({
-      ...credential,
-      passwordSalt: passwordHash.salt,
-      passwordHash: passwordHash.hash,
-      usesDefaultPassword: false,
-      passwordUpdatedAt: new Date().toISOString()
-    });
-
-    this.store.logOperation({
-      category: "admin",
-      type: "reset-backoffice-password-by-owner",
-      status: "success",
-      actor: {
-        type: user.role,
-        id: user.id,
-        name: user.name,
-        role: user.role
-      },
-      primarySubject: {
-        type: "user",
-        id: user.id,
-        label: user.name
-      },
-      metadata: {
-        username: updatedCredential.username,
-        backofficeRole: updatedCredential.role,
-        resetMethod: "phone-verification",
-        undoState: "not_undoable"
+    this.store.runBackofficePasswordResetTransaction(() => {
+      if (
+        !this.consumeCheckedCode(
+          payload.phone,
+          "password-reset",
+          verification,
+          { persist: false }
+        )
+      ) {
+        throw new UnauthorizedException("账号、手机号或验证码不正确。");
       }
-    });
 
-    this.store.revokeSessionsForUser(user.id);
+      const updatedCredential = this.store.upsertBackofficeCredential({
+        ...credential,
+        passwordSalt: passwordHash.salt,
+        passwordHash: passwordHash.hash,
+        usesDefaultPassword: false,
+        passwordUpdatedAt: new Date().toISOString()
+      });
+
+      this.store.logOperation({
+        category: "admin",
+        type: "reset-backoffice-password-by-owner",
+        status: "success",
+        actor: {
+          type: user.role,
+          id: user.id,
+          name: user.name,
+          role: user.role
+        },
+        primarySubject: {
+          type: "user",
+          id: user.id,
+          label: user.name
+        },
+        metadata: {
+          username: updatedCredential.username,
+          backofficeRole: updatedCredential.role,
+          resetMethod: "phone-verification",
+          undoState: "not_undoable"
+        }
+      });
+
+      this.store.revokeSessionsForUser(user.id);
+    });
+    this.clearPasswordLoginAccountFailures(normalizedUsername);
+
     return { reset: true };
   }
 
@@ -1244,6 +1257,10 @@ export class AuthService {
       throw new BadRequestException("目标后台账号不存在或已停用。");
     }
 
+    if (!this.store.isBackofficeCredentialValidForUser(targetUser, credential)) {
+      throw new BadRequestException("目标后台账号与当前人员身份不匹配。");
+    }
+
     if (
       payload.role === "super_admin" ||
       credential.tenantId !== actorTenantId ||
@@ -1266,39 +1283,44 @@ export class AuthService {
     }
 
     const passwordHash = hashAdminPassword(normalizedPassword);
-    const updatedCredential = this.store.upsertBackofficeCredential({
-      ...credential,
-      passwordSalt: passwordHash.salt,
-      passwordHash: passwordHash.hash,
-      usesDefaultPassword: false,
-      passwordUpdatedAt: new Date().toISOString()
-    });
+    const updatedCredential =
+      this.store.runBackofficePasswordResetTransaction(() => {
+        const updated = this.store.upsertBackofficeCredential({
+          ...credential,
+          passwordSalt: passwordHash.salt,
+          passwordHash: passwordHash.hash,
+          usesDefaultPassword: false,
+          passwordUpdatedAt: new Date().toISOString()
+        });
 
-    this.store.logOperation({
-      category: "admin",
-      type: "reset-backoffice-password-by-super-admin",
-      status: "success",
-      actor: {
-        type: actor.user.role,
-        id: actor.user.id,
-        name: actor.user.name,
-        role: actor.user.role
-      },
-      primarySubject: {
-        type: "user",
-        id: targetUser.id,
-        label: targetUser.name
-      },
-      metadata: {
-        username: updatedCredential.username,
-        backofficeRole: updatedCredential.role,
-        reason: normalizedReason,
-        resetMethod: "super-admin",
-        undoState: "not_undoable"
-      }
-    });
+        this.store.logOperation({
+          category: "admin",
+          type: "reset-backoffice-password-by-super-admin",
+          status: "success",
+          actor: {
+            type: actor.user.role,
+            id: actor.user.id,
+            name: actor.user.name,
+            role: actor.user.role
+          },
+          primarySubject: {
+            type: "user",
+            id: targetUser.id,
+            label: targetUser.name
+          },
+          metadata: {
+            username: updated.username,
+            backofficeRole: updated.role,
+            reason: normalizedReason,
+            resetMethod: "super-admin",
+            undoState: "not_undoable"
+          }
+        });
 
-    this.store.revokeSessionsForUser(targetUser.id);
+        this.store.revokeSessionsForUser(targetUser.id);
+        return updated;
+      });
+    this.clearPasswordLoginAccountFailures(updatedCredential.username);
     return this.createBackofficeCredentialSnapshot(updatedCredential);
   }
 
@@ -1388,6 +1410,53 @@ export class AuthService {
         purpose
       )
     };
+  }
+
+  private async checkCodeWithContext(
+    phone: string,
+    code: string,
+    purpose: "app-login" | "password-reset"
+  ): Promise<VerificationCodeCheckResult> {
+    const contextualService = this.verificationCodeService as unknown as {
+      checkCodeWithContext?: (
+        targetPhone: string,
+        targetCode: string,
+        targetPurpose: "app-login" | "password-reset"
+      ) => Promise<VerificationCodeCheckResult>;
+    };
+
+    if (typeof contextualService.checkCodeWithContext === "function") {
+      return contextualService.checkCodeWithContext(phone, code, purpose);
+    }
+
+    return this.verifyCodeWithContext(phone, code, purpose);
+  }
+
+  private consumeCheckedCode(
+    phone: string,
+    purpose: "app-login" | "password-reset",
+    checked: VerificationCodeCheckResult,
+    options: { persist?: boolean } = {}
+  ) {
+    const contextualService = this.verificationCodeService as unknown as {
+      consumeCheckedCode?: (
+        targetPhone: string,
+        targetPurpose: "app-login" | "password-reset",
+        targetChecked: VerificationCodeCheckResult,
+        targetOptions?: { persist?: boolean }
+      ) => boolean;
+    };
+
+    if (typeof contextualService.consumeCheckedCode === "function") {
+      return contextualService.consumeCheckedCode(
+        phone,
+        purpose,
+        checked,
+        options
+      );
+    }
+
+    return checked.verified;
   }
 
   private createManualVerificationGrantSnapshot(
@@ -1485,7 +1554,10 @@ export class AuthService {
     token?: string,
     credential = this.store.findBackofficeCredentialByUserId(user.id, backofficeRole)
   ): BackofficeSessionResult {
-    if (!credential) {
+    if (
+      !credential ||
+      !this.store.isBackofficeCredentialValidForUser(user, credential)
+    ) {
       throw new UnauthorizedException("当前后台账号未配置登录凭证。");
     }
 

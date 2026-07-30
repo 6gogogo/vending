@@ -5,6 +5,8 @@ import {
   backofficePasswordMinimumLengthForUsername,
   isManualVerificationCode,
   manualCodeFromRandomValue,
+  resolveBackofficePasswordResetPreview,
+  resolveEligibleBackofficeRole,
   validateBackofficePasswordResetDraft,
   validatePlatformTenantDraft,
   validatePlatformTenantUpdateDraft,
@@ -166,5 +168,44 @@ test("服务提供商代重置要求符合目标账号密码策略并填写审�
       reason: ""
     }),
     "请填写密码重置原因，且不能超过 500 个字符。"
+  );
+});
+
+test("后台账号入口只选择当前人员身份允许的凭据角色", () => {
+  assert.equal(
+    resolveEligibleBackofficeRole(["merchant"], ["admin", "merchant"]),
+    "merchant"
+  );
+  assert.equal(
+    resolveEligibleBackofficeRole(["admin"], ["merchant", "admin"]),
+    "admin"
+  );
+  assert.equal(resolveEligibleBackofficeRole(["restocker"], ["merchant"]), "restocker");
+});
+
+test("只有公开配置允许的 mock 找回流程才展示验证码预览", () => {
+  assert.equal(
+    resolveBackofficePasswordResetPreview({
+      provider: "mock",
+      previewEnabled: true,
+      previewCode: "123456"
+    }),
+    "123456"
+  );
+  assert.equal(
+    resolveBackofficePasswordResetPreview({
+      provider: "mock",
+      previewEnabled: false,
+      previewCode: "123456"
+    }),
+    ""
+  );
+  assert.equal(
+    resolveBackofficePasswordResetPreview({
+      provider: "aliyun_pnvs",
+      previewEnabled: true,
+      previewCode: "123456"
+    }),
+    ""
   );
 });

@@ -440,7 +440,10 @@ export class CabinetEventsService {
     );
 
     if (user) {
-      tenantIds.push(this.store.getUserTenantId(user));
+      const userTenantId = this.store.getUserTenantId(user);
+      if (userTenantId) {
+        tenantIds.push(userTenantId);
+      }
     }
 
     if (device) {

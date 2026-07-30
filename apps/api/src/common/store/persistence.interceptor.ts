@@ -8,11 +8,12 @@ import {
   Optional,
   ServiceUnavailableException
 } from "@nestjs/common";
-import { tap, throwError } from "rxjs";
+import { catchError, tap, throwError } from "rxjs";
 
 import { isProductionRuntime } from "../config/runtime-environment";
 import { summarizeCallbackPayload } from "../logging/callback-log-sanitizer";
 import { InMemoryStoreService } from "./in-memory-store.service";
+import { PersistedStateWriteError } from "./persistence";
 import {
   SystemAuditLogService,
   type CriticalAuditOutcome
@@ -75,6 +76,10 @@ const HEALTH_PROBE_PATHS = new Set([
   "/api/health/production-readiness"
 ]);
 
+export const REQUEST_PERSISTENCE_HANDLED = Symbol(
+  "request-persistence-handled"
+);
+
 @Injectable()
 export class PersistenceInterceptor implements NestInterceptor {
   constructor(
@@ -96,6 +101,7 @@ export class PersistenceInterceptor implements NestInterceptor {
       ip?: string;
       headers?: Record<string, string | undefined>;
       authUser?: { id?: string; role?: string };
+      [REQUEST_PERSISTENCE_HANDLED]?: boolean;
     }>();
     const response = context.switchToHttp().getResponse<{ statusCode?: number; getHeader?: (name: string) => unknown }>();
     const startedAt = Date.now();
@@ -166,9 +172,29 @@ export class PersistenceInterceptor implements NestInterceptor {
     };
 
     return next.handle().pipe(
+      catchError((error) => {
+        if (error instanceof PersistedStateWriteError && error.committed) {
+          return throwError(
+            () =>
+              new ConflictException({
+                message: "请求状态暂不可确认，请勿重复提交；请联系管理员核对。",
+                code: "operation_indeterminate",
+                ...(criticalOperation
+                  ? { operationId: criticalOperation.operationId }
+                  : {}),
+                retryable: false
+              })
+          );
+        }
+
+        return throwError(() => error);
+      }),
       tap({
         next: (data) => {
-          if (this.shouldPersistRequest(request.method, response.statusCode)) {
+          if (
+            request[REQUEST_PERSISTENCE_HANDLED] !== true &&
+            this.shouldPersistRequest(request.method, response.statusCode)
+          ) {
             try {
               this.store.persist();
             } catch (error) {
@@ -212,8 +238,14 @@ export class PersistenceInterceptor implements NestInterceptor {
         },
         error: (error) => {
           const errorStatus = this.readErrorStatus(error) ?? response.statusCode ?? 500;
+          const operationIndeterminate =
+            this.isOperationIndeterminateError(error);
           completeCriticalAudit(
-            errorStatus >= 400 && errorStatus < 500 ? "rejected" : "indeterminate",
+            operationIndeterminate
+              ? "indeterminate"
+              : errorStatus >= 400 && errorStatus < 500
+                ? "rejected"
+                : "indeterminate",
             errorStatus
           );
           if (shouldWriteAuditLog) {
@@ -434,5 +466,24 @@ export class PersistenceInterceptor implements NestInterceptor {
     }
 
     return undefined;
+  }
+
+  private isOperationIndeterminateError(error: unknown) {
+    if (
+      typeof error !== "object" ||
+      !error ||
+      !("getResponse" in error) ||
+      typeof error.getResponse !== "function"
+    ) {
+      return false;
+    }
+
+    const response = error.getResponse();
+    return (
+      typeof response === "object" &&
+      response !== null &&
+      "code" in response &&
+      response.code === "operation_indeterminate"
+    );
   }
 }

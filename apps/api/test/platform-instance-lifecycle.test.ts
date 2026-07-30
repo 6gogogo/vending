@@ -142,6 +142,111 @@ test("实例管理员侧不存在向上认领服务商账号的接口", async ()
   }
 });
 
+test("实例管理员不能通过人员标签或批量导入改写服务商根账号", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const adminToken = createDefaultAdminToken(store);
+    const providerToken = createProviderToken(store);
+    const providerCredential = store.backofficeCredentials.find(
+      (entry) => entry.role === "super_admin"
+    );
+    const providerUser = store.users.find(
+      (entry) => entry.id === providerCredential?.userId
+    );
+    const adminCredential = store.backofficeCredentials.find(
+      (entry) =>
+        entry.role === "admin" &&
+        entry.tenantId === store.getDefaultTenantId()
+    );
+    const adminUser = store.users.find(
+      (entry) => entry.id === adminCredential?.userId
+    );
+    assert.ok(providerCredential);
+    assert.ok(providerUser);
+    assert.ok(adminCredential);
+    assert.ok(adminUser);
+    const providerBefore = structuredClone(providerUser);
+    const providerCredentialBefore = structuredClone(providerCredential);
+    const userCountBefore = store.users.length;
+    const providerImportResponse = await fetch(`${baseUrl}/users/import`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        role: "merchant",
+        entries: [
+          {
+            phone: providerUser.phone,
+            name: "不得覆盖服务商根账号"
+          }
+        ]
+      })
+    });
+    const unknownFieldImportResponse = await fetch(
+      `${baseUrl}/users/import`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          role: "special",
+          entries: [
+            {
+              phone: "18800000097",
+              name: "非法归属字段",
+              tenantId: "forged-tenant"
+            }
+          ]
+        })
+      }
+    );
+    const updateResponse = await fetch(`${baseUrl}/users/${adminUser.id}`, {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        tags: ["运营", "super-admin", "hidden-backoffice"]
+      })
+    });
+    store.upsertBackofficeCredential({
+      ...adminCredential,
+      username: "historical-provider-admin",
+      role: "super_admin",
+      tenantId: undefined
+    });
+    const loginResponse = await fetch(`${baseUrl}/auth/backoffice-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        username: "historical-provider-admin",
+        password: "admin"
+      })
+    });
+
+    assert.equal(providerImportResponse.status, 400);
+    assert.equal(unknownFieldImportResponse.status, 400);
+    assert.equal(updateResponse.status, 400);
+    assert.equal(loginResponse.status, 401);
+    assert.deepEqual(providerUser, providerBefore);
+    assert.deepEqual(providerCredential, providerCredentialBefore);
+    assert.ok(store.getBackofficeSessionUser(providerToken));
+    assert.equal(store.users.length, userCountBefore);
+    assert.equal(adminUser.tags.includes("super-admin"), false);
+    assert.equal(adminUser.tags.includes("hidden-backoffice"), false);
+  } finally {
+    await app.close();
+  }
+});
+
 test("服务商原子创建客户实例及首管理员且响应不返回密码", async () => {
   const { app, baseUrl, store } = await startApi();
 
@@ -247,6 +352,58 @@ test("服务商原子创建客户实例及首管理员且响应不返回密码",
   }
 });
 
+test("多实例歧义人员会被隔离，不会拖垮服务商总览或正常实例人员页", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const providerToken = createProviderToken(store);
+    const adminToken = createDefaultAdminToken(store);
+    const defaultTenant = store.platformTenants[0];
+    assert.ok(defaultTenant);
+    store.platformTenants.push({
+      ...defaultTenant,
+      id: "tenant-quarantine-target",
+      code: "tenant-quarantine-target",
+      name: "歧义隔离测试实例",
+      instanceUrl: "https://tenant-quarantine-target.example.test"
+    });
+    store.users.push({
+      id: "ambiguous-quarantined-user",
+      role: "merchant",
+      phone: "18800000096",
+      name: "缺失归属隔离人员",
+      status: "active",
+      tags: [],
+      mobileProfileCompleted: true
+    });
+
+    const overviewResponse = await fetch(`${baseUrl}/platform/overview`, {
+      headers: {
+        authorization: `Bearer ${providerToken}`
+      }
+    });
+    const usersResponse = await fetch(`${baseUrl}/users`, {
+      headers: {
+        authorization: `Bearer ${adminToken}`
+      }
+    });
+    const usersPayload = (await usersResponse.json()) as {
+      data?: Array<{ id?: string }>;
+    };
+
+    assert.equal(overviewResponse.status, 200);
+    assert.equal(usersResponse.status, 200);
+    assert.equal(
+      usersPayload.data?.some(
+        (entry) => entry.id === "ambiguous-quarantined-user"
+      ),
+      false
+    );
+  } finally {
+    await app.close();
+  }
+});
+
 test("每个客户实例始终保留至少一名启用的实例管理员", async () => {
   const { app, baseUrl, store } = await startApi();
 
@@ -281,6 +438,27 @@ test("每个客户实例始终保留至少一名启用的实例管理员", async
     assert.ok(tenantId);
     assert.ok(firstAdminUserId);
 
+    const firstAdminCredential = store.findBackofficeCredentialByUserId(
+      firstAdminUserId,
+      "admin"
+    );
+    assert.ok(firstAdminCredential);
+    const moveCredentialResponse = await fetch(`${baseUrl}/auth/backoffice-credentials`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${providerToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        userId: firstAdminUserId,
+        username: firstAdminCredential.username,
+        role: "admin",
+        tenantId: store.getDefaultTenantId()
+      })
+    });
+    assert.equal(moveCredentialResponse.status, 403);
+    assert.equal(firstAdminCredential.tenantId, tenantId);
+
     const enterResponse = await fetch(`${baseUrl}/platform/tenants/${tenantId}/enter`, {
       method: "POST",
       headers: {
@@ -293,6 +471,20 @@ test("每个客户实例始终保留至少一名启用的实例管理员", async
     const tenantProviderToken = enterPayload.data?.token;
     assert.equal(enterResponse.status, 201);
     assert.ok(tenantProviderToken);
+
+    const placeholderAdminResponse = await fetch(`${baseUrl}/users`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${tenantProviderToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        role: "admin",
+        phone: "18800000032",
+        name: "无后台凭据的占位管理员"
+      })
+    });
+    assert.equal(placeholderAdminResponse.status, 201);
 
     const request = (method: "PATCH" | "DELETE", body?: Record<string, unknown>) =>
       fetch(`${baseUrl}/users/${firstAdminUserId}`, {
@@ -314,6 +506,109 @@ test("每个客户实例始终保留至少一名启用的实例管理员", async
     const firstAdmin = store.users.find((entry) => entry.id === firstAdminUserId);
     assert.equal(firstAdmin?.role, "admin");
     assert.equal(firstAdmin?.status, "active");
+  } finally {
+    await app.close();
+  }
+});
+
+test("撤销人员角色变更不能让实例失去可登录管理员", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const providerToken = createProviderToken(store);
+    const tenantId = store.getDefaultTenantId();
+    const enterResponse = await fetch(`${baseUrl}/platform/tenants/${tenantId}/enter`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${providerToken}`
+      }
+    });
+    const enterPayload = (await enterResponse.json()) as {
+      data?: { token?: string };
+    };
+    const tenantProviderToken = enterPayload.data?.token;
+    assert.equal(enterResponse.status, 201);
+    assert.ok(tenantProviderToken);
+
+    const headers = {
+      authorization: `Bearer ${tenantProviderToken}`,
+      "content-type": "application/json"
+    };
+    const originalAdmin = store.users.find(
+      (entry) =>
+        entry.role === "admin" &&
+        entry.status === "active" &&
+        !store.isHiddenBackofficeUser(entry) &&
+        store.findBackofficeCredentialByUserId(entry.id, "admin")?.tenantId === tenantId
+    );
+    assert.ok(originalAdmin);
+
+    const createResponse = await fetch(`${baseUrl}/users`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        role: "merchant",
+        phone: "18800000033",
+        name: "撤销守卫候选管理员"
+      })
+    });
+    const createPayload = (await createResponse.json()) as {
+      data?: { id?: string };
+    };
+    const candidateUserId = createPayload.data?.id;
+    assert.equal(createResponse.status, 201);
+    assert.ok(candidateUserId);
+
+    const promoteResponse = await fetch(`${baseUrl}/users/${candidateUserId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ role: "admin" })
+    });
+    assert.equal(promoteResponse.status, 200);
+    const promoteLog = store.logs.find(
+      (entry) =>
+        entry.type === "update-user" &&
+        entry.primarySubject?.type === "user" &&
+        entry.primarySubject.id === candidateUserId
+    );
+    assert.ok(promoteLog);
+
+    const credentialResponse = await fetch(`${baseUrl}/auth/backoffice-credentials`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        userId: candidateUserId,
+        username: "undo-continuity-admin",
+        password: "undo-continuity-password",
+        role: "admin",
+        tenantId
+      })
+    });
+    assert.equal(credentialResponse.status, 201);
+
+    const deactivateResponse = await fetch(`${baseUrl}/users/${originalAdmin.id}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ status: "inactive" })
+    });
+    assert.equal(deactivateResponse.status, 200);
+
+    const undoResponse = await fetch(
+      `${baseUrl}/operation-logs/${encodeURIComponent(promoteLog.id)}/undo`,
+      {
+        method: "POST",
+        headers
+      }
+    );
+    assert.equal(undoResponse.status, 400);
+    assert.equal(
+      store.users.find((entry) => entry.id === candidateUserId)?.role,
+      "admin"
+    );
+    assert.equal(
+      store.users.find((entry) => entry.id === originalAdmin.id)?.status,
+      "inactive"
+    );
   } finally {
     await app.close();
   }

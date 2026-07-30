@@ -459,6 +459,11 @@ export class RegistrationApplicationsService {
 
     const now = new Date().toISOString();
     const tenantId = this.store.getUserTenantId(user);
+    if (!tenantId) {
+      throw new BadRequestException(
+        "当前账号缺少明确的实例归属，请联系服务商处理。"
+      );
+    }
     const existingApplication = this.findLatestByPhone(user.phone, tenantId);
     const application =
       existingApplication ??

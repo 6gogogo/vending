@@ -5,12 +5,18 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 
 import type { CallHandler, ExecutionContext } from "@nestjs/common";
-import { ServiceUnavailableException } from "@nestjs/common";
+import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { firstValueFrom, of, throwError } from "rxjs";
 
-import { PersistenceInterceptor } from "../src/common/store/persistence.interceptor";
+import {
+  PersistenceInterceptor,
+  REQUEST_PERSISTENCE_HANDLED
+} from "../src/common/store/persistence.interceptor";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
-import type { VerificationPurpose } from "../src/common/store/persistence";
+import {
+  PersistedStateWriteError,
+  type VerificationPurpose
+} from "../src/common/store/persistence";
 import { AuthController } from "../src/modules/auth/auth.controller";
 import {
   changeAdminBackofficePasswordWithCurrentPassword,
@@ -202,6 +208,92 @@ test("读取请求保留审计记录，但不触发全量业务状态写盘", as
   assert.match(readFileSync(systemLogFile, "utf8"), /mobile-session/);
 });
 
+test("已在服务内原子持久化的密码找回请求不会被拦截器重复写盘", async () => {
+  const directory = createTemporaryDirectory("vm-reset-persistence-audit-");
+  const systemLogFile = join(directory, "system-audit.ndjson");
+  process.env.SYSTEM_LOG_FILE = systemLogFile;
+  let persistedCount = 0;
+  const interceptor = new PersistenceInterceptor({
+    persist() {
+      persistedCount += 1;
+    }
+  } as InMemoryStoreService);
+  const request = {
+    method: "POST",
+    path: "/api/auth/backoffice-password-reset",
+    headers: {},
+    [REQUEST_PERSISTENCE_HANDLED]: true
+  };
+  const context = {
+    switchToHttp: () => ({
+      getRequest: () => request,
+      getResponse: () => ({ statusCode: 200 })
+    })
+  } as ExecutionContext;
+
+  await firstValueFrom(
+    interceptor.intercept(context, {
+      handle: () => of({ data: { reset: true } })
+    } as CallHandler)
+  );
+
+  assert.equal(persistedCount, 0);
+  assert.match(
+    readFileSync(systemLogFile, "utf8"),
+    /backoffice-password-reset/
+  );
+});
+
+test("密码找回在文件已替换后失败时向调用方报告不可重复提交的 409", async () => {
+  const directory = createTemporaryDirectory("vm-reset-indeterminate-audit-");
+  process.env.SYSTEM_LOG_FILE = join(directory, "system-audit.ndjson");
+  const interceptor = new PersistenceInterceptor({
+    persist() {
+      throw new Error("不应执行第二次持久化");
+    }
+  } as unknown as InMemoryStoreService);
+  const context = {
+    switchToHttp: () => ({
+      getRequest: () => ({
+        method: "POST",
+        path: "/api/auth/backoffice-password-reset",
+        headers: {}
+      }),
+      getResponse: () => ({ statusCode: 500 })
+    })
+  } as ExecutionContext;
+
+  await assert.rejects(
+    firstValueFrom(
+      interceptor.intercept(context, {
+        handle: () =>
+          throwError(
+            () =>
+              new PersistedStateWriteError(
+                "injected-post-rename-durability-failure",
+                true
+              )
+          )
+      } as CallHandler)
+    ),
+    (error: unknown) => {
+      if (!(error instanceof ConflictException) || error.getStatus() !== 409) {
+        return false;
+      }
+
+      const response = error.getResponse();
+      return (
+        typeof response === "object" &&
+        response !== null &&
+        "code" in response &&
+        response.code === "operation_indeterminate" &&
+        "retryable" in response &&
+        response.retryable === false
+      );
+    }
+  );
+});
+
 test("健康探测不写入审计日志或业务状态，但其他读取请求仍保留审计", async () => {
   const directory = createTemporaryDirectory("vm-health-audit-");
   const systemLogFile = join(directory, "system-audit.ndjson");
@@ -317,7 +409,7 @@ test("登录态和资料草稿使用高熵 token，并由服务端拒绝过期�
   user.status = "active";
 
   const draftToken = store.createDraftSession({
-    tenantId: store.getUserTenantId(user),
+    tenantId: store.getUserTenantId(user)!,
     phone: user.phone
   });
   const draft = store.draftSessions.get(draftToken) as { expiresAt?: string } | undefined;
@@ -773,7 +865,7 @@ test("停用用户时，单个更新和批量更新都会立即撤销其已有�
 
   const specialToken = store.createSession(specialUser);
   const specialDraftToken = store.createDraftSession({
-    tenantId: store.getUserTenantId(specialUser),
+    tenantId: store.getUserTenantId(specialUser)!,
     phone: specialUser.phone,
     linkedUserId: specialUser.id,
     requestedRole: specialUser.role
@@ -812,6 +904,74 @@ test("超级管理员重置其他后台账号密码时，目标账号旧会话�
   assert.equal(store.getSession(merchant.token), undefined);
   const refreshedMerchant = await authService.backofficeLogin("merchant", "merchant-new-password");
   assert.equal(refreshedMerchant.user.id, merchant.user.id);
+});
+
+test("服务商代重置成功后解除目标用户名级登录失败锁定", async () => {
+  const store = createIsolatedStore();
+  const authService = createAuthService(store);
+  const superAdmin = await authService.backofficeLogin("super", "super123");
+  const scopedSuperAdmin = authService.enterPlatformTenant(
+    superAdmin.token,
+    store.getDefaultTenantId()
+  );
+  const merchantCredential =
+    store.findBackofficeCredentialByUsername("merchant");
+  assert.ok(merchantCredential);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await assert.rejects(
+      () =>
+        authService.backofficeLogin(
+          "merchant",
+          "definitely-wrong-password",
+          `provider-reset-lock-source-${attempt}`
+        ),
+      /账号或密码不正确/
+    );
+  }
+
+  authService.resetBackofficePasswordAsSuperAdmin(scopedSuperAdmin.token, {
+    userId: merchantCredential.userId,
+    role: merchantCredential.role,
+    newPassword: "merchant-provider-reset",
+    reason: "账号忘记密码，由服务商受控恢复"
+  });
+
+  const refreshedMerchant = await authService.backofficeLogin(
+    "merchant",
+    "merchant-provider-reset",
+    "provider-reset-success-source"
+  );
+  assert.equal(refreshedMerchant.user.id, merchantCredential.userId);
+});
+
+test("服务提供商不能重置与当前人员身份不匹配的历史后台凭据", async () => {
+  const store = createIsolatedStore();
+  const authService = createAuthService(store);
+  const superAdmin = await authService.backofficeLogin("super", "super123");
+  const scopedSuperAdmin = authService.enterPlatformTenant(
+    superAdmin.token,
+    store.getDefaultTenantId()
+  );
+  const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
+  assert.ok(merchantCredential);
+
+  store.upsertBackofficeCredential({
+    ...merchantCredential,
+    username: "historical-merchant-admin",
+    role: "admin"
+  });
+
+  assert.throws(
+    () =>
+      authService.resetBackofficePasswordAsSuperAdmin(scopedSuperAdmin.token, {
+        userId: merchantCredential.userId,
+        role: "admin",
+        newPassword: "historical-admin-new-password",
+        reason: "历史凭据不能再作为当前身份使用"
+      }),
+    /目标后台账号与当前人员身份不匹配/
+  );
 });
 
 test("普通后台管理员不能重置其他账号密码，通用账号配置接口也拒绝已有账号密码字段", async () => {
@@ -886,6 +1046,373 @@ test("账号本人通过手机号验证码重置后台密码会撤销旧会话",
   assert.equal(refreshedMerchant.user.id, merchant.user.id);
 });
 
+test("账号本人找回密码成功后解除用户名级登录失败锁定", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await assert.rejects(
+      () =>
+        authService.backofficeLogin(
+          "merchant",
+          "definitely-wrong-password",
+          `lock-test-source-${attempt}`
+        ),
+      /账号或密码不正确/
+    );
+  }
+
+  const issued = await verificationCodes.requestCode(
+    merchant.user.phone,
+    "password-reset"
+  );
+  assert.ok(issued.previewCode);
+  await authService.resetOwnBackofficePassword({
+    username: "merchant",
+    phone: merchant.user.phone,
+    code: issued.previewCode,
+    newPassword: "merchant-lock-cleared"
+  });
+
+  const refreshedMerchant = await authService.backofficeLogin(
+    "merchant",
+    "merchant-lock-cleared",
+    "lock-test-success-source"
+  );
+  assert.equal(refreshedMerchant.user.id, merchant.user.id);
+});
+
+test("本人找回最终持久化失败时回滚密码、会话和验证码消费", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+  const issued = await verificationCodes.requestCode(merchant.user.phone, "password-reset");
+  const previewCode = issued.previewCode;
+  assert.ok(previewCode);
+  const merchantRecord = store.users.find(
+    (entry) => entry.id === merchant.user.id
+  );
+  assert.ok(merchantRecord);
+  const draftToken = store.createDraftSession({
+    tenantId: store.getUserTenantId(merchantRecord)!,
+    phone: merchant.user.phone,
+    linkedUserId: merchant.user.id,
+    requestedRole: merchantRecord.role
+  });
+  const originalPersist = store.persist.bind(store);
+
+  store.persist = () => {
+    throw new Error("injected-password-reset-persistence-failure");
+  };
+
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "merchant",
+        phone: merchant.user.phone,
+        code: previewCode,
+        newPassword: "merchant-persist-retry"
+      }),
+    /injected-password-reset-persistence-failure/
+  );
+
+  store.persist = originalPersist;
+  assert.ok(store.getSession(merchant.token));
+  assert.ok(store.getDraftSession(draftToken));
+  const oldPasswordSession = await authService.backofficeLogin("merchant", "merchant123");
+  assert.equal(oldPasswordSession.user.id, merchant.user.id);
+
+  const result = await authService.resetOwnBackofficePassword({
+    username: "merchant",
+    phone: merchant.user.phone,
+    code: previewCode,
+    newPassword: "merchant-persist-retry"
+  });
+  assert.deepEqual(result, { reset: true });
+});
+
+test("本人找回在数据文件已替换但耐久性未确认时保留新运行态", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+  const issued = await verificationCodes.requestCode(merchant.user.phone, "password-reset");
+  const previewCode = issued.previewCode;
+  assert.ok(previewCode);
+  const originalPersist = store.persist.bind(store);
+
+  store.persist = () => {
+    throw new PersistedStateWriteError(
+      "injected-post-rename-durability-failure",
+      true
+    );
+  };
+
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "merchant",
+        phone: merchant.user.phone,
+        code: previewCode,
+        newPassword: "merchant-committed-state"
+      }),
+    (error: unknown) =>
+      error instanceof PersistedStateWriteError && error.committed
+  );
+
+  store.persist = originalPersist;
+  assert.equal(store.getSession(merchant.token), undefined);
+  await assert.rejects(
+    () => authService.backofficeLogin("merchant", "merchant123"),
+    /账号或密码不正确/
+  );
+  const newPasswordSession = await authService.backofficeLogin(
+    "merchant",
+    "merchant-committed-state"
+  );
+  assert.equal(newPasswordSession.user.id, merchant.user.id);
+  assert.equal(
+    (
+      await verificationCodes.verifyCodeWithContext(
+        merchant.user.phone,
+        previewCode,
+        "password-reset"
+      )
+    ).verified,
+    false
+  );
+});
+
+test("后台密码策略失败不会提前消费本人找回验证码", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+  const issued = await verificationCodes.requestCode(merchant.user.phone, "password-reset");
+  const previewCode = issued.previewCode;
+  assert.ok(previewCode);
+
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "merchant",
+        phone: merchant.user.phone,
+        code: previewCode,
+        newPassword: "654321"
+      }),
+    /至少需要 8 位/
+  );
+
+  const result = await authService.resetOwnBackofficePassword({
+    username: "merchant",
+    phone: merchant.user.phone,
+    code: previewCode,
+    newPassword: "merchant-valid-reset"
+  });
+  assert.deepEqual(result, { reset: true });
+});
+
+test("新密码与当前密码相同时不会提前消费本人找回验证码", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+  const issued = await verificationCodes.requestCode(merchant.user.phone, "password-reset");
+  const previewCode = issued.previewCode;
+  assert.ok(previewCode);
+
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "merchant",
+        phone: merchant.user.phone,
+        code: previewCode,
+        newPassword: "merchant123"
+      }),
+    /新密码不能与当前密码相同/
+  );
+
+  const result = await authService.resetOwnBackofficePassword({
+    username: "merchant",
+    phone: merchant.user.phone,
+    code: previewCode,
+    newPassword: "merchant-retry-reset"
+  });
+  assert.deepEqual(result, { reset: true });
+});
+
+test("本人找回拒绝历史角色凭据且不消费可用于当前身份的验证码", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+  const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
+  assert.ok(merchantCredential);
+  store.upsertBackofficeCredential({
+    ...merchantCredential,
+    username: "historical-owner-admin",
+    role: "admin"
+  });
+  const issued = await verificationCodes.requestCode(merchant.user.phone, "password-reset");
+  const previewCode = issued.previewCode;
+  assert.ok(previewCode);
+
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "historical-owner-admin",
+        phone: merchant.user.phone,
+        code: previewCode,
+        newPassword: "historical-owner-reset"
+      }),
+    /账号、手机号或验证码不正确/
+  );
+
+  const result = await authService.resetOwnBackofficePassword({
+    username: "merchant",
+    phone: merchant.user.phone,
+    code: previewCode,
+    newPassword: "merchant-current-role-reset"
+  });
+  assert.deepEqual(result, { reset: true });
+});
+
+test("登录和本人找回拒绝仍指向其他实例的同角色历史凭据", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const merchant = await authService.backofficeLogin("merchant", "merchant123");
+  const merchantCredential = store.findBackofficeCredentialByUsername("merchant");
+  assert.ok(merchantCredential);
+  const currentTenantId = merchantCredential.tenantId;
+  merchantCredential.tenantId = "tenant-historical-owner";
+  const issued = await verificationCodes.requestCode(merchant.user.phone, "password-reset");
+  const previewCode = issued.previewCode;
+  assert.ok(previewCode);
+
+  await assert.rejects(
+    () => authService.backofficeLogin("merchant", "merchant123"),
+    /账号或密码不正确/
+  );
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "merchant",
+        phone: merchant.user.phone,
+        code: previewCode,
+        newPassword: "merchant-cross-tenant-reset"
+      }),
+    /账号、手机号或验证码不正确/
+  );
+
+  merchantCredential.tenantId = currentTenantId;
+  const result = await authService.resetOwnBackofficePassword({
+    username: "merchant",
+    phone: merchant.user.phone,
+    code: previewCode,
+    newPassword: "merchant-current-tenant-reset"
+  });
+  assert.deepEqual(result, { reset: true });
+});
+
+test("多实例旧快照不能用后台凭据反向补写缺失的人员归属", async () => {
+  const store = createIsolatedStore();
+  const defaultTenant = store.platformTenants[0];
+  const adminCredential = store.findBackofficeCredentialByUsername("admin");
+  assert.ok(defaultTenant);
+  assert.ok(adminCredential);
+  store.platformTenants.push({
+    ...defaultTenant,
+    id: "tenant-migration-target",
+    code: "tenant-migration-target",
+    name: "迁移攻击目标实例",
+    instanceUrl: "https://tenant-migration-target.example.test"
+  });
+  store.users.push({
+    id: "legacy-ambiguous-admin",
+    role: "admin",
+    phone: "18800000098",
+    name: "缺失归属的旧管理员",
+    status: "active",
+    tags: [],
+    mobileProfileCompleted: true
+  });
+  store.backofficeCredentials.push({
+    ...adminCredential,
+    userId: "legacy-ambiguous-admin",
+    username: "legacy-ambiguous-admin",
+    tenantId: "tenant-migration-target"
+  });
+  store.persist();
+
+  const restartedStore = new InMemoryStoreService();
+  const restartedUser = restartedStore.users.find(
+    (entry) => entry.id === "legacy-ambiguous-admin"
+  );
+  const restartedAuth = createAuthService(restartedStore);
+  assert.ok(restartedUser);
+  assert.equal(restartedUser.tenantId, undefined);
+  await assert.rejects(
+    () =>
+      restartedAuth.backofficeLogin(
+        "legacy-ambiguous-admin",
+        "admin"
+      ),
+    /账号或密码不正确/
+  );
+});
+
+test("普通实例管理员不能借历史 super_admin 凭据提权或找回服务商密码", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const authService = createAuthService(store, verificationCodes);
+  const admin = await authService.backofficeLogin("admin", "admin");
+  const adminCredential = store.findBackofficeCredentialByUsername("admin");
+  assert.ok(adminCredential);
+  store.upsertBackofficeCredential({
+    ...adminCredential,
+    username: "historical-provider-admin",
+    role: "super_admin",
+    tenantId: undefined
+  });
+  const issued = await verificationCodes.requestCode(
+    admin.user.phone,
+    "password-reset"
+  );
+  const previewCode = issued.previewCode;
+  assert.ok(previewCode);
+
+  await assert.rejects(
+    () =>
+      authService.backofficeLogin(
+        "historical-provider-admin",
+        "admin"
+      ),
+    /账号或密码不正确/
+  );
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "historical-provider-admin",
+        phone: admin.user.phone,
+        code: previewCode,
+        newPassword: "historical-provider-reset"
+      }),
+    /账号、手机号或验证码不正确/
+  );
+
+  const result = await authService.resetOwnBackofficePassword({
+    username: "admin",
+    phone: admin.user.phone,
+    code: previewCode,
+    newPassword: "historical-provider-reset"
+  });
+  assert.deepEqual(result, { reset: true });
+});
+
 test("初始实例管理员通过绑定手机号找回密码时沿用已授权的六位密码策略", async () => {
   const store = createIsolatedStore();
   const verificationCodes = createVerificationCodeService(store);
@@ -914,7 +1441,7 @@ test("删除用户时立即撤销关联会话和资料草稿", () => {
   assert.ok(user);
   const token = store.createSession(user);
   const draftToken = store.createDraftSession({
-    tenantId: store.getUserTenantId(user),
+    tenantId: store.getUserTenantId(user)!,
     phone: user.phone,
     linkedUserId: user.id,
     requestedRole: user.role
@@ -938,6 +1465,36 @@ test("验证码成功后立即消费，同一验证码不能再次使用", async
   await assert.rejects(
     () => verificationCodes.requestCode(phone, "register"),
     /验证码发送过于频繁/
+  );
+});
+
+test("mock 验证结果只可消费校验时绑定的同一代挑战", async () => {
+  const store = createIsolatedStore();
+  const verificationCodes = createVerificationCodeService(store);
+  const phone = "13812345679";
+  const firstCode = store.issueVerificationCode(phone, "password-reset");
+  const checked = await verificationCodes.checkCodeWithContext(
+    phone,
+    firstCode,
+    "password-reset"
+  );
+  assert.equal(checked.verified, true);
+
+  const secondCode = store.issueVerificationCode(phone, "password-reset");
+  assert.notEqual(secondCode, firstCode);
+  assert.equal(
+    verificationCodes.consumeCheckedCode(phone, "password-reset", checked),
+    false
+  );
+  assert.equal(
+    (
+      await verificationCodes.verifyCodeWithContext(
+        phone,
+        secondCode,
+        "password-reset"
+      )
+    ).verified,
+    true
   );
 });
 
@@ -999,15 +1556,21 @@ test("全真模拟 manual 模式只接受后台签发短期码，不接受静态
   );
   assert.equal(store.getVerificationRecord("13812345684", "app-login"), undefined);
 
-  const targetUser = store.users.find((entry) => entry.status === "active");
+  const targetUser = store.users.find(
+    (entry) =>
+      entry.status === "active" &&
+      store.getUserTenantId(entry) !== undefined
+  );
   assert.ok(targetUser);
+  const targetTenantId = store.getUserTenantId(targetUser);
+  assert.ok(targetTenantId);
   store.issueManualVerificationGrant({
     phone: targetUser.phone,
     purpose: "app-login",
     code: "654321",
     issuerUserId: "manual-mode-test-issuer",
     targetUserId: targetUser.id,
-    tenantId: store.getUserTenantId(targetUser),
+    tenantId: targetTenantId,
     expiresInSeconds: 300
   });
   assert.equal(
