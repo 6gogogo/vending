@@ -41,6 +41,15 @@ test("pure router keeps mobile and admin namespaces separate", () => {
     }
   );
   assert.deepEqual(
+    resolvePublicWebRoute({ method: "GET", requestTarget: "/mobile/static/tabs/home.png" }),
+    {
+      kind: "file",
+      root: "mobile",
+      relativePath: "static/tabs/home.png",
+      fallback: false
+    }
+  );
+  assert.deepEqual(
     resolvePublicWebRoute({ method: "GET", requestTarget: "/login" }),
     {
       kind: "file",
@@ -72,7 +81,8 @@ test("pure router fails closed for writes, malformed paths, and traversal", () =
     "/mobile/assets/%2e%2e/index.html",
     "/mobile/assets/%2Fetc/passwd",
     "/mobile/assets/%5Csecret",
-    "/mobile/assets/\0secret"
+    "/mobile/assets/\0secret",
+    "/mobile/static/%2e%2e/index.html"
   ]) {
     assert.equal(
       resolvePublicWebRoute({ method: "GET", requestTarget }).status,
@@ -183,10 +193,12 @@ before(async () => {
   const mobileRoot = join(temporaryRoot, "mobile");
   await mkdir(join(adminRoot, "assets"), { recursive: true });
   await mkdir(join(mobileRoot, "assets"), { recursive: true });
+  await mkdir(join(mobileRoot, "static", "tabs"), { recursive: true });
   await writeFile(join(adminRoot, "index.html"), "<title>ADMIN</title>");
   await writeFile(join(adminRoot, "assets", "admin.css"), "body{color:#123}");
   await writeFile(join(mobileRoot, "index.html"), "<title>MOBILE</title>");
   await writeFile(join(mobileRoot, "assets", "mobile.js"), "globalThis.mobile=true;");
+  await writeFile(join(mobileRoot, "static", "tabs", "home.png"), "png");
 
   server = await createPublicWebServer({ adminRoot, mobileRoot });
   await new Promise((resolveListening) => server.listen(0, "127.0.0.1", resolveListening));
@@ -211,6 +223,10 @@ test("integration serves both SPAs and their assets with safe headers", async ()
   const mobileRedirect = await requestRaw({ port, path: "/mobile" });
   const mobile = await requestRaw({ port, path: "/mobile/" });
   const mobileAsset = await requestRaw({ port, path: "/mobile/assets/mobile.js" });
+  const mobileStaticAsset = await requestRaw({
+    port,
+    path: "/mobile/static/tabs/home.png"
+  });
   const adminAsset = await requestRaw({ port, path: "/assets/admin.css" });
   const apiRoute = await requestRaw({ port, path: "/api/health" });
   const apiHead = await requestRaw({ port, method: "HEAD", path: "/api/health" });
@@ -230,6 +246,13 @@ test("integration serves both SPAs and their assets with safe headers", async ()
   assert.equal(mobileAsset.body, "globalThis.mobile=true;");
   assert.match(mobileAsset.headers["content-type"], /^text\/javascript/);
   assert.equal(mobileAsset.headers["cache-control"], "public, max-age=31536000, immutable");
+  assert.equal(mobileStaticAsset.status, 200);
+  assert.equal(mobileStaticAsset.body, "png");
+  assert.equal(mobileStaticAsset.headers["content-type"], "image/png");
+  assert.equal(
+    mobileStaticAsset.headers["cache-control"],
+    "public, max-age=3600"
+  );
   assert.equal(adminAsset.status, 200);
   assert.match(adminAsset.headers["content-type"], /^text\/css/);
   assert.equal(apiRoute.status, 404);

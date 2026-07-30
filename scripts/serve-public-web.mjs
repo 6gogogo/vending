@@ -152,7 +152,10 @@ export const resolvePublicWebRoute = ({ method, requestTarget }) => {
     };
   }
 
-  if (pathname.startsWith("/mobile/assets/")) {
+  if (
+    pathname.startsWith("/mobile/assets/") ||
+    pathname.startsWith("/mobile/static/")
+  ) {
     const relativePath = pathname.slice("/mobile/".length);
     if (!relativePath || relativePath.endsWith("/")) {
       return errorRoute(404, "Not Found");
