@@ -12,7 +12,6 @@ import {
   writePersistedState
 } from "../common/store/persistence.js";
 import { validatePersistedState } from "../common/store/persisted-state-integrity.js";
-import { resolveRuntimeDataPlane } from "../common/config/runtime-data-plane.js";
 import { acquireFinancialSingleWriterForMaintenance } from "../common/coordination/financial-single-writer-runtime.js";
 import { SystemAuditLogService } from "../common/store/system-audit-log.service.js";
 import { hashAdminPassword } from "../modules/auth/admin-password.utils.js";
@@ -181,7 +180,17 @@ const readCredentialSourceSelection = (
   };
 };
 
-const dataPlane = resolveRuntimeDataPlane();
+const runtimePaths = resolveRuntimeStoragePaths();
+const dataFile = runtimePaths.dataFile;
+const dataPlane = runtimePaths.dataPlane;
+
+assertRuntimePathsSafe({
+  dataFile: runtimePaths.dataFile,
+  systemLogFile: runtimePaths.systemLogFile,
+  uploadDir: runtimePaths.uploadDir,
+  backupDir: runtimePaths.backupDir,
+  financialLeaseFile: runtimePaths.financialLeaseFile
+});
 
 if (dataPlane !== "live") {
   throw new Error("真实初始化命令只能在 VM_DATA_PLANE=live 时执行。");
@@ -226,17 +235,6 @@ if (phone !== undefined && !mainlandPhonePattern.test(phone)) {
 if (name !== undefined && [...name].length > 100) {
   throw new Error("初始超级管理员名称不能超过 100 个字符。");
 }
-
-const runtimePaths = resolveRuntimeStoragePaths();
-const dataFile = runtimePaths.dataFile;
-
-assertRuntimePathsSafe({
-  dataFile: runtimePaths.dataFile,
-  systemLogFile: runtimePaths.systemLogFile,
-  uploadDir: runtimePaths.uploadDir,
-  backupDir: runtimePaths.backupDir,
-  financialLeaseFile: runtimePaths.financialLeaseFile
-});
 
 /**
  * 真正的首次初始化只能落在一个没有遗留审计、上传、备份或租约的根目录中。若存在这些

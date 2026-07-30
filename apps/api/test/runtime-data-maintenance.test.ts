@@ -79,9 +79,19 @@ const createIsolatedRuntime = (): IsolatedRuntime => {
   };
 };
 
-const runScript = (script: string, args: string[], env: NodeJS.ProcessEnv) =>
-  spawnSync(process.execPath, [tsxCli, script, ...args], {
-    cwd: apiRoot,
+const runScript = (
+  script: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd = apiRoot
+) =>
+  spawnSync(process.execPath, [
+    tsxCli,
+    ...(cwd === apiRoot ? [] : ["--tsconfig", resolve(apiRoot, "tsconfig.json")]),
+    script,
+    ...args
+  ], {
+    cwd,
     env,
     encoding: "utf8"
   });
@@ -856,6 +866,76 @@ test("真实初始化在取得租约或写入前拒绝混有历史审计证据�
   assert.match(`${result.stdout}\n${result.stderr}`, /真实数据根目录含有遗留文件/);
   assert.equal(existsSync(dataFile), false);
   assert.equal(readFileSync(auditFile, "utf8"), '{"event":"historical-evidence"}\n');
+});
+
+test("真实初始化命令会从当前 API 工作区加载受控 .env", (t) => {
+  const commandRoot = mkdtempSync(join(tmpdir(), "vm-live-init-env-command-"));
+  const targetRoot = join(commandRoot, "live-root");
+  writeFileSync(
+    join(commandRoot, "package.json"),
+    '{\n  "name": "@vm/api"\n}\n',
+    "utf8"
+  );
+  writeFileSync(
+    join(commandRoot, ".env"),
+    [
+      "NODE_ENV=test",
+      "VM_DATA_PLANE=live",
+      `VM_DATA_ROOT=${targetRoot.replaceAll("\\", "/")}`,
+      "VM_DATA_PLANE_ID=live-env-command-test",
+      "VM_PLATFORM_TENANT_NAME=命令配置正式实例",
+      "PUBLIC_BASE_URL=https://vending.example.com",
+      "VM_INITIAL_SUPER_ADMIN_USERNAME=env-command-admin",
+      "VM_INITIAL_SUPER_ADMIN_PASSWORD=test-only-initial-password",
+      "VM_INITIAL_SUPER_ADMIN_PHONE=13900000000",
+      "VM_INITIAL_SUPER_ADMIN_NAME=命令配置管理员"
+    ].join("\n") + "\n",
+    { encoding: "utf8", mode: 0o600 }
+  );
+  chmodSync(join(commandRoot, ".env"), 0o600);
+  t.after(() => rmSync(commandRoot, { recursive: true, force: true }));
+
+  const childEnv = { ...process.env };
+  for (const key of [
+    "APP_ENV",
+    "VM_TEST_ISOLATED_ENV",
+    "VM_SIMULATION_PROFILE",
+    "VM_FULL_SIMULATION_ENABLED",
+    "VM_DATA_PLANE",
+    "VM_DATA_ROOT",
+    "VM_DATA_PLANE_ID",
+    "VM_PLATFORM_TENANT_NAME",
+    "PUBLIC_BASE_URL",
+    "API_DATA_FILE",
+    "SYSTEM_LOG_FILE",
+    "UPLOAD_DIR",
+    "API_BACKUP_DIR",
+    "FINANCIAL_SINGLE_WRITER_LEASE_FILE",
+    "VM_INITIAL_SUPER_ADMIN_USERNAME",
+    "VM_INITIAL_SUPER_ADMIN_PASSWORD",
+    "VM_INITIAL_SUPER_ADMIN_PHONE",
+    "VM_INITIAL_SUPER_ADMIN_NAME",
+    "VM_INITIAL_CREDENTIAL_SOURCE_DATA_FILE",
+    "VM_INITIAL_TENANT_ADMIN_USERNAME"
+  ]) {
+    delete childEnv[key];
+  }
+  childEnv.NODE_ENV = "test";
+
+  const result = runScript(
+    initializeLiveDataScript,
+    ["--confirm-live-initialization"],
+    childEnv,
+    commandRoot
+  );
+
+  assertSucceeded(result);
+  const targetState = JSON.parse(
+    readFileSync(join(targetRoot, "store.json"), "utf8")
+  ) as ReturnType<typeof createSeededPersistedState>;
+  assert.equal(targetState.dataPlane, "live");
+  assert.equal(targetState.instanceId, "live-env-command-test");
+  assert.equal(targetState.platformTenants[0]?.name, "命令配置正式实例");
 });
 
 test("真实初始化可只迁入现有非默认服务商与首管理员凭据散列", (t) => {
