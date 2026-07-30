@@ -55,6 +55,10 @@ const reservationOnlyProductionConfig: Record<string, string | undefined> = {
   PAYMENT_MODE: "disabled",
   PAYMENT_RECONCILIATION_ENABLED: "false",
   VERIFICATION_CODE_PROVIDER: "manual",
+  SMARTVM_MODE: "disabled",
+  SMARTVM_BASE_URL: undefined,
+  SMARTVM_CLIENT_ID: undefined,
+  SMARTVM_KEY: undefined,
   ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
   ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
   ALIYUN_PNVS_SIGN_NAME: undefined,
@@ -227,6 +231,27 @@ test("预约制正式实例在人工码和支付关闭配置下通过生产就�
           message: "成功",
           data: { status: "就绪" }
         }
+      );
+    }
+  );
+});
+
+test("尚未接柜机的正式实例仅在零柜机时保持生产就绪", () => {
+  withRuntimeEnvironment(
+    {
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      assertReadinessUnavailable(
+        createController(reservationOnlyProductionConfig, {
+          devices: [
+            {
+              deviceCode: "PRODUCTION-DEVICE-001",
+              isMock: false
+            }
+          ]
+        })
       );
     }
   );

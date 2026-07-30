@@ -113,6 +113,10 @@ const reservationOnlyProductionConfig = {
   PAYMENT_MODE: "disabled",
   PAYMENT_RECONCILIATION_ENABLED: "false",
   VERIFICATION_CODE_PROVIDER: "manual",
+  SMARTVM_MODE: "disabled",
+  SMARTVM_BASE_URL: undefined,
+  SMARTVM_CLIENT_ID: undefined,
+  SMARTVM_KEY: undefined,
   ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
   ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
   ALIYUN_PNVS_SIGN_NAME: undefined,
@@ -414,6 +418,24 @@ test("全新预约制正式实例无需支付渠道配置，但仍拒绝账本�
           readyAuditLog as never
         ),
       /已有支付或退款账本.*不能关闭支付配置/
+    );
+
+    assert.throws(
+      () =>
+        assertProductionSafety(
+          createConfigService(reservationOnlyProductionConfig),
+          {
+            ...emptyCredentialStore,
+            devices: [
+              {
+                deviceCode: "PRODUCTION-DEVICE-001",
+                isMock: false
+              }
+            ]
+          } as never,
+          readyAuditLog as never
+        ),
+      /柜机平台尚未启用.*不能加载柜机/
     );
   } finally {
     if (previousNodeEnv === undefined) {

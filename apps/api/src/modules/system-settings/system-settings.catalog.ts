@@ -249,7 +249,20 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "调用大模型接口的请求超时时间。",
     inputType: "number"
   },
+  SMARTVM_MODE: {
+    group: "柜机平台接入",
+    label: "柜机接入状态",
+    description: "新实例还没有柜机时选择“尚未接入柜机”；录入首台柜机前必须切换为正式 SmartVM，并完成生产地址和凭据配置。",
+    inputType: "select",
+    options: [
+      { label: "尚未接入柜机", value: "disabled" },
+      { label: "正式 SmartVM", value: "real" }
+    ],
+    required: true,
+    restartRequired: true
+  },
   SMARTVM_BASE_URL: {
+    group: "柜机平台接入",
     label: "柜机平台地址",
     description: "智能柜平台 API 根地址。",
     inputType: "url"

@@ -33,6 +33,7 @@ test("预约制正式配置只继承获准集成并强制关闭支付与短信",
     "API_HOST=127.0.0.1",
     "PUBLIC_BASE_URL=https://vending.example.com",
     "CORS_ORIGINS=https://vending.example.com",
+    "SMARTVM_MODE=real",
     "SMARTVM_BASE_URL=https://smartvm.example.com",
     "SMARTVM_CLIENT_ID=smartvm-client-private-marker",
     "SMARTVM_KEY=smartvm-key-private-marker",
@@ -88,8 +89,10 @@ test("预约制正式配置只继承获准集成并强制关闭支付与短信",
   assert.equal(values.get("PAYMENT_RECONCILIATION_ENABLED"), "false");
   assert.equal(values.get("VERIFICATION_CODE_PROVIDER"), "manual");
   assert.equal(values.get("VERIFICATION_CODE_PREVIEW_ENABLED"), "false");
-  assert.equal(values.get("SMARTVM_CLIENT_ID"), "smartvm-client-private-marker");
-  assert.equal(values.get("SMARTVM_KEY"), "smartvm-key-private-marker");
+  assert.equal(values.get("SMARTVM_MODE"), "disabled");
+  assert.equal(values.get("SMARTVM_BASE_URL"), "");
+  assert.equal(values.get("SMARTVM_CLIENT_ID"), "");
+  assert.equal(values.get("SMARTVM_KEY"), "");
   assert.equal(values.get("AMAP_WEB_KEY"), "amap-web-marker");
   assert.equal(values.get("AMAP_SECURITY_JS_CODE"), "amap-security-marker");
   assert.equal(values.get("OPENAI_API_KEY"), "openai-private-marker");

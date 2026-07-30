@@ -146,9 +146,6 @@ const assertRequiredInheritedConfiguration = (values) => {
   const requiredKeys = [
     "PUBLIC_BASE_URL",
     "CORS_ORIGINS",
-    "SMARTVM_BASE_URL",
-    "SMARTVM_CLIENT_ID",
-    "SMARTVM_KEY",
     "AMAP_WEB_KEY",
     "AMAP_SECURITY_JS_CODE"
   ];
@@ -284,6 +281,7 @@ const main = () => {
     PAYMENT_RECONCILIATION_ENABLED: "false",
     VERIFICATION_CODE_PROVIDER: "manual",
     VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+    SMARTVM_MODE: "disabled",
     SMARTVM_ALLOW_UNSIGNED_CALLBACKS: "false",
     SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS: "false",
     ALLOW_DEFAULT_BACKOFFICE_LOGIN: "false",
@@ -297,6 +295,15 @@ const main = () => {
       throw new Error(`生产模板缺少受控配置项：${key}。`);
     }
     targetValues.set(key, encodeEnvValue(value));
+  }
+
+  for (const key of [
+    "SMARTVM_BASE_URL",
+    "SMARTVM_ALLOWED_NOTIFY_ORIGINS",
+    "SMARTVM_CLIENT_ID",
+    "SMARTVM_KEY"
+  ]) {
+    targetValues.set(key, "");
   }
 
   const renderedLines = templateContent.split(/\r?\n/u).map((line) => {

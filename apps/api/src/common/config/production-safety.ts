@@ -167,6 +167,7 @@ export const productionPaymentSafetyCriticalKeys = [
 ] as const;
 
 export const productionSmartVmSafetyCriticalKeys = [
+  "SMARTVM_MODE",
   "SMARTVM_BASE_URL",
   "SMARTVM_ALLOWED_NOTIFY_ORIGINS",
   "SMARTVM_CLIENT_ID",
@@ -331,9 +332,13 @@ export const assertProductionPaymentSafety = (configService: ConfigService) => {
 };
 
 export const assertProductionSmartVmSafety = (configService: ConfigService) => {
-  const smartVmBaseUrl = requireConfig(configService, "SMARTVM_BASE_URL");
-  assertPublicHttpsUrl(smartVmBaseUrl, "SMARTVM_BASE_URL");
-  requireConfigs(configService, ["SMARTVM_CLIENT_ID", "SMARTVM_KEY"]);
+  const mode = readConfig(configService, "SMARTVM_MODE")?.toLowerCase() || "real";
+
+  if (!["real", "disabled"].includes(mode)) {
+    throw new BadRequestException(
+      "生产环境 SMARTVM_MODE 只能设置为 real 或 disabled。"
+    );
+  }
 
   if (
     isTruthy(readConfig(configService, "SMARTVM_ALLOW_UNSIGNED_CALLBACKS")) ||
@@ -354,6 +359,27 @@ export const assertProductionSmartVmSafety = (configService: ConfigService) => {
       "生产环境不能开启结算后自动转发付款成功；正金额订单必须由已确认支付单驱动回写。"
     );
   }
+
+  if (mode === "disabled") {
+    const configuredKeys = [
+      "SMARTVM_BASE_URL",
+      "SMARTVM_ALLOWED_NOTIFY_ORIGINS",
+      "SMARTVM_CLIENT_ID",
+      "SMARTVM_KEY"
+    ].filter((key) => Boolean(readConfig(configService, key)));
+
+    if (configuredKeys.length > 0) {
+      throw new BadRequestException(
+        `柜机平台禁用时不能保留 SmartVM 接入配置：${configuredKeys.join("、")}。`
+      );
+    }
+
+    return;
+  }
+
+  const smartVmBaseUrl = requireConfig(configService, "SMARTVM_BASE_URL");
+  assertPublicHttpsUrl(smartVmBaseUrl, "SMARTVM_BASE_URL");
+  requireConfigs(configService, ["SMARTVM_CLIENT_ID", "SMARTVM_KEY"]);
 
   const allowedNotifyOrigins =
     readConfig(configService, "SMARTVM_ALLOWED_NOTIFY_ORIGINS")
@@ -546,6 +572,15 @@ export const assertProductionSafety = (
 
   assertProductionConfigurationSafety(configService);
   assertPaymentDisablementStoreSafety(configService, store);
+
+  if (
+    readConfig(configService, "SMARTVM_MODE")?.toLowerCase() === "disabled" &&
+    store.devices.length > 0
+  ) {
+    throw new BadRequestException(
+      "柜机平台尚未启用，真实数据平面不能加载柜机；请先配置生产 SmartVM 再录入设备。"
+    );
+  }
 
   if (!auditLog.isReady()) {
     throw new BadRequestException("系统审计日志未就绪。");

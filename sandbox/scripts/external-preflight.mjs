@@ -730,12 +730,31 @@ const checkProductionSafety = (config, options) => {
       : pass("验证码预览", "验证码预览已关闭。")
   );
 
-  const smartVmMissing = validateKeyPresence(config, ["SMARTVM_BASE_URL", "SMARTVM_CLIENT_ID", "SMARTVM_KEY"]);
-  checks.push(
-    smartVmMissing.length
-      ? fail("SmartVM 必填配置", "缺少 SmartVM 接入配置。", smartVmMissing)
-      : pass("SmartVM 必填配置", "SmartVM 基础接入配置已填写。")
-  );
+  const smartVmMode = (readConfig(config, "SMARTVM_MODE") ?? "real").trim().toLowerCase();
+  const smartVmConfigurationKeys = [
+    "SMARTVM_BASE_URL",
+    "SMARTVM_ALLOWED_NOTIFY_ORIGINS",
+    "SMARTVM_CLIENT_ID",
+    "SMARTVM_KEY"
+  ];
+  const configuredSmartVmKeys = smartVmConfigurationKeys.filter((key) => Boolean(readConfig(config, key)));
+
+  if (!["real", "disabled"].includes(smartVmMode)) {
+    checks.push(fail("SmartVM 接入状态", "SMARTVM_MODE 只能设置为 real 或 disabled。"));
+  } else if (smartVmMode === "disabled") {
+    checks.push(
+      configuredSmartVmKeys.length
+        ? fail("SmartVM 接入状态", "尚未接入柜机时不能保留 SmartVM 地址、来源或凭据。", configuredSmartVmKeys)
+        : pass("SmartVM 接入状态", "当前为零柜机正式实例，柜机平台尚未接入。")
+    );
+  } else {
+    const smartVmMissing = validateKeyPresence(config, ["SMARTVM_BASE_URL", "SMARTVM_CLIENT_ID", "SMARTVM_KEY"]);
+    checks.push(
+      smartVmMissing.length
+        ? fail("SmartVM 必填配置", "缺少 SmartVM 接入配置。", smartVmMissing)
+        : pass("SmartVM 必填配置", "SmartVM 基础接入配置已填写。")
+    );
+  }
 
   const unsignedCallbacksEnabled =
     isTruthy(readConfig(config, "SMARTVM_ALLOW_UNSIGNED_CALLBACKS")) ||
@@ -869,9 +888,33 @@ const checkApiSurface = async (config, options) => {
 
 const checkSmartVm = async (config, options) => {
   const checks = [];
+  const mode = (readConfig(config, "SMARTVM_MODE") ?? "real").trim().toLowerCase();
   const baseUrl = readConfig(config, "SMARTVM_BASE_URL");
   const clientId = readConfig(config, "SMARTVM_CLIENT_ID");
   const key = readConfig(config, "SMARTVM_KEY");
+  const configuredKeys = [
+    "SMARTVM_BASE_URL",
+    "SMARTVM_ALLOWED_NOTIFY_ORIGINS",
+    "SMARTVM_CLIENT_ID",
+    "SMARTVM_KEY"
+  ].filter((configKey) => Boolean(readConfig(config, configKey)));
+
+  if (!["real", "disabled"].includes(mode)) {
+    checks.push(fail("SmartVM 接入状态", "SMARTVM_MODE 只能设置为 real 或 disabled。"));
+    checks.push(skip("SmartVM 只读探测", "柜机平台状态无效，跳过平台请求。"));
+    return createSection("SmartVM", "检查柜机平台外部连接、签名参数和只读接口。", checks);
+  }
+
+  if (mode === "disabled") {
+    checks.push(
+      configuredKeys.length
+        ? fail("SmartVM 接入状态", "尚未接入柜机时不能保留 SmartVM 地址、来源或凭据。", configuredKeys)
+        : pass("SmartVM 接入状态", "当前实例尚未录入柜机，柜机平台显式关闭。")
+    );
+    checks.push(skip("SmartVM 只读探测", "当前实例没有柜机，不向外部柜机平台发起请求。"));
+    return createSection("SmartVM", "检查柜机平台外部连接、签名参数和只读接口。", checks);
+  }
+
   const baseUrlValidation = validateExternalUrl(baseUrl, "SMARTVM_BASE_URL");
 
   checks.push(

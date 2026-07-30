@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, Optional } from "@nestjs/common";
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+  ServiceUnavailableException
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   SmartVmClient,
@@ -617,6 +623,7 @@ export class SmartVmGateway {
         VM_FULL_SIMULATION_SMARTVM_MODE: this.configService.get<string>(
           "VM_FULL_SIMULATION_SMARTVM_MODE"
         ),
+        SMARTVM_MODE: this.configService.get<string>("SMARTVM_MODE"),
         SMARTVM_BASE_URL: this.configService.get<string>("SMARTVM_BASE_URL"),
         SMARTVM_CLIENT_ID: this.configService.get<string>("SMARTVM_CLIENT_ID"),
         SMARTVM_KEY: this.configService.get<string>("SMARTVM_KEY"),
@@ -630,7 +637,21 @@ export class SmartVmGateway {
           "SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS"
         )
       });
+
+      if (
+        this.isLiveDataPlane() &&
+        this.configService.get<string>("SMARTVM_MODE")?.trim().toLowerCase() ===
+          "disabled"
+      ) {
+        throw new ServiceUnavailableException(
+          "柜机平台尚未接入，当前实例不能执行柜机查询或控制操作。"
+        );
+      }
     } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+
       throw new BadRequestException(
         error instanceof Error ? error.message : "SmartVM 数据平面配置无效。"
       );

@@ -42,6 +42,7 @@ export const runtimeDataPlaneExternalIntegrationKeys = [
   "OPENAI_API_KEY",
   "ENABLE_LOCAL_MOCK_DEVICE_API",
   "ENABLE_TEST_DEVICE_BOOTSTRAP",
+  "SMARTVM_MODE",
   "SMARTVM_BASE_URL",
   "SMARTVM_CLIENT_ID",
   "SMARTVM_KEY",
@@ -306,6 +307,39 @@ const requireSmartVmPolicy = (
         `模拟数据平面只能使用 SmartVM mock，不能配置真实 SmartVM 接入项：${configuredKeys.join("、")}。`
       );
     }
+    return;
+  }
+
+  const mode = normalize(settings.SMARTVM_MODE) || "real";
+
+  if (!["real", "disabled"].includes(mode)) {
+    throw new RuntimeDataPlanePolicyError(
+      "真实数据平面 SMARTVM_MODE 只能设置为 real 或 disabled。"
+    );
+  }
+
+  if (mode === "disabled") {
+    if (configuredKeys.length > 0) {
+      throw new RuntimeDataPlanePolicyError(
+        `柜机平台禁用时不能配置 SmartVM 接入项：${configuredKeys.join("、")}。`
+      );
+    }
+
+    if (
+      isTruthy(settings.SMARTVM_ALLOW_UNSIGNED_CALLBACKS) ||
+      isTruthy(settings.ALLOW_UNSIGNED_SMARTVM_CALLBACKS)
+    ) {
+      throw new RuntimeDataPlanePolicyError(
+        "真实数据平面禁止允许未签名 SmartVM 回调。"
+      );
+    }
+
+    if (isTruthy(settings.SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS)) {
+      throw new RuntimeDataPlanePolicyError(
+        "真实数据平面禁止自动将柜机结算转发为付款成功。"
+      );
+    }
+
     return;
   }
 

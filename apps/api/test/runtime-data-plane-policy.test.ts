@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   BadRequestException,
   ForbiddenException,
-  InternalServerErrorException
+  InternalServerErrorException,
+  ServiceUnavailableException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
@@ -442,6 +443,26 @@ test("SmartVM 在模拟平面不接受真实凭据，在真实平面不允许回
     new ConfigService(liveSettings)
   );
   assert.equal(liveGateway.isUsingMockTransport(), false);
+
+  const disabledLiveSettings = {
+    ...liveSettings,
+    SMARTVM_MODE: "disabled",
+    SMARTVM_BASE_URL: undefined,
+    SMARTVM_CLIENT_ID: undefined,
+    SMARTVM_KEY: undefined
+  };
+  assert.doesNotThrow(() =>
+    assertRuntimeDataPlaneExternalIntegrationPolicy(disabledLiveSettings)
+  );
+  const disabledLiveGateway = new SmartVmGateway(
+    new ConfigService(disabledLiveSettings)
+  );
+  assert.throws(
+    () => disabledLiveGateway.isUsingMockTransport(),
+    (error) =>
+      error instanceof ServiceUnavailableException &&
+      /柜机平台尚未接入/.test(error.message)
+  );
 });
 
 test("真实数据平面拒绝本地 mock 柜机接口，即使进程不是 production", () => {
