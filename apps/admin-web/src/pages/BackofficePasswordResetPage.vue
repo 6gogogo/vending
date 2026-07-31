@@ -10,6 +10,14 @@ import {
   resolveBackofficePasswordResetPreview,
   validateBackofficePasswordResetDraft
 } from "../utils/backoffice-provisioning";
+import {
+  BACKOFFICE_PASSWORD_RESET_RUNTIME_ERROR_MESSAGE,
+  canRequestBackofficePasswordResetCode,
+  isBackofficePasswordResetVerificationProvider,
+  resolveBackofficePasswordResetCodeActionLabel,
+  type BackofficePasswordResetRuntimeStatus
+} from "../utils/backoffice-password-reset-runtime";
+import { getAdminErrorMessage } from "../utils/error-message";
 
 const username = ref("");
 const phone = ref("");
@@ -17,6 +25,8 @@ const code = ref("");
 const newPassword = ref("");
 const confirmPassword = ref("");
 const verificationProvider = ref<VerificationProvider>();
+const runtimeConfigStatus = ref<BackofficePasswordResetRuntimeStatus>("loading");
+const runtimeConfigErrorMessage = ref("");
 const verificationPreviewEnabled = ref(false);
 const previewCode = ref("");
 const requestingCode = ref(false);
@@ -29,24 +39,20 @@ const isManualMode = computed(() => verificationProvider.value === "manual");
 const minimumPasswordLength = computed(() =>
   backofficePasswordMinimumLengthForUsername(username.value)
 );
-const canRequestCode = computed(
-  () =>
-    /^1\d{10}$/u.test(phone.value.trim()) &&
-    !requestingCode.value &&
-    cooldownSeconds.value === 0 &&
-    !isManualMode.value
+const requestCodeState = computed(() => ({
+  status: runtimeConfigStatus.value,
+  provider: verificationProvider.value,
+  username: username.value,
+  phone: phone.value,
+  requestingCode: requestingCode.value,
+  cooldownSeconds: cooldownSeconds.value
+}));
+const canRequestCode = computed(() =>
+  canRequestBackofficePasswordResetCode(requestCodeState.value)
 );
-const requestCodeLabel = computed(() => {
-  if (requestingCode.value) {
-    return "发送中...";
-  }
-
-  if (cooldownSeconds.value > 0) {
-    return `${cooldownSeconds.value} 秒后可重发`;
-  }
-
-  return "获取找回验证码";
-});
+const requestCodeActionLabel = computed(() =>
+  resolveBackofficePasswordResetCodeActionLabel(requestCodeState.value)
+);
 
 const clearCooldownTimer = () => {
   if (cooldownTimer !== undefined) {
@@ -67,17 +73,28 @@ const startCooldown = (seconds: number) => {
 };
 
 const loadRuntimeConfig = async () => {
+  runtimeConfigStatus.value = "loading";
+  runtimeConfigErrorMessage.value = "";
   try {
     const config = await adminApi.publicRuntimeConfig();
+    if (!isBackofficePasswordResetVerificationProvider(config.verificationProvider)) {
+      throw new Error("当前服务未返回可用的验证码方式。");
+    }
     verificationProvider.value = config.verificationProvider;
     verificationPreviewEnabled.value = config.verificationPreviewEnabled === true;
+    runtimeConfigStatus.value = "ready";
     if (!verificationPreviewEnabled.value) {
       previewCode.value = "";
     }
-  } catch {
+  } catch (error) {
     verificationProvider.value = undefined;
     verificationPreviewEnabled.value = false;
     previewCode.value = "";
+    runtimeConfigStatus.value = "error";
+    runtimeConfigErrorMessage.value = getAdminErrorMessage(
+      error,
+      BACKOFFICE_PASSWORD_RESET_RUNTIME_ERROR_MESSAGE
+    );
   }
 };
 
@@ -90,7 +107,10 @@ const requestCode = async () => {
   message.value = undefined;
   previewCode.value = "";
   try {
-    const result = await adminApi.requestBackofficePasswordResetCode(phone.value.trim());
+    const result = await adminApi.requestBackofficePasswordResetCode(
+      username.value.trim().toLowerCase(),
+      phone.value.trim()
+    );
     verificationProvider.value = result.provider;
     previewCode.value = resolveBackofficePasswordResetPreview({
       provider: result.provider,
@@ -105,7 +125,7 @@ const requestCode = async () => {
   } catch (error) {
     message.value = {
       type: "error",
-      text: error instanceof Error ? error.message : "找回验证码发送失败。"
+      text: getAdminErrorMessage(error, "找回验证码发送失败。")
     };
   } finally {
     requestingCode.value = false;
@@ -151,7 +171,7 @@ const resetPassword = async () => {
   } catch (error) {
     message.value = {
       type: "error",
-      text: error instanceof Error ? error.message : "密码重置失败。"
+      text: getAdminErrorMessage(error, "密码重置失败。")
     };
   } finally {
     resetting.value = false;
@@ -175,6 +195,14 @@ onUnmounted(clearCooldownTimer);
 
       <div v-if="isManualMode" class="admin-note">
         当前实例使用人工验证码。请联系同实例另一位管理员签发“后台密码重置”验证码；如果没有其他可登录管理员，请联系服务提供商进入本实例代重置。
+      </div>
+
+      <div
+        v-if="runtimeConfigErrorMessage"
+        class="admin-note reset-panel__message reset-panel__message--error"
+        role="alert"
+      >
+        {{ runtimeConfigErrorMessage }} 验证码获取入口已暂时关闭。
       </div>
 
       <div v-if="previewCode" class="admin-note" role="status">
@@ -225,7 +253,7 @@ onUnmounted(clearCooldownTimer);
           :disabled="!canRequestCode"
           @click="requestCode"
         >
-          {{ isManualMode ? "请向管理员获取" : requestCodeLabel }}
+          {{ requestCodeActionLabel }}
         </button>
       </div>
 

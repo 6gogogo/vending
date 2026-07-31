@@ -31,9 +31,10 @@ export class AuthController {
     body: {
       phone: string;
       scene?: "app-login" | "register" | "general" | "password-reset";
+      username?: string;
     }
   ) {
-    return ok(await this.authService.requestCode(body.phone, body.scene));
+    return ok(await this.authService.requestCode(body.phone, body.scene, body.username));
   }
 
   @Post("mobile-login")

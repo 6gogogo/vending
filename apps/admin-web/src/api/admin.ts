@@ -102,13 +102,14 @@ export const adminApi = {
   publicRuntimeConfig() {
     return adminClient.get<PublicRuntimeConfig>("/public-config");
   },
-  requestBackofficePasswordResetCode(phone: string) {
+  requestBackofficePasswordResetCode(username: string, phone: string) {
     return adminClient.post<{
       phone: string;
       expiresInSeconds: number;
       provider: "mock" | "aliyun_pnvs" | "manual";
       previewCode?: string;
     }>("/auth/request-code", {
+      username,
       phone,
       scene: "password-reset"
     });

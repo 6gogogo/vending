@@ -27,7 +27,9 @@ import {
 } from "../src/modules/auth/first-backoffice-password";
 import {
   initializeFirstSuperAdminPassword,
-  MIN_FIRST_SUPER_ADMIN_PASSWORD_LENGTH
+  MIN_FIRST_SUPER_ADMIN_PASSWORD_LENGTH,
+  MIN_SUPER_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH,
+  recoverSuperAdminBackofficePassword
 } from "../src/modules/auth/first-super-admin-password";
 import { verifyAdminPassword } from "../src/modules/auth/admin-password.utils";
 import { AuthService } from "../src/modules/auth/auth.service";
@@ -62,6 +64,11 @@ const createAuthService = (
       expiresInSeconds: number;
       provider: "mock" | "aliyun_pnvs" | "manual";
     }>;
+    describeCodeRequest?: (phone: string) => {
+      phone: string;
+      expiresInSeconds: number;
+      provider: "mock" | "aliyun_pnvs" | "manual";
+    };
     verifyCode: (phone: string, code: string, purpose?: VerificationPurpose) => Promise<boolean>;
   } = {
     requestCode: async (phone) => ({
@@ -614,6 +621,173 @@ test("服务商超级管理员首次改密只处理固定默认账号、保持�
       ),
     /至少需要/u
   );
+});
+
+test("本机服务商密码恢复处理凭据导入生成的 live provider 并撤销旧会话", async () => {
+  const store = createIsolatedStore();
+  const initialCredential = store.backofficeCredentials.find((credential) =>
+    store.isDefaultSuperAdminBootstrapCredential(credential)
+  );
+  const user = store.users.find((entry) => entry.id === initialCredential?.userId);
+  assert.ok(initialCredential);
+  assert.ok(user);
+
+  const initialized = initializeFirstSuperAdminPassword(
+    store,
+    "initial-provider-password"
+  );
+  user.id = "live-provider-test";
+  initialized.credential.userId = user.id;
+  initialized.credential.username = "live-provider";
+  const authService = createAuthService(store);
+  const existingSession = await authService.backofficeLogin(
+    "live-provider",
+    "initial-provider-password"
+  );
+  const recoveredPassword = "recovered-provider-password";
+
+  assert.equal(MIN_SUPER_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_LENGTH, 8);
+  const result = recoverSuperAdminBackofficePassword(store, recoveredPassword);
+
+  assert.equal(result.credential.userId, user.id);
+  assert.equal(result.credential.username, "live-provider");
+  assert.equal(result.credential.role, "super_admin");
+  assert.equal(result.credential.tenantId, undefined);
+  assert.equal(result.credential.usesDefaultPassword, false);
+  assert.equal(
+    verifyAdminPassword(
+      recoveredPassword,
+      result.credential.passwordSalt,
+      result.credential.passwordHash
+    ),
+    true
+  );
+  assert.equal(store.getSession(existingSession.token), undefined);
+  assert.ok(
+    store.logs.some(
+      (entry) =>
+        entry.type === "recover-super-admin-backoffice-password" &&
+        entry.metadata?.recoveryMethod === "local-tty"
+    )
+  );
+});
+
+test("本机服务商密码恢复在存在多个有效 super_admin 时失败关闭", () => {
+  const store = createIsolatedStore();
+  const initialCredential = store.backofficeCredentials.find((credential) =>
+    store.isDefaultSuperAdminBootstrapCredential(credential)
+  );
+  const user = store.users.find((entry) => entry.id === initialCredential?.userId);
+  assert.ok(user);
+
+  const initialized = initializeFirstSuperAdminPassword(
+    store,
+    "initial-provider-password"
+  );
+  const duplicateUser = {
+    ...user,
+    id: "live-provider-duplicate"
+  };
+  store.users.push(duplicateUser);
+  store.backofficeCredentials.push({
+    ...initialized.credential,
+    userId: duplicateUser.id,
+    username: "duplicate-live-provider"
+  });
+
+  assert.throws(
+    () => recoverSuperAdminBackofficePassword(store, "recovered-provider-password"),
+    /不存在唯一有效的服务商超级管理员/u
+  );
+});
+
+test("实例找回页对服务商和未知账号统一无副作用拒绝", async () => {
+  const store = createIsolatedStore();
+  const initialCredential = store.backofficeCredentials.find((credential) =>
+    store.isDefaultSuperAdminBootstrapCredential(credential)
+  );
+  const user = store.users.find((entry) => entry.id === initialCredential?.userId);
+  assert.ok(user);
+
+  const initialized = initializeFirstSuperAdminPassword(
+    store,
+    "initial-provider-password"
+  );
+  user.id = "live-provider-reset-boundary";
+  initialized.credential.userId = user.id;
+  initialized.credential.username = "live-provider";
+  let requestCalls = 0;
+  let verificationCalls = 0;
+  const authService = createAuthService(store, {
+    requestCode: async (phone) => {
+      requestCalls += 1;
+      return {
+        phone,
+        expiresInSeconds: 300,
+        provider: "mock"
+      };
+    },
+    describeCodeRequest: (phone) => ({
+      phone,
+      expiresInSeconds: 300,
+      provider: "mock"
+    }),
+    verifyCode: async () => {
+      verificationCalls += 1;
+      return true;
+    }
+  });
+
+  const providerRequest = await authService.requestCode(
+    user.phone,
+    "password-reset",
+    "live-provider"
+  );
+  const unknownRequest = await authService.requestCode(
+    user.phone,
+    "password-reset",
+    "unknown-provider"
+  );
+  assert.deepEqual(providerRequest, unknownRequest);
+  assert.equal(requestCalls, 0);
+
+  const adminCredential = store.findBackofficeCredentialByUsername("admin");
+  const adminUser = store.users.find((entry) => entry.id === adminCredential?.userId);
+  assert.ok(adminUser);
+  const instanceRequest = await authService.requestCode(
+    adminUser.phone,
+    "password-reset",
+    "admin"
+  );
+  assert.equal(instanceRequest.phone, adminUser.phone);
+  assert.equal(requestCalls, 1);
+
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "live-provider",
+        phone: user.phone,
+        code: "123456",
+        newPassword: "should-not-replace-provider-password"
+      }),
+    /账号、手机号或验证码不正确/u
+  );
+  await assert.rejects(
+    () =>
+      authService.resetOwnBackofficePassword({
+        username: "unknown-provider",
+        phone: user.phone,
+        code: "123456",
+        newPassword: "should-not-replace-provider-password"
+      }),
+    /账号、手机号或验证码不正确/u
+  );
+  assert.equal(verificationCalls, 0);
+  const login = await authService.backofficeLogin(
+    "live-provider",
+    "initial-provider-password"
+  );
+  assert.equal(login.user.backofficeRole, "super_admin");
 });
 
 test("启动时会修复旧 admin 凭据仍标记默认密码的历史状态", () => {

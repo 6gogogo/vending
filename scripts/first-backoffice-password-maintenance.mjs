@@ -5,6 +5,8 @@ export const MAINTENANCE_DROP_IN_NAME =
   "95-first-backoffice-password-maintenance.conf";
 export const ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME =
   "96-admin-backoffice-password-recovery.conf";
+export const SUPER_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME =
+  "94-super-admin-backoffice-password-recovery.conf";
 export const LOGIND_COMMAND_ENVIRONMENT = Object.freeze({
   PATH: "/usr/bin:/bin",
   LANG: "C",

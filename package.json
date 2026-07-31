@@ -17,6 +17,7 @@
     "init:first-super-admin-password:maintenance": "node scripts/run-first-super-admin-password-maintenance.mjs",
     "preflight:first-super-admin-password:maintenance": "node scripts/run-first-super-admin-password-maintenance-preflight.mjs",
     "recover:admin-backoffice-password:maintenance": "node scripts/run-recover-admin-backoffice-password-maintenance.mjs",
+    "recover:super-admin-backoffice-password:maintenance": "node scripts/run-recover-super-admin-backoffice-password-maintenance.mjs",
     "init:all-data:keep-uploads": "npm run data:init:empty --workspace @vm/api -- --keep-uploads",
     "backup:api-data": "npm run data:backup --workspace @vm/api --",
     "verify:api-data": "npm run data:verify --workspace @vm/api --",

@@ -83,8 +83,16 @@ export class AuthService {
 
   async requestCode(
     phone: string,
-    scene: "app-login" | "register" | "general" | "password-reset" = "general"
+    scene: "app-login" | "register" | "general" | "password-reset" = "general",
+    username?: string
   ) {
+    if (scene === "password-reset") {
+      const target = this.resolveBackofficePasswordResetTarget(username, phone);
+      if (!target) {
+        return this.verificationCodeService.describeCodeRequest(phone);
+      }
+    }
+
     return this.verificationCodeService.requestCode(phone, scene);
   }
 
@@ -946,9 +954,12 @@ export class AuthService {
   }) {
     const normalizedUsername = payload.username.trim().toLowerCase();
     const normalizedPassword = payload.newPassword.trim();
-    const credential = this.store.findBackofficeCredentialByUsername(normalizedUsername);
-    const minimumPasswordLength = credential
-      ? getBackofficePasswordMinimumLength(credential)
+    const target = this.resolveBackofficePasswordResetTarget(
+      normalizedUsername,
+      payload.phone
+    );
+    const minimumPasswordLength = target
+      ? getBackofficePasswordMinimumLength(target.credential)
       : MIN_STANDARD_BACKOFFICE_PASSWORD_LENGTH;
 
     if (!normalizedUsername || normalizedPassword.length < minimumPasswordLength) {
@@ -957,23 +968,20 @@ export class AuthService {
       );
     }
 
+    if (!target) {
+      throw new UnauthorizedException("账号、手机号或验证码不正确。");
+    }
+
+    const { credential, user } = target;
+
     const verification = await this.checkCodeWithContext(
       payload.phone,
       payload.code,
       "password-reset"
     );
 
-    const user = credential
-      ? this.store.users.find((entry) => entry.id === credential.userId)
-      : undefined;
-
     if (
       !verification.verified ||
-      !credential ||
-      !user ||
-      user.status !== "active" ||
-      !this.store.isBackofficeCredentialValidForUser(user, credential) ||
-      user.phone !== payload.phone.trim() ||
       (verification.targetUserId !== undefined &&
         verification.targetUserId !== user.id) ||
       (verification.tenantId !== undefined &&
@@ -1036,6 +1044,48 @@ export class AuthService {
     this.clearPasswordLoginAccountFailures(normalizedUsername);
 
     return { reset: true };
+  }
+
+  private resolveBackofficePasswordResetTarget(
+    username: string | undefined,
+    phone: string
+  ) {
+    const normalizedUsername = username?.trim().toLowerCase() ?? "";
+    const normalizedPhone = phone.trim();
+    if (!normalizedUsername || !normalizedPhone) {
+      return undefined;
+    }
+
+    const matches = this.store.backofficeCredentials.flatMap((credential) => {
+      if (credential.username.trim().toLowerCase() !== normalizedUsername) {
+        return [];
+      }
+
+      const user = this.store.users.find((entry) => entry.id === credential.userId);
+      if (
+        !user ||
+        !this.store.isBackofficeCredentialValidForUser(user, credential)
+      ) {
+        return [];
+      }
+
+      return [{ credential, user }];
+    });
+
+    if (matches.length !== 1) {
+      return undefined;
+    }
+
+    const [target] = matches;
+    if (
+      target.credential.role === "super_admin" ||
+      target.user.status !== "active" ||
+      target.user.phone !== normalizedPhone
+    ) {
+      return undefined;
+    }
+
+    return target;
   }
 
   createBackofficeCredential(

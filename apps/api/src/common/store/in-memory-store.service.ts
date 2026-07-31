@@ -1365,7 +1365,8 @@ export class InMemoryStoreService {
     return (
       user.id === DEFAULT_SUPER_ADMIN_USER_ID ||
       user.id === LEGACY_SUPER_ADMIN_USER_ID ||
-      user.id.startsWith("live-super-admin")
+      user.id.startsWith("live-super-admin") ||
+      user.id.startsWith("live-provider-")
     );
   }
 

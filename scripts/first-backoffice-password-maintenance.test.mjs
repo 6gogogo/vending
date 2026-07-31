@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME,
   MAINTENANCE_DROP_IN_NAME,
+  SUPER_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME,
   LOGIND_COMMAND_ENVIRONMENT,
   assertLocalGraphicalLogindSession,
   createFirstBackofficeMaintenanceCancellationCoordinator,
@@ -79,6 +80,30 @@ test("admin 密码恢复脚本拒绝参数，避免从命令行接收口令", ()
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
+test("服务商超级管理员密码恢复脚本拒绝参数，避免从命令行接收口令", () => {
+  const command = resolveTypeScriptMaintenanceCommand({
+    tsxCliPath: resolve(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    tsconfigPath: resolve(repositoryRoot, "apps", "api", "tsconfig.json"),
+    scriptPath: resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "recover-super-admin-backoffice-password.ts"
+    ),
+    args: ["--probe"]
+  });
+  const result = spawnSync(process.execPath, command, {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /本命令不接受参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
 test("admin 密码恢复维护入口固定运行器且拒绝命令行参数", () => {
   const result = spawnSync(
     process.execPath,
@@ -98,6 +123,28 @@ test("admin 密码恢复维护入口固定运行器且拒绝命令行参数", ()
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /admin 后台密码恢复命令不接受任何参数/u);
+  assert.doesNotMatch(result.stderr, /TransformError/u);
+});
+
+test("服务商超级管理员密码恢复维护入口固定运行器且拒绝命令行参数", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(
+        repositoryRoot,
+        "scripts",
+        "run-recover-super-admin-backoffice-password-maintenance.mjs"
+      ),
+      "--probe"
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8"
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /服务商超级管理员密码恢复命令不接受任何参数/u);
   assert.doesNotMatch(result.stderr, /TransformError/u);
 });
 
@@ -387,6 +434,35 @@ test("admin 密码恢复在要求确认或输入密码前先取得金融单写�
   );
 });
 
+test("服务商超级管理员密码恢复先固定目标和取得租约，再要求确认或输入密码", () => {
+  const source = readFileSync(
+    resolve(
+      repositoryRoot,
+      "apps",
+      "api",
+      "src",
+      "scripts",
+      "recover-super-admin-backoffice-password.ts"
+    ),
+    "utf8"
+  );
+  const targetPosition = source.indexOf(
+    "assertSuperAdminBackofficePasswordRecoveryTarget(new InMemoryStoreService())"
+  );
+  const leasePosition = source.indexOf(
+    "const financialWriter = acquireFinancialSingleWriterForMaintenance()"
+  );
+  const confirmationPosition = source.indexOf("await assertRecoveryConfirmation()");
+  const passwordPosition = source.indexOf("const password = await readConfirmedPassword");
+
+  assert.ok(targetPosition >= 0);
+  assert.ok(leasePosition > targetPosition);
+  assert.ok(confirmationPosition > leasePosition);
+  assert.ok(passwordPosition > confirmationPosition);
+  assert.match(source, /RESET SUPER ADMIN/u);
+  assert.doesNotMatch(source, /username:/u);
+});
+
 test("预检文案不把 API 恢复误称为绝对零写入", () => {
   const preflightScript = readFileSync(
     resolve(
@@ -464,6 +540,37 @@ test("admin 密码恢复使用独立受控 drop-in，不与首次初始化路径
     /^ExecStart=\/home\/fivegogogo\/.nvm\/versions\/node\/v22\.22\.2\/bin\/node \/home\/fivegogogo\/vending\/current\/scripts\/recover-admin-backoffice-password-maintenance-runner\.mjs$/mu
   );
   assert.doesNotMatch(plan.contents, /^Environment(?:File)?=/mu);
+});
+
+test("服务商超级管理员密码恢复使用固定独立 drop-in，且不注入环境变量", () => {
+  const plan = resolveFirstBackofficeMaintenancePlan({
+    runtimeDirectory: "/run/user/1000",
+    workingDirectory: "/home/fivegogogo/vending/current",
+    nodeExecutable: "/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/node",
+    runnerPath:
+      "/home/fivegogogo/vending/current/scripts/recover-super-admin-backoffice-password-maintenance-runner.mjs",
+    ttyPath: "/dev/pts/8",
+    dropInName: SUPER_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME
+  });
+
+  assert.equal(
+    plan.dropInPath,
+    "/run/user/1000/systemd/user/vending-api-candidate.service.d/94-super-admin-backoffice-password-recovery.conf"
+  );
+  assert.notEqual(
+    SUPER_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME,
+    ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME
+  );
+  assert.notEqual(
+    SUPER_ADMIN_BACKOFFICE_PASSWORD_RECOVERY_DROP_IN_NAME,
+    MAINTENANCE_DROP_IN_NAME
+  );
+  assert.match(
+    plan.contents,
+    /^ExecStart=\/home\/fivegogogo\/.nvm\/versions\/node\/v22\.22\.2\/bin\/node \/home\/fivegogogo\/vending\/current\/scripts\/recover-super-admin-backoffice-password-maintenance-runner\.mjs$/mu
+  );
+  assert.doesNotMatch(plan.contents, /^Environment(?:File)?=/mu);
+  assert.doesNotMatch(plan.contents, /(?:password|code|secret)=/iu);
 });
 
 test("首次后台密码预检使用独立受控 drop-in，并保持同一 VNC TTY 契约", () => {
@@ -575,6 +682,10 @@ test("旧的直接首次密码初始化 npm 入口已移除", () => {
   assert.equal(
     rootPackage.scripts["preflight:first-super-admin-password:maintenance"],
     "node scripts/run-first-super-admin-password-maintenance-preflight.mjs"
+  );
+  assert.equal(
+    rootPackage.scripts["recover:super-admin-backoffice-password:maintenance"],
+    "node scripts/run-recover-super-admin-backoffice-password-maintenance.mjs"
   );
 });
 

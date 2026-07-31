@@ -19,7 +19,7 @@ import { assertConfiguredRuntimeDataPlaneVerificationPolicy } from "../../common
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import type { VerificationPurpose } from "../../common/store/persistence";
 
-interface VerificationCodeResult {
+export interface VerificationCodeResult {
   phone: string;
   expiresInSeconds: number;
   provider: VerificationProvider;
@@ -256,6 +256,17 @@ export class VerificationCodeService {
     return {
       provider,
       previewEnabled: provider === "mock" && this.isPreviewEnabled()
+    };
+  }
+
+  describeCodeRequest(phone: string): VerificationCodeResult {
+    const normalizedPhone = this.normalizePhone(phone);
+    const { provider } = this.getRuntimeConfig();
+
+    return {
+      phone: normalizedPhone,
+      expiresInSeconds: 300,
+      provider
     };
   }
 
