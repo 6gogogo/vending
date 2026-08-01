@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 
-type GuideAudienceId = "provider" | "tenant-admin" | "operator" | "app-user";
+type GuideAudienceId = "tenant-admin" | "operator" | "app-user";
 
 interface GuideAudience {
   id: GuideAudienceId;
@@ -14,25 +14,6 @@ interface GuideAudience {
 
 const audiences: GuideAudience[] = [
   {
-    id: "provider",
-    label: "服务提供商",
-    summary: "维护已开通的客户实例，再进入目标实例处理该实例的业务。",
-    steps: [
-      "平台首次部署时，由平台初始化负责人通过受控初始化流程建立首个服务商账号；实例管理员不能开通或重置服务商账号。",
-      "使用服务商账号登录，打开“服务商后台 → 全局工作台”。",
-      "正式实例先由服务管理员建立独立数据平面、域名和首管理员；完成生产门禁后会出现在全局工作台。",
-      "在实例列表选择“维护实例”，更新实例名称、运行状态、地址、联系人和服务方案；暂停不会删除现有记录。",
-      "确认实例名称和首管理员交接信息后，选择“进入实例”。进入后才会出现实例业务菜单；需要处理其他客户时先选择“退出当前实例”。"
-    ],
-    tips: [
-      "服务商账号属于平台范围，不能由任何客户实例中的角色向上授权。",
-      "平台账号未进入实例时不能访问柜机、人员、库存等实例业务数据。",
-      "进入实例后，只处理当前实例；不要在不同客户之间复用账号或人工码。",
-      "当前正式数据平面不能在线追加第二个客户实例；新增正式实例需要独立生产开通。",
-      "密码、会话令牌和人工码请仅通过安全渠道交付。"
-    ]
-  },
-  {
     id: "tenant-admin",
     label: "实例管理员",
     summary: "配置领取方式，管理人员、角色和柜机，并为 App 用户签发登录码。",
@@ -40,7 +21,7 @@ const audiences: GuideAudience[] = [
       "在“领取与服务设置”确认预约取货和额度规则。预约制不创建支付单，也不需要支付配置。",
       "在“人员管理”完成建档、审核和启用；给商户或补货员分配相应后台角色及可操作柜机。",
       "确认柜机在线且有可预约库存，再为已启用的 App 账号签发“APP / 小程序登录”用途的 6 位一次性验证码。",
-      "忘记后台密码时，在登录页选择“忘记密码”，使用绑定手机号和找回验证码自行重置；无法自助时由服务提供商进入本实例代重置。",
+      "忘记后台密码时，在登录页选择“忘记密码”，使用绑定手机号和另一名实例管理员签发的找回验证码重置；没有其他管理员时联系技术支持。",
       "用户完成登录和预约后，在人员记录、预约和操作日志中查看处理结果。"
     ],
     tips: [
@@ -84,7 +65,7 @@ const audiences: GuideAudience[] = [
   }
 ];
 
-const selectedAudienceId = ref<GuideAudienceId>("provider");
+const selectedAudienceId = ref<GuideAudienceId>("tenant-admin");
 const selectedAudience = computed(
   () => audiences.find((audience) => audience.id === selectedAudienceId.value) ?? audiences[0]
 );
@@ -97,7 +78,7 @@ const selectedAudience = computed(
         <p class="public-guide__eyebrow">使用说明</p>
         <h1>公益智助柜操作指引</h1>
         <p class="public-guide__intro">
-          按身份查看从开通、登录到预约取货的操作步骤。后台业务权限由当前会话和实例范围决定。
+          按身份查看登录、日常管理、预约和领取步骤。页面只显示当前账号可以使用的功能。
         </p>
       </div>
       <RouterLink class="admin-button public-guide__login" to="/login">进入后台登录</RouterLink>
@@ -156,14 +137,14 @@ const selectedAudience = computed(
         <p class="public-guide__eyebrow">遇到问题</p>
         <h2>先找对应管理员</h2>
         <p>
-          App 用户联系当前实例管理员；商户和补货员联系分配其柜机的管理员；服务提供商处理已开通实例的状态和实例切换，新增正式实例由服务管理员完成生产开通。
+          App 用户、商户和补货员先联系当前实例管理员；唯一管理员无法找回密码或系统无法正常使用时，再联系技术支持。
         </p>
       </article>
     </section>
 
     <footer class="public-guide__footer">
       <RouterLink class="admin-link" to="/login">返回后台登录</RouterLink>
-      <span>遇到问题请联系当前实例管理员或服务管理员。</span>
+      <span>遇到问题请先联系当前实例管理员。</span>
     </footer>
   </main>
 </template>
@@ -241,7 +222,7 @@ const selectedAudience = computed(
 
 .public-guide__tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 

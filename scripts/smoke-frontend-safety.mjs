@@ -94,6 +94,8 @@ const adminAppSource = readSource("apps/admin-web/src/App.vue");
 const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
 const adminLoginSource = readSource("apps/admin-web/src/pages/AdminLoginPage.vue");
 const adminSystemSettingsPageSource = readSource("apps/admin-web/src/pages/SystemSettingsPage.vue");
+const publicGuideSource = readSource("apps/admin-web/src/pages/PublicGuidePage.vue");
+const userManualSource = readSource("docs/公益智助柜用户使用手册.md");
 const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
@@ -194,6 +196,49 @@ assert.match(
   "后台登录页在手机宽度必须保留左右安全边距"
 );
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
+for (const userGuideSource of [publicGuideSource, userManualSource]) {
+  assert.doesNotMatch(
+    userGuideSource,
+    /服务提供商|服务商|数据平面|生产门禁|平台初始化/,
+    "面向实例用户的操作说明不得出现平台身份或内部部署概念"
+  );
+}
+for (const userRoleLabel of ["实例管理员", "商户", "补货员", "App 用户"]) {
+  assert.ok(
+    userManualSource.includes(userRoleLabel),
+    "用户手册必须包含" + userRoleLabel + "说明"
+  );
+}
+assert.match(
+  publicGuideSource,
+  /type GuideAudienceId = "tenant-admin" \| "operator" \| "app-user";/,
+  "公网操作说明只能展示实例内用户身份"
+);
+assert.match(
+  publicGuideSource,
+  /const selectedAudienceId = ref<GuideAudienceId>\("tenant-admin"\)/,
+  "公网操作说明必须默认展示实例管理员"
+);
+assert.match(
+  publicGuideSource,
+  /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/,
+  "公网操作说明的身份页签必须与三个实例内用户分组一致"
+);
+for (const screenshotName of [
+  "backoffice-login-public-1280x720-20260729.png",
+  "backoffice-instance-settings-live-1440x900-20260730.jpg",
+  "app-public-login-390x844-20260729.png",
+  "app-public-manual-login-390x844-20260729.png"
+]) {
+  assert.ok(
+    userManualSource.includes("assets/" + screenshotName),
+    "用户手册必须引用截图 " + screenshotName
+  );
+  assert.ok(
+    existsSync(resolve(process.cwd(), "docs", "assets", screenshotName)),
+    "用户手册截图必须存在：" + screenshotName
+  );
+}
 assert.match(
   systemSettingsPageSource,
   /<RouterLink class="admin-button admin-button--ghost settings-page__guide-link" to="\/guide">查看操作说明<\/RouterLink>/,
