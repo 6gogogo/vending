@@ -423,6 +423,7 @@ export class AuthService {
   ): Promise<BackofficeSessionResult> {
     this.assertPasswordLoginAllowed(username, sourceKey);
     const credential = this.store.findBackofficeCredentialByUsername(username);
+    const normalizedPassword = password.trim();
 
     if (!credential) {
       this.recordPasswordLoginFailure(username, sourceKey);
@@ -435,7 +436,14 @@ export class AuthService {
         this.store.isBackofficeCredentialValidForUser(entry, credential)
     );
 
-    if (!user || !verifyAdminPassword(password, credential.passwordSalt, credential.passwordHash)) {
+    if (
+      !user ||
+      !verifyAdminPassword(
+        normalizedPassword,
+        credential.passwordSalt,
+        credential.passwordHash
+      )
+    ) {
       this.recordPasswordLoginFailure(username, sourceKey);
       throw new UnauthorizedException("账号或密码不正确。");
     }

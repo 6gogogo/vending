@@ -10,6 +10,7 @@ const sessionStore = useAdminSessionStore();
 
 const username = ref("");
 const password = ref("");
+const showPassword = ref(false);
 const busy = ref(false);
 const errorMessage = ref("");
 
@@ -53,19 +54,35 @@ const submit = async () => {
         />
       </label>
 
-      <label class="admin-field">
-        <span class="admin-field__label">密码</span>
-        <input
-          v-model="password"
-          class="admin-input"
-          type="password"
-          name="password"
-          autocomplete="current-password"
-          placeholder="请输入管理员密码"
-        />
-      </label>
+      <div class="admin-field">
+        <label class="admin-field__label" for="backoffice-password">密码</label>
+        <div class="login-panel__password-control">
+          <input
+            id="backoffice-password"
+            v-model="password"
+            class="admin-input"
+            :type="showPassword ? 'text' : 'password'"
+            name="password"
+            autocomplete="current-password"
+            autocapitalize="none"
+            spellcheck="false"
+            placeholder="请输入管理员密码"
+          />
+          <button
+            class="login-panel__password-toggle"
+            type="button"
+            :aria-pressed="showPassword"
+            @click="showPassword = !showPassword"
+          >
+            {{ showPassword ? "隐藏密码" : "显示密码" }}
+          </button>
+        </div>
+      </div>
 
-      <div v-if="errorMessage" class="admin-note login-panel__error" role="alert">{{ errorMessage }}</div>
+      <div v-if="errorMessage" class="admin-note login-panel__error" role="alert">
+        <span>{{ errorMessage }}</span>
+        <small>刚重置过密码时，请先清空浏览器自动填充，再重新输入并核对。</small>
+      </div>
 
       <button class="admin-button" type="submit" :disabled="busy || !username || !password">
         {{ busyLabel }}
@@ -146,9 +163,38 @@ const submit = async () => {
 }
 
 .login-panel__error {
+  display: grid;
+  gap: 6px;
   background: #fff1ef;
   border-color: #e4b7b2;
   color: #a5443f;
+}
+
+.login-panel__password-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.login-panel__password-control .admin-input {
+  min-width: 0;
+}
+
+.login-panel__password-toggle {
+  min-width: 84px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--admin-accent-strong);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.login-panel__password-toggle:hover,
+.login-panel__password-toggle:focus-visible {
+  border-color: var(--admin-accent);
+  background: #f2f8f4;
 }
 
 .login-panel__guide {

@@ -201,6 +201,16 @@ assert.match(
   /--login-shell-gutter: 36px/,
   "后台登录页在手机宽度必须保留左右安全边距"
 );
+assert.match(
+  adminLoginSource,
+  /:type="showPassword \? 'text' : 'password'"/,
+  "后台登录页必须允许用户核对浏览器实际填入的密码"
+);
+assert.match(
+  adminLoginSource,
+  /清空浏览器自动填充/,
+  "后台登录失败时必须提示清除旧的浏览器自动填充"
+);
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
 const roleSpecificManualSources = [
   instanceAdminManualSource,

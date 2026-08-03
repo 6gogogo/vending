@@ -672,6 +672,21 @@ test("本机服务商密码恢复处理凭据导入生成的 live provider 并�
   );
 });
 
+test("服务商密码恢复与后台登录使用相同的首尾空白归一化", async () => {
+  const store = createIsolatedStore();
+  initializeFirstSuperAdminPassword(store, "initial-provider-password");
+  const passwordEnteredInLocalTerminal = "  recovered-provider-password  ";
+
+  recoverSuperAdminBackofficePassword(store, passwordEnteredInLocalTerminal);
+  const authService = createAuthService(store);
+  const session = await authService.backofficeLogin(
+    "super",
+    passwordEnteredInLocalTerminal
+  );
+
+  assert.equal(session.user.backofficeRole, "super_admin");
+});
+
 test("启动时修复平台服务商误绑实例并丢失保留标签的历史状态", () => {
   const store = createIsolatedStore();
   const credential = store.backofficeCredentials.find(
