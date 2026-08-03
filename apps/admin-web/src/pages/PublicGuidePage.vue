@@ -53,7 +53,9 @@ import { RouterLink } from "vue-router";
 
 <style scoped>
 .login-guide {
-  width: min(960px, 100%);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 960px;
   min-height: 100vh;
   margin: 0 auto;
   padding: 32px 24px 40px;
@@ -69,6 +71,14 @@ import { RouterLink } from "vue-router";
   border-left: 5px solid var(--admin-accent);
   border-radius: 10px;
   background: #ffffff;
+}
+
+.login-guide__header > div,
+.login-guide__entries,
+.login-guide__card,
+.login-guide__checklist,
+.login-guide__checklist > * {
+  min-width: 0;
 }
 
 .login-guide h1,
@@ -95,6 +105,7 @@ import { RouterLink } from "vue-router";
 .login-guide__footer {
   color: var(--admin-muted);
   line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 
 .login-guide__eyebrow {

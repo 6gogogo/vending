@@ -229,6 +229,11 @@ assert.doesNotMatch(
   "登录前向导不得包含分角色详细操作手册"
 );
 assert.match(
+  publicGuideSource,
+  /\.login-guide \{[\s\S]{0,100}box-sizing: border-box;[\s\S]{0,100}width: 100%;[\s\S]{0,100}max-width: 960px;/,
+  "登录前向导必须使用视口内盒模型，避免手机宽度出现横向裁切"
+);
+assert.match(
   roleManualSource,
   /if \(role === "super_admin"\) \{[\s\S]{0,80}return roleManualOrder;/,
   "只有服务商角色可以取得全部角色手册"
