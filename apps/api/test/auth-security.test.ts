@@ -672,6 +672,42 @@ test("本机服务商密码恢复处理凭据导入生成的 live provider 并�
   );
 });
 
+test("启动时修复平台服务商误绑实例并丢失保留标签的历史状态", () => {
+  const store = createIsolatedStore();
+  const credential = store.backofficeCredentials.find(
+    (entry) => entry.role === "super_admin" && entry.tenantId === undefined
+  );
+  const user = store.users.find((entry) => entry.id === credential?.userId);
+  const tenant = store.platformTenants[0];
+  assert.ok(credential);
+  assert.ok(user);
+  assert.ok(tenant);
+
+  user.tenantId = tenant.id;
+  user.tags = user.tags.filter(
+    (tag) => tag !== "super-admin" && tag !== "hidden-backoffice"
+  );
+  store.persist();
+
+  const restarted = new InMemoryStoreService();
+  const repairedCredential = restarted.backofficeCredentials.find(
+    (entry) => entry.userId === credential.userId && entry.role === "super_admin"
+  );
+  const repairedUser = restarted.users.find((entry) => entry.id === credential.userId);
+  assert.ok(repairedCredential);
+  assert.ok(repairedUser);
+  assert.equal(repairedUser.tenantId, undefined);
+  assert.ok(repairedUser.tags.includes("super-admin"));
+  assert.ok(repairedUser.tags.includes("hidden-backoffice"));
+  assert.equal(
+    restarted.isBackofficeCredentialValidForUser(repairedUser, repairedCredential),
+    true
+  );
+  assert.doesNotThrow(() =>
+    recoverSuperAdminBackofficePassword(restarted, "recovered-provider-password")
+  );
+});
+
 test("本机服务商密码恢复在存在多个有效 super_admin 时失败关闭", () => {
   const store = createIsolatedStore();
   const initialCredential = store.backofficeCredentials.find((credential) =>

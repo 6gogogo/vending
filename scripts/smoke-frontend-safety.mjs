@@ -95,7 +95,13 @@ const adminCopySource = readSource("apps/admin-web/src/constants/copy.ts");
 const adminLoginSource = readSource("apps/admin-web/src/pages/AdminLoginPage.vue");
 const adminSystemSettingsPageSource = readSource("apps/admin-web/src/pages/SystemSettingsPage.vue");
 const publicGuideSource = readSource("apps/admin-web/src/pages/PublicGuidePage.vue");
+const roleGuideSource = readSource("apps/admin-web/src/pages/RoleGuidePage.vue");
+const roleManualSource = readSource("apps/admin-web/src/utils/role-manual.ts");
 const userManualSource = readSource("docs/公益智助柜用户使用手册.md");
+const instanceAdminManualSource = readSource("docs/用户手册/实例管理员使用手册.md");
+const merchantManualSource = readSource("docs/用户手册/商户使用手册.md");
+const restockerManualSource = readSource("docs/用户手册/补货员使用手册.md");
+const appUserManualSource = readSource("docs/用户手册/App用户使用手册.md");
 const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
@@ -196,53 +202,80 @@ assert.match(
   "后台登录页在手机宽度必须保留左右安全边距"
 );
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
-for (const userGuideSource of [publicGuideSource, userManualSource]) {
+const roleSpecificManualSources = [
+  instanceAdminManualSource,
+  merchantManualSource,
+  restockerManualSource,
+  appUserManualSource
+];
+for (const userGuideSource of [publicGuideSource, userManualSource, ...roleSpecificManualSources]) {
   assert.doesNotMatch(
     userGuideSource,
     /服务提供商|服务商|数据平面|生产门禁|平台初始化/,
     "面向实例用户的操作说明不得出现平台身份或内部部署概念"
   );
 }
-for (const userRoleLabel of ["实例管理员", "商户", "补货员", "App 用户"]) {
-  assert.ok(
-    userManualSource.includes(userRoleLabel),
-    "用户手册必须包含" + userRoleLabel + "说明"
-  );
+for (const source of [publicGuideSource, roleGuideSource, roleManualSource, ...roleSpecificManualSources]) {
+  assert.doesNotMatch(source, /设计自述|验收步骤|验收结果/, "用户帮助内容不得出现设计或验收自述");
 }
 assert.match(
   publicGuideSource,
-  /type GuideAudienceId = "tenant-admin" \| "operator" \| "app-user";/,
-  "公网操作说明只能展示实例内用户身份"
+  /详细操作手册会在登录后按当前账号身份显示/,
+  "登录前向导必须说明详细手册在登录后可见"
+);
+assert.doesNotMatch(
+  publicGuideSource,
+  /GuideAudienceId|role="tablist"|签发 App 登录验证码|管理货品、库存和柜机/,
+  "登录前向导不得包含分角色详细操作手册"
 );
 assert.match(
-  publicGuideSource,
-  /const selectedAudienceId = ref<GuideAudienceId>\("tenant-admin"\)/,
-  "公网操作说明必须默认展示实例管理员"
+  roleManualSource,
+  /if \(role === "super_admin"\) \{[\s\S]{0,80}return roleManualOrder;/,
+  "只有服务商角色可以取得全部角色手册"
 );
+for (const [role, expectedManual] of [
+  ["admin", "admin"],
+  ["merchant", "merchant"],
+  ["restocker", "restocker"]
+]) {
+  assert.match(
+    roleManualSource,
+    new RegExp(role + ': "' + expectedManual + '"'),
+    role + " 角色必须只映射到自己的手册"
+  );
+}
+assert.match(roleGuideSource, /v-if="showRoleTabs"/, "多角色页签只能在服务商可见集合中显示");
 assert.match(
-  publicGuideSource,
-  /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/,
-  "公网操作说明的身份页签必须与三个实例内用户分组一致"
+  adminRouterSource,
+  /path: "\/manual"[\s\S]{0,420}backofficeRoles: \["super_admin", "admin", "merchant", "restocker"\]/,
+  "登录后手册路由必须允许所有后台角色进入"
 );
-for (const screenshotName of [
-  "backoffice-login-public-1280x720-20260729.png",
-  "backoffice-instance-settings-live-1440x900-20260730.jpg",
-  "app-public-login-390x844-20260729.png",
-  "app-public-manual-login-390x844-20260729.png"
+assert.doesNotMatch(
+  adminRouterSource,
+  /to\.path === "\/manual"/,
+  "登录后手册不得加入公开路由白名单"
+);
+for (const [manualSource, screenshotName] of [
+  [instanceAdminManualSource, "backoffice-login-public-1280x720-20260729.png"],
+  [instanceAdminManualSource, "backoffice-instance-settings-live-1440x900-20260730.jpg"],
+  [merchantManualSource, "backoffice-login-public-1280x720-20260729.png"],
+  [restockerManualSource, "backoffice-login-public-1280x720-20260729.png"],
+  [appUserManualSource, "app-public-login-390x844-20260729.png"],
+  [appUserManualSource, "app-public-manual-login-390x844-20260729.png"]
 ]) {
   assert.ok(
-    userManualSource.includes("assets/" + screenshotName),
-    "用户手册必须引用截图 " + screenshotName
+    manualSource.includes("../assets/" + screenshotName),
+    "分角色手册必须引用截图 " + screenshotName
   );
   assert.ok(
     existsSync(resolve(process.cwd(), "docs", "assets", screenshotName)),
-    "用户手册截图必须存在：" + screenshotName
+    "分角色手册截图必须存在：" + screenshotName
   );
 }
 assert.match(
   systemSettingsPageSource,
-  /<RouterLink class="admin-button admin-button--ghost settings-page__guide-link" to="\/guide">查看操作说明<\/RouterLink>/,
-  "系统设置页必须提供独立的详细操作说明入口"
+  /<RouterLink class="admin-button admin-button--ghost settings-page__guide-link" to="\/manual">查看操作手册<\/RouterLink>/,
+  "系统设置页必须进入登录后身份手册"
 );
 assert.match(
   systemSettingsPageSource,

@@ -481,7 +481,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="admin-toolbar settings-page__actions">
-          <RouterLink class="admin-button admin-button--ghost settings-page__guide-link" to="/guide">查看操作说明</RouterLink>
+          <RouterLink class="admin-button admin-button--ghost settings-page__guide-link" to="/manual">查看操作手册</RouterLink>
           <button class="admin-button admin-button--ghost" type="button" :disabled="loading || saving" @click="loadSettings">
             {{ loading ? "刷新中" : "刷新" }}
           </button>

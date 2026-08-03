@@ -3113,22 +3113,9 @@ export class InMemoryStoreService {
       : undefined;
 
     for (const user of this.users) {
-      if (user.tenantId) {
-        const sanitizedTags = user.tags.filter(
-          (tag) => !RESERVED_BACKOFFICE_USER_TAGS.has(tag)
-        );
-        if (sanitizedTags.length !== user.tags.length) {
-          user.tags = sanitizedTags;
-          changed = true;
-        }
-        continue;
-      }
-
       const isProviderRoot =
         this.isControlledProviderUser(user) &&
         user.role === "admin" &&
-        user.tags.includes(SUPER_ADMIN_TAG) &&
-        user.tags.includes(HIDDEN_BACKOFFICE_USER_TAG) &&
         this.backofficeCredentials.some(
           (credential) =>
             credential.userId === user.id &&
@@ -3137,6 +3124,28 @@ export class InMemoryStoreService {
         );
 
       if (isProviderRoot) {
+        if (user.tenantId) {
+          delete user.tenantId;
+          changed = true;
+        }
+
+        for (const requiredTag of [SUPER_ADMIN_TAG, HIDDEN_BACKOFFICE_USER_TAG]) {
+          if (!user.tags.includes(requiredTag)) {
+            user.tags.push(requiredTag);
+            changed = true;
+          }
+        }
+        continue;
+      }
+
+      if (user.tenantId) {
+        const sanitizedTags = user.tags.filter(
+          (tag) => !RESERVED_BACKOFFICE_USER_TAGS.has(tag)
+        );
+        if (sanitizedTags.length !== user.tags.length) {
+          user.tags = sanitizedTags;
+          changed = true;
+        }
         continue;
       }
 

@@ -51,6 +51,8 @@ const resolveRequiredPermissions = (meta: Record<string, unknown>): BackofficePe
   return Array.from(new Set(required));
 };
 
+const RoleGuidePage = () => import("../pages/RoleGuidePage.vue");
+
 const resolveRequiredBackofficeRoles = (meta: Record<string, unknown>): BackofficeRole[] =>
   Array.isArray(meta.backofficeRoles)
     ? meta.backofficeRoles.filter(isBackofficeRole)
@@ -175,6 +177,17 @@ export const router = createRouter({
             description: "设置本实例的领取方式、登录验证和已授权服务。",
             permission: "system-settings:view",
             backofficeRoles: ["super_admin", "admin"]
+          }
+        },
+        {
+          path: "/manual",
+          component: RoleGuidePage,
+          meta: {
+            group: "帮助",
+            eyebrow: "操作手册",
+            title: "当前身份使用手册",
+            description: "按当前登录身份查看可执行的操作、权限边界和常见问题。",
+            backofficeRoles: ["super_admin", "admin", "merchant", "restocker"]
           }
         },
         {

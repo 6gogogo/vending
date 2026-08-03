@@ -1,325 +1,192 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
-
-type GuideAudienceId = "tenant-admin" | "operator" | "app-user";
-
-interface GuideAudience {
-  id: GuideAudienceId;
-  label: string;
-  summary: string;
-  steps: string[];
-  tips: string[];
-}
-
-const audiences: GuideAudience[] = [
-  {
-    id: "tenant-admin",
-    label: "实例管理员",
-    summary: "配置领取方式，管理人员、角色和柜机，并为 App 用户签发登录码。",
-    steps: [
-      "在“领取与服务设置”确认预约取货和额度规则。预约制不创建支付单，也不需要支付配置。",
-      "在“人员管理”完成建档、审核和启用；给商户或补货员分配相应后台角色及可操作柜机。",
-      "确认柜机在线且有可预约库存，再为已启用的 App 账号签发“APP / 小程序登录”用途的 6 位一次性验证码。",
-      "忘记后台密码时，在登录页选择“忘记密码”，使用绑定手机号和另一名实例管理员签发的找回验证码重置；没有其他管理员时联系技术支持。",
-      "用户完成登录和预约后，在人员记录、预约和操作日志中查看处理结果。"
-    ],
-    tips: [
-      "每个实例必须至少保留一名启用、已开通后台账号且可登录的实例管理员。",
-      "人工码只能用于当前实例、已启用的既有账号，不能创建账号或替代 PC 后台密码。",
-      "预约制下支付项保持关闭或不显示；出现支付步骤时请先检查“预约取货”设置。",
-      "人员、角色、柜机分配和操作日志都应由当前实例管理员复核。"
-    ]
-  },
-  {
-    id: "operator",
-    label: "商户与补货员",
-    summary: "在管理员授权的柜机范围内完成补货、巡检和记录核对。",
-    steps: [
-      "使用管理员开通的后台账号登录，先确认当前身份与可操作柜机列表。",
-      "商户维护商品与补货记录；补货员只处理被分配柜机的现场补货和巡检任务。",
-      "提交操作后在记录或日志中核对柜机、数量、时间和处理结果。",
-      "发现未被分配的柜机、人员或数据时，不要尝试绕过权限，应联系当前实例管理员。"
-    ],
-    tips: [
-      "看不到未分配柜机是权限保护的预期结果，不是页面异常。",
-      "商户和补货员不应进入人工码、实例设置或其他实例数据。",
-      "涉及库存差异、柜机异常时，保留业务记录并交由管理员处理。"
-    ]
-  },
-  {
-    id: "app-user",
-    label: "App 用户",
-    summary: "使用一次性验证码登录，完成预约并在约定时间到柜领取。",
-    steps: [
-      "未建档时先联系当前实例管理员完成身份资料建档与审核；人工码模式不会发送短信，也不开放自助注册。",
-      "从管理员处通过安全渠道获得一条 6 位一次性登录码，在 App 中填写手机号、验证码并勾选免责声明。",
-      "登录后选择在线柜机和可预约货品，提交预约取货并核对保留时间。",
-      "到达同一柜机后打开当前预约完成领取；预约流程不会要求支付。"
-    ],
-    tips: [
-      "验证码过期、撤销、输错达到上限或已经使用后，应联系管理员重新签发。",
-      "不要把验证码、手机号或预约截图发到公开群组。",
-      "预约超时或柜机异常时，先在当前预约中核对状态，再提交反馈。"
-    ]
-  }
-];
-
-const selectedAudienceId = ref<GuideAudienceId>("tenant-admin");
-const selectedAudience = computed(
-  () => audiences.find((audience) => audience.id === selectedAudienceId.value) ?? audiences[0]
-);
 </script>
 
 <template>
-  <main class="public-guide">
-    <header class="public-guide__header">
+  <main class="login-guide">
+    <header class="login-guide__header">
       <div>
-        <p class="public-guide__eyebrow">使用说明</p>
-        <h1>公益智助柜操作指引</h1>
-        <p class="public-guide__intro">
-          按身份查看登录、日常管理、预约和领取步骤。页面只显示当前账号可以使用的功能。
+        <p class="login-guide__eyebrow">登录前使用向导</p>
+        <h1>先选择使用入口</h1>
+        <p>
+          这里仅说明如何进入系统。详细操作手册会在登录后按当前账号身份显示。
         </p>
       </div>
-      <RouterLink class="admin-button public-guide__login" to="/login">进入后台登录</RouterLink>
+      <RouterLink class="admin-button login-guide__login" to="/login">进入电脑后台</RouterLink>
     </header>
 
-    <section class="public-guide__section" aria-labelledby="guide-audience-title">
-      <div class="public-guide__section-heading">
-        <p class="public-guide__eyebrow">选择身份</p>
-        <h2 id="guide-audience-title">我现在要做什么？</h2>
+    <section class="login-guide__entries" aria-label="系统入口">
+      <article class="login-guide__card">
+        <p class="login-guide__eyebrow">电脑端</p>
+        <h2>后台账号登录</h2>
+        <p>用于实例管理、商户工作和补货巡检。输入已经开通的后台账号与密码。</p>
+        <RouterLink class="admin-link" to="/login">打开后台登录</RouterLink>
+      </article>
+
+      <article class="login-guide__card">
+        <p class="login-guide__eyebrow">手机端</p>
+        <h2>App 登录与预约</h2>
+        <p>使用本人手机号和当前有效的一次性验证码登录，再按页面提示预约和领取。</p>
+        <a class="admin-link" href="/mobile/">打开移动端</a>
+      </article>
+    </section>
+
+    <section class="login-guide__checklist">
+      <div>
+        <p class="login-guide__eyebrow">登录前确认</p>
+        <h2>准备好账号信息</h2>
       </div>
-      <div class="public-guide__tabs" role="tablist" aria-label="使用身份">
-        <button
-          v-for="audience in audiences"
-          :key="audience.id"
-          class="public-guide__tab"
-          :class="{ 'public-guide__tab--active': selectedAudienceId === audience.id }"
-          type="button"
-          role="tab"
-          :aria-selected="selectedAudienceId === audience.id"
-          aria-controls="guide-content"
-          @click="selectedAudienceId = audience.id"
-        >
-          {{ audience.label }}
-        </button>
-      </div>
+      <ol>
+        <li>后台账号应由当前实例的管理人员开通；不要借用他人账号。</li>
+        <li>App 首次使用前需要完成建档、审核和启用。</li>
+        <li>忘记后台密码时，从登录页进入“忘记密码”，按页面要求验证绑定手机号。</li>
+        <li>登录成功后，从左侧“操作手册”查看与你当前身份对应的步骤。</li>
+      </ol>
     </section>
 
-    <section id="guide-content" class="public-guide__content" role="tabpanel">
-      <article class="public-guide__card public-guide__card--primary">
-        <p class="public-guide__eyebrow">{{ selectedAudience.label }}</p>
-        <h2>{{ selectedAudience.summary }}</h2>
-        <ol class="public-guide__steps">
-          <li v-for="step in selectedAudience.steps" :key="step">{{ step }}</li>
-        </ol>
-      </article>
-
-      <aside class="public-guide__card">
-        <p class="public-guide__eyebrow">操作提示</p>
-        <h2>使用时注意</h2>
-        <ul class="public-guide__tips">
-          <li v-for="tip in selectedAudience.tips" :key="tip">{{ tip }}</li>
-        </ul>
-      </aside>
-    </section>
-
-    <section class="public-guide__section public-guide__section--two" aria-labelledby="guide-entry-title">
-      <article class="public-guide__card">
-        <p class="public-guide__eyebrow">入口说明</p>
-        <h2 id="guide-entry-title">从公网入口开始</h2>
-        <p>
-          电脑后台使用 <code>https://vending.5gogogo.top/login</code>，App 使用 <code>https://vending.5gogogo.top/mobile/</code>。
-          从带端口入口访问时会自动跳转到 HTTPS 业务站点。
-        </p>
-      </article>
-      <article class="public-guide__card">
-        <p class="public-guide__eyebrow">遇到问题</p>
-        <h2>先找对应管理员</h2>
-        <p>
-          App 用户、商户和补货员先联系当前实例管理员；唯一管理员无法找回密码或系统无法正常使用时，再联系技术支持。
-        </p>
-      </article>
-    </section>
-
-    <footer class="public-guide__footer">
+    <footer class="login-guide__footer">
+      <span>账号未开通或验证码无效时，请联系当前实例管理员。</span>
       <RouterLink class="admin-link" to="/login">返回后台登录</RouterLink>
-      <span>遇到问题请先联系当前实例管理员。</span>
     </footer>
   </main>
 </template>
 
 <style scoped>
-.public-guide {
-  width: min(1080px, 100%);
+.login-guide {
+  width: min(960px, 100%);
   min-height: 100vh;
   margin: 0 auto;
   padding: 32px 24px 40px;
 }
 
-.public-guide__header,
-.public-guide__section-heading,
-.public-guide__footer {
+.login-guide__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-}
-
-.public-guide__header {
-  padding: 24px;
+  gap: 24px;
+  padding: 28px;
   border: 1px solid #c7dac9;
   border-left: 5px solid var(--admin-accent);
-  background: #fff;
+  border-radius: 10px;
+  background: #ffffff;
 }
 
-.public-guide h1,
-.public-guide h2,
-.public-guide p {
+.login-guide h1,
+.login-guide h2,
+.login-guide p {
   margin-top: 0;
 }
 
-.public-guide h1 {
+.login-guide h1 {
   margin-bottom: 10px;
   color: var(--admin-text);
-  font-size: clamp(1.65rem, 2.8vw, 2.2rem);
-  line-height: 1.25;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  line-height: 1.2;
 }
 
-.public-guide h2 {
-  margin-bottom: 12px;
+.login-guide h2 {
+  margin-bottom: 10px;
   color: var(--admin-text);
-  font-size: 1.05rem;
-  line-height: 1.45;
+  font-size: 1.1rem;
 }
 
-.public-guide__eyebrow {
+.login-guide p,
+.login-guide li,
+.login-guide__footer {
+  color: var(--admin-muted);
+  line-height: 1.7;
+}
+
+.login-guide__eyebrow {
   margin-bottom: 8px;
-  color: var(--admin-accent-strong);
+  color: var(--admin-accent-strong) !important;
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.04em;
 }
 
-.public-guide__intro,
-.public-guide__card p,
-.public-guide__footer {
-  margin-bottom: 0;
-  color: var(--admin-muted);
-  line-height: 1.65;
-}
-
-.public-guide__login {
+.login-guide__login {
   flex: 0 0 auto;
   text-decoration: none;
 }
 
-.public-guide__section {
+.login-guide__entries {
   display: grid;
-  gap: 14px;
-  margin-top: 20px;
-}
-
-.public-guide__tabs {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.public-guide__tab {
-  min-height: 42px;
-  padding: 8px 12px;
-  border: 1px solid var(--admin-line-strong);
-  border-radius: 6px;
-  background: #fff;
-  color: var(--admin-text);
-  font-weight: 700;
-  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
-}
-
-.public-guide__tab:hover,
-.public-guide__tab--active {
-  border-color: var(--admin-accent);
-  background: var(--admin-accent-soft);
-  color: var(--admin-accent-strong);
-}
-
-.public-guide__content,
-.public-guide__section--two {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.8fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
-.public-guide__card {
-  padding: 20px;
+.login-guide__card,
+.login-guide__checklist {
+  padding: 22px;
   border: 1px solid var(--admin-line);
-  border-radius: 8px;
-  background: #fff;
+  border-radius: 10px;
+  background: #ffffff;
 }
 
-.public-guide__card--primary {
-  border-color: #c7dac9;
+.login-guide__card p {
+  min-height: 58px;
 }
 
-.public-guide__steps,
-.public-guide__tips {
+.login-guide__checklist {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(190px, 0.55fr) minmax(0, 1.45fr);
+  gap: 24px;
+  margin-top: 18px;
+}
+
+.login-guide__checklist ol {
+  display: grid;
+  gap: 10px;
   margin: 0;
   padding-left: 22px;
-  color: var(--admin-text);
-  line-height: 1.65;
 }
 
-.public-guide__steps li::marker {
+.login-guide__checklist li::marker {
   color: var(--admin-accent-strong);
   font-weight: 800;
 }
 
-.public-guide__tips li::marker {
-  color: var(--admin-info);
-}
-
-.public-guide__section--two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.public-guide__footer {
+.login-guide__footer {
+  display: flex;
   align-items: center;
-  margin-top: 24px;
-  padding: 16px 0;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 22px;
+  padding: 16px 2px;
   border-top: 1px solid var(--admin-line);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
 }
 
-@media (max-width: 760px) {
-  .public-guide {
-    padding: 20px 16px 28px;
+@media (max-width: 680px) {
+  .login-guide {
+    padding: 18px 14px 28px;
   }
 
-  .public-guide__header,
-  .public-guide__section-heading,
-  .public-guide__footer {
+  .login-guide__header,
+  .login-guide__footer {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .public-guide__tabs,
-  .public-guide__content,
-  .public-guide__section--two {
+  .login-guide__entries,
+  .login-guide__checklist {
     grid-template-columns: 1fr;
   }
 
-  .public-guide__login {
+  .login-guide__header,
+  .login-guide__card,
+  .login-guide__checklist {
+    padding: 18px;
+  }
+
+  .login-guide__login {
     align-self: flex-start;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .public-guide__tab {
-    transition: none;
+  .login-guide__card p {
+    min-height: 0;
   }
 }
 </style>

@@ -73,7 +73,7 @@ const submit = async () => {
 
       <div class="login-panel__links">
         <RouterLink class="login-panel__guide" to="/forgot-password">忘记密码</RouterLink>
-        <RouterLink class="login-panel__guide" to="/guide">查看按身份操作指引</RouterLink>
+        <RouterLink class="login-panel__guide" to="/guide">登录前使用向导</RouterLink>
       </div>
     </form>
   </section>

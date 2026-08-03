@@ -11,7 +11,7 @@ interface NavItem {
   to: string;
   label: string;
   icon: string;
-  permission: BackofficePermission;
+  permission?: BackofficePermission;
   roles?: readonly BackofficeRole[];
 }
 
@@ -142,6 +142,17 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
       }
     ]
   },
+  {
+    title: "帮助",
+    items: [
+      {
+        to: "/manual",
+        label: "操作手册",
+        roles: ["super_admin", "admin", "merchant", "restocker"],
+        icon: "M6.75 3.5h8.7A2.55 2.55 0 0 1 18 6.05v12.2a.75.75 0 0 1-1.12.65A7.9 7.9 0 0 0 12 17.25a7.9 7.9 0 0 0-4.88 1.65A.75.75 0 0 1 6 18.25V4.25a.75.75 0 0 1 .75-.75m.75 1.5v11.9A9.5 9.5 0 0 1 12 15.75a9.5 9.5 0 0 1 4.5 1.15V6.05c0-.58-.47-1.05-1.05-1.05zm2 3.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75m0 3a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75"
+      }
+    ]
+  },
 ];
 
 const visibleNavSections = computed(() =>
@@ -150,7 +161,7 @@ const visibleNavSections = computed(() =>
       ...section,
       items: section.items.filter(
         (item) =>
-          sessionStore.can(item.permission) &&
+          (!item.permission || sessionStore.can(item.permission)) &&
           hasBackofficeRouteRole(sessionStore.user?.backofficeRole, item.roles)
       )
     }))

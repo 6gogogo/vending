@@ -301,7 +301,7 @@ onUnmounted(clearCooldownTimer);
 
       <div class="reset-panel__links">
         <RouterLink class="admin-link" to="/login">返回后台登录</RouterLink>
-        <RouterLink class="admin-link" to="/guide">查看用户操作手册</RouterLink>
+        <RouterLink class="admin-link" to="/guide">查看登录帮助</RouterLink>
       </div>
     </form>
   </section>
