@@ -1,4 +1,8 @@
-import type { SystemSettingEntry } from "@vm/shared-types";
+import type {
+  BackofficeRole,
+  BackofficeScope,
+  SystemSettingEntry
+} from "@vm/shared-types";
 
 export const reservationOnlyPickupSettingKey = "VM_RESERVATION_ONLY_PICKUP";
 export const adjustmentQuotaModeSettingKey = "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE";
@@ -55,6 +59,17 @@ export const settingsVisibleForInstanceAdministration = (settings: SystemSetting
       (fullSimulationEnabled && fullSimulationExampleSettingKeys.has(entry.key))
   );
 };
+
+export const settingsVisibleForBackofficeSession = (
+  settings: SystemSettingEntry[],
+  session: {
+    backofficeRole?: BackofficeRole;
+    scope?: BackofficeScope;
+  }
+) =>
+  session.backofficeRole === "super_admin" && session.scope === "tenant"
+    ? settings
+    : settingsVisibleForInstanceAdministration(settings);
 
 export const settingsVisibleForCurrentPickupMode = (
   settings: SystemSettingEntry[],

@@ -28,6 +28,9 @@ import type {
 import {
   BACKOFFICE_ROLE_ALLOWED_PERMISSIONS,
   BACKOFFICE_ROLE_DEFAULT_PERMISSIONS,
+  MANUAL_VERIFICATION_TTL_DEFAULT_SECONDS,
+  MANUAL_VERIFICATION_TTL_MAX_SECONDS,
+  MANUAL_VERIFICATION_TTL_MIN_SECONDS,
   resolveBackofficePermissions
 } from "@vm/shared-types";
 
@@ -835,14 +838,15 @@ export class AuthService {
       throw new BadRequestException("人工验证码必须是 6 位数字。");
     }
 
-    const expiresInSeconds = payload.expiresInSeconds ?? 300;
+    const expiresInSeconds =
+      payload.expiresInSeconds ?? MANUAL_VERIFICATION_TTL_DEFAULT_SECONDS;
 
     if (
       !Number.isInteger(expiresInSeconds) ||
-      expiresInSeconds < 60 ||
-      expiresInSeconds > 600
+      expiresInSeconds < MANUAL_VERIFICATION_TTL_MIN_SECONDS ||
+      expiresInSeconds > MANUAL_VERIFICATION_TTL_MAX_SECONDS
     ) {
-      throw new BadRequestException("人工验证码有效期必须在 60 至 600 秒之间。");
+      throw new BadRequestException("人工验证码有效期必须在 1 分钟至 30 天之间。");
     }
 
     const record = this.store.issueManualVerificationGrant({

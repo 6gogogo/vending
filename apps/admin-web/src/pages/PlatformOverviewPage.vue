@@ -223,7 +223,11 @@ const createTenant = async () => {
   }
 };
 
-const enterTenant = async (tenantId: string, tenantName: string) => {
+const enterTenant = async (
+  tenantId: string,
+  tenantName: string,
+  targetPath: "/users" | "/settings" = "/users"
+) => {
   if (enteringTenantId.value) {
     return;
   }
@@ -233,7 +237,11 @@ const enterTenant = async (tenantId: string, tenantName: string) => {
   try {
     const session = await adminApi.enterPlatformTenant(tenantId);
     sessionStore.setSession(session);
-    await router.replace(sessionStore.can("users:view") ? "/users" : sessionStore.defaultPath);
+    const canOpenTarget =
+      targetPath === "/settings"
+        ? sessionStore.can("system-settings:view")
+        : sessionStore.can("users:view");
+    await router.replace(canOpenTarget ? targetPath : sessionStore.defaultPath);
   } catch (error) {
     actionMessage.value = {
       type: "error",
@@ -531,6 +539,16 @@ onMounted(() => {
                         ? "进入中..."
                         : resolveTenantEntryAction(entry.tenant).label
                     }}
+                  </button>
+                  <button
+                    class="admin-button admin-button--ghost"
+                    :disabled="
+                      Boolean(enteringTenantId) ||
+                      resolveTenantEntryAction(entry.tenant).disabled
+                    "
+                    @click="enterTenant(entry.tenant.id, entry.tenant.name, '/settings')"
+                  >
+                    运维设置
                   </button>
                 </div>
               </td>

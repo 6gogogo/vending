@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { RouterLink, useRouter } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 
 const router = useRouter();
+const route = useRoute();
 const sessionStore = useAdminSessionStore();
 
 const username = ref("");
@@ -15,6 +16,9 @@ const busy = ref(false);
 const errorMessage = ref("");
 
 const busyLabel = computed(() => (busy.value ? "登录中..." : "进入后台"));
+const instanceRestartNotice = computed(
+  () => route.query.reason === "instance-restart"
+);
 
 const submit = async () => {
   if (busy.value) {
@@ -77,6 +81,10 @@ const submit = async () => {
             {{ showPassword ? "隐藏密码" : "显示密码" }}
           </button>
         </div>
+      </div>
+
+      <div v-if="instanceRestartNotice" class="admin-note" role="status">
+        当前实例应用已重启，原登录会话已失效。服务恢复后请重新登录。
       </div>
 
       <div v-if="errorMessage" class="admin-note login-panel__error" role="alert">

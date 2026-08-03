@@ -387,6 +387,72 @@ test("后台签发的 6 位人工码只用于绑定账号且单次消费，不�
   }
 });
 
+test("人工码可以签发最长 30 天，超过上限仍会拒绝", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const adminToken = createTenantAdminToken(store);
+    const adminHeaders = {
+      authorization: `Bearer ${adminToken}`,
+      "content-type": "application/json"
+    };
+    const createUserResponse = await fetch(`${baseUrl}/users`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        role: "special",
+        phone: "18800000921",
+        name: "长期人工码边界测试账号"
+      })
+    });
+    const createUserPayload = (await createUserResponse.json()) as {
+      data?: { id?: string };
+    };
+    const targetUserId = createUserPayload.data?.id;
+    assert.equal(createUserResponse.status, 201);
+    assert.ok(targetUserId);
+
+    const issuedAt = Date.now();
+    const issueResponse = await fetch(
+      `${baseUrl}/auth/manual-verification-codes`,
+      {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          userId: targetUserId,
+          purpose: "app-login",
+          code: "741852",
+          expiresInSeconds: 30 * 24 * 60 * 60
+        })
+      }
+    );
+    const issuePayload = (await issueResponse.json()) as {
+      data?: { expiresAt?: string };
+    };
+    assert.equal(issueResponse.status, 201);
+    const expiresAt = Date.parse(issuePayload.data?.expiresAt ?? "");
+    assert.ok(Number.isFinite(expiresAt));
+    assert.ok(expiresAt - issuedAt >= 30 * 24 * 60 * 60 * 1000 - 1_000);
+
+    const overLimitResponse = await fetch(
+      `${baseUrl}/auth/manual-verification-codes`,
+      {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          userId: targetUserId,
+          purpose: "app-login",
+          code: "741853",
+          expiresInSeconds: 30 * 24 * 60 * 60 + 1
+        })
+      }
+    );
+    assert.equal(overLimitResponse.status, 400);
+  } finally {
+    await app.close();
+  }
+});
+
 test("人工码 App 登录取得的移动会话可完成预约，且同一码不能重放", async () => {
   const { app, baseUrl, store } = await startApi();
 

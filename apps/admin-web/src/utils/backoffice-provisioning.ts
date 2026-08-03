@@ -4,6 +4,10 @@ import type {
   PlatformTenantStatus,
   VerificationProvider
 } from "@vm/shared-types";
+import {
+  MANUAL_VERIFICATION_TTL_MAX_SECONDS,
+  MANUAL_VERIFICATION_TTL_MIN_SECONDS
+} from "@vm/shared-types";
 
 export interface PlatformTenantDraftForValidation {
   code: string;
@@ -218,6 +222,19 @@ export const resolveBackofficePasswordResetPreview = (input: {
     : "";
 
 export const isManualVerificationCode = (value: string) => /^\d{6}$/u.test(value);
+
+export const manualVerificationTtlOptions = [
+  { label: "10 分钟", value: 10 * 60 },
+  { label: "1 小时", value: 60 * 60 },
+  { label: "1 天", value: 24 * 60 * 60 },
+  { label: "7 天", value: 7 * 24 * 60 * 60 },
+  { label: "30 天", value: MANUAL_VERIFICATION_TTL_MAX_SECONDS }
+] as const;
+
+export const isManualVerificationTtlSeconds = (value: number) =>
+  Number.isInteger(value) &&
+  value >= MANUAL_VERIFICATION_TTL_MIN_SECONDS &&
+  value <= MANUAL_VERIFICATION_TTL_MAX_SECONDS;
 
 export const manualCodeFromRandomValue = (value: number) => {
   const unsignedValue = Math.trunc(value) >>> 0;

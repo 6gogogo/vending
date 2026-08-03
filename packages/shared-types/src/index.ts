@@ -393,6 +393,9 @@ export interface BackofficeCredentialSnapshot {
 }
 
 export type ManualVerificationPurpose = "app-login" | "password-reset";
+export const MANUAL_VERIFICATION_TTL_MIN_SECONDS = 60;
+export const MANUAL_VERIFICATION_TTL_MAX_SECONDS = 30 * 24 * 60 * 60;
+export const MANUAL_VERIFICATION_TTL_DEFAULT_SECONDS = 10 * 60;
 export type ManualVerificationGrantStatus =
   | "active"
   | "consumed"
@@ -1848,6 +1851,25 @@ export interface SystemSettingsUpdateResult extends SystemSettingsSnapshot {
   changedKeys: string[];
   runtimeAppliedKeys: string[];
   restartRequiredKeys: string[];
+}
+
+export interface InstanceRuntimeControlStatus {
+  available: boolean;
+  tenantName: string;
+  scope: "current-instance";
+  activeService: "API 应用";
+}
+
+export interface InstanceRuntimeRestartPayload {
+  tenantNameConfirmation: string;
+  reason: string;
+}
+
+export interface InstanceRuntimeRestartResult {
+  operationId: string;
+  status: "scheduled";
+  scheduledAt: string;
+  expectedReadyWithinSeconds: number;
 }
 
 export interface AiInsightMeta {

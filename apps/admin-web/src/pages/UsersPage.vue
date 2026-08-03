@@ -5,6 +5,7 @@ import {
   BACKOFFICE_PERMISSIONS,
   BACKOFFICE_ROLE_ALLOWED_PERMISSIONS,
   BACKOFFICE_ROLE_DEFAULT_PERMISSIONS,
+  MANUAL_VERIFICATION_TTL_DEFAULT_SECONDS,
   type BackofficeCredentialSnapshot,
   type BackofficePermission,
   type BackofficeRole,
@@ -27,7 +28,9 @@ import { useAdminSessionStore } from "../stores/session";
 import {
   backofficePasswordMinimumLengthForUsername,
   isManualVerificationCode,
+  isManualVerificationTtlSeconds,
   manualCodeFromRandomValue,
+  manualVerificationTtlOptions,
   resolveEligibleBackofficeRole,
   validateSupervisorPasswordResetDraft
 } from "../utils/backoffice-provisioning";
@@ -255,7 +258,7 @@ const createEmptyManualVerificationForm = (): ManualVerificationFormState => ({
   userName: "",
   purpose: "app-login",
   code: "",
-  expiresInSeconds: 300
+  expiresInSeconds: MANUAL_VERIFICATION_TTL_DEFAULT_SECONDS
 });
 
 const sessionStore = useAdminSessionStore();
@@ -1174,12 +1177,8 @@ const submitManualVerificationCode = async () => {
     return;
   }
 
-  if (
-    !Number.isInteger(expiresInSeconds) ||
-    expiresInSeconds < 60 ||
-    expiresInSeconds > 600
-  ) {
-    showActionMessage("error", "一次性验证码有效期必须在 60 至 600 秒之间。");
+  if (!isManualVerificationTtlSeconds(expiresInSeconds)) {
+    showActionMessage("error", "一次性验证码有效期必须在 1 分钟至 30 天之间。");
     return;
   }
 
@@ -2074,17 +2073,24 @@ onMounted(load);
             {{ manualCodeIssued ? "生成另一条验证码" : "重新随机生成" }}
           </button>
           <label class="admin-field">
-            <span class="admin-field__label">有效期（秒）</span>
-            <input
+            <span class="admin-field__label">有效期</span>
+            <select
               v-model.number="manualVerificationForm.expiresInSeconds"
-              class="admin-input"
-              type="number"
-              min="60"
-              max="600"
-              step="30"
+              class="admin-select"
               :disabled="manualCodeIssued"
-            />
+            >
+              <option
+                v-for="option in manualVerificationTtlOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
           </label>
+          <div class="admin-note">
+            验证码仍为单次使用；使用、撤销、输错锁定或到期后立即失效。长期选项只用于受控测试或固定人员临时通行。
+          </div>
           <div v-if="manualCodeIssued" class="admin-note users-manual-code-success" role="status">
             已签发。请仅通过安全渠道交付上方验证码；关闭面板后后台不会再次显示该码。
           </div>

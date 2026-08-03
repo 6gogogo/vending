@@ -28,6 +28,9 @@ import type {
   GoodsDetailSnapshot,
   GoodsOverviewSnapshot,
   InventoryMovement,
+  InstanceRuntimeControlStatus,
+  InstanceRuntimeRestartPayload,
+  InstanceRuntimeRestartResult,
   MerchantGoodsTemplate,
   ManualVerificationGrantSnapshot,
   ManualVerificationPurpose,
@@ -753,6 +756,17 @@ export const adminApi = {
   saveSystemSettings(payload: SystemSettingsUpdatePayload) {
     requireBackofficePermission("system-settings:update");
     return adminClient.patch<SystemSettingsUpdateResult>("/system-settings", payload);
+  },
+  instanceRuntimeControl() {
+    requireBackofficePermission("system-settings:view");
+    return adminClient.get<InstanceRuntimeControlStatus>("/system-settings/runtime-control");
+  },
+  restartCurrentInstance(payload: InstanceRuntimeRestartPayload) {
+    requireBackofficePermission("system-settings:update");
+    return adminClient.post<InstanceRuntimeRestartResult>(
+      "/system-settings/runtime-control/restart",
+      payload
+    );
   },
   aiEventDiagnosis(payload: { eventId?: string; orderNo?: string; logId?: string }) {
     requireBackofficePermission("ai-insights:view");

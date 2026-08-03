@@ -1,9 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { BadRequestException, ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Optional
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type {
+  BackofficeRole,
   SystemSettingEntry,
   SystemSettingInputType,
   SystemSettingsSnapshot,
@@ -56,6 +64,15 @@ export const SYSTEM_SETTINGS_RUNTIME_ADAPTER = Symbol(
 const defaultGroupName = "其他配置";
 const envKeyPattern = /^[A-Z][A-Z0-9_]*$/;
 const runtimeEnvironmentKeys = new Set(["NODE_ENV", "APP_ENV"]);
+const instanceAdministratorSettingKeys = new Set([
+  "VM_RESERVATION_ONLY_PICKUP",
+  "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"
+]);
+const fullSimulationAdministratorSettingKeys = new Set([
+  "VM_FULL_SIMULATION_VERIFICATION_MODE",
+  "VM_FULL_SIMULATION_PAYMENT_MODE"
+]);
+const truthySettingValues = new Set(["1", "true", "yes", "on"]);
 const runtimeDataPlaneExternalIntegrationKeySet = new Set<string>(
   runtimeDataPlaneExternalIntegrationKeys
 );
@@ -99,24 +116,34 @@ export class SystemSettingsService {
     });
   }
 
-  getSettings(options?: { includeSensitiveValues?: boolean }): SystemSettingsSnapshot {
+  getSettings(options?: {
+    includeSensitiveValues?: boolean;
+    actorBackofficeRole?: BackofficeRole;
+  }): SystemSettingsSnapshot {
     const envFilePath = this.envFilePath;
     const exampleFilePath = this.resolveExampleFilePath(envFilePath);
     const envFile = this.parseEnvFile(envFilePath);
     const exampleFile = this.parseEnvFile(exampleFilePath);
     const keys = this.collectSettingKeys(envFile, exampleFile);
 
+    const settings = keys.map((key) =>
+      this.createSettingEntry(key, envFile, exampleFile, options)
+    );
+
     return {
       envFilePath,
       exampleFilePath: existsSync(exampleFilePath) ? exampleFilePath : undefined,
       loadedAt: new Date().toISOString(),
-      settings: keys.map((key) => this.createSettingEntry(key, envFile, exampleFile, options))
+      settings: this.filterSettingsForActor(settings, options?.actorBackofficeRole)
     };
   }
 
   updateSettings(
     payload: SystemSettingsUpdatePayload,
-    options?: { includeSensitiveValues?: boolean }
+    options?: {
+      includeSensitiveValues?: boolean;
+      actorBackofficeRole?: BackofficeRole;
+    }
   ): SystemSettingsUpdateResult {
     if (
       this.configService.get<string>("VM_DATA_PLANE")?.trim().toLowerCase() === "live" &&
@@ -134,6 +161,12 @@ export class SystemSettingsService {
     const snapshotBefore = this.getSettings({ includeSensitiveValues: true });
     const entriesByKey = new Map(snapshotBefore.settings.map((entry) => [entry.key, entry]));
     const nextValues = new Map<string, string>();
+
+    this.assertActorCanUpdateKeys(
+      Object.keys(payload.values),
+      snapshotBefore.settings,
+      options?.actorBackofficeRole
+    );
 
     if (!options?.includeSensitiveValues) {
       const sensitiveKey = Object.keys(payload.values).find((key) => entriesByKey.get(key)?.sensitive);
@@ -312,6 +345,65 @@ export class SystemSettingsService {
       }
       throw error;
     }
+  }
+
+  private filterSettingsForActor(
+    settings: SystemSettingEntry[],
+    actorBackofficeRole?: BackofficeRole
+  ) {
+    if (!actorBackofficeRole || actorBackofficeRole === "super_admin") {
+      return settings;
+    }
+
+    if (actorBackofficeRole !== "admin") {
+      return [];
+    }
+
+    const allowedKeys = new Set(instanceAdministratorSettingKeys);
+
+    if (this.isEnabledFullSimulation(settings)) {
+      for (const key of fullSimulationAdministratorSettingKeys) {
+        allowedKeys.add(key);
+      }
+    }
+
+    return settings.filter((entry) => allowedKeys.has(entry.key));
+  }
+
+  private assertActorCanUpdateKeys(
+    keys: string[],
+    settings: SystemSettingEntry[],
+    actorBackofficeRole?: BackofficeRole
+  ) {
+    if (!actorBackofficeRole || actorBackofficeRole === "super_admin") {
+      return;
+    }
+
+    const allowedKeys = new Set(
+      this.filterSettingsForActor(settings, actorBackofficeRole).map((entry) => entry.key)
+    );
+
+    if (keys.some((key) => !allowedKeys.has(key))) {
+      throw new ForbiddenException(
+        "实例管理员只能维护日常实例设置；登录、短信、密钥和运行配置由服务提供商维护。"
+      );
+    }
+  }
+
+  private isEnabledFullSimulation(settings: SystemSettingEntry[]) {
+    const values = new Map(
+      settings.map((entry) => [entry.key, entry.value.trim()])
+    );
+
+    return (
+      values.get("VM_DATA_PLANE") === "simulation" &&
+      values.get("VM_SIMULATION_PROFILE") === "full" &&
+      truthySettingValues.has(
+        values.get("VM_FULL_SIMULATION_ENABLED")?.toLowerCase() ?? ""
+      ) &&
+      Boolean(values.get("VM_DATA_ROOT")) &&
+      Boolean(values.get("VM_DATA_PLANE_ID"))
+    );
   }
 
   private createSettingEntry(

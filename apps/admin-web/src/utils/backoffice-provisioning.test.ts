@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   backofficePasswordMinimumLengthForUsername,
   isManualVerificationCode,
+  isManualVerificationTtlSeconds,
   manualCodeFromRandomValue,
+  manualVerificationTtlOptions,
   resolveBackofficePasswordResetPreview,
   resolveEligibleBackofficeRole,
   validateBackofficePasswordResetDraft,
@@ -132,6 +134,18 @@ test("人工码只能是 6 位数字且随机值始终映射到 100000 至 99999
   assert.equal(manualCodeFromRandomValue(899_999), "999999");
   assert.equal(manualCodeFromRandomValue(900_000), "100000");
   assert.match(manualCodeFromRandomValue(0xffff_ffff), /^\d{6}$/u);
+});
+
+test("人工码有效期提供常用长期选项且不允许超过 30 天", () => {
+  assert.deepEqual(
+    manualVerificationTtlOptions.map((option) => option.value),
+    [600, 3_600, 86_400, 604_800, 2_592_000]
+  );
+  assert.equal(isManualVerificationTtlSeconds(60), true);
+  assert.equal(isManualVerificationTtlSeconds(2_592_000), true);
+  assert.equal(isManualVerificationTtlSeconds(59), false);
+  assert.equal(isManualVerificationTtlSeconds(2_592_001), false);
+  assert.equal(isManualVerificationTtlSeconds(600.5), false);
 });
 
 test("后台密码找回校验账号、绑定手机号、专用验证码和账号密码策略", () => {

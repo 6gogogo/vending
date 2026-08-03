@@ -7,6 +7,7 @@ import {
   isPaymentOnlySetting,
   isReservationOnlyPickupEnabled,
   orderSystemSettingsGroups,
+  settingsVisibleForBackofficeSession,
   settingsVisibleForInstanceAdministration,
   settingsVisibleForCurrentPickupMode
 } from "./system-settings-display";
@@ -99,6 +100,31 @@ test("实例后台在标准模拟或实机服务中只展示日常领取设置",
       "VM_RESERVATION_ONLY_PICKUP",
       "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"
     ]
+  );
+});
+
+test("服务商进入实例后可查看完整运维设置，实例管理员仍只看日常设置", () => {
+  const settings = [
+    createSetting("VM_RESERVATION_ONLY_PICKUP"),
+    createSetting("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"),
+    createSetting("VERIFICATION_CODE_PROVIDER"),
+    createSetting("ALIYUN_PNVS_ACCESS_KEY_ID"),
+    createSetting("AMAP_WEB_KEY")
+  ];
+
+  assert.deepEqual(
+    settingsVisibleForBackofficeSession(settings, {
+      backofficeRole: "super_admin",
+      scope: "tenant"
+    }).map((entry) => entry.key),
+    settings.map((entry) => entry.key)
+  );
+  assert.deepEqual(
+    settingsVisibleForBackofficeSession(settings, {
+      backofficeRole: "admin",
+      scope: "tenant"
+    }).map((entry) => entry.key),
+    ["VM_RESERVATION_ONLY_PICKUP", "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"]
   );
 });
 

@@ -456,8 +456,8 @@ assert.doesNotMatch(
 );
 assert.match(
   adminSystemSettingsPageSource,
-  /settingsVisibleForInstanceAdministration/,
-  "实例管理员设置页只展示日常领取、登录和运行环境设置"
+  /settingsVisibleForBackofficeSession/,
+  "系统设置页必须按后台会话区分服务商实例运维视图和实例管理员日常设置"
 );
 assert.doesNotMatch(
   adminSystemSettingsPageSource,

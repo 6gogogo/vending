@@ -149,6 +149,60 @@ test("实例设置将领取和 App 验证选项集中展示，运行环境只能
   }
 });
 
+test("实例管理员在 API 层只能读写日常实例设置，不能绕过页面修改短信登录配置", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-role-boundary-"));
+  const envFilePath = join(directory, ".env");
+  const settings = {
+    NODE_ENV: "development",
+    APP_ENV: "development",
+    VM_DATA_PLANE: "simulation",
+    VM_SIMULATION_PROFILE: "standard",
+    VM_RESERVATION_ONLY_PICKUP: "true",
+    SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: "auto",
+    VERIFICATION_CODE_PROVIDER: "mock",
+    ALIYUN_PNVS_ACCESS_KEY_ID: "sensitive-id"
+  };
+  writeFileSync(envFilePath, encodeEnv(settings), "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => settings[key as keyof typeof settings],
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const adminSnapshot = service.getSettings({
+      actorBackofficeRole: "admin",
+      includeSensitiveValues: true
+    });
+    assert.deepEqual(
+      adminSnapshot.settings.map((entry) => entry.key),
+      ["VM_RESERVATION_ONLY_PICKUP", "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"]
+    );
+    assert.throws(
+      () =>
+        service.updateSettings(
+          { values: { VERIFICATION_CODE_PROVIDER: "manual" } },
+          { actorBackofficeRole: "admin", includeSensitiveValues: true }
+        ),
+      /实例管理员只能维护日常实例设置/
+    );
+
+    const providerSnapshot = service.getSettings({
+      actorBackofficeRole: "super_admin",
+      includeSensitiveValues: true
+    });
+    assert.equal(
+      providerSnapshot.settings.find((entry) => entry.key === "ALIYUN_PNVS_ACCESS_KEY_ID")
+        ?.value,
+      "sensitive-id"
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("全真模拟的手动验证码演练可单独保存额度归属，不强制填写未启用的短信服务", () => {
   const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-manual-quota-"));
   const envFilePath = join(directory, ".env");

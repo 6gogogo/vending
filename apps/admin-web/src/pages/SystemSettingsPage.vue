@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { onBeforeRouteLeave } from "vue-router";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 import type {
+  InstanceRuntimeControlStatus,
+  InstanceRuntimeRestartResult,
   PaymentDiagnosticsResult,
   PaymentEffectiveMode,
   PaymentRuntimeMode,
@@ -20,7 +22,7 @@ import {
   isReservationOnlyPickupEnabled,
   orderSystemSettingsGroups,
   reservationOnlyPickupSettingKey,
-  settingsVisibleForInstanceAdministration,
+  settingsVisibleForBackofficeSession,
   settingsVisibleForCurrentPickupMode
 } from "../utils/system-settings-display";
 import {
@@ -49,11 +51,25 @@ const paymentDiagnosticsError = ref("");
 const revealedKeys = ref<Set<string>>(new Set());
 const leaveDialogOpen = ref(false);
 const sessionStore = useAdminSessionStore();
+const router = useRouter();
+const runtimeControlStatus = ref<InstanceRuntimeControlStatus>();
+const runtimeControlLoading = ref(false);
+const restartPanelOpen = ref(false);
+const restartSubmitting = ref(false);
+const restartResult = ref<InstanceRuntimeRestartResult>();
+const restartConfirmation = ref("");
+const restartReason = ref("");
+const restartMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 let resolveLeaveDecision: ((decision: LeaveDecision) => void) | undefined;
 
 const settings = computed(() => settingsSnapshot.value?.settings ?? []);
 const canUpdateSettings = computed(() => sessionStore.can("system-settings:update"));
 const canViewSensitiveSettings = computed(() => sessionStore.can("system-settings:secret:view"));
+const isProviderTenantSession = computed(
+  () =>
+    sessionStore.user?.backofficeRole === "super_admin" &&
+    sessionStore.user?.scope === "tenant"
+);
 const effectiveRuntimeValues = computed(() => getEffectiveSystemSettingValues(settings.value));
 const isProductionRuntime = computed(() => isProductionRuntimeSettings(effectiveRuntimeValues.value));
 const settingsByKey = computed(() => new Map(settings.value.map((entry) => [entry.key, entry])));
@@ -73,7 +89,10 @@ const adjustmentQuotaModeSetting = computed(() =>
 );
 const settingsForCurrentPickupMode = computed(() =>
   settingsVisibleForCurrentPickupMode(
-    settingsVisibleForInstanceAdministration(settings.value),
+    settingsVisibleForBackofficeSession(settings.value, {
+      backofficeRole: sessionStore.user?.backofficeRole,
+      scope: sessionStore.user?.scope
+    }),
     reservationOnlyPickup.value
   )
 );
@@ -123,7 +142,9 @@ const groupCounts = computed(() =>
 );
 const adjustmentQuotaModeLabel = computed(() => optionLabel("SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"));
 const exampleSettingsIntro = computed(() =>
-  manualVerificationSettingVisible.value
+  isProviderTenantSession.value
+    ? "当前为服务商运维视图，可维护当前实例的登录服务、短信接口、地图、柜机接入及其他运行配置。"
+    : manualVerificationSettingVisible.value
     ? "先确认领取方式、差异额度归属和 App 登录验证，再保存设置。"
     : "先确认领取方式和差异额度归属，再保存设置。"
 );
@@ -131,6 +152,11 @@ const instanceSettingsIntro = computed(() =>
   manualVerificationSettingVisible.value
     ? "人员额度、预约时段和审核规则请在“人员管理”中维护。"
     : "人员额度、预约时段和审核规则请在“人员管理”中维护；App 登录方式由服务管理员维护。"
+);
+const settingsScopeIntro = computed(() =>
+  isProviderTenantSession.value
+    ? "敏感项默认隐藏；修改外部服务或登录方式后，请保存并按提示重启当前实例应用。运行数据路径和实例身份仍只能通过发布流程维护。"
+    : `${instanceSettingsIntro.value}运行环境、运行数据、外部服务和密钥由服务管理员维护，本页无需填写这些内容。`
 );
 const paymentSummaryClass = computed(() => {
   const summary = paymentDiagnostics.value?.summary;
@@ -210,6 +236,9 @@ const loadSettings = async () => {
     applySnapshot(snapshot);
     refreshPaymentDiagnosticsFor(snapshot);
     lastSaveResult.value = undefined;
+    if (isProviderTenantSession.value) {
+      void loadRuntimeControlStatus();
+    }
   } catch (error) {
     loadError.value = readErrorMessage(error, "加载系统设置失败。");
   } finally {
@@ -264,6 +293,70 @@ const resetChanges = () => {
 
 const setActiveGroup = (group: string) => {
   activeGroup.value = group;
+};
+
+const loadRuntimeControlStatus = async () => {
+  if (!isProviderTenantSession.value) {
+    runtimeControlStatus.value = undefined;
+    return;
+  }
+
+  runtimeControlLoading.value = true;
+  try {
+    runtimeControlStatus.value = await adminApi.instanceRuntimeControl();
+  } catch (error) {
+    runtimeControlStatus.value = undefined;
+    restartMessage.value = {
+      type: "error",
+      text: readErrorMessage(error, "当前实例重启状态不可用。")
+    };
+  } finally {
+    runtimeControlLoading.value = false;
+  }
+};
+
+const openRestartPanel = () => {
+  restartPanelOpen.value = true;
+  restartResult.value = undefined;
+  restartConfirmation.value = "";
+  restartReason.value = "";
+  restartMessage.value = null;
+};
+
+const submitInstanceRestart = async () => {
+  if (!runtimeControlStatus.value?.available || hasDirtyChanges.value) {
+    restartMessage.value = {
+      type: "error",
+      text: hasDirtyChanges.value
+        ? "请先保存或放弃当前设置更改，再重启实例应用。"
+        : "当前部署暂不支持快捷重启。"
+    };
+    return;
+  }
+
+  restartSubmitting.value = true;
+  restartMessage.value = null;
+  try {
+    restartResult.value = await adminApi.restartCurrentInstance({
+      tenantNameConfirmation: restartConfirmation.value,
+      reason: restartReason.value
+    });
+    restartMessage.value = {
+      type: "success",
+      text: `已安排重启，预计 ${restartResult.value.expectedReadyWithinSeconds} 秒内恢复。重启会使当前登录失效，页面即将返回登录入口。`
+    };
+    window.setTimeout(() => {
+      sessionStore.clearSession();
+      void router.replace({ path: "/login", query: { reason: "instance-restart" } });
+    }, 4_500);
+  } catch (error) {
+    restartMessage.value = {
+      type: "error",
+      text: readErrorMessage(error, "快捷重启安排失败。")
+    };
+  } finally {
+    restartSubmitting.value = false;
+  }
 };
 
 const isBooleanEnabled = (key: string) => ["1", "true", "yes", "on"].includes((formValues[key] ?? "").toLowerCase());
@@ -486,6 +579,15 @@ onBeforeUnmount(() => {
             {{ loading ? "刷新中" : "刷新" }}
           </button>
           <button
+            v-if="isProviderTenantSession"
+            class="admin-button admin-button--ghost"
+            type="button"
+            :disabled="runtimeControlLoading || restartSubmitting || hasDirtyChanges || !runtimeControlStatus?.available"
+            @click="openRestartPanel"
+          >
+            {{ restartSubmitting ? "安排中" : "重启当前实例" }}
+          </button>
+          <button
             class="admin-button admin-button--ghost"
             type="button"
             :disabled="saving || !hasDirtyChanges"
@@ -503,7 +605,7 @@ onBeforeUnmount(() => {
         当前账号只有查看权限，不能修改或保存系统设置。
       </div>
       <div class="admin-note settings-page__note">
-        {{ instanceSettingsIntro }}运行环境、运行数据、外部服务和密钥由服务管理员维护，本页无需填写这些内容。
+        {{ settingsScopeIntro }}
       </div>
       <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
@@ -521,6 +623,71 @@ onBeforeUnmount(() => {
       <div v-if="hasDirtyChanges" class="admin-note settings-page__note settings-page__note--warning">
         当前有 {{ dirtyKeys.length }} 项未保存；{{ runtimeDirtyKeys.length }} 项保存后立即生效，{{ restartDirtyKeys.length }} 项需要重新启用服务后完全生效。
       </div>
+
+      <section
+        v-if="isProviderTenantSession && restartPanelOpen"
+        class="admin-panel admin-panel-block settings-page__restart-panel"
+      >
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">实例应用控制</span>
+            <h3 class="admin-panel__title">重启 {{ runtimeControlStatus?.tenantName || "当前实例" }} API 应用</h3>
+          </div>
+          <button
+            class="admin-button admin-button--ghost"
+            type="button"
+            :disabled="restartSubmitting"
+            @click="restartPanelOpen = false"
+          >
+            取消
+          </button>
+        </div>
+        <div class="admin-note settings-page__note settings-page__note--warning">
+          仅重启当前 Spark 部署的 API 应用，不操作柜机、运行数据或公网转发。重启期间约有数秒不可用，所有现有登录会话都会失效。
+        </div>
+        <div class="settings-page__restart-fields">
+          <label class="admin-field">
+            <span class="admin-field__label">输入实例名称确认</span>
+            <input
+              v-model.trim="restartConfirmation"
+              class="admin-input"
+              :placeholder="runtimeControlStatus?.tenantName"
+              :disabled="restartSubmitting"
+            />
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">重启原因</span>
+            <input
+              v-model.trim="restartReason"
+              class="admin-input"
+              maxlength="200"
+              placeholder="例如：使短信登录配置生效"
+              :disabled="restartSubmitting"
+            />
+          </label>
+        </div>
+        <div
+          v-if="restartMessage"
+          class="admin-note settings-page__note"
+          :class="restartMessage.type === 'error' ? 'settings-page__note--danger' : 'settings-page__note--success'"
+          role="status"
+        >
+          {{ restartMessage.text }}
+        </div>
+        <button
+          class="admin-button"
+          type="button"
+          :disabled="
+            restartSubmitting ||
+            restartConfirmation !== runtimeControlStatus?.tenantName ||
+            restartReason.trim().length < 4 ||
+            hasDirtyChanges
+          "
+          @click="submitInstanceRestart"
+        >
+          {{ restartSubmitting ? "正在安排重启" : "确认重启当前实例" }}
+        </button>
+      </section>
 
       <section class="admin-panel admin-panel-block settings-page__example-overview">
         <div class="admin-panel__head">
@@ -654,6 +821,7 @@ onBeforeUnmount(() => {
       <div v-else class="admin-note settings-page__note settings-page__note--success">
         当前为预约取货：新的领取流程不需要支付配置，支付自检与支付专用设置已收起；历史订单仍可在订单和日志中查询。
       </div>
+
     </section>
 
     <section class="settings-page__workspace">
@@ -680,7 +848,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="admin-note settings-page__note">
-          建议先完成“实例设置”。其他服务事项请联系服务管理员协助处理。
+          {{ isProviderTenantSession
+            ? "可按分类维护当前实例；带“重启后生效”的配置保存后请使用页面顶部的重启入口。"
+            : "建议先完成“实例设置”。其他服务事项请联系服务管理员协助处理。" }}
         </div>
       </aside>
 
@@ -867,6 +1037,20 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 12px;
   margin-top: 12px;
+}
+
+.settings-page__restart-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  border-color: #e3c47f;
+  background: #fffdf7;
+}
+
+.settings-page__restart-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .settings-page__example-grid {
@@ -1253,7 +1437,8 @@ onBeforeUnmount(() => {
   .settings-page__field-row,
   .payment-diagnostics__providers,
   .settings-page__example-grid,
-  .settings-page__example-grid--two {
+  .settings-page__example-grid--two,
+  .settings-page__restart-fields {
     grid-template-columns: 1fr;
   }
 
