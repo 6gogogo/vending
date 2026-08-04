@@ -54,6 +54,8 @@ interface SessionState {
   bootstrapped: boolean;
 }
 
+const pendingBootstraps = new WeakMap<object, Promise<SessionState["user"]>>();
+
 export const useSessionStore = defineStore("mobile-session", {
   state: (): SessionState => ({
     token: undefined,
@@ -83,7 +85,7 @@ export const useSessionStore = defineStore("mobile-session", {
       this.draft = stored.draft;
       this.application = stored.application as RegistrationApplication | undefined;
       this.profileDraft = stored.profileDraft as RegistrationApplicationProfile | undefined;
-      this.bootstrapped = true;
+      this.bootstrapped = !stored.token;
     },
     persist() {
       writeStoredMobileSession({
@@ -100,20 +102,37 @@ export const useSessionStore = defineStore("mobile-session", {
         return this.user;
       }
 
-      this.hydrate();
-
-      if (!this.token) {
-        return this.user;
+      const pendingBootstrap = pendingBootstraps.get(this);
+      if (pendingBootstrap) {
+        return pendingBootstrap;
       }
+
+      const bootstrap = (async () => {
+        this.hydrate();
+
+        if (!this.token) {
+          this.bootstrapped = true;
+          return this.user;
+        }
+
+        try {
+          const snapshot = await mobileApi.appSession();
+          this.setSession(snapshot);
+        } catch {
+          this.clear();
+        }
+
+        return this.user;
+      })();
+      pendingBootstraps.set(this, bootstrap);
 
       try {
-        const snapshot = await mobileApi.appSession();
-        this.setSession(snapshot);
-      } catch {
-        this.clear();
+        return await bootstrap;
+      } finally {
+        if (pendingBootstraps.get(this) === bootstrap) {
+          pendingBootstraps.delete(this);
+        }
       }
-
-      return this.user;
     },
     setSession(payload: MobileSessionSnapshot) {
       this.token = payload.token;

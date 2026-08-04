@@ -14,7 +14,7 @@
     "build:alipay": "uni build -p mp-alipay",
     "build:app": "uni build -p app",
     "smoke:h5-deployment": "node ./scripts/smoke-h5-deployment-build.mjs",
-    "test": "tsx --test src/utils/*.test.ts",
+    "test": "tsx --test src/utils/*.test.ts src/stores/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

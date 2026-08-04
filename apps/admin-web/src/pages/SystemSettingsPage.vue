@@ -828,7 +828,7 @@ onBeforeUnmount(() => {
       <aside class="admin-panel admin-panel-block settings-page__sidebar">
         <label class="admin-field">
           <span class="admin-field__label">搜索设置</span>
-          <input v-model.trim="searchText" class="admin-input" placeholder="设置名称、说明或分类" />
+          <input v-model.trim="searchText" class="admin-input" placeholder="设置名称或分类" />
         </label>
 
         <div class="settings-page__group-list">
@@ -847,11 +847,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="admin-note settings-page__note">
-          {{ isProviderTenantSession
-            ? "可按分类维护当前实例；带“重启后生效”的配置保存后请使用页面顶部的重启入口。"
-            : "建议先完成“实例设置”。其他服务事项请联系服务管理员协助处理。" }}
-        </div>
       </aside>
 
       <article class="admin-panel admin-panel-block settings-page__form-panel">

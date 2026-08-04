@@ -5,6 +5,7 @@ import { readStoredMobileSession } from "../utils/session-storage";
 
 const fallbackApiBaseUrl = "http://127.0.0.1:4000/api";
 const localHostnames = new Set(["localhost", "127.0.0.1", "::1"]);
+const buildEnv = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env;
 
 const isLocalHostname = (hostname: string) => localHostnames.has(hostname);
 
@@ -22,12 +23,12 @@ const isLocalApiBaseUrl = (baseUrl: string) => {
 };
 
 const shouldForceLocalApiBaseUrl = (configuredBaseUrl: string) => {
-  if (!import.meta.env.DEV || typeof window === "undefined") {
+  if (!buildEnv?.DEV || typeof window === "undefined") {
     return false;
   }
 
   const allowRemoteApi =
-    String(import.meta.env.VITE_ALLOW_REMOTE_API_IN_LOCAL_DEV ?? "")
+    String(buildEnv.VITE_ALLOW_REMOTE_API_IN_LOCAL_DEV ?? "")
       .trim()
       .toLowerCase() === "true";
 
@@ -40,7 +41,7 @@ const shouldForceLocalApiBaseUrl = (configuredBaseUrl: string) => {
 
 export const resolveMobileApiBaseUrl = () => {
   const configuredBaseUrl =
-    String(import.meta.env.VITE_API_BASE_URL ?? "").trim() || fallbackApiBaseUrl;
+    String(buildEnv?.VITE_API_BASE_URL ?? "").trim() || fallbackApiBaseUrl;
 
   if (shouldForceLocalApiBaseUrl(configuredBaseUrl)) {
     console.warn(

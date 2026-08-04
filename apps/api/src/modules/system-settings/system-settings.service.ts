@@ -41,7 +41,7 @@ interface EnvAssignment {
   key: string;
   value: string;
   lineIndex: number;
-  group: string;
+  group?: string;
 }
 
 interface ParsedEnvFile {
@@ -606,7 +606,7 @@ export class SystemSettingsService {
     const assignments: EnvAssignment[] = [];
     const values = new Map<string, string>();
     const groups = new Map<string, string>();
-    let currentGroup = defaultGroupName;
+    let currentGroup: string | undefined;
 
     lines.forEach((line, lineIndex) => {
       const sectionName = this.parseSectionName(line);
@@ -630,7 +630,9 @@ export class SystemSettingsService {
 
       assignments.push(entry);
       values.set(entry.key, entry.value);
-      groups.set(entry.key, entry.group);
+      if (entry.group) {
+        groups.set(entry.key, entry.group);
+      }
     });
 
     return {
@@ -643,13 +645,13 @@ export class SystemSettingsService {
   }
 
   private parseSectionName(line: string) {
-    const match = line.match(/^\s*#\s*(.+?)\s*$/);
+    const match = line.match(/^\s*#\s*分组\s*[:：]\s*(.+?)\s*$/);
 
     if (!match?.[1]) {
       return undefined;
     }
 
-    return match[1].split(/[:：]/)[0]?.trim() || defaultGroupName;
+    return match[1].trim() || defaultGroupName;
   }
 
   private parseAssignmentLine(line: string) {

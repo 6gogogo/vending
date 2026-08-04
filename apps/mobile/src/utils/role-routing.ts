@@ -63,8 +63,21 @@ export const isStockOperatorRole = (
 
 export const resolveHomePath = (_role?: UserRole) => sharedTabPaths[0];
 
+export const isSharedTabPageRoute = (route?: string) => {
+  const normalizedRoute = `/${(route ?? "").replace(/^\/+/, "")}`;
+  return (sharedTabPaths as readonly string[]).includes(normalizedRoute);
+};
+
+const getCurrentPageRoute = () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    getCurrentPages?: () => Array<{ route?: string }>;
+  };
+  const pages = runtimeGlobals.getCurrentPages?.() ?? [];
+  return pages[pages.length - 1]?.route;
+};
+
 export const syncRoleTabBar = (role?: UserRole) => {
-  if (!role) {
+  if (!role || !isSharedTabPageRoute(getCurrentPageRoute())) {
     return;
   }
 

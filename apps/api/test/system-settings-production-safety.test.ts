@@ -149,6 +149,72 @@ test("实例设置将领取和 App 验证选项集中展示，运行环境只能
   }
 });
 
+test("环境文件说明注释不会成为后台设置分组", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-groups-"));
+  const envFilePath = join(directory, ".env");
+  writeFileSync(
+    envFilePath,
+    "# 生产服务应从密钥管理器注入，当前行只是操作说明。\nOPENAI_MODEL=qwen-test\n",
+    "utf8"
+  );
+  writeFileSync(
+    join(directory, ".env.example"),
+    "# 分组：大模型服务\n# 模型名称由服务提供商按部署方案维护。\nOPENAI_MODEL=qwen-example\n",
+    "utf8"
+  );
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => key === "OPENAI_MODEL" ? "qwen-test" : undefined,
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const entry = service.getSettings().settings.find(
+      (setting) => setting.key === "OPENAI_MODEL"
+    );
+
+    assert.equal(entry?.group, "大模型服务");
+    assert.doesNotMatch(entry?.group ?? "", /密钥管理器|操作说明/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("系统设置模板只生成简洁稳定的后台分组", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-template-groups-"));
+  const envFilePath = join(directory, ".env");
+  writeFileSync(envFilePath, "", "utf8");
+  writeFileSync(
+    join(directory, ".env.example"),
+    readFileSync(new URL("../.env.example", import.meta.url), "utf8"),
+    "utf8"
+  );
+  const service = new SystemSettingsService(
+    {
+      get: () => undefined,
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const entries = new Map(service.getSettings().settings.map((entry) => [entry.key, entry]));
+
+    assert.equal(entries.get("AMAP_WEB_KEY")?.group, "地图服务");
+    assert.equal(entries.get("OPENAI_MODEL")?.group, "大模型服务");
+    assert.equal(entries.get("PAYMENT_MODE")?.group, "支付服务");
+    assert.equal(entries.get("VERIFICATION_CODE_PROVIDER")?.group, "验证码服务");
+    assert.equal(
+      service.getSettings().settings.some((entry) => /必须|只能|不得|；|。/.test(entry.group)),
+      false
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("实例管理员在 API 层只能读写日常实例设置，不能绕过页面修改短信登录配置", () => {
   const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-role-boundary-"));
   const envFilePath = join(directory, ".env");
