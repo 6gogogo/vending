@@ -27,10 +27,10 @@
   },
   "dependencies": {
     "@alicloud/dypnsapi20170525": "^2.0.0",
-    "@nestjs/common": "^11.0.0",
+    "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.2",
-    "@nestjs/core": "^11.0.0",
-    "@nestjs/platform-express": "^11.1.17",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-express": "^11.1.28",
     "@prisma/client": "^7.8.0",
     "@vm/shared-client": "file:../../packages/shared-client",
     "@vm/shared-types": "file:../../packages/shared-types",
