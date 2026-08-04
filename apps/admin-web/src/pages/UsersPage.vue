@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
+import { readSheet } from "read-excel-file/browser";
 import {
   BACKOFFICE_PERMISSIONS,
   BACKOFFICE_ROLE_ALLOWED_PERMISSIONS,
@@ -36,11 +37,19 @@ import {
 } from "../utils/backoffice-provisioning";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
+import {
+  parsePersonnelImportRows,
+  type PersonnelImportCell,
+  type PersonnelImportEntry,
+  type PersonnelImportIssue,
+  type PersonnelImportRole
+} from "../utils/personnel-import";
 
 type DrawerMode =
   | ""
   | "create-user"
   | "edit-user"
+  | "import-users"
   | "create-policy"
   | "edit-policy"
   | "backoffice-account"
@@ -316,6 +325,14 @@ const manualVerificationForm = ref<ManualVerificationFormState>(
 const reservationForm = ref<ReservationFormState>({ enabled: false, holdMinutes: 15, maxTimeouts: 3 });
 const reservationMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
+const personnelImportRole = ref<PersonnelImportRole>("special");
+const personnelImportFileName = ref("");
+const personnelImportRows = ref<PersonnelImportCell[][]>([]);
+const personnelImportEntries = ref<PersonnelImportEntry[]>([]);
+const personnelImportIssues = ref<PersonnelImportIssue[]>([]);
+const personnelImportSourceRowCount = ref(0);
+const personnelImportParsing = ref(false);
+const personnelImportSubmitting = ref(false);
 
 const showActionMessage = (type: "success" | "error", text: string) => {
   actionMessage.value = { type, text };
@@ -361,6 +378,8 @@ const currentDrawerTitle = computed(() =>
     ? "新增人员"
     : drawerMode.value === "edit-user"
       ? "编辑人员"
+      : drawerMode.value === "import-users"
+        ? "导入 Excel 人员表"
       : drawerMode.value === "create-policy"
         ? "新增每日物资模板"
         : drawerMode.value === "edit-policy"
@@ -381,6 +400,8 @@ const isUserMutating = computed(
     deviceAssignmentSaving.value ||
     supervisorPasswordResetSaving.value ||
     manualCodeSaving.value ||
+    personnelImportParsing.value ||
+    personnelImportSubmitting.value ||
     Boolean(removingUserId.value)
 );
 const canManageBackofficeCredentials = computed(() => sessionStore.can("backoffice-credentials:manage"));
@@ -881,6 +902,100 @@ const openBackofficeAccount = (user: UserRecord) => {
   fillBackofficeFormForRole(user, role);
   drawerMode.value = "backoffice-account";
 };
+const resetPersonnelImport = () => {
+  personnelImportRole.value = "special";
+  personnelImportFileName.value = "";
+  personnelImportRows.value = [];
+  personnelImportEntries.value = [];
+  personnelImportIssues.value = [];
+  personnelImportSourceRowCount.value = 0;
+};
+const refreshPersonnelImportPreview = () => {
+  if (!personnelImportRows.value.length) {
+    personnelImportEntries.value = [];
+    personnelImportIssues.value = [];
+    personnelImportSourceRowCount.value = 0;
+    return;
+  }
+  const result = parsePersonnelImportRows(
+    personnelImportRows.value,
+    personnelImportRole.value
+  );
+  personnelImportEntries.value = result.entries;
+  personnelImportIssues.value = result.issues;
+  personnelImportSourceRowCount.value = result.sourceRowCount;
+};
+const openPersonnelImport = () => {
+  resetPersonnelImport();
+  drawerMode.value = "import-users";
+};
+const handlePersonnelImportFile = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  personnelImportFileName.value = file?.name ?? "";
+  personnelImportRows.value = [];
+  personnelImportEntries.value = [];
+  personnelImportIssues.value = [];
+  personnelImportSourceRowCount.value = 0;
+  if (!file) return;
+
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    personnelImportIssues.value = [
+      { row: 1, field: "文件", message: "只支持 .xlsx 文件，请使用下载的模板。" }
+    ];
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    personnelImportIssues.value = [
+      { row: 1, field: "文件", message: "Excel 文件不能超过 2 MB。" }
+    ];
+    return;
+  }
+
+  personnelImportParsing.value = true;
+  try {
+    personnelImportRows.value = (await readSheet(file)) as PersonnelImportCell[][];
+    refreshPersonnelImportPreview();
+  } catch (error) {
+    personnelImportIssues.value = [
+      {
+        row: 1,
+        field: "文件",
+        message: `Excel 读取失败：${readErrorMessage(error, "请重新下载模板后填写")}`
+      }
+    ];
+  } finally {
+    personnelImportParsing.value = false;
+  }
+};
+const submitPersonnelImport = async () => {
+  if (!personnelImportEntries.value.length || personnelImportIssues.value.length) return;
+  const count = personnelImportEntries.value.length;
+  const roleLabel = personnelImportRole.value === "special" ? "特殊群体 / App 用户" : "商家";
+  if (
+    !window.confirm(
+      `确认向当前实例导入 ${count} 名${roleLabel}？同手机号同角色的已有人员会更新并重新启用。`
+    )
+  ) {
+    return;
+  }
+
+  personnelImportSubmitting.value = true;
+  actionMessage.value = null;
+  try {
+    const result = await adminApi.importUsers({
+      role: personnelImportRole.value,
+      entries: personnelImportEntries.value
+    });
+    closeDrawer();
+    await load();
+    showActionMessage("success", `已导入 ${result.count} 名${roleLabel}。`);
+  } catch (error) {
+    showActionMessage("error", `人员导入失败：${readErrorMessage(error, "请检查表格后重试")}`);
+  } finally {
+    personnelImportSubmitting.value = false;
+  }
+};
 
 const openSupervisorPasswordReset = (user: UserRecord) => {
   const credential = backofficeCredentialForUser(user);
@@ -946,6 +1061,7 @@ const closeDrawer = () => {
   supervisorPasswordResetForm.value = createEmptySupervisorPasswordResetForm();
   manualVerificationForm.value = createEmptyManualVerificationForm();
   manualCodeIssued.value = false;
+  resetPersonnelImport();
 };
 
 const submitUserForm = async (configureAccess = false) => {
@@ -1368,7 +1484,11 @@ onMounted(load);
           <p class="admin-kicker">业务配置</p>
           <h3 class="admin-page__section-title">先建人员，再配置每日可领取物资和预约规则</h3>
         </div>
-        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">新增人员</button>
+        <div v-if="canManageUsers" class="admin-inline-links">
+          <a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>下载 Excel 模板</a>
+          <button class="admin-button admin-button--ghost" @click="openPersonnelImport">导入 Excel</button>
+          <button class="admin-button" @click="openCreateUser">新增人员</button>
+        </div>
       </div>
 
       <div class="users-setup-grid">
@@ -1489,7 +1609,11 @@ onMounted(load);
           <p class="admin-kicker">实例初始化</p>
           <h3 class="admin-page__section-title">先新增人员，再分配柜机并开通登录</h3>
         </div>
-        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">新增人员</button>
+        <div v-if="canManageUsers" class="admin-inline-links">
+          <a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>下载 Excel 模板</a>
+          <button class="admin-button admin-button--ghost" @click="openPersonnelImport">导入 Excel</button>
+          <button class="admin-button" @click="openCreateUser">新增人员</button>
+        </div>
       </div>
       <article class="admin-panel admin-panel-block users-tenant-flow">
         <div class="users-setup-step">
@@ -1655,7 +1779,11 @@ onMounted(load);
           <p class="admin-kicker">人员检索</p>
           <h3 class="admin-page__section-title">按区域分组查看人员台账并批量绑定特殊群体策略</h3>
         </div>
-        <button v-if="canManageUsers" class="admin-button" @click="openCreateUser">新增人员</button>
+        <div v-if="canManageUsers" class="admin-inline-links">
+          <a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>下载 Excel 模板</a>
+          <button class="admin-button admin-button--ghost" @click="openPersonnelImport">导入 Excel</button>
+          <button class="admin-button" @click="openCreateUser">新增人员</button>
+        </div>
       </div>
 
       <div class="users-filters admin-panel admin-panel-block">
@@ -1930,7 +2058,93 @@ onMounted(load);
           <button class="admin-button admin-button--ghost" :disabled="isUserMutating" @click="closeDrawer">关闭</button>
         </div>
 
-        <div v-if="drawerMode === 'create-user' || drawerMode === 'edit-user'" class="users-drawer__body">
+        <div v-if="drawerMode === 'import-users'" class="users-drawer__body">
+          <div class="admin-note">
+            每次导入 1 至 500 人。支持特殊群体 / App 用户和商家；实例管理员、补货员仍需逐个创建并配置后台权限或柜机范围。
+          </div>
+          <a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>
+            下载标准 Excel 模板
+          </a>
+          <label class="admin-field">
+            <span class="admin-field__label">导入角色</span>
+            <select
+              v-model="personnelImportRole"
+              class="admin-select"
+              :disabled="personnelImportParsing || personnelImportSubmitting"
+              @change="refreshPersonnelImportPreview"
+            >
+              <option value="special">特殊群体 / App 用户</option>
+              <option value="merchant">商家</option>
+            </select>
+          </label>
+          <label class="admin-field">
+            <span class="admin-field__label">选择 .xlsx 文件</span>
+            <input
+              class="admin-input"
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              :disabled="personnelImportParsing || personnelImportSubmitting"
+              @change="handlePersonnelImportFile"
+            />
+            <span class="admin-table__subtext">文件不超过 2 MB；第一行列名不能修改。</span>
+          </label>
+
+          <div v-if="personnelImportParsing" class="admin-note" role="status">正在读取 Excel…</div>
+          <div v-else-if="personnelImportIssues.length" class="admin-alert admin-alert--danger" role="alert">
+            <strong>发现 {{ personnelImportIssues.length }} 项问题</strong>
+            <ol class="users-import-issues">
+              <li v-for="(issue, index) in personnelImportIssues.slice(0, 20)" :key="`${issue.row}-${issue.field}-${index}`">
+                第 {{ issue.row }} 行 · {{ issue.field }}：{{ issue.message }}
+              </li>
+            </ol>
+            <span v-if="personnelImportIssues.length > 20" class="admin-table__subtext">
+              其余 {{ personnelImportIssues.length - 20 }} 项请修正前述问题后重新选择文件查看。
+            </span>
+          </div>
+          <template v-else-if="personnelImportEntries.length">
+            <div class="admin-note users-import-summary" role="status">
+              已读取 {{ personnelImportFileName }}：共 {{ personnelImportSourceRowCount }} 人，校验通过。提交前请核对前 10 行。
+            </div>
+            <div class="users-import-preview">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>姓名</th>
+                    <th>手机号</th>
+                    <th>区域</th>
+                    <th>标签</th>
+                    <th>每日总额度</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in personnelImportEntries.slice(0, 10)" :key="entry.phone">
+                    <td>{{ entry.name }}</td>
+                    <td class="admin-code">{{ entry.phone }}</td>
+                    <td>{{ entry.regionName || "未分配" }}</td>
+                    <td>{{ entry.tags?.join("、") || "无" }}</td>
+                    <td>{{ entry.quota?.dailyLimit ?? "未填写" }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="admin-note">
+              同一实例内，同手机号、同角色的已有人员会更新并重新启用；跨实例、跨角色或服务商账号冲突会使整批导入失败，不会只写入一部分。
+            </div>
+            <button
+              class="admin-button"
+              :disabled="personnelImportSubmitting || !canManageUsers"
+              @click="submitPersonnelImport"
+            >
+              {{ personnelImportSubmitting ? "导入中" : `确认导入 ${personnelImportEntries.length} 人` }}
+            </button>
+          </template>
+
+          <div v-else-if="personnelImportFileName" class="admin-note">
+            文件中没有可提交的人员记录。
+          </div>
+        </div>
+
+        <div v-else-if="drawerMode === 'create-user' || drawerMode === 'edit-user'" class="users-drawer__body">
           <label class="admin-field">
             <span class="admin-field__label">角色</span>
             <select v-model="userForm.role" class="admin-select" :disabled="editingCurrentUser">
@@ -2415,6 +2629,30 @@ onMounted(load);
   border-color: #b6dfc4;
   background: #f0fbf4;
   color: #25673b;
+}
+
+.users-import-issues {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+}
+
+.users-import-summary {
+  border-color: #b6dfc4;
+  background: #f0fbf4;
+  color: #25673b;
+}
+
+.users-import-preview {
+  overflow-x: auto;
+  max-height: 360px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+}
+
+.users-import-preview .admin-table {
+  min-width: 680px;
 }
 
 .users-region-group__head {

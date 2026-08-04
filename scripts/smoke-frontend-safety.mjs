@@ -103,6 +103,7 @@ const merchantManualSource = readSource("docs/用户手册/商户使用手册.md
 const restockerManualSource = readSource("docs/用户手册/补货员使用手册.md");
 const appUserManualSource = readSource("docs/用户手册/App用户使用手册.md");
 const adminUsersSource = readSource("apps/admin-web/src/pages/UsersPage.vue");
+const personnelImportSource = readSource("apps/admin-web/src/utils/personnel-import.ts");
 const adminApiSource = readSource("apps/admin-web/src/api/admin.ts");
 const adminRouterSource = readSource("apps/admin-web/src/router/index.ts");
 const roleBoundaryLayoutSource = readSource("apps/admin-web/src/layouts/AdminLayout.vue");
@@ -212,6 +213,34 @@ assert.match(
   "后台登录失败时必须提示清除旧的浏览器自动填充"
 );
 assert.doesNotMatch(adminCopySource, /验收模拟实例/, "管理后台不得向用户展示验收自述");
+assert.ok(
+  existsSync(resolve(process.cwd(), "apps/admin-web/public/templates/公益智助柜人员导入模板.xlsx")),
+  "后台人员导入必须随版本提供标准 Excel 模板"
+);
+assert.ok(
+  existsSync(resolve(process.cwd(), "docs/公益智助柜用户使用手册.docx")),
+  "发布版本必须包含可交付的 Word 用户使用手册"
+);
+assert.match(
+  adminUsersSource,
+  /v-if="canManageUsers"[\s\S]{0,400}下载 Excel 模板[\s\S]{0,200}导入 Excel/,
+  "Excel 导入入口必须只向具备人员管理权限的后台账号显示"
+);
+assert.match(
+  adminApiSource,
+  /importUsers\([\s\S]{0,500}requireBackofficePermission\("users:manage"\)/,
+  "Excel 导入请求必须在前端权限边界内失败关闭"
+);
+assert.match(
+  personnelImportSource,
+  /MAX_IMPORT_ROWS = 500/,
+  "Excel 导入解析器必须限制批量规模"
+);
+assert.match(
+  personnelImportSource,
+  /\^1\\d\{10\}\$[\s\S]{0,160}手机号必须是 11 位中国大陆手机号/,
+  "Excel 导入解析器必须校验手机号"
+);
 const roleSpecificManualSources = [
   instanceAdminManualSource,
   merchantManualSource,

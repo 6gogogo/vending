@@ -40,3 +40,10 @@ test("实例内角色手册不暴露服务商身份", () => {
     assert.doesNotMatch(JSON.stringify(roleManuals[manualId]), /服务提供商|服务商/u);
   }
 });
+
+test("实例管理员手册明确 Excel 导入范围和后续配置", () => {
+  const source = JSON.stringify(roleManuals.admin);
+  assert.match(source, /标准 Excel 模板/u);
+  assert.match(source, /特殊群体 \/ App 用户/u);
+  assert.match(source, /实例管理员和补货员.*不能从 Excel 批量创建/u);
+});

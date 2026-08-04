@@ -1,4 +1,5 @@
 import type {
+  AccessQuota,
   AiAdminCustomQueryReply,
   AiEventDiagnosis,
   AiFeedbackDraft,
@@ -278,6 +279,21 @@ export const adminApi = {
   }) {
     requireBackofficePermission("users:manage");
     return adminClient.post<UserRecord>("/users", payload);
+  },
+  importUsers(payload: {
+    role: Extract<UserRecord["role"], "special" | "merchant">;
+    entries: Array<{
+      phone: string;
+      name: string;
+      neighborhood?: string;
+      regionId?: string;
+      regionName?: string;
+      tags?: string[];
+      quota?: AccessQuota;
+    }>;
+  }) {
+    requireBackofficePermission("users:manage");
+    return adminClient.post<{ count: number; imported: UserRecord[] }>("/users/import", payload);
   },
   updateUser(
     userId: string,

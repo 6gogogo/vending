@@ -688,6 +688,9 @@ export class UsersService {
       );
       this.assertStringValue(entry.phone, "手机号", 32);
       this.assertStringValue(entry.name, "用户姓名", 100);
+      if (!/^1\d{10}$/u.test((entry.phone as string).trim())) {
+        throw new BadRequestException("手机号必须是 11 位中国大陆手机号。");
+      }
       for (const [field, label] of [
         ["neighborhood", "所属区域"],
         ["regionId", "区域编号"],

@@ -144,6 +144,83 @@ test("实例管理员侧不存在向上认领服务商账号的接口", async ()
   }
 });
 
+test("实例管理员可通过受保护路由批量导入本实例人员，服务商全局会话不能越权调用", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const adminToken = createDefaultAdminToken(store);
+    const providerToken = createProviderToken(store);
+    const response = await fetch(`${baseUrl}/users/import`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        role: "special",
+        entries: [
+          {
+            phone: "18800000094",
+            name: "批量导入路由测试",
+            regionName: "测试区域",
+            tags: ["路由回归"],
+            quota: {
+              dailyLimit: 4,
+              categoryLimit: {
+                food: 2,
+                drink: 1,
+                daily: 1
+              }
+            }
+          }
+        ]
+      })
+    });
+    const payload = (await response.json()) as {
+      data?: {
+        count?: number;
+        imported?: Array<{
+          phone?: string;
+          tenantId?: string;
+          quota?: { dailyLimit?: number };
+        }>;
+      };
+    };
+    const providerResponse = await fetch(`${baseUrl}/users/import`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${providerToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        role: "merchant",
+        entries: [
+          {
+            phone: "18800000093",
+            name: "不得由服务商全局会话直接导入"
+          }
+        ]
+      })
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(payload.data?.count, 1);
+    assert.equal(payload.data?.imported?.[0]?.phone, "18800000094");
+    assert.equal(
+      payload.data?.imported?.[0]?.tenantId,
+      store.getDefaultTenantId()
+    );
+    assert.equal(payload.data?.imported?.[0]?.quota?.dailyLimit, 4);
+    assert.equal(providerResponse.status, 403);
+    assert.equal(
+      store.users.some((entry) => entry.phone === "18800000093"),
+      false
+    );
+  } finally {
+    await app.close();
+  }
+});
+
 test("实例管理员不能通过人员标签或批量导入改写服务商根账号", async () => {
   const { app, baseUrl, store } = await startApi();
 
@@ -2246,6 +2323,46 @@ test("人员创建、更新和批量导入都保持手机号全局唯一，失�
       /导入数据中存在重复手机号/
     );
     assert.deepEqual(store.users, beforeImport);
+
+    assert.throws(
+      () =>
+        usersService.importUsers(
+          {
+            role: "special",
+            entries: [{ phone: "123", name: "无效手机号" }]
+          },
+          tenantId
+        ),
+      /手机号必须是 11 位中国大陆手机号/
+    );
+    assert.deepEqual(store.users, beforeImport);
+
+    const successfulImport = usersService.importUsers(
+      {
+        role: "special",
+        entries: [
+          {
+            phone: "18800000015",
+            name: "批量导入成功账号",
+            regionName: "测试地区",
+            tags: ["重点关怀"],
+            quota: {
+              dailyLimit: 2,
+              categoryLimit: { food: 1, drink: 1 }
+            }
+          }
+        ]
+      },
+      tenantId
+    );
+    assert.equal(successfulImport.count, 1);
+    assert.equal(successfulImport.imported[0]?.tenantId, tenantId);
+    assert.equal(successfulImport.imported[0]?.phone, "18800000015");
+    assert.equal(successfulImport.imported[0]?.regionName, "测试地区");
+    assert.deepEqual(successfulImport.imported[0]?.quota, {
+      dailyLimit: 2,
+      categoryLimit: { food: 1, drink: 1 }
+    });
   } finally {
     await app.close();
   }
