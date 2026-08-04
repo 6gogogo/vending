@@ -12,6 +12,7 @@ import { ConfigService } from "@nestjs/config";
 
 import type {
   BackofficeRole,
+  RuntimeDataPlane,
   SystemSettingEntry,
   SystemSettingInputType,
   SystemSettingsSnapshot,
@@ -120,6 +121,21 @@ export class SystemSettingsService {
     includeSensitiveValues?: boolean;
     actorBackofficeRole?: BackofficeRole;
   }): SystemSettingsSnapshot {
+    const snapshot = this.getUnfilteredSettings(options);
+    const runtimeVisibleSettings = this.applyRuntimePlaneVisibility(snapshot.settings);
+
+    return {
+      ...snapshot,
+      settings: this.filterSettingsForActor(
+        runtimeVisibleSettings,
+        options?.actorBackofficeRole
+      )
+    };
+  }
+
+  private getUnfilteredSettings(options?: {
+    includeSensitiveValues?: boolean;
+  }): SystemSettingsSnapshot {
     const envFilePath = this.envFilePath;
     const exampleFilePath = this.resolveExampleFilePath(envFilePath);
     const envFile = this.parseEnvFile(envFilePath);
@@ -134,7 +150,7 @@ export class SystemSettingsService {
       envFilePath,
       exampleFilePath: existsSync(exampleFilePath) ? exampleFilePath : undefined,
       loadedAt: new Date().toISOString(),
-      settings: this.filterSettingsForActor(settings, options?.actorBackofficeRole)
+      settings
     };
   }
 
@@ -158,7 +174,7 @@ export class SystemSettingsService {
       throw new BadRequestException("配置保存参数不正确。");
     }
 
-    const snapshotBefore = this.getSettings({ includeSensitiveValues: true });
+    const snapshotBefore = this.getUnfilteredSettings({ includeSensitiveValues: true });
     const entriesByKey = new Map(snapshotBefore.settings.map((entry) => [entry.key, entry]));
     const nextValues = new Map<string, string>();
 
@@ -368,6 +384,36 @@ export class SystemSettingsService {
     }
 
     return settings.filter((entry) => allowedKeys.has(entry.key));
+  }
+
+  private applyRuntimePlaneVisibility(settings: SystemSettingEntry[]) {
+    const runtimeDataPlane = this.resolveRuntimeDataPlane(settings);
+
+    return settings
+      .filter((entry) => {
+        const runtimePlanes = systemSettingCatalog[entry.key]?.runtimePlanes;
+        return !runtimePlanes || runtimePlanes.includes(runtimeDataPlane);
+      })
+      .map((entry) => {
+        const allowedOptionValues =
+          systemSettingCatalog[entry.key]?.optionValuesByRuntimePlane?.[runtimeDataPlane];
+
+        if (!allowedOptionValues || !entry.options) {
+          return entry;
+        }
+
+        const allowedValues = new Set(allowedOptionValues);
+        return {
+          ...entry,
+          options: entry.options.filter((option) => allowedValues.has(option.value))
+        };
+      });
+  }
+
+  private resolveRuntimeDataPlane(settings: SystemSettingEntry[]): RuntimeDataPlane {
+    const entry = settings.find((setting) => setting.key === "VM_DATA_PLANE");
+    const value = (entry?.effectiveValue || entry?.value || "simulation").trim().toLowerCase();
+    return value === "live" ? "live" : "simulation";
   }
 
   private assertActorCanUpdateKeys(

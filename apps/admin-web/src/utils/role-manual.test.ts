@@ -11,10 +11,19 @@ test("服务商可查看全部分角色手册", () => {
   assert.deepEqual(resolveVisibleRoleManualIds("super_admin"), roleManualOrder);
 });
 
-test("实例角色只能查看自己的手册", () => {
-  assert.deepEqual(resolveVisibleRoleManualIds("admin"), ["admin"]);
-  assert.deepEqual(resolveVisibleRoleManualIds("merchant"), ["merchant"]);
-  assert.deepEqual(resolveVisibleRoleManualIds("restocker"), ["restocker"]);
+test("实例角色只能查看自己及下级角色手册", () => {
+  assert.deepEqual(resolveVisibleRoleManualIds("admin"), [
+    "admin",
+    "merchant",
+    "restocker",
+    "app"
+  ]);
+  assert.deepEqual(resolveVisibleRoleManualIds("merchant"), [
+    "merchant",
+    "restocker",
+    "app"
+  ]);
+  assert.deepEqual(resolveVisibleRoleManualIds("restocker"), ["restocker", "app"]);
   assert.deepEqual(resolveVisibleRoleManualIds(undefined), []);
 });
 

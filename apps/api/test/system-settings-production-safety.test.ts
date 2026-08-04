@@ -210,6 +210,12 @@ test("系统设置模板只生成简洁稳定的后台分组", () => {
       service.getSettings().settings.some((entry) => /必须|只能|不得|；|。/.test(entry.group)),
       false
     );
+    assert.deepEqual(
+      service.getSettings().settings
+        .filter((entry) => entry.description === `${entry.group}配置项。`)
+        .map((entry) => entry.key),
+      []
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -263,6 +269,82 @@ test("实例管理员在 API 层只能读写日常实例设置，不能绕过页
       providerSnapshot.settings.find((entry) => entry.key === "ALIYUN_PNVS_ACCESS_KEY_ID")
         ?.value,
       "sensitive-id"
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("正式实机设置只返回生产相关配置和正式服务选项", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-live-visibility-"));
+  const envFilePath = join(directory, ".env");
+  const settings = {
+    NODE_ENV: "production",
+    APP_ENV: "production",
+    VM_DATA_PLANE: "live",
+    VM_SIMULATION_PROFILE: "standard",
+    VM_FULL_SIMULATION_ENABLED: "false",
+    VM_FULL_SIMULATION_SMARTVM_MODE: "mock",
+    VM_FULL_SIMULATION_PAYMENT_MODE: "mock",
+    VM_FULL_SIMULATION_VERIFICATION_MODE: "mock",
+    VM_FULL_SIMULATION_AI_MODE: "mock",
+    VM_FULL_SIMULATION_MAP_MODE: "mock",
+    VM_RESERVATION_ONLY_PICKUP: "true",
+    SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: "auto",
+    SMARTVM_TEST_DEVICE_CODE: "simulation-device",
+    SMARTVM_TEST_DOOR_NUM: "1",
+    SMARTVM_ALLOW_UNSIGNED_CALLBACKS: "false",
+    PAYMENT_MODE: "disabled",
+    PAYMENT_MOCK_ENABLED: "false",
+    VERIFICATION_CODE_PROVIDER: "manual",
+    VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+    ALLOW_DEFAULT_BACKOFFICE_LOGIN: "false"
+  };
+  writeFileSync(envFilePath, encodeEnv(settings), "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => settings[key as keyof typeof settings],
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const snapshot = service.getSettings({ actorBackofficeRole: "super_admin" });
+    const entries = new Map(snapshot.settings.map((entry) => [entry.key, entry]));
+
+    for (const hiddenKey of [
+      "VM_SIMULATION_PROFILE",
+      "VM_FULL_SIMULATION_ENABLED",
+      "VM_FULL_SIMULATION_SMARTVM_MODE",
+      "VM_FULL_SIMULATION_PAYMENT_MODE",
+      "VM_FULL_SIMULATION_VERIFICATION_MODE",
+      "VM_FULL_SIMULATION_AI_MODE",
+      "VM_FULL_SIMULATION_MAP_MODE",
+      "SMARTVM_TEST_DEVICE_CODE",
+      "SMARTVM_TEST_DOOR_NUM",
+      "SMARTVM_ALLOW_UNSIGNED_CALLBACKS",
+      "PAYMENT_MOCK_ENABLED",
+      "VERIFICATION_CODE_PREVIEW_ENABLED",
+      "ALLOW_DEFAULT_BACKOFFICE_LOGIN"
+    ]) {
+      assert.equal(entries.has(hiddenKey), false, `${hiddenKey} 不应出现在正式实机设置中`);
+    }
+
+    assert.equal(entries.has("VM_DATA_PLANE"), true);
+    assert.deepEqual(
+      entries.get("VERIFICATION_CODE_PROVIDER")?.options?.map((option) => option.value),
+      ["manual", "aliyun_pnvs"]
+    );
+    assert.deepEqual(
+      entries.get("PAYMENT_MODE")?.options?.map((option) => option.value),
+      ["disabled", "real"]
+    );
+
+    const adminSnapshot = service.getSettings({ actorBackofficeRole: "admin" });
+    assert.deepEqual(
+      adminSnapshot.settings.map((entry) => entry.key),
+      ["VM_RESERVATION_ONLY_PICKUP", "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"]
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });

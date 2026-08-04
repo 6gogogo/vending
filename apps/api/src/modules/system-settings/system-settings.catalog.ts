@@ -1,4 +1,5 @@
 import type {
+  RuntimeDataPlane,
   SystemSettingInputType,
   SystemSettingNumberConstraints,
   SystemSettingOption
@@ -16,6 +17,8 @@ interface SystemSettingMetadata {
   sensitive?: boolean;
   required?: boolean;
   restartRequired?: boolean;
+  runtimePlanes?: readonly RuntimeDataPlane[];
+  optionValuesByRuntimePlane?: Partial<Record<RuntimeDataPlane, readonly string[]>>;
 }
 
 export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
@@ -65,14 +68,16 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "全真模拟：按模块选择", value: "full" }
     ],
     required: true,
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   VM_FULL_SIMULATION_ENABLED: {
     group: "运行方式",
     label: "确认启用全真模拟",
     description: "只有 VM_SIMULATION_PROFILE=full 时生效。必须显式开启，并配合独立的数据根和实例标识后才能启动。",
     inputType: "boolean",
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   VM_FULL_SIMULATION_SMARTVM_MODE: {
     group: "运行方式",
@@ -83,7 +88,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "模拟柜机", value: "mock" },
       { label: "真实 SmartVM", value: "real" }
     ],
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   VM_FULL_SIMULATION_PAYMENT_MODE: {
     group: "实例设置",
@@ -94,7 +100,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "模拟支付", value: "mock" },
       { label: "真实支付", value: "real" }
     ],
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   VM_FULL_SIMULATION_VERIFICATION_MODE: {
     group: "实例设置",
@@ -106,7 +113,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "短信验证码（服务自动发送）", value: "real" },
       { label: "手动设置验证码", value: "manual" }
     ],
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   VM_FULL_SIMULATION_AI_MODE: {
     group: "运行方式",
@@ -117,7 +125,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "模拟 AI", value: "mock" },
       { label: "真实 AI", value: "real" }
     ],
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   VM_FULL_SIMULATION_MAP_MODE: {
     group: "运行方式",
@@ -128,7 +137,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "模拟地图", value: "mock" },
       { label: "真实高德地图", value: "real" }
     ],
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   VM_RESERVATION_ONLY_PICKUP: {
     group: "实例设置",
@@ -156,6 +166,24 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "Nest 后端监听端口，修改后需要重启服务才会切换监听端口。",
     inputType: "number",
     required: true,
+    restartRequired: true
+  },
+  API_HOST: {
+    label: "API 监听地址",
+    description: "API 进程绑定的本机地址。生产环境通常只监听回环地址，再由同机反向代理转发。",
+    inputType: "text",
+    required: true,
+    restartRequired: true
+  },
+  TRUST_PROXY_HOPS: {
+    label: "可信反向代理层数",
+    description: "API 前方固定且受信的反向代理层数。留空表示不信任转发头；填写后必须与实际链路一致。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      max: 10,
+      integerOnly: true
+    },
     restartRequired: true
   },
   PUBLIC_BASE_URL: {
@@ -191,6 +219,25 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "path",
     required: true,
     restartRequired: true
+  },
+  API_BACKUP_DIR: {
+    label: "运行数据备份目录",
+    description: "受控备份命令保存账本、审计和上传文件清单的位置；必须与运行数据及上传目录相互隔离。",
+    inputType: "path",
+    required: true,
+    restartRequired: true
+  },
+  ENABLE_LOCAL_MOCK_DEVICE_API: {
+    label: "本机模拟柜机接口",
+    description: "仅在回环地址联调模拟柜机时临时启用；正式实机服务不会显示也不能启用。",
+    inputType: "boolean",
+    runtimePlanes: ["simulation"]
+  },
+  ENABLE_TEST_DEVICE_BOOTSTRAP: {
+    label: "载入测试柜机数据",
+    description: "仅为隔离测试数据补入固定测试柜机；不得用于日常模拟或正式业务数据。",
+    inputType: "boolean",
+    runtimePlanes: ["simulation"]
   },
   DATABASE_URL: {
     label: "数据库连接",
@@ -302,7 +349,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   SMARTVM_ALLOW_UNSIGNED_CALLBACKS: {
     label: "允许未签名柜机回调",
     description: "仅用于本地联调；生产环境必须关闭。",
-    inputType: "boolean"
+    inputType: "boolean",
+    runtimePlanes: ["simulation"]
   },
   SMARTVM_DEFAULT_PAY_STYLE: {
     label: "默认支付方式",
@@ -317,12 +365,14 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   SMARTVM_TEST_DEVICE_CODE: {
     label: "测试柜机编号",
     description: "沙箱脚本和联调默认使用的柜机编号。",
-    inputType: "text"
+    inputType: "text",
+    runtimePlanes: ["simulation"]
   },
   SMARTVM_TEST_DOOR_NUM: {
     label: "测试门号",
     description: "沙箱脚本和联调默认使用的柜门号。",
-    inputType: "number"
+    inputType: "number",
+    runtimePlanes: ["simulation"]
   },
   SMARTVM_DOOR_STATUS_CALLBACK_PATH: {
     label: "门状态回调路径",
@@ -361,6 +411,33 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "向柜机平台转发支付成功通知时使用的接口路径。",
     inputType: "path"
   },
+  SMARTVM_CALLBACK_MAX_AGE_SECONDS: {
+    label: "柜机回调最大延迟秒数",
+    description: "回调签名时间早于当前时间超过该秒数时拒绝，防止旧请求重放。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      integerOnly: true
+    }
+  },
+  SMARTVM_CALLBACK_FUTURE_TOLERANCE_SECONDS: {
+    label: "柜机回调未来时间容差",
+    description: "允许柜机平台时钟略快于服务器的最大秒数；超过后按异常时间拒绝。",
+    inputType: "number",
+    numberConstraints: {
+      min: 0,
+      integerOnly: true
+    }
+  },
+  SMARTVM_CALLBACK_EVENT_MAX_AGE_SECONDS: {
+    label: "柜机事件关联最长时间",
+    description: "回调只能关联该时长内的柜机事件，避免旧事件被后续回调误更新。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      integerOnly: true
+    }
+  },
   PAYMENT_MODE: {
     label: "支付运行模式",
     description: "预约取货可关闭支付；即时领取可使用模拟、自动或严格真实支付。",
@@ -370,7 +447,10 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "自动：缺配置时模拟", value: "auto" },
       { label: "强制模拟支付", value: "mock" },
       { label: "严格真实支付", value: "real" }
-    ]
+    ],
+    optionValuesByRuntimePlane: {
+      live: ["disabled", "real"]
+    }
   },
   PAYMENT_PROVIDER_TIMEOUT_MS: {
     label: "支付平台超时毫秒",
@@ -401,6 +481,17 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     numberConstraints: {
       min: 1,
       max: 1,
+      integerOnly: true
+    },
+    restartRequired: true
+  },
+  NODE_APP_INSTANCE: {
+    label: "Node 进程实例编号",
+    description: "用于识别进程管理器实例。JSON 账本阶段只能留空或使用单实例编号 0。",
+    inputType: "number",
+    numberConstraints: {
+      min: 0,
+      max: 0,
       integerOnly: true
     },
     restartRequired: true
@@ -496,6 +587,42 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       integerOnly: true
     }
   },
+  PAYMENT_NOT_FOUND_CONFIRMATIONS: {
+    label: "支付不存在确认次数",
+    description: "支付渠道连续返回订单不存在达到该次数后，系统才把结果视为稳定结论，避免单次查询误判。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      integerOnly: true
+    }
+  },
+  PAYMENT_NOT_FOUND_GRACE_SECONDS: {
+    label: "支付不存在宽限秒数",
+    description: "新建支付单在该时间内查询不到时继续等待，不立即判定为渠道不存在。",
+    inputType: "number",
+    numberConstraints: {
+      min: 0,
+      integerOnly: true
+    }
+  },
+  PAYMENT_PAYER_IDENTITY_TTL_SECONDS: {
+    label: "付款身份句柄有效期",
+    description: "客户端付款身份临时句柄的有效秒数；过期后必须重新申请。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      integerOnly: true
+    }
+  },
+  PAYMENT_PAYER_IDENTITY_HANDLE_CAPACITY: {
+    label: "付款身份句柄容量",
+    description: "服务进程最多保留的未过期付款身份句柄数量，用于限制内存占用。",
+    inputType: "number",
+    numberConstraints: {
+      min: 1,
+      integerOnly: true
+    }
+  },
   PAYMENT_MOCK_ENABLED: {
     label: "旧版模拟支付开关",
     description: "兼容旧配置；PAYMENT_MODE 优先。留空跟随 PAYMENT_MODE；true 强制模拟；false 等价严格真实支付。",
@@ -504,7 +631,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "跟随 PAYMENT_MODE", value: "" },
       { label: "强制模拟", value: "true" },
       { label: "严格真实", value: "false" }
-    ]
+    ],
+    runtimePlanes: ["simulation"]
   },
   WECHAT_PAY_APP_ID: {
     label: "微信支付 App ID",
@@ -614,17 +742,28 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
       { label: "后台签发一次性人工验证码", value: "manual" },
       { label: "阿里云号码认证（PNVS）", value: "aliyun_pnvs" }
     ],
-    required: true
+    required: true,
+    optionValuesByRuntimePlane: {
+      live: ["manual", "aliyun_pnvs"]
+    }
   },
   VERIFICATION_CODE_PREVIEW_ENABLED: {
     label: "显示模拟验证码",
     description: "仅限本机联调。开启后，接口响应可能返回验证码；生产环境必须关闭。",
-    inputType: "boolean"
+    inputType: "boolean",
+    runtimePlanes: ["simulation"]
   },
   ALLOW_DEFAULT_BACKOFFICE_LOGIN: {
     label: "允许默认后台密码登录",
     description: "仅限本机初始化联调。关闭后，仍使用默认密码的后台账号不能登录。",
-    inputType: "boolean"
+    inputType: "boolean",
+    runtimePlanes: ["simulation"]
+  },
+  PUBLIC_ADMIN_REGISTRATION_ENABLED: {
+    label: "允许公开申请管理员身份",
+    description: "仅用于隔离演练公开注册流程；正式实例管理员必须由服务商或已有实例管理员在后台建立。",
+    inputType: "boolean",
+    runtimePlanes: ["simulation"]
   },
   ALIYUN_PNVS_ACCESS_KEY_ID: {
     label: "阿里云 PNVS AccessKey ID",

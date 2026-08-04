@@ -144,10 +144,10 @@ export const roleManuals: Record<RoleManualId, RoleManual> = {
   }
 };
 
-const singleRoleManual: Partial<Record<BackofficeRole, RoleManualId>> = {
-  admin: "admin",
-  merchant: "merchant",
-  restocker: "restocker"
+const roleManualStartIndex: Partial<Record<BackofficeRole, number>> = {
+  admin: roleManualOrder.indexOf("admin"),
+  merchant: roleManualOrder.indexOf("merchant"),
+  restocker: roleManualOrder.indexOf("restocker")
 };
 
 export const resolveVisibleRoleManualIds = (
@@ -157,6 +157,6 @@ export const resolveVisibleRoleManualIds = (
     return roleManualOrder;
   }
 
-  const manualId = role ? singleRoleManual[role] : undefined;
-  return manualId ? [manualId] : [];
+  const startIndex = role ? roleManualStartIndex[role] : undefined;
+  return startIndex === undefined ? [] : roleManualOrder.slice(startIndex);
 };

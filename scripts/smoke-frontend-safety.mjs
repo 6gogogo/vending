@@ -255,11 +255,16 @@ for (const [role, expectedManual] of [
 ]) {
   assert.match(
     roleManualSource,
-    new RegExp(role + ': "' + expectedManual + '"'),
-    role + " 角色必须只映射到自己的手册"
+    new RegExp(role + ': roleManualOrder\\.indexOf\\("' + expectedManual + '"\\)'),
+    role + " 角色必须从自己的手册开始向下映射"
   );
 }
-assert.match(roleGuideSource, /v-if="showRoleTabs"/, "多角色页签只能在服务商可见集合中显示");
+assert.match(
+  roleManualSource,
+  /return startIndex === undefined \? \[\] : roleManualOrder\.slice\(startIndex\);/,
+  "实例角色手册必须从当前身份开始只向下展示"
+);
+assert.match(roleGuideSource, /v-if="showRoleTabs"/, "可见手册多于一项时必须显示身份页签");
 assert.match(
   adminRouterSource,
   /path: "\/manual"[\s\S]{0,420}backofficeRoles: \["super_admin", "admin", "merchant", "restocker"\]/,

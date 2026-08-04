@@ -15,20 +15,27 @@ const sessionStore = useAdminSessionStore();
 const visibleManualIds = computed(() =>
   resolveVisibleRoleManualIds(sessionStore.user?.backofficeRole)
 );
-const selectedManualId = ref<RoleManualId>("admin");
+const selectedManualId = ref<RoleManualId>("provider");
 
 watch(
-  visibleManualIds,
-  (manualIds) => {
-    if (!manualIds.includes(selectedManualId.value)) {
-      selectedManualId.value = manualIds[0] ?? "admin";
-    }
+  () => sessionStore.user?.backofficeRole,
+  () => {
+    selectedManualId.value = visibleManualIds.value[0] ?? "admin";
   },
   { immediate: true }
 );
 
 const selectedManual = computed(() => roleManuals[selectedManualId.value]);
 const showRoleTabs = computed(() => visibleManualIds.value.length > 1);
+const manualIntroCopy = computed(() => {
+  if (sessionStore.user?.backofficeRole === "super_admin") {
+    return "服务商账号可查阅本身份及全部下级角色手册；进入实例后仍可核对各角色的操作边界。";
+  }
+
+  return showRoleTabs.value
+    ? "本页只显示当前身份及下级角色手册，不会显示任何上级角色内容。"
+    : "本页只显示与你当前后台身份相符的内容。";
+});
 const manualImageById: Record<RoleManualId, { src: string; alt: string; caption: string }> = {
   provider: {
     src: backofficeLoginImage,
@@ -65,9 +72,7 @@ const selectedImage = computed(() => manualImageById[selectedManualId.value]);
       <div>
         <p class="admin-kicker">当前账号使用手册</p>
         <h2>{{ showRoleTabs ? "按身份查找操作步骤" : selectedManual.label + "使用手册" }}</h2>
-        <p class="admin-copy">
-          {{ showRoleTabs ? "服务商账号可查阅全部角色；进入实例后仍可在这里核对各角色的操作边界。" : "本页只显示与你当前后台身份相符的内容。" }}
-        </p>
+        <p class="admin-copy">{{ manualIntroCopy }}</p>
       </div>
       <span class="admin-pill admin-pill--success">{{ selectedManual.label }}</span>
     </div>

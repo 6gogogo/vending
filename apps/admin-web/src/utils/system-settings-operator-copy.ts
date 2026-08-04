@@ -1,6 +1,8 @@
 import type { SystemSettingEntry } from "@vm/shared-types";
 
 const deploymentManagedRuntimeKeys = new Set([
+  "API_HOST",
+  "TRUST_PROXY_HOPS",
   "VM_DATA_PLANE",
   "VM_DATA_ROOT",
   "VM_DATA_PLANE_ID",
@@ -18,6 +20,7 @@ const consistencyKeys = new Set([
   "FINANCIAL_SINGLE_WRITER_ENABLED",
   "WEB_CONCURRENCY",
   "API_INSTANCE_COUNT",
+  "NODE_APP_INSTANCE",
   "FINANCIAL_INSTANCE_ID",
   "FINANCIAL_SINGLE_WRITER_LEASE_FILE",
   "FINANCIAL_SINGLE_WRITER_LEASE_MS"
@@ -40,7 +43,8 @@ export const getEffectiveSystemSettingValues = (
 ) => Object.fromEntries(entries.map((entry) => [entry.key, entry.effectiveValue]));
 
 export const getSystemSettingOperatorDescription = (
-  entry: Pick<SystemSettingEntry, "key" | "group">
+  entry: Pick<SystemSettingEntry, "key" | "group"> &
+    Partial<Pick<SystemSettingEntry, "description">>
 ) => {
   if (entry.key === "VM_RESERVATION_ONLY_PICKUP") {
     return "开启后，用户须先预约再取货；本页不会显示或要求支付设置。关闭后按即时领取处理。";
@@ -59,20 +63,24 @@ export const getSystemSettingOperatorDescription = (
   }
 
   if (isDeploymentManagedRuntimeSetting(entry.key)) {
-    return "当前值由服务管理员的发布方案固定，实例管理员无需填写或修改。";
+    return entry.description
+      ? `${entry.description} 此项由发布方案固定，后台仅供核对。`
+      : "当前值由服务管理员的发布方案固定，实例管理员无需填写或修改。";
   }
 
   if (isProductionManagedRuntimeSetting(entry.key)) {
-    return "运行环境由已启用的发布方案决定，实例后台仅供查看。";
+    return entry.description
+      ? `${entry.description} 正式环境由发布方案锁定，后台仅供查看。`
+      : "运行环境由已启用的发布方案决定，实例后台仅供查看。";
   }
 
   if (consistencyKeys.has(entry.key)) {
-    return "该项由服务管理员固定，用于保证支付和退款记录一致。";
+    return entry.description || "该项由服务管理员固定，用于保证支付和退款记录一致。";
   }
 
   if (entry.group === "运行方式") {
-    return "当前服务方式由服务管理员维护，实例管理员无需在此页设置。";
+    return entry.description || "当前服务方式由服务管理员维护，实例管理员无需在此页设置。";
   }
 
-  return "按已确认的业务方案设置；不确定时请联系服务管理员。";
+  return entry.description || "按已确认的业务方案设置；不确定时请联系服务管理员。";
 };

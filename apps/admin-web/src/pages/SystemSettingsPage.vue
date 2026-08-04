@@ -841,8 +841,11 @@ onBeforeUnmount(() => {
             @click="setActiveGroup(item.group)"
           >
             <span>{{ item.group }}</span>
-            <span class="settings-page__group-count">
-              {{ item.count }}<template v-if="item.dirtyCount"> / {{ item.dirtyCount }}</template>
+            <span class="settings-page__group-meta">
+              <span class="settings-page__group-count">{{ item.count }} 项</span>
+              <span v-if="item.dirtyCount" class="settings-page__group-dirty">
+                {{ item.dirtyCount }} 未保存
+              </span>
             </span>
           </button>
         </div>
@@ -1297,6 +1300,23 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   color: var(--admin-muted);
   font-size: 0.78rem;
+}
+
+.settings-page__group-meta {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-page__group-dirty {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #fff3d6;
+  color: #8a5a00;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .settings-page__form-panel {

@@ -57,7 +57,24 @@ test("高级项默认展示操作说明，不展示实现叙述", () => {
     /领取额度/
   );
   assert.doesNotMatch(
-    getSystemSettingOperatorDescription({ key: "WEB_CONCURRENCY", group: "支付接入" }),
+    getSystemSettingOperatorDescription({
+      key: "WEB_CONCURRENCY",
+      group: "支付接入",
+      description: "保证账本只有一个写入进程。"
+    }),
     /JSON|cluster|API 工作者/
+  );
+});
+
+test("服务配置默认展示目录中的真实用途说明", () => {
+  const description = "AI 工作台调用大模型时使用的模型名称。";
+
+  assert.equal(
+    getSystemSettingOperatorDescription({
+      key: "OPENAI_MODEL",
+      group: "大模型服务",
+      description
+    }),
+    description
   );
 });
