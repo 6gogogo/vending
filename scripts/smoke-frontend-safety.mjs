@@ -219,8 +219,24 @@ assert.ok(
 );
 assert.ok(
   existsSync(resolve(process.cwd(), "docs/公益智助柜用户使用手册.docx")),
-  "发布版本必须包含可交付的 Word 用户使用手册"
+  "发布版本必须保留内部汇总版 Word 用户使用手册"
 );
+const roleWordManuals = [
+  ["实例管理员", "docs/用户手册/公益智助柜实例管理员使用手册.docx"],
+  ["商户", "docs/用户手册/公益智助柜商户使用手册.docx"],
+  ["补货员", "docs/用户手册/公益智助柜补货员使用手册.docx"],
+  ["App 用户", "docs/用户手册/公益智助柜App用户使用手册.docx"]
+];
+for (const [roleName, manualPath] of roleWordManuals) {
+  assert.ok(
+    existsSync(resolve(process.cwd(), manualPath)),
+    `发布版本必须包含独立的${roleName} Word 使用手册`
+  );
+  assert.ok(
+    userManualSource.includes(manualPath.replace(/^docs\//, "")),
+    `分角色使用手册索引必须链接${roleName} Word 版`
+  );
+}
 assert.match(
   adminUsersSource,
   /v-if="canManageUsers"[\s\S]{0,400}下载 Excel 模板[\s\S]{0,200}导入 Excel/,
