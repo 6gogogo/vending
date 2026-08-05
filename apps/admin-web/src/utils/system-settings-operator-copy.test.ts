@@ -4,10 +4,35 @@ import test from "node:test";
 import {
   getEffectiveSystemSettingValues,
   getSystemSettingOperatorDescription,
+  getSystemSettingStatusPill,
   isDeploymentManagedRuntimeSetting,
   isProductionManagedRuntimeSetting,
   isProductionRuntimeSettings
 } from "./system-settings-operator-copy";
+
+test("示例占位、未保存和已配置状态使用不同提示", () => {
+  assert.deepEqual(
+    getSystemSettingStatusPill(
+      { value: "", source: "example", restartRequired: true },
+      false
+    ),
+    { className: "admin-pill--warning", text: "未配置" }
+  );
+  assert.deepEqual(
+    getSystemSettingStatusPill(
+      { value: "next", source: "env", restartRequired: true },
+      true
+    ),
+    { className: "admin-pill--warning", text: "未保存" }
+  );
+  assert.deepEqual(
+    getSystemSettingStatusPill(
+      { value: "saved", source: "env", restartRequired: true },
+      false
+    ),
+    { className: "admin-pill--neutral", text: "重启后生效" }
+  );
+});
 
 test("部署管理的运行边界不能在后台当作日常输入项", () => {
   assert.equal(isProductionRuntimeSettings({ NODE_ENV: "production" }), true);

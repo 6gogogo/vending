@@ -204,28 +204,32 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "本地 JSON 数据文件路径。修改后建议重启并确认数据迁移。",
     inputType: "path",
     required: true,
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   UPLOAD_DIR: {
     label: "上传文件目录",
     description: "图片等上传文件保存目录。静态资源挂载在启动时完成，修改后需重启。",
     inputType: "path",
     required: true,
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   SYSTEM_LOG_FILE: {
     label: "系统审计日志",
     description: "系统级请求、外部接口调用和配置变更审计日志文件；只能在停服维护窗口通过受控部署配置修改。",
     inputType: "path",
     required: true,
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   API_BACKUP_DIR: {
     label: "运行数据备份目录",
     description: "受控备份命令保存账本、审计和上传文件清单的位置；必须与运行数据及上传目录相互隔离。",
     inputType: "path",
     required: true,
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   ENABLE_LOCAL_MOCK_DEVICE_API: {
     label: "本机模拟柜机接口",
@@ -506,7 +510,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     label: "金融单写者租约文件",
     description: "跨进程互斥租约的本地文件路径。所有同一账本实例必须共享该路径。",
     inputType: "path",
-    restartRequired: true
+    restartRequired: true,
+    runtimePlanes: ["simulation"]
   },
   FINANCIAL_SINGLE_WRITER_LEASE_MS: {
     label: "金融租约有效期毫秒",

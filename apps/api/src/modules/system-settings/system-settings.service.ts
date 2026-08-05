@@ -77,6 +77,13 @@ const truthySettingValues = new Set(["1", "true", "yes", "on"]);
 const runtimeDataPlaneExternalIntegrationKeySet = new Set<string>(
   runtimeDataPlaneExternalIntegrationKeys
 );
+const individualRuntimeStoragePathKeys = new Set([
+  "API_DATA_FILE",
+  "SYSTEM_LOG_FILE",
+  "UPLOAD_DIR",
+  "API_BACKUP_DIR",
+  "FINANCIAL_SINGLE_WRITER_LEASE_FILE"
+]);
 // 这些路径共同定义一份运行态快照。在线切换任一项都会让审计、账本、上传或维护命令
 // 落到不同位置，必须在停服维护窗口通过受控部署配置统一修改。
 const liveRuntimeStorageBoundaryKeys = new Set([
@@ -84,11 +91,7 @@ const liveRuntimeStorageBoundaryKeys = new Set([
   "VM_DATA_ROOT",
   "VM_DATA_PLANE_ID",
   "VM_PLATFORM_TENANT_NAME",
-  "API_DATA_FILE",
-  "SYSTEM_LOG_FILE",
-  "UPLOAD_DIR",
-  "API_BACKUP_DIR",
-  "FINANCIAL_SINGLE_WRITER_LEASE_FILE"
+  ...individualRuntimeStoragePathKeys
 ]);
 
 @Injectable()
@@ -176,6 +179,8 @@ export class SystemSettingsService {
 
     const snapshotBefore = this.getUnfilteredSettings({ includeSensitiveValues: true });
     const entriesByKey = new Map(snapshotBefore.settings.map((entry) => [entry.key, entry]));
+    const persistedEnvFile = this.parseEnvFile(this.envFilePath);
+    const currentValues = new Map<string, string>();
     const nextValues = new Map<string, string>();
 
     this.assertActorCanUpdateKeys(
@@ -197,7 +202,15 @@ export class SystemSettingsService {
         payload.values,
         entry.key
       );
-      const rawValue = isExplicitlyUpdated ? payload.values[entry.key] : entry.value;
+      // 示例文件只负责字段目录、说明和控件类型，绝不能在 PATCH 一个无关字段时
+      // 被当作正式运行值写入 .env。未改字段只继承真实 env 或当前进程值。
+      const currentValue =
+        persistedEnvFile.values.get(entry.key) ??
+        this.configService.get<string>(entry.key) ??
+        "";
+      const rawValue = isExplicitlyUpdated ? payload.values[entry.key] : currentValue;
+
+      currentValues.set(entry.key, currentValue);
 
       // PATCH 只校验本次准备写入的字段。未改动的历史配置仍会作为完整候选
       // 交给跨字段与数据平面门禁复核，避免保存一个示例选项时被未启用服务的
@@ -230,7 +243,7 @@ export class SystemSettingsService {
     );
 
     const changedKeys = snapshotBefore.settings
-      .filter((entry) => entry.value !== nextValues.get(entry.key))
+      .filter((entry) => currentValues.get(entry.key) !== nextValues.get(entry.key))
       .map((entry) => entry.key);
 
     if (
@@ -286,7 +299,9 @@ export class SystemSettingsService {
     let configFileCommitted = false;
 
     try {
-      this.writeEnvFile(nextValues);
+      this.writeEnvFile(
+        new Map(changedKeys.map((key) => [key, nextValues.get(key) ?? ""]))
+      );
       configFileCommitted = true;
 
       for (const key of runtimeAppliedKeys) {
@@ -388,11 +403,19 @@ export class SystemSettingsService {
 
   private applyRuntimePlaneVisibility(settings: SystemSettingEntry[]) {
     const runtimeDataPlane = this.resolveRuntimeDataPlane(settings);
+    const usesUnifiedDataRoot = Boolean(
+      settings
+        .find((entry) => entry.key === "VM_DATA_ROOT")
+        ?.effectiveValue.trim()
+    );
 
     return settings
       .filter((entry) => {
         const runtimePlanes = systemSettingCatalog[entry.key]?.runtimePlanes;
-        return !runtimePlanes || runtimePlanes.includes(runtimeDataPlane);
+        return (
+          (!runtimePlanes || runtimePlanes.includes(runtimeDataPlane)) &&
+          !(usesUnifiedDataRoot && individualRuntimeStoragePathKeys.has(entry.key))
+        );
       })
       .map((entry) => {
         const allowedOptionValues =
@@ -462,21 +485,20 @@ export class SystemSettingsService {
     const envValue = envFile.values.get(key);
     const exampleValue = exampleFile.values.get(key);
     const runtimeValue = this.configService.get<string>(key);
-    const value = envValue ?? runtimeValue ?? exampleValue ?? "";
+    const value = envValue ?? runtimeValue ?? "";
     const sensitive = metadata?.sensitive ?? this.isSensitiveKey(key);
     const masked = sensitive && !options?.includeSensitiveValues && Boolean(value);
     const displayValue = masked ? "********" : value;
-    const runtimeDisplayValue = sensitive && !options?.includeSensitiveValues && Boolean(runtimeValue ?? value)
+    const effectiveValue = runtimeValue ?? value;
+    const runtimeDisplayValue = sensitive && !options?.includeSensitiveValues && Boolean(effectiveValue)
       ? "********"
-      : (runtimeValue ?? value);
+      : effectiveValue;
     const source: SystemSettingEntry["source"] =
       envValue !== undefined
         ? "env"
-        : exampleValue !== undefined && runtimeValue === exampleValue
-          ? "example"
-          : runtimeValue !== undefined
-            ? "runtime"
-            : "example";
+        : runtimeValue !== undefined
+          ? "runtime"
+          : "example";
     const group = metadata?.group ?? envFile.groups.get(key) ?? exampleFile.groups.get(key) ?? defaultGroupName;
     const inputType = this.resolveInputType(key, value, exampleValue, metadata?.inputType);
 
@@ -500,31 +522,36 @@ export class SystemSettingsService {
   }
 
   private writeEnvFile(values: Map<string, string>) {
+    if (values.size === 0) {
+      return;
+    }
+
     const envFilePath = this.envFilePath;
-    const exampleFilePath = this.resolveExampleFilePath(envFilePath);
     const envFile = this.parseEnvFile(envFilePath);
-    const exampleFile = this.parseEnvFile(exampleFilePath);
-    const templateFile = exampleFile.assignments.length > 0 ? exampleFile : envFile;
-    const templatedKeys = new Set<string>();
-    const nextLines = templateFile.lines.map((line) => {
+    const updatedKeys = new Set<string>();
+    const nextLines = envFile.lines.map((line) => {
       const assignment = this.parseAssignmentLine(line);
 
       if (!assignment || !values.has(assignment.key)) {
         return line;
       }
 
-      templatedKeys.add(assignment.key);
+      updatedKeys.add(assignment.key);
       return `${assignment.key}=${this.encodeEnvValue(values.get(assignment.key) ?? "")}`;
     });
 
-    const extraKeys = [...values.keys()].filter((key) => !templatedKeys.has(key)).sort();
+    const extraKeys = [...values.keys()].filter((key) => !updatedKeys.has(key)).sort();
 
     if (extraKeys.length > 0) {
-      if (nextLines.length > 0 && nextLines[nextLines.length - 1]?.trim()) {
+      while (nextLines.length > 0 && !nextLines[nextLines.length - 1]?.trim()) {
+        nextLines.pop();
+      }
+
+      if (nextLines.length > 0) {
         nextLines.push("");
       }
 
-      nextLines.push(`# ${defaultGroupName}`);
+      nextLines.push(`# 分组：${defaultGroupName}`);
       for (const key of extraKeys) {
         nextLines.push(`${key}=${this.encodeEnvValue(values.get(key) ?? "")}`);
       }

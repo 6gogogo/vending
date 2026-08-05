@@ -42,6 +42,25 @@ export const getEffectiveSystemSettingValues = (
   entries: Array<Pick<SystemSettingEntry, "key" | "effectiveValue">>
 ) => Object.fromEntries(entries.map((entry) => [entry.key, entry.effectiveValue]));
 
+export const getSystemSettingStatusPill = (
+  entry: Pick<SystemSettingEntry, "value" | "source" | "restartRequired">,
+  dirty: boolean
+) => {
+  if (dirty) {
+    return { className: "admin-pill--warning", text: "未保存" };
+  }
+
+  if (entry.source === "example" && !entry.value) {
+    return { className: "admin-pill--warning", text: "未配置" };
+  }
+
+  if (entry.restartRequired) {
+    return { className: "admin-pill--neutral", text: "重启后生效" };
+  }
+
+  return { className: "admin-pill--success", text: "保存即生效" };
+};
+
 export const getSystemSettingOperatorDescription = (
   entry: Pick<SystemSettingEntry, "key" | "group"> &
     Partial<Pick<SystemSettingEntry, "description">>

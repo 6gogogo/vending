@@ -116,6 +116,33 @@ test("系统审计日志首次写入失败后粘性关闭，且不泄露底层�
   assert.throws(() => service.initialize(), /系统审计日志不可用/);
 });
 
+test("系统审计故障只报告安全错误分类，不泄露路径或错误原文", () => {
+  let report: unknown;
+  const privatePath = "/srv/private/tenant-secret/system-audit.ndjson";
+  const service = new SystemAuditLogService({
+    appendAuditLog: () => {
+      throw Object.assign(new Error(`permission denied: ${privatePath}`), {
+        code: "EACCES",
+        syscall: "open",
+        path: privatePath
+      });
+    },
+    reportFailure: (failure) => {
+      report = failure;
+    }
+  } satisfies SystemAuditLogRuntimeAdapter);
+
+  assert.equal(service.appendSafely(createEntry()), false);
+  assert.deepEqual(report, {
+    source: "append",
+    errorName: "Error",
+    code: "EACCES",
+    syscall: "open"
+  });
+  assert.equal(JSON.stringify(report).includes(privatePath), false);
+  assert.equal(JSON.stringify(report).includes("permission denied"), false);
+});
+
 test("审计故障报告器自身异常不能覆盖原始业务结果", () => {
   const service = new SystemAuditLogService({
     appendAuditLog: () => {

@@ -8,7 +8,14 @@ export type SystemAuditLogStatus = "unverified" | "ready" | "failed";
 
 export interface SystemAuditLogRuntimeAdapter {
   appendAuditLog?: typeof appendSystemAuditLog;
-  reportFailure?: () => void;
+  reportFailure?: (failure: SystemAuditFailureReport) => void;
+}
+
+export interface SystemAuditFailureReport {
+  source: "append" | "external";
+  errorName: string;
+  code?: string;
+  syscall?: string;
 }
 
 export interface CriticalAuditIntentInput {
@@ -46,7 +53,7 @@ const SYSTEM_AUDIT_STARTUP_PATH = "/internal/system-audit-log/startup";
 @Injectable()
 export class SystemAuditLogService {
   private readonly appendAuditLog: typeof appendSystemAuditLog;
-  private readonly reportFailure: () => void;
+  private readonly reportFailure: (failure: SystemAuditFailureReport) => void;
   private status: SystemAuditLogStatus = "unverified";
   private failureReported = false;
   private readonly activeCriticalOperations = new Map<string, CriticalAuditOperation>();
@@ -59,9 +66,12 @@ export class SystemAuditLogService {
     runtimeAdapter?: SystemAuditLogRuntimeAdapter
   ) {
     this.appendAuditLog = runtimeAdapter?.appendAuditLog ?? appendSystemAuditLog;
-    this.reportFailure = runtimeAdapter?.reportFailure ?? (() => {
+    this.reportFailure = runtimeAdapter?.reportFailure ?? ((failure) => {
       if (process.env.NODE_ENV !== "test") {
-        console.error("系统审计日志不可用；生产业务流量将保持关闭，请检查持久化介质后重启服务。");
+        console.error(
+          "系统审计日志不可用；生产业务流量将保持关闭，请检查持久化介质后重启服务。",
+          failure
+        );
       }
     });
   }
@@ -144,8 +154,8 @@ export class SystemAuditLogService {
       this.appendAuditLog(entry);
       this.status = "ready";
       return true;
-    } catch {
-      this.markFailed();
+    } catch (error) {
+      this.markFailed(this.describeFailure("append", error));
       return false;
     }
   }
@@ -217,7 +227,7 @@ export class SystemAuditLogService {
   }
 
   recordFailure() {
-    this.markFailed();
+    this.markFailed({ source: "external", errorName: "UnknownError" });
   }
 
   isReady() {
@@ -228,17 +238,42 @@ export class SystemAuditLogService {
     return this.status;
   }
 
-  private markFailed() {
+  private markFailed(failure: SystemAuditFailureReport) {
     this.status = "failed";
 
     if (!this.failureReported) {
       this.failureReported = true;
       try {
-        this.reportFailure();
+        this.reportFailure(failure);
       } catch {
         // 故障上报是旁路诊断，绝不能覆盖已经完成的业务或金融结果。
       }
     }
+  }
+
+  private describeFailure(
+    source: SystemAuditFailureReport["source"],
+    error: unknown
+  ): SystemAuditFailureReport {
+    const errorRecord =
+      typeof error === "object" && error !== null
+        ? (error as Record<string, unknown>)
+        : undefined;
+    const errorName = this.readSafeErrorToken(errorRecord?.name, /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u)
+      ?? "UnknownError";
+    const code = this.readSafeErrorToken(errorRecord?.code, /^[A-Z][A-Z0-9_]{0,31}$/u);
+    const syscall = this.readSafeErrorToken(errorRecord?.syscall, /^[a-z][a-z0-9_]{0,31}$/u);
+
+    return {
+      source,
+      errorName,
+      ...(code ? { code } : {}),
+      ...(syscall ? { syscall } : {})
+    };
+  }
+
+  private readSafeErrorToken(value: unknown, pattern: RegExp) {
+    return typeof value === "string" && pattern.test(value) ? value : undefined;
   }
 
 }

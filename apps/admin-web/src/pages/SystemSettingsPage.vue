@@ -28,6 +28,7 @@ import {
 import {
   getEffectiveSystemSettingValues,
   getSystemSettingOperatorDescription,
+  getSystemSettingStatusPill,
   isDeploymentManagedRuntimeSetting,
   isProductionManagedRuntimeSetting,
   isProductionRuntimeSettings
@@ -460,27 +461,11 @@ const providerStateClass = (provider: PaymentDiagnosticsResult["providers"][numb
 };
 
 const fieldPillClass = (entry: SystemSettingEntry) => {
-  if (dirtyKeys.value.includes(entry.key)) {
-    return "admin-pill--warning";
-  }
-
-  if (entry.restartRequired) {
-    return "admin-pill--neutral";
-  }
-
-  return "admin-pill--success";
+  return getSystemSettingStatusPill(entry, dirtyKeys.value.includes(entry.key)).className;
 };
 
 const fieldPillText = (entry: SystemSettingEntry) => {
-  if (dirtyKeys.value.includes(entry.key)) {
-    return "未保存";
-  }
-
-  if (entry.restartRequired) {
-    return "重启后生效";
-  }
-
-  return "保存即生效";
+  return getSystemSettingStatusPill(entry, dirtyKeys.value.includes(entry.key)).text;
 };
 
 const shouldHideSensitiveTextarea = (entry: SystemSettingEntry) =>

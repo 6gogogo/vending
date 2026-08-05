@@ -87,6 +87,21 @@ const encodeEnv = (values: Record<string, string>) =>
     .map(([key, value]) => `${key}=${value}`)
     .join("\n")}\n`;
 
+const liveRuntimePathOverrideKeys = [
+  "API_DATA_FILE",
+  "UPLOAD_DIR",
+  "SYSTEM_LOG_FILE",
+  "API_BACKUP_DIR",
+  "FINANCIAL_SINGLE_WRITER_LEASE_FILE"
+] as const;
+
+const withoutLiveRuntimePathOverrides = (values: Record<string, string>) =>
+  Object.fromEntries(
+    Object.entries(values).filter(
+      ([key]) => !liveRuntimePathOverrideKeys.includes(key as (typeof liveRuntimePathOverrideKeys)[number])
+    )
+  );
+
 test("隔离演练可显式将系统设置写入自身临时配置文件", () => {
   const previousIsolatedFlag = process.env.VM_TEST_ISOLATED_ENV;
   const previousEnvFile = process.env.VM_ISOLATED_SYSTEM_SETTINGS_ENV_FILE;
@@ -110,6 +125,56 @@ test("隔离演练可显式将系统设置写入自身临时配置文件", () =>
       process.env.VM_ISOLATED_SYSTEM_SETTINGS_ENV_FILE = previousEnvFile;
     }
 
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("示例文件只提供占位值，不伪装成已配置或已生效值", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-example-placeholder-"));
+  const envFilePath = join(directory, ".env");
+  writeFileSync(envFilePath, "", "utf8");
+  writeFileSync(join(directory, ".env.example"), "API_HOST=127.0.0.1\n", "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: () => undefined,
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const entry = service.getSettings().settings.find((setting) => setting.key === "API_HOST");
+
+    assert.ok(entry);
+    assert.equal(entry.value, "");
+    assert.equal(entry.effectiveValue, "");
+    assert.equal(entry.exampleValue, "127.0.0.1");
+    assert.equal(entry.source, "example");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("运行值即使等于示例值也标记为运行配置", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-runtime-source-"));
+  const envFilePath = join(directory, ".env");
+  writeFileSync(envFilePath, "", "utf8");
+  writeFileSync(join(directory, ".env.example"), "API_HOST=127.0.0.1\n", "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => key === "API_HOST" ? "127.0.0.1" : undefined,
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const entry = service.getSettings().settings.find((setting) => setting.key === "API_HOST");
+
+    assert.ok(entry);
+    assert.equal(entry.value, "127.0.0.1");
+    assert.equal(entry.source, "runtime");
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -301,6 +366,17 @@ test("正式实机设置只返回生产相关配置和正式服务选项", () =>
     ALLOW_DEFAULT_BACKOFFICE_LOGIN: "false"
   };
   writeFileSync(envFilePath, encodeEnv(settings), "utf8");
+  writeFileSync(
+    join(directory, ".env.example"),
+    encodeEnv({
+      API_DATA_FILE: "runtime-data/store.json",
+      UPLOAD_DIR: "runtime-uploads",
+      SYSTEM_LOG_FILE: "runtime-data/system-audit.ndjson",
+      API_BACKUP_DIR: "runtime-backups",
+      FINANCIAL_SINGLE_WRITER_LEASE_FILE: "runtime-data/financial-writer.lock"
+    }),
+    "utf8"
+  );
   const service = new SystemSettingsService(
     {
       get: (key: string) => settings[key as keyof typeof settings],
@@ -326,7 +402,12 @@ test("正式实机设置只返回生产相关配置和正式服务选项", () =>
       "SMARTVM_ALLOW_UNSIGNED_CALLBACKS",
       "PAYMENT_MOCK_ENABLED",
       "VERIFICATION_CODE_PREVIEW_ENABLED",
-      "ALLOW_DEFAULT_BACKOFFICE_LOGIN"
+      "ALLOW_DEFAULT_BACKOFFICE_LOGIN",
+      "API_DATA_FILE",
+      "UPLOAD_DIR",
+      "SYSTEM_LOG_FILE",
+      "API_BACKUP_DIR",
+      "FINANCIAL_SINGLE_WRITER_LEASE_FILE"
     ]) {
       assert.equal(entries.has(hiddenKey), false, `${hiddenKey} 不应出现在正式实机设置中`);
     }
@@ -346,6 +427,47 @@ test("正式实机设置只返回生产相关配置和正式服务选项", () =>
       adminSnapshot.settings.map((entry) => entry.key),
       ["VM_RESERVATION_ONLY_PICKUP", "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE"]
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("使用统一数据根的模拟实例不展示互斥的旧路径配置", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-unified-root-visibility-"));
+  const envFilePath = join(directory, ".env");
+  const settings = {
+    NODE_ENV: "development",
+    APP_ENV: "development",
+    VM_DATA_PLANE: "simulation",
+    VM_DATA_ROOT: join(directory, "runtime-data"),
+    VM_DATA_PLANE_ID: "full-simulation-test"
+  };
+  writeFileSync(envFilePath, encodeEnv(settings), "utf8");
+  writeFileSync(
+    join(directory, ".env.example"),
+    encodeEnv({
+      API_DATA_FILE: "runtime-data/store.json",
+      UPLOAD_DIR: "runtime-uploads",
+      SYSTEM_LOG_FILE: "runtime-data/system-audit.ndjson",
+      API_BACKUP_DIR: "runtime-backups",
+      FINANCIAL_SINGLE_WRITER_LEASE_FILE: "runtime-data/financial-writer.lock"
+    }),
+    "utf8"
+  );
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => settings[key as keyof typeof settings],
+      set: () => undefined
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    const keys = new Set(service.getSettings().settings.map((entry) => entry.key));
+
+    for (const key of liveRuntimePathOverrideKeys) {
+      assert.equal(keys.has(key), false, `${key} 不应与 VM_DATA_ROOT 同时显示`);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -445,6 +567,93 @@ test("生产配置存在未改的空必填项时，保存无关额度设置必�
     } else {
       process.env.APP_ENV = previousAppEnv;
     }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("正式实例单项保存不会把示例文件中的旧运行路径写入正式配置", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-live-example-isolation-"));
+  const envFilePath = join(directory, ".env");
+  const exampleFilePath = join(directory, ".env.example");
+  const liveSettings = withoutLiveRuntimePathOverrides(validPaymentSettings);
+  const runtimeValues = new Map(Object.entries(liveSettings));
+  writeFileSync(envFilePath, encodeEnv(liveSettings), "utf8");
+  writeFileSync(exampleFilePath, encodeEnv(validPaymentSettings), "utf8");
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => runtimeValues.get(key),
+      set: (key: string, value: string) => runtimeValues.set(key, value)
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+  const previousAppEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "production";
+
+  try {
+    const result = service.updateSettings({
+      values: { PAYMENT_PROVIDER_TIMEOUT_MS: "20000" }
+    });
+    const savedConfig = readFileSync(envFilePath, "utf8");
+
+    assert.deepEqual(result.changedKeys, ["PAYMENT_PROVIDER_TIMEOUT_MS"]);
+    assert.match(savedConfig, /^PAYMENT_PROVIDER_TIMEOUT_MS=20000$/m);
+    for (const key of liveRuntimePathOverrideKeys) {
+      assert.doesNotMatch(savedConfig, new RegExp(`^${key}=`, "m"));
+    }
+  } finally {
+    if (previousAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnv;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("单项保存原样保留未改配置和注释，只追加明确提交的新字段", () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-system-settings-patch-preservation-"));
+  const envFilePath = join(directory, ".env");
+  const originalContent = [
+    "# 由部署系统维护，必须保留",
+    "NODE_ENV=development",
+    "APP_ENV=development",
+    "VM_DATA_PLANE=simulation",
+    "PAYMENT_MODE=mock",
+    "VERIFICATION_CODE_PROVIDER=mock",
+    "UNMANAGED_DEPLOYMENT_MARKER=keep-me",
+    ""
+  ].join("\n");
+  writeFileSync(envFilePath, originalContent, "utf8");
+  writeFileSync(
+    join(directory, ".env.example"),
+    "BUSINESS_DAY_START_HOUR=0\nAPI_HOST=127.0.0.1\n",
+    "utf8"
+  );
+  const runtimeValues = new Map<string, string>([
+    ["NODE_ENV", "development"],
+    ["APP_ENV", "development"],
+    ["VM_DATA_PLANE", "simulation"],
+    ["PAYMENT_MODE", "mock"],
+    ["VERIFICATION_CODE_PROVIDER", "mock"],
+    ["UNMANAGED_DEPLOYMENT_MARKER", "keep-me"]
+  ]);
+  const service = new SystemSettingsService(
+    {
+      get: (key: string) => runtimeValues.get(key),
+      set: (key: string, value: string) => runtimeValues.set(key, value)
+    } as unknown as ConfigService,
+    { envFilePath, appendAuditLog: () => "" }
+  );
+
+  try {
+    service.updateSettings({ values: { BUSINESS_DAY_START_HOUR: "5" } });
+    const savedConfig = readFileSync(envFilePath, "utf8");
+
+    assert.match(savedConfig, /^# 由部署系统维护，必须保留$/m);
+    assert.match(savedConfig, /^UNMANAGED_DEPLOYMENT_MARKER=keep-me$/m);
+    assert.match(savedConfig, /^BUSINESS_DAY_START_HOUR=5$/m);
+    assert.doesNotMatch(savedConfig, /^API_HOST=/m);
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
