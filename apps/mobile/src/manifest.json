@@ -5,6 +5,10 @@
   "versionName": "0.1.0",
   "versionCode": "100",
   "transformPx": false,
+  "mp-weixin": {
+    "appid": "wx4f14e307e19e68c1",
+    "projectname": "公益智助柜移动端"
+  },
   "app-plus": {
     "usingComponents": true,
     "optimization": {
