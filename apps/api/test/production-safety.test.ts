@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { ConfigService } from "@nestjs/config";
 
-import { assertProductionSafety } from "../src/common/config/production-safety.js";
+import {
+  assertProductionConfigurationSafety,
+  assertProductionSafety
+} from "../src/common/config/production-safety.js";
 import { createEmptyPersistedState } from "../src/common/store/persistence.js";
 
 const validProductionConfig: Record<string, string> = {
@@ -112,15 +115,10 @@ const reservationOnlyProductionConfig = {
   VM_RESERVATION_ONLY_PICKUP: "true",
   PAYMENT_MODE: "disabled",
   PAYMENT_RECONCILIATION_ENABLED: "false",
-  VERIFICATION_CODE_PROVIDER: "manual",
   SMARTVM_MODE: "disabled",
   SMARTVM_BASE_URL: undefined,
   SMARTVM_CLIENT_ID: undefined,
   SMARTVM_KEY: undefined,
-  ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
-  ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
-  ALIYUN_PNVS_SIGN_NAME: undefined,
-  ALIYUN_PNVS_TEMPLATE_CODE: undefined,
   WECHAT_PAY_APP_ID: undefined,
   WECHAT_MINI_APP_SECRET: undefined,
   WECHAT_PAY_MCH_ID: undefined,
@@ -144,6 +142,13 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
   try {
     assert.doesNotThrow(() =>
       assertProductionSafety(createConfigService(), emptyCredentialStore as never, readyAuditLog as never)
+    );
+    assert.throws(
+      () =>
+        assertProductionConfigurationSafety(
+          createConfigService({ VERIFICATION_CODE_PROVIDER: "manual" })
+        ),
+      /生产环境验证码必须使用阿里云 PNVS.*人工验证码仅作为应急保底/
     );
 
     for (const schemeValue of [undefined, "", "   "]) {

@@ -55,12 +55,7 @@ const liveSettings = {
 const reservationOnlyLiveSettings = {
   ...liveSettings,
   VM_RESERVATION_ONLY_PICKUP: "true",
-  PAYMENT_MODE: "disabled",
-  VERIFICATION_CODE_PROVIDER: "manual",
-  ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
-  ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
-  ALIYUN_PNVS_SIGN_NAME: undefined,
-  ALIYUN_PNVS_TEMPLATE_CODE: undefined
+  PAYMENT_MODE: "disabled"
 };
 
 const fullSimulationSettings = {
@@ -291,29 +286,18 @@ test("预约制真实数据平面可以显式关闭支付，非预约制不得�
   );
 });
 
-test("真实数据平面可只接受后台签发的一次性人工验证码", () => {
-  assert.doesNotThrow(() =>
-    assertRuntimeDataPlaneExternalIntegrationPolicy(
-      reservationOnlyLiveSettings
-    )
-  );
-
-  const verification = new VerificationCodeService(
-    new ConfigService(reservationOnlyLiveSettings),
-    {} as InMemoryStoreService
-  );
-  assert.deepEqual(verification.getRuntimeConfig(), {
-    provider: "manual",
-    previewEnabled: false
-  });
-
+test("真实数据平面不能把后台签发人工码配置成短信主通道", () => {
   assert.throws(
     () =>
       assertRuntimeDataPlaneExternalIntegrationPolicy({
-        ...reservationOnlyLiveSettings,
-        VERIFICATION_CODE_PREVIEW_ENABLED: "true"
+        ...liveSettings,
+        VERIFICATION_CODE_PROVIDER: "manual",
+        ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
+        ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
+        ALIYUN_PNVS_SIGN_NAME: undefined,
+        ALIYUN_PNVS_TEMPLATE_CODE: undefined
       }),
-    /人工验证码时必须关闭 VERIFICATION_CODE_PREVIEW_ENABLED/
+    /真实数据平面必须使用 VERIFICATION_CODE_PROVIDER=aliyun_pnvs.*人工验证码仅作为应急保底/
   );
 });
 

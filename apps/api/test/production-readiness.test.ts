@@ -54,15 +54,10 @@ const reservationOnlyProductionConfig: Record<string, string | undefined> = {
   VM_RESERVATION_ONLY_PICKUP: "true",
   PAYMENT_MODE: "disabled",
   PAYMENT_RECONCILIATION_ENABLED: "false",
-  VERIFICATION_CODE_PROVIDER: "manual",
   SMARTVM_MODE: "disabled",
   SMARTVM_BASE_URL: undefined,
   SMARTVM_CLIENT_ID: undefined,
   SMARTVM_KEY: undefined,
-  ALIYUN_PNVS_ACCESS_KEY_ID: undefined,
-  ALIYUN_PNVS_ACCESS_KEY_SECRET: undefined,
-  ALIYUN_PNVS_SIGN_NAME: undefined,
-  ALIYUN_PNVS_TEMPLATE_CODE: undefined,
   WECHAT_PAY_APP_ID: undefined,
   WECHAT_MINI_APP_SECRET: undefined,
   WECHAT_PAY_MCH_ID: undefined,
@@ -217,7 +212,7 @@ test("生产就绪健康契约仅在完整生产门禁通过时返回最小成�
   );
 });
 
-test("预约制正式实例在人工码和支付关闭配置下通过生产就绪门禁", () => {
+test("预约制正式实例在 PNVS 短信和支付关闭配置下通过生产就绪门禁", () => {
   withRuntimeEnvironment(
     {
       NODE_ENV: "production",

@@ -6,6 +6,7 @@ import test, { after } from "node:test";
 
 import type { CallHandler, ExecutionContext } from "@nestjs/common";
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { firstValueFrom, of, throwError } from "rxjs";
 
 import {
@@ -1802,6 +1803,88 @@ test("全真模拟 manual 模式只接受后台签发短期码，不接受静态
     await service.verifyCode(targetUser.phone, "654321", "app-login"),
     true
   );
+});
+
+test("manual 只能通过全真模拟专用配置启用，不能作为普通验证码提供商", () => {
+  const service = new VerificationCodeService(
+    new ConfigService({
+      VM_DATA_PLANE: "live",
+      VERIFICATION_CODE_PROVIDER: "manual"
+    }),
+    createIsolatedStore()
+  );
+
+  assert.throws(
+    () => service.getRuntimeConfig(),
+    /真实数据平面必须使用 VERIFICATION_CODE_PROVIDER=aliyun_pnvs/
+  );
+});
+
+test("正式 PNVS 发送短信时仍接受后台签发的单次应急验证码", async () => {
+  const store = createIsolatedStore();
+  const service = new VerificationCodeService(
+    new ConfigService({
+      VM_DATA_PLANE: "live",
+      VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
+      VERIFICATION_CODE_PREVIEW_ENABLED: "false",
+      ALIYUN_PNVS_ACCESS_KEY_ID: "test-access-key-id",
+      ALIYUN_PNVS_ACCESS_KEY_SECRET: "test-access-key-secret",
+      ALIYUN_PNVS_SIGN_NAME: "test-sign-name",
+      ALIYUN_PNVS_TEMPLATE_CODE: "test-template-code"
+    }),
+    store
+  );
+  let sendCalls = 0;
+  let checkCalls = 0;
+  (
+    service as unknown as {
+      createAliyunPnvsClient: () => {
+        sendSmsVerifyCode: () => Promise<unknown>;
+        checkSmsVerifyCode: () => Promise<unknown>;
+      };
+    }
+  ).createAliyunPnvsClient = () => ({
+    sendSmsVerifyCode: async () => {
+      sendCalls += 1;
+      return { body: { code: "OK", success: true } };
+    },
+    checkSmsVerifyCode: async () => {
+      checkCalls += 1;
+      return { body: { code: "OK", success: true, model: { verifyResult: "PASS" } } };
+    }
+  });
+
+  const smsRequest = await service.requestCode("13812345684", "app-login");
+  assert.equal(smsRequest.provider, "aliyun_pnvs");
+  assert.equal(sendCalls, 1);
+
+  const targetUser = store.users.find(
+    (entry) =>
+      entry.status === "active" &&
+      store.getUserTenantId(entry) !== undefined
+  );
+  assert.ok(targetUser);
+  const targetTenantId = store.getUserTenantId(targetUser);
+  assert.ok(targetTenantId);
+  store.issueManualVerificationGrant({
+    phone: targetUser.phone,
+    purpose: "app-login",
+    code: "654321",
+    issuerUserId: "pnvs-fallback-test-issuer",
+    targetUserId: targetUser.id,
+    tenantId: targetTenantId,
+    expiresInSeconds: 300
+  });
+
+  assert.equal(
+    await service.verifyCode(targetUser.phone, "654321", "app-login"),
+    true
+  );
+  assert.equal(
+    await service.verifyCode(targetUser.phone, "654321", "app-login"),
+    false
+  );
+  assert.equal(checkCalls, 0);
 });
 
 test("本机 admin 密码恢复允许非默认账号、仅恢复唯一 admin 并撤销旧会话", () => {

@@ -456,12 +456,9 @@ export const assertProductionConfigurationSafety = (
     configService,
     "VERIFICATION_CODE_PROVIDER"
   );
-  if (
-    verificationProvider !== "aliyun_pnvs" &&
-    verificationProvider !== "manual"
-  ) {
+  if (verificationProvider !== "aliyun_pnvs") {
     throw new BadRequestException(
-      "生产环境验证码必须使用阿里云 PNVS，或仅接受后台签发的一次性人工验证码。"
+      "生产环境验证码必须使用阿里云 PNVS 发送短信；后台签发的一次性人工验证码仅作为应急保底。"
     );
   }
 

@@ -740,16 +740,15 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   VERIFICATION_CODE_PROVIDER: {
     label: "验证码服务",
-    description: "mock 为本地验证码；manual 仅接受后台签发的一次性人工验证码；aliyun_pnvs 使用阿里云号码认证短信。",
+    description: "正式实例使用阿里云 PNVS 发送短信验证码；后台签发的一次性人工验证码始终作为账号级应急保底，无需在此切换。",
     inputType: "select",
     options: [
       { label: "本地模拟", value: "mock" },
-      { label: "后台签发一次性人工验证码", value: "manual" },
       { label: "阿里云号码认证（PNVS）", value: "aliyun_pnvs" }
     ],
     required: true,
     optionValuesByRuntimePlane: {
-      live: ["manual", "aliyun_pnvs"]
+      live: ["aliyun_pnvs"]
     }
   },
   VERIFICATION_CODE_PREVIEW_ENABLED: {

@@ -113,6 +113,7 @@ const isInheritedKey = (key) =>
     "OPENAI_MODEL",
     "OPENAI_TIMEOUT_MS"
   ].includes(key) ||
+  key.startsWith("ALIYUN_PNVS_") ||
   (key.startsWith("SMARTVM_") &&
     !key.startsWith("SMARTVM_TEST_") &&
     key !== "SMARTVM_DEFAULT_PAY_STYLE" &&
@@ -144,7 +145,14 @@ const assertPrivateRegularSource = (filePath) => {
 };
 
 const assertRequiredInheritedConfiguration = (values) => {
-  const requiredKeys = ["AMAP_WEB_KEY", "AMAP_SECURITY_JS_CODE"];
+  const requiredKeys = [
+    "AMAP_WEB_KEY",
+    "AMAP_SECURITY_JS_CODE",
+    "ALIYUN_PNVS_ACCESS_KEY_ID",
+    "ALIYUN_PNVS_ACCESS_KEY_SECRET",
+    "ALIYUN_PNVS_SIGN_NAME",
+    "ALIYUN_PNVS_TEMPLATE_CODE"
+  ];
 
   for (const key of requiredKeys) {
     if (!decodeEnvValue(values.get(key))) {
@@ -285,7 +293,7 @@ const main = () => {
     FINANCIAL_SINGLE_WRITER_ENABLED: "true",
     FINANCIAL_INSTANCE_ID: dataPlaneId,
     PAYMENT_RECONCILIATION_ENABLED: "false",
-    VERIFICATION_CODE_PROVIDER: "manual",
+    VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
     VERIFICATION_CODE_PREVIEW_ENABLED: "false",
     SMARTVM_MODE: "disabled",
     SMARTVM_ALLOW_UNSIGNED_CALLBACKS: "false",

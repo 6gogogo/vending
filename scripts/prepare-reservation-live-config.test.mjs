@@ -23,7 +23,7 @@ const parseAssignments = (content) =>
       .map((match) => [match[1], match[2]])
   );
 
-test("预约制正式配置只继承获准集成并强制关闭支付与短信", (t) => {
+test("预约制正式配置只继承获准集成并强制关闭支付、启用 PNVS", (t) => {
   const directory = mkdtempSync(join(tmpdir(), "vm-live-config-"));
   const sourceEnv = join(directory, "source.env");
   const targetEnv = join(directory, "target.env");
@@ -46,7 +46,10 @@ test("预约制正式配置只继承获准集成并强制关闭支付与短信",
     "API_DATA_FILE=old-store.json",
     "PAYMENT_MODE=mock",
     "WECHAT_PAY_API_V3_KEY=wechat-private-marker",
-    "ALIYUN_PNVS_ACCESS_KEY_SECRET=pnvs-private-marker",
+    "ALIYUN_PNVS_ACCESS_KEY_ID=pnvs-id-private-marker",
+    "ALIYUN_PNVS_ACCESS_KEY_SECRET=pnvs-secret-private-marker",
+    "ALIYUN_PNVS_SIGN_NAME=pnvs-sign-private-marker",
+    "ALIYUN_PNVS_TEMPLATE_CODE=pnvs-template-private-marker",
     "VERIFICATION_CODE_PROVIDER=mock",
     "SMARTVM_ALLOW_UNSIGNED_CALLBACKS=true",
     "SMARTVM_AUTO_FORWARD_SETTLEMENT_PAYMENT_SUCCESS=true",
@@ -90,7 +93,7 @@ test("预约制正式配置只继承获准集成并强制关闭支付与短信",
   assert.equal(values.get("PAYMENT_MODE"), "disabled");
   assert.equal(values.get("PAYMENT_MOCK_ENABLED"), "false");
   assert.equal(values.get("PAYMENT_RECONCILIATION_ENABLED"), "false");
-  assert.equal(values.get("VERIFICATION_CODE_PROVIDER"), "manual");
+  assert.equal(values.get("VERIFICATION_CODE_PROVIDER"), "aliyun_pnvs");
   assert.equal(values.get("VERIFICATION_CODE_PREVIEW_ENABLED"), "false");
   assert.equal(values.get("SMARTVM_MODE"), "disabled");
   assert.equal(values.get("SMARTVM_BASE_URL"), "");
@@ -105,7 +108,10 @@ test("预约制正式配置只继承获准集成并强制关闭支付与短信",
     "false"
   );
   assert.equal(values.get("WECHAT_PAY_API_V3_KEY"), "");
-  assert.equal(values.get("ALIYUN_PNVS_ACCESS_KEY_SECRET"), "");
+  assert.equal(values.get("ALIYUN_PNVS_ACCESS_KEY_ID"), "pnvs-id-private-marker");
+  assert.equal(values.get("ALIYUN_PNVS_ACCESS_KEY_SECRET"), "pnvs-secret-private-marker");
+  assert.equal(values.get("ALIYUN_PNVS_SIGN_NAME"), "pnvs-sign-private-marker");
+  assert.equal(values.get("ALIYUN_PNVS_TEMPLATE_CODE"), "pnvs-template-private-marker");
   assert.equal(values.has("API_DATA_FILE"), false);
   assert.equal(values.has("SMARTVM_TEST_DEVICE_CODE"), false);
   if (process.platform !== "win32") {

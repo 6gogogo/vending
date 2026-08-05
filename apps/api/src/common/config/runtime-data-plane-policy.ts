@@ -175,19 +175,9 @@ const requireVerificationPolicy = (
     return;
   }
 
-  if (normalizedProvider === "manual") {
-    if (isTruthy(previewEnabled)) {
-      throw new RuntimeDataPlanePolicyError(
-        "真实数据平面使用人工验证码时必须关闭 VERIFICATION_CODE_PREVIEW_ENABLED。"
-      );
-    }
-
-    return;
-  }
-
   if (normalizedProvider !== "aliyun_pnvs") {
     throw new RuntimeDataPlanePolicyError(
-      "真实数据平面只能设置 VERIFICATION_CODE_PROVIDER=aliyun_pnvs 或 manual。"
+      "真实数据平面必须使用 VERIFICATION_CODE_PROVIDER=aliyun_pnvs 发送短信；后台签发的一次性人工验证码仅作为应急保底。"
     );
   }
 

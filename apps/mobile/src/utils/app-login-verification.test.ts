@@ -15,10 +15,11 @@ test("人工验证码登录在配置加载后不展示短信获取入口", () =>
 });
 
 test("短信与模拟验证码保留获取入口，配置加载前不误发请求", () => {
-  assert.equal(
-    resolveAppLoginVerificationPresentation("aliyun_pnvs").canRequestCode,
-    true
-  );
+  assert.deepEqual(resolveAppLoginVerificationPresentation("aliyun_pnvs"), {
+    guideText: "获取短信验证码登录；已有管理员签发的应急验证码也可直接输入",
+    codeHelper: "短信发送后输入，应急验证码可直接使用",
+    canRequestCode: true
+  });
   assert.equal(
     resolveAppLoginVerificationPresentation("mock").canRequestCode,
     true

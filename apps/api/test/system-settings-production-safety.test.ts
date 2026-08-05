@@ -361,7 +361,7 @@ test("正式实机设置只返回生产相关配置和正式服务选项", () =>
     SMARTVM_ALLOW_UNSIGNED_CALLBACKS: "false",
     PAYMENT_MODE: "disabled",
     PAYMENT_MOCK_ENABLED: "false",
-    VERIFICATION_CODE_PROVIDER: "manual",
+    VERIFICATION_CODE_PROVIDER: "aliyun_pnvs",
     VERIFICATION_CODE_PREVIEW_ENABLED: "false",
     ALLOW_DEFAULT_BACKOFFICE_LOGIN: "false"
   };
@@ -415,7 +415,7 @@ test("正式实机设置只返回生产相关配置和正式服务选项", () =>
     assert.equal(entries.has("VM_DATA_PLANE"), true);
     assert.deepEqual(
       entries.get("VERIFICATION_CODE_PROVIDER")?.options?.map((option) => option.value),
-      ["manual", "aliyun_pnvs"]
+      ["aliyun_pnvs"]
     );
     assert.deepEqual(
       entries.get("PAYMENT_MODE")?.options?.map((option) => option.value),
@@ -946,7 +946,7 @@ test("已有支付账本的正式实例不能通过系统设置关闭支付", ()
               VM_RESERVATION_ONLY_PICKUP: "true",
               PAYMENT_MODE: "disabled",
               PAYMENT_RECONCILIATION_ENABLED: "false",
-              VERIFICATION_CODE_PROVIDER: "manual"
+              VERIFICATION_CODE_PROVIDER: "aliyun_pnvs"
             }
           },
           { includeSensitiveValues: true }

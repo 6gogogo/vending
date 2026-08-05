@@ -722,11 +722,9 @@ const checkProductionSafety = (config, options) => {
   checks.push(
     verificationProvider === "aliyun_pnvs"
       ? pass("验证码供应商", "VERIFICATION_CODE_PROVIDER=aliyun_pnvs。")
-      : verificationProvider === "manual"
-        ? pass("验证码供应商", "仅接受后台签发的一次性人工验证码。")
-        : fail("验证码供应商", "公网或预发布必须使用 PNVS 或后台签发的一次性人工验证码。", [
-            `当前 VERIFICATION_CODE_PROVIDER=${verificationProvider ?? "(未设置)"}`
-          ])
+      : fail("验证码供应商", "公网或预发布必须使用 PNVS；后台签发的一次性人工验证码仅作为应急保底。", [
+          `当前 VERIFICATION_CODE_PROVIDER=${verificationProvider ?? "(未设置)"}`
+        ])
   );
 
   const previewEnabled = isTruthy(readConfig(config, "VERIFICATION_CODE_PREVIEW_ENABLED"));
@@ -1010,7 +1008,7 @@ const checkSmartVm = async (config, options) => {
   return createSection("SmartVM", "检查柜机平台外部连接、签名参数和只读接口。", checks);
 };
 
-const checkSms = async (config, options) => {
+export const checkSms = async (config, options) => {
   const checks = [];
   const provider = readConfig(config, "VERIFICATION_CODE_PROVIDER");
   const previewEnabled = isTruthy(readConfig(config, "VERIFICATION_CODE_PREVIEW_ENABLED"));
@@ -1023,29 +1021,10 @@ const checkSms = async (config, options) => {
       : pass("短信验证码预览", "验证码预览已关闭。")
   );
 
-  if (provider === "manual") {
-    checks.unshift(
-      pass(
-        "人工验证码供应商",
-        "当前仅接受后台签发、短期有效且单次消费的人工验证码。"
-      )
-    );
-    checks.push(
-      options.sendSms
-        ? fail("真实短信发送", "人工验证码模式不发送短信，不能使用 --send-sms。")
-        : skip("真实短信发送", "人工验证码模式无需配置或发送短信。")
-    );
-    return createSection(
-      "登录验证",
-      "检查后台签发的一次性人工验证码模式。",
-      checks
-    );
-  }
-
   checks.unshift(
     provider === "aliyun_pnvs"
       ? pass("短信验证码供应商", "验证码供应商已切到阿里云 PNVS。")
-      : fail("短信验证码供应商", "外部服务预检要求 VERIFICATION_CODE_PROVIDER=aliyun_pnvs 或 manual。", [
+      : fail("短信验证码供应商", "外部服务预检要求 VERIFICATION_CODE_PROVIDER=aliyun_pnvs；人工验证码仅作为应急保底。", [
           `当前=${provider ?? "(未设置)"}`
         ])
   );
