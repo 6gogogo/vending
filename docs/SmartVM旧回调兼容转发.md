@@ -47,8 +47,10 @@ systemctl --user enable --now vending-legacy-smartvm-callback-relay.service
 systemctl --user is-active --quiet vending-legacy-smartvm-callback-relay.service
 ss -lntp | grep ':4000'
 test "$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H 'Host: 5gogogo.top:4000' \
   http://127.0.0.1:4000/api/health)" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H 'Host: 5gogogo.top:4000' \
   http://127.0.0.1:4000/api/cabinet-events/callbacks/door-status)" = 405
 ```
 
