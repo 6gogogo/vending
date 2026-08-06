@@ -1419,7 +1419,7 @@ function resolveGoodsName(goodsId: string) {
       </div>
     </dialog>
 
-    <div v-if="editorMode" class="goods-editor-backdrop" @click.self="closeEditor">
+    <div v-if="editorMode" class="goods-editor-backdrop">
       <aside class="goods-editor admin-panel">
         <div class="admin-panel__head">
           <div>

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Inject,
@@ -233,6 +234,20 @@ export class AuthController {
         body.reason
       ),
       "人工验证码已撤销。"
+    );
+  }
+
+  @Delete("manual-verification-codes/:grantId")
+  clearManualVerificationCode(
+    @Param("grantId") grantId: string,
+    @Headers("authorization") authorization: string | undefined
+  ) {
+    return ok(
+      this.authService.clearManualVerificationCode(
+        this.extractBearerToken(authorization),
+        grantId
+      ),
+      "人工验证码记录已清除。"
     );
   }
 

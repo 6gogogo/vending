@@ -184,7 +184,7 @@ onMounted(load);
       </aside>
     </section>
 
-    <div v-if="activeAlert" class="alerts-modal-backdrop" @click.self="activeAlert = undefined">
+    <div v-if="activeAlert" class="alerts-modal-backdrop">
       <section class="alerts-modal admin-panel">
         <div class="admin-panel__head">
           <div>

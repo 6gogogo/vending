@@ -2327,7 +2327,7 @@ onUnmounted(() => {
       </div>
     </dialog>
 
-    <div v-if="mapPickerVisible" class="device-map-backdrop" @click.self="mapPickerVisible = false">
+    <div v-if="mapPickerVisible" class="device-map-backdrop">
       <section class="device-map-panel admin-panel">
         <AmapLocationPicker
           :initial-longitude="detail.device.longitude"

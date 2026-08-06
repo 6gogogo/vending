@@ -187,6 +187,12 @@ export const adminApi = {
       { reason }
     );
   },
+  clearManualVerificationCode(grantId: string) {
+    requireBackofficePermission("verification-codes:manage");
+    return adminClient.delete<ManualVerificationGrantSnapshot>(
+      `/auth/manual-verification-codes/${encodeURIComponent(grantId)}`
+    );
+  },
   dashboard() {
     requireBackofficePermission("dashboard:view");
     return adminClient.get<DashboardSnapshot>("/analytics/dashboard");

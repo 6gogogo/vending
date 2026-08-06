@@ -289,6 +289,7 @@ const deviceAssignmentSaving = ref(false);
 const supervisorPasswordResetSaving = ref(false);
 const manualCodeSaving = ref(false);
 const revokingManualGrantId = ref("");
+const clearingManualGrantId = ref("");
 const manualCodeIssued = ref(false);
 const reviewingApplicationId = ref("");
 const removingUserId = ref("");
@@ -1347,6 +1348,30 @@ const revokeManualVerificationGrant = async (grant: ManualVerificationGrantSnaps
   }
 };
 
+const clearManualVerificationGrant = async (grant: ManualVerificationGrantSnapshot) => {
+  if (
+    !window.confirm(
+      `确认清除 ${grant.userName} 的${manualPurposeLabel(grant.purpose)}验证码记录吗？操作日志仍会保留。`
+    )
+  ) {
+    return;
+  }
+
+  clearingManualGrantId.value = grant.id;
+  actionMessage.value = null;
+  try {
+    await adminApi.clearManualVerificationCode(grant.id);
+    manualVerificationGrants.value = manualVerificationGrants.value.filter(
+      (item) => item.id !== grant.id
+    );
+    showActionMessage("success", `已清除 ${grant.userName} 的一次性验证码记录。`);
+  } catch (error) {
+    showActionMessage("error", `验证码记录清除失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    clearingManualGrantId.value = "";
+  }
+};
+
 const createRegionDirect = async () => {
   const name = regionDraftName.value.trim();
 
@@ -1702,12 +1727,20 @@ onMounted(load);
                   v-if="grant.status === 'active'"
                   class="admin-text-button"
                   type="button"
-                  :disabled="Boolean(revokingManualGrantId)"
+                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId)"
                   @click="revokeManualVerificationGrant(grant)"
                 >
                   {{ revokingManualGrantId === grant.id ? "撤销中" : "撤销" }}
                 </button>
-                <span v-else class="admin-table__subtext">不可再次使用</span>
+                <button
+                  v-else
+                  class="admin-text-button"
+                  type="button"
+                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId)"
+                  @click="clearManualVerificationGrant(grant)"
+                >
+                  {{ clearingManualGrantId === grant.id ? "清除中" : "清除记录" }}
+                </button>
               </td>
             </tr>
           </tbody>
@@ -2048,7 +2081,7 @@ onMounted(load);
       </aside>
     </section>
 
-    <div v-if="drawerMode" class="users-drawer-backdrop" @click.self="closeDrawer">
+    <div v-if="drawerMode" class="users-drawer-backdrop">
       <aside class="users-drawer admin-panel">
         <div class="admin-panel__head">
           <div>
@@ -2486,7 +2519,7 @@ onMounted(load);
       </aside>
     </div>
 
-    <div v-if="regionMapPickerVisible" class="users-map-backdrop" @click.self="regionMapPickerVisible = false">
+    <div v-if="regionMapPickerVisible" class="users-map-backdrop">
       <section class="users-map-panel admin-panel">
         <AmapLocationPicker
           :initial-longitude="regionDraftLongitude"

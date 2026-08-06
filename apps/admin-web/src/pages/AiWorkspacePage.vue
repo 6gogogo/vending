@@ -1595,7 +1595,7 @@ onMounted(() => {
       </aside>
     </section>
 
-    <div v-if="configDialogOpen" class="ai-page__modal-backdrop" @click.self="closeConfigDialog">
+    <div v-if="configDialogOpen" class="ai-page__modal-backdrop">
       <section class="ai-page__modal admin-panel">
         <div class="admin-panel__head">
           <div>

@@ -707,7 +707,7 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <div v-if="activeBucket && activeBucketData" class="dashboard-drawer-backdrop" @click.self="closeBucket">
+    <div v-if="activeBucket && activeBucketData" class="dashboard-drawer-backdrop">
       <article class="dashboard-drawer admin-panel">
         <div class="admin-panel__head">
           <div>
@@ -752,7 +752,7 @@ onUnmounted(() => {
       </article>
     </div>
 
-    <div v-if="activeTask" class="dashboard-drawer-backdrop" @click.self="closeTaskDetail">
+    <div v-if="activeTask" class="dashboard-drawer-backdrop">
       <article class="dashboard-drawer admin-panel">
         <div class="admin-panel__head">
           <div>

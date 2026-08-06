@@ -474,7 +474,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="drawerMode" class="operations-drawer-backdrop" @click.self="requestCloseDeviceDrawer">
+    <div v-if="drawerMode" class="operations-drawer-backdrop">
       <aside class="operations-drawer admin-panel">
         <div class="admin-panel__head">
           <div>

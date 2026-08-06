@@ -958,6 +958,60 @@ export class AuthService {
     return this.createManualVerificationGrantSnapshot(record);
   }
 
+  clearManualVerificationCode(
+    token: string | undefined,
+    grantId: string
+  ): ManualVerificationGrantSnapshot {
+    const actor = this.getBackofficeSession(token);
+    this.assertCanManageManualVerificationCodes(actor.user);
+    const tenantId =
+      actor.user.tenantId ?? this.store.getDefaultTenantId();
+    const result = this.store.clearTerminalManualVerificationGrant(
+      grantId,
+      tenantId
+    );
+
+    if (result.state === "missing") {
+      throw new NotFoundException("未找到可清除的人工验证码记录。");
+    }
+    if (result.state === "active") {
+      throw new ConflictException("验证码仍可使用，请先撤销后再清除记录。");
+    }
+
+    const targetUser = result.record.targetUserId
+      ? this.store.users.find((entry) => entry.id === result.record.targetUserId)
+      : undefined;
+    const snapshot = this.createManualVerificationGrantSnapshot(result.record);
+    this.store.logOperation({
+      category: "admin",
+      type: "clear-manual-verification-code-record",
+      status: "success",
+      actor: {
+        type: actor.user.role,
+        id: actor.user.id,
+        name: actor.user.name,
+        role: actor.user.role
+      },
+      primarySubject: targetUser
+        ? {
+            type: "user",
+            id: targetUser.id,
+            label: targetUser.name
+          }
+        : undefined,
+      metadata: {
+        manualGrantId: result.record.manualGrantId,
+        tenantId,
+        purpose: result.record.purpose,
+        terminalStatus: snapshot.status,
+        undoState: "not_undoable"
+      }
+    });
+    this.store.persist();
+
+    return snapshot;
+  }
+
   async resetOwnBackofficePassword(payload: {
     username: string;
     phone: string;

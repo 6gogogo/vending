@@ -387,6 +387,120 @@ test("后台签发的 6 位人工码只用于绑定账号且单次消费，不�
   }
 });
 
+test("终态人工验证码记录可由当前实例管理员清除，有效码必须先撤销", async () => {
+  let runningApi:
+    | Awaited<ReturnType<typeof startApi>>
+    | undefined = await startApi();
+
+  try {
+    const adminToken = createTenantAdminToken(runningApi.store);
+    const adminHeaders = {
+      authorization: `Bearer ${adminToken}`
+    };
+    const credential = runningApi.store.backofficeCredentials.find(
+      (entry) => entry.role === "admin"
+    );
+    const targetUser = runningApi.store.users.find(
+      (entry) => entry.id === credential?.userId
+    );
+    assert.ok(credential?.tenantId);
+    assert.ok(targetUser);
+
+    const consumedGrant = runningApi.store.issueManualVerificationGrant({
+      phone: targetUser.phone,
+      purpose: "password-reset",
+      code: "314159",
+      issuerUserId: targetUser.id,
+      targetUserId: targetUser.id,
+      tenantId: credential.tenantId,
+      expiresInSeconds: 300
+    });
+    assert.equal(
+      runningApi.store.consumeManualVerificationGrant(
+        targetUser.phone,
+        "password-reset",
+        consumedGrant.manualGrantId!
+      ),
+      true
+    );
+    const activeGrant = runningApi.store.issueManualVerificationGrant({
+      phone: targetUser.phone,
+      purpose: "password-reset",
+      code: "271828",
+      issuerUserId: targetUser.id,
+      targetUserId: targetUser.id,
+      tenantId: credential.tenantId,
+      expiresInSeconds: 300
+    });
+
+    const providerToken = createProviderToken(runningApi.store);
+    const providerClearResponse = await fetch(
+      `${runningApi.baseUrl}/auth/manual-verification-codes/${encodeURIComponent(consumedGrant.manualGrantId!)}`,
+      {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${providerToken}` }
+      }
+    );
+    assert.equal(providerClearResponse.status, 403);
+
+    const clearConsumedResponse = await fetch(
+      `${runningApi.baseUrl}/auth/manual-verification-codes/${encodeURIComponent(consumedGrant.manualGrantId!)}`,
+      {
+        method: "DELETE",
+        headers: adminHeaders
+      }
+    );
+    assert.equal(clearConsumedResponse.status, 200);
+    assert.equal(
+      runningApi.store.manualVerificationGrants.some(
+        (entry) => entry.manualGrantId === consumedGrant.manualGrantId
+      ),
+      false
+    );
+    assert.ok(
+      runningApi.store.logs.some(
+        (entry) =>
+          entry.type === "clear-manual-verification-code-record" &&
+          entry.metadata?.manualGrantId === consumedGrant.manualGrantId
+      )
+    );
+
+    const clearActiveResponse = await fetch(
+      `${runningApi.baseUrl}/auth/manual-verification-codes/${encodeURIComponent(activeGrant.manualGrantId!)}`,
+      {
+        method: "DELETE",
+        headers: adminHeaders
+      }
+    );
+    assert.equal(clearActiveResponse.status, 409);
+    assert.equal(
+      runningApi.store.manualVerificationGrants.some(
+        (entry) => entry.manualGrantId === activeGrant.manualGrantId
+      ),
+      true
+    );
+
+    const dataFile = runningApi.dataFile;
+    await runningApi.app.close();
+    runningApi = undefined;
+    runningApi = await startApiWithDataFile(dataFile);
+    assert.equal(
+      runningApi.store.manualVerificationGrants.some(
+        (entry) => entry.manualGrantId === consumedGrant.manualGrantId
+      ),
+      false
+    );
+    assert.equal(
+      runningApi.store.manualVerificationGrants.some(
+        (entry) => entry.manualGrantId === activeGrant.manualGrantId
+      ),
+      true
+    );
+  } finally {
+    await runningApi?.app.close();
+  }
+});
+
 test("人工码可以签发最长 30 天，超过上限仍会拒绝", async () => {
   const { app, baseUrl, store } = await startApi();
 

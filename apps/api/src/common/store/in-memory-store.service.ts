@@ -707,6 +707,38 @@ export class InMemoryStoreService {
     return structuredClone(record);
   }
 
+  clearTerminalManualVerificationGrant(grantId: string, tenantId: string) {
+    const recordIndex = this.manualVerificationGrants.findIndex(
+      (entry) =>
+        entry.manualGrantId === grantId &&
+        entry.tenantId === tenantId
+    );
+
+    if (recordIndex < 0) {
+      return { state: "missing" } as const;
+    }
+
+    const record = this.manualVerificationGrants[recordIndex]!;
+    this.expireManualVerificationGrant(record);
+
+    if (!this.isManualVerificationGrantTerminal(record)) {
+      return { state: "active" } as const;
+    }
+
+    if (
+      this.activeManualVerificationGrantIds.get(record.challengeKey) ===
+      record.manualGrantId
+    ) {
+      this.activeManualVerificationGrantIds.delete(record.challengeKey);
+    }
+    this.manualVerificationGrants.splice(recordIndex, 1);
+
+    return {
+      state: "cleared",
+      record: structuredClone(record)
+    } as const;
+  }
+
   getVerificationRecord(phone: string, purpose: VerificationPurpose = "general") {
     return this.verificationCodes.get(this.getVerificationCodeKey(phone, purpose));
   }
