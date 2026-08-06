@@ -76,13 +76,20 @@ export class DeviceOperationCoordinator {
           : connectivity === "stale"
             ? "stale"
             : undefined;
-    const doorState = this.store.getDeviceRuntime(device.deviceCode).doorState;
+    const runtime = this.store.getDeviceRuntime(device.deviceCode);
+    const doorState = runtime.doorState;
+    const hasPriorOpenCommand = Boolean(
+      runtime.lastCommandAt ||
+      this.store.events.some((event) => event.deviceCode === device.deviceCode)
+    );
     const physicalDoorBlocker =
       doorState === "open"
         ? "door_open"
         : doorState === "closed"
           ? undefined
-          : "door_unconfirmed";
+          : hasPriorOpenCommand
+            ? "door_unconfirmed"
+            : undefined;
     const blocker = statusBlocker ?? physicalDoorBlocker;
     const staleAt = Number.isFinite(lastObservedAtMs)
       ? new Date(lastObservedAtMs + staleAfterMs).toISOString()

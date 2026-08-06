@@ -18,7 +18,6 @@ import type {
   DeviceStatus,
   GoodsCategory,
   PaymentRefundRecoverySummary,
-  SmartVmRouterStatusResult,
   UserRole
 } from "@vm/shared-types";
 
@@ -658,13 +657,22 @@ export class DevicesService {
   ) {
     const device = this.getByCodeForTenant(deviceCode, actorTenantId);
     const now = new Date().toISOString();
-    let remoteStatus: SmartVmRouterStatusResult | undefined;
+    let platformRecognition: "confirmed" | "not-configured" = "not-configured";
     const runtimePatch: Partial<DeviceRuntimeState> = {
       lastRefreshAt: now
     };
 
     try {
-      remoteStatus = await this.smartVmGateway.getRouterStatus({ deviceCode });
+      const probe = await this.smartVmGateway.probeDevice({
+        deviceCode,
+        doorNum: device.doors[0]?.doorNum
+      });
+
+      if (probe?.recognized) {
+        platformRecognition = "confirmed";
+        device.status = "online";
+        device.lastSeenAt = now;
+      }
     } catch (error) {
       const detail = this.smartVmGateway.extractErrorMessage(error);
       this.store.updateDeviceRuntime(deviceCode, runtimePatch);
@@ -678,37 +686,14 @@ export class DevicesService {
           id: device.deviceCode,
           label: device.name
         },
-        description: `管理员刷新 ${device.name} 的平台状态失败。`,
+        description: `管理员确认 ${device.name} 的平台接入失败。`,
         detail: `柜机平台返回：${detail}`,
         metadata: {
           deviceCode: device.deviceCode,
           undoState: "not_undoable"
         }
       });
-      throw new BadGatewayException(`柜机平台状态读取失败：${detail}`);
-    }
-
-    const remoteDeviceStatus = this.resolveRemoteDeviceStatus(remoteStatus);
-    const remoteDoorState = this.resolveRemoteDoorState(remoteStatus);
-
-    if (remoteDeviceStatus) {
-      device.status = remoteDeviceStatus;
-      if (remoteDeviceStatus === "online") {
-        device.lastSeenAt = now;
-      }
-    }
-
-    if (remoteDoorState) {
-      runtimePatch.doorState = remoteDoorState;
-    }
-
-    const recoveredPhysicalDoorEventCount =
-      remoteStatus && remoteDoorState === "closed"
-        ? this.reconcilePendingDoorEventsAfterTrustedClose(deviceCode, now)
-        : 0;
-
-    if (remoteStatus && remoteDoorState === "closed") {
-      runtimePatch.lastClosedAt = now;
+      throw new BadGatewayException(`柜机平台设备确认失败：${detail}`);
     }
 
     this.store.updateDeviceRuntime(deviceCode, runtimePatch);
@@ -722,91 +707,18 @@ export class DevicesService {
         id: device.deviceCode,
         label: device.name
       },
-      description: `管理员刷新了 ${device.name} 的设备状态。`,
-      detail: remoteStatus
-        ? `设备 ${device.deviceCode} 已从平台读取状态：${remoteDeviceStatus ? `设备${remoteDeviceStatus}` : "设备状态未返回"}，${remoteDoorState ? `门${remoteDoorState}` : "门状态未返回"}；恢复未决门事件 ${recoveredPhysicalDoorEventCount} 笔。`
-        : `设备 ${device.deviceCode} 已刷新本地状态；当前未配置 SmartVM 凭据，未读取平台状态。`,
+      description: `管理员刷新了 ${device.name} 的平台接入状态。`,
+      detail: platformRecognition === "confirmed"
+        ? `设备 ${device.deviceCode} 已由 SmartVM 1.1 只读接口确认；物理在线和门状态等待设备回调。`
+        : `设备 ${device.deviceCode} 已刷新本地操作时间；当前未配置 SmartVM 凭据。`,
       metadata: {
         deviceCode: device.deviceCode,
-        remoteStatus,
-        recoveredPhysicalDoorEventCount,
-        doorRecoveryEvidence: remoteStatus
-          ? remoteDoorState === "closed"
-            ? "trusted-remote-closed"
-            : remoteDoorState
-              ? `trusted-remote-${remoteDoorState}`
-              : "remote-door-state-missing"
-          : "smartvm-not-configured"
+        platformRecognition,
+        doorStateEvidence: "callback-required"
       }
     });
 
     return this.monitoringDetail(deviceCode, actorTenantId);
-  }
-
-  private reconcilePendingDoorEventsAfterTrustedClose(deviceCode: string, observedAt: string) {
-    let recoveredCount = 0;
-
-    for (const event of this.store.events) {
-      if (
-        event.deviceCode !== deviceCode ||
-        (event.physicalDoorState !== "unknown" && event.physicalDoorState !== "open")
-      ) {
-        continue;
-      }
-
-      event.physicalDoorState = "closed";
-
-      if (
-        event.status === "created" ||
-        event.status === "opening" ||
-        event.status === "opened" ||
-        event.status === "stuck_open"
-      ) {
-        event.status = "closed";
-      }
-
-      // settled / refunded 等业务终态只协调物理门状态，绝不因设备刷新而回退账务状态。
-      event.updatedAt = observedAt;
-      recoveredCount += 1;
-    }
-
-    return recoveredCount;
-  }
-
-  private normalizeSmartVmState(value: unknown) {
-    if (value === undefined || value === null) {
-      return undefined;
-    }
-
-    return String(value).trim();
-  }
-
-  private resolveRemoteDeviceStatus(status?: SmartVmRouterStatusResult): Extract<DeviceStatus, "online" | "offline"> | undefined {
-    const normalized = this.normalizeSmartVmState(status?.online ?? status?.routerInfo?.online ?? status?.vendingInfo?.online);
-
-    if (normalized === "0") {
-      return "online";
-    }
-
-    if (normalized === "1") {
-      return "offline";
-    }
-
-    return undefined;
-  }
-
-  private resolveRemoteDoorState(status?: SmartVmRouterStatusResult): DeviceRuntimeState["doorState"] | undefined {
-    const normalized = this.normalizeSmartVmState(status?.doorState ?? status?.vendingInfo?.doorState);
-
-    if (normalized === "0") {
-      return "open";
-    }
-
-    if (normalized === "1") {
-      return "closed";
-    }
-
-    return undefined;
   }
 
   async remoteOpen(

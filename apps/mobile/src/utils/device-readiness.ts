@@ -31,13 +31,9 @@ const fallbackReadiness = (device: DeviceRecord): Pick<DeviceReadiness, "canOpen
 
 export const getDeviceStatusPresentation = (device: DeviceRecord): DeviceStatusPresentation => {
   const readiness = device.readiness ?? fallbackReadiness(device);
-  const physicalDoorBlocker =
-    device.runtime?.doorState === "open"
-      ? "door_open"
-      : device.runtime?.doorState === "closed"
-        ? undefined
-        : "door_unconfirmed";
-  const blocker = readiness.blocker ?? physicalDoorBlocker;
+  // 新版 API 已把首次联机试开、命令历史和物理门状态统一折算进 readiness。
+  // 只有旧响应缺少 readiness 时才使用上方关闭式兼容逻辑。
+  const blocker = readiness.blocker;
 
   if (blocker === "stale") {
     return {

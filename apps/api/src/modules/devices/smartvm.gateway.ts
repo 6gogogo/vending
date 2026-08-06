@@ -271,8 +271,17 @@ export class SmartVmGateway {
     return this.createClient()?.getCabinetGoodsInfo(payload);
   }
 
-  async getRouterStatus(payload: { deviceCode: string }) {
-    return this.createClient()?.getRouterStatus(payload);
+  async probeDevice(payload: { deviceCode: string; doorNum?: string }) {
+    const client = this.createClient();
+
+    if (!client) {
+      return undefined;
+    }
+
+    // 当前实机交付使用 1.1 契约；商品查询是供应商明确提供的只读 POST，
+    // 可确认租户凭据与设备编号有效。物理在线和门状态仍只接受设备回调。
+    await client.getCabinetGoodsInfo(payload);
+    return { recognized: true as const };
   }
 
   async openDoor(payload: {
@@ -488,14 +497,26 @@ export class SmartVmGateway {
 
   extractErrorMessage(error: unknown) {
     if (error instanceof SmartVmRequestError) {
+      if (this.looksLikeHtml(error.message) || this.looksLikeHtml(error.responseBody)) {
+        return `柜机平台请求失败（HTTP ${error.statusCode}）。`;
+      }
+
       return error.message;
     }
 
     if (error instanceof Error) {
+      if (this.looksLikeHtml(error.message)) {
+        return "柜机平台返回了无法识别的响应。";
+      }
+
       return error.message;
     }
 
     return "柜机平台未返回可用结果。";
+  }
+
+  private looksLikeHtml(value: unknown) {
+    return typeof value === "string" && /<(?:!doctype|html|head|body|title|h1)\b/i.test(value);
   }
 
   extractExchangeTrace(error: unknown): SmartVmExchangeTrace | undefined {

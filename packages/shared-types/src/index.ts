@@ -155,8 +155,9 @@ export type DeviceReadinessBlocker =
 /**
  * 柜机当前是否适合执行开门操作的服务端派生快照。
  * `reportedStatus` 保留设备上报值，`connectivity` 单独表达心跳是否陈旧，
- * 避免把“状态已过期”误显示成设备明确上报的“离线”；物理柜门只有明确
- * `closed` 时才允许开门，打开、未知或缺失的运行态均保持关闭式阻断。
+ * 避免把“状态已过期”误显示成设备明确上报的“离线”。物理柜门明确打开
+ * 时始终阻断；已有开门命令后若状态未知也保持阻断。首次接入且尚无任何
+ * 开门命令时，可在平台只读确认设备后执行一次受审计的联机试开。
  */
 export interface DeviceReadiness {
   reportedStatus: DeviceStatus;
@@ -2009,22 +2010,6 @@ export interface SmartVmDoorStatusPayload {
   deviceCode: string;
   status: "OPENDING" | "SUCCESS" | "CLOSED" | "FAIL";
   doorIsOpen?: "Y" | "N";
-}
-
-export interface SmartVmRouterStatusResult {
-  assetId?: string;
-  online?: number | string;
-  doorState?: number | string;
-  routerInfo?: {
-    online?: number | string;
-    [key: string]: unknown;
-  };
-  vendingInfo?: {
-    online?: number | string;
-    doorState?: number | string;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
 }
 
 export interface SmartVmSettlementPayload {

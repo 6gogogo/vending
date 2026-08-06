@@ -22,7 +22,7 @@ const deviceStatusLabel = computed(() => {
   if (device.value.readiness?.blocker === "offline" || device.value.status === "offline") return "离线";
   if (device.value.readiness?.blocker === "maintenance" || device.value.status === "maintenance") return "维护中";
   if (device.value.readiness?.blocker === "stale") return "状态已过期";
-  return "在线";
+  return "平台已识别";
 });
 const deviceStatusClass = computed(() => {
   if (!device.value || device.value.status === "offline") return "admin-pill--danger";
@@ -96,7 +96,7 @@ onMounted(() => void load());
             <p class="admin-kicker">运行状态</p>
             <p><span class="admin-pill" :class="deviceStatusClass">{{ deviceStatusLabel }}</span></p>
             <p class="admin-copy">{{ doorStateLabel(device.runtime?.doorState) }}</p>
-            <p class="admin-copy">最近心跳：{{ formatDateTime(device.lastSeenAt) }}</p>
+            <p class="admin-copy">最近平台确认：{{ formatDateTime(device.lastSeenAt) }}</p>
           </section>
           <section class="admin-panel admin-panel-block">
             <p class="admin-kicker">最近记录</p>

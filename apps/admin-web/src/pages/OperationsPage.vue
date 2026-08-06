@@ -91,7 +91,7 @@ const getDeviceStatusPresentation = (device: DeviceRecord) => {
     return {
       label: "状态已过期",
       pillClass: "admin-pill--warning",
-      hint: "最近心跳已超过有效时限，请进入详情主动刷新；刷新前不能开门。"
+      hint: "最近一次平台确认已超过有效时限，请进入详情刷新；刷新前不能开门。"
     };
   }
 
@@ -107,14 +107,14 @@ const getDeviceStatusPresentation = (device: DeviceRecord) => {
     return {
       label: "离线",
       pillClass: "admin-pill--danger",
-      hint: "设备已明确离线，请先排查连接并刷新状态。"
+      hint: "尚未取得可用的平台确认，请先排查连接并刷新状态。"
     };
   }
 
   return {
-    label: "在线",
+    label: "平台已识别",
     pillClass: "admin-pill--success",
-    hint: "最近心跳在有效时限内。"
+    hint: "最近一次平台确认在有效时限内；门状态以后续设备回调为准。"
   };
 };
 
@@ -414,7 +414,7 @@ onUnmounted(() => {
             <strong class="admin-code">{{ totalStock(device) }}</strong>
           </div>
           <div class="operations-card__row">
-            <span>最近心跳</span>
+            <span>最近平台确认</span>
             <span class="admin-code">{{ formatDateTime(device.lastSeenAt) }}</span>
           </div>
           <div class="operations-card__row">

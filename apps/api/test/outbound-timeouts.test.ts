@@ -70,6 +70,57 @@ test("SmartVM 客户端超时会中止请求并保留 504 跟踪语义", async (
   assert.equal(exchanges[0]?.statusCode, 504);
 });
 
+test("SmartVM 设备确认沿用 1.1 POST JSON 契约，不调用旧 1.2 GET 状态接口", async () => {
+  const requests: Array<{ url: string; init?: RequestInit; body?: Record<string, unknown> }> = [];
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    const body = typeof init?.body === "string"
+      ? JSON.parse(init.body) as Record<string, unknown>
+      : undefined;
+    requests.push({ url: String(input), init, body });
+    return new Response(
+      JSON.stringify({ code: 200, message: "请求成功", data: [] }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+  const client = new SmartVmClient({
+    baseUrl: "https://smartvm.example",
+    credentials: { clientId: "local-test", key: "local-test-key" },
+    fetchImpl
+  });
+
+  await client.getCabinetGoodsInfo({ deviceCode: "91110265", doorNum: "1" });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.url, "https://smartvm.example/api/pay/container/getCabinetGoodsInfo");
+  assert.equal(requests[0]?.init?.method, "POST");
+  assert.equal(
+    new Headers(requests[0]?.init?.headers).get("content-type"),
+    "application/json"
+  );
+  assert.equal(requests[0]?.body?.deviceCode, "91110265");
+  assert.equal(requests[0]?.body?.doorNum, "1");
+  assert.equal(requests[0]?.body?.clientId, "local-test");
+  assert.equal(typeof requests[0]?.body?.nonceStr, "string");
+  assert.equal(typeof requests[0]?.body?.sign, "string");
+  assert.equal(requests[0]?.body?.assetId, undefined);
+  assert.equal(requests[0]?.body?.nonce_str, undefined);
+});
+
+test("SmartVM 上游 HTML 错误只返回收敛后的状态信息", () => {
+  const gateway = new SmartVmGateway(new ConfigService({}));
+  const error = new SmartVmRequestError(
+    "<!doctype html><html><title>HTTP Status 405</title><h1>Apache Tomcat</h1></html>",
+    405,
+    "/osapi/router/status",
+    {},
+    "<!doctype html><html><title>HTTP Status 405</title><h1>Apache Tomcat</h1></html>"
+  );
+
+  const message = gateway.extractErrorMessage(error);
+  assert.match(message, /HTTP 405/);
+  assert.doesNotMatch(message, /doctype|html|Tomcat/i);
+});
+
 test("SmartVM 付款回写拒绝不在允许来源中的 URL", async () => {
   const gateway = new SmartVmGateway(
     new ConfigService({

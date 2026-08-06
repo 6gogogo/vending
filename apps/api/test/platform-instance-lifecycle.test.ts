@@ -1673,7 +1673,7 @@ test("新实例管理员不能通过已知用户 ID、柜机编号或凭证接�
           return [];
         }
       },
-      getRouterStatus: {
+      probeDevice: {
         configurable: true,
         value: async () => {
           gatewayCalls.refresh += 1;

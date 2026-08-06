@@ -46,3 +46,19 @@ test("移动端只在柜门明确关闭时允许继续开柜", () => {
   assert.equal(presentation.canOpen, true);
   assert.equal(presentation.label, "在线");
 });
+
+test("移动端尊重服务端签发的首次联机试开就绪度", () => {
+  const device = createDevice("unknown");
+  device.readiness = {
+    reportedStatus: "online",
+    effectiveStatus: "online",
+    connectivity: "online",
+    canOpen: true,
+    lastObservedAt: device.lastSeenAt,
+    staleAfterMs: 300_000
+  };
+
+  const presentation = getDeviceStatusPresentation(device);
+  assert.equal(presentation.canOpen, true);
+  assert.equal(presentation.label, "在线");
+});

@@ -86,7 +86,7 @@ test("在线标记超过心跳时限后按状态过期处理，维护态始终�
   assert.equal(maintenance.blocker, "maintenance");
 });
 
-test("柜门物理状态未知时保持关闭式阻断，只有明确 closed 才允许开门", () => {
+test("首次联机尚无开门历史时允许受审计试开，既有命令且门状态未知时继续阻断", () => {
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
   const device = store.devices[0];
@@ -98,6 +98,14 @@ test("柜门物理状态未知时保持关闭式阻断，只有明确 closed 才
   store.events.splice(0, store.events.length);
   store.updateDeviceRuntime(device.deviceCode, { doorState: "unknown" });
 
+  assert.doesNotThrow(() =>
+    coordinator.assertOpenable({ deviceCode: device.deviceCode, doorNum: door.doorNum })
+  );
+
+  store.updateDeviceRuntime(device.deviceCode, {
+    doorState: "unknown",
+    lastCommandAt: new Date().toISOString()
+  });
   assert.throws(
     () => coordinator.assertOpenable({ deviceCode: device.deviceCode, doorNum: door.doorNum }),
     /物理状态尚未确认/
@@ -109,28 +117,32 @@ test("柜门物理状态未知时保持关闭式阻断，只有明确 closed 才
   );
 });
 
-test("设备就绪度把打开、未知和缺失的物理门状态前置为不可开柜", () => {
+test("设备就绪度只在已有开门命令时把未知门状态前置为不可开柜", () => {
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
   const device = store.devices[0];
   assert.ok(device);
   device.status = "online";
   device.lastSeenAt = new Date().toISOString();
+  store.events.splice(0, store.events.length);
 
   store.updateDeviceRuntime(device.deviceCode, { doorState: "open" });
   const openDoor = coordinator.getReadiness(device.deviceCode);
   assert.equal(openDoor.canOpen, false);
   assert.equal(openDoor.blocker, "door_open");
 
-  store.updateDeviceRuntime(device.deviceCode, { doorState: "unknown" });
+  store.updateDeviceRuntime(device.deviceCode, {
+    doorState: "unknown",
+    lastCommandAt: new Date().toISOString()
+  });
   const unknownDoor = coordinator.getReadiness(device.deviceCode);
   assert.equal(unknownDoor.canOpen, false);
   assert.equal(unknownDoor.blocker, "door_unconfirmed");
 
   store.deviceRuntime.delete(device.deviceCode);
   const missingRuntime = coordinator.getReadiness(device.deviceCode);
-  assert.equal(missingRuntime.canOpen, false);
-  assert.equal(missingRuntime.blocker, "door_unconfirmed");
+  assert.equal(missingRuntime.canOpen, true);
+  assert.equal(missingRuntime.blocker, undefined);
 
   const devices = new DevicesService(
     store,
@@ -139,8 +151,8 @@ test("设备就绪度把打开、未知和缺失的物理门状态前置为不�
     coordinator
   );
   const detailView = devices.getViewByCode(device.deviceCode, "special");
-  assert.equal(detailView.readiness?.canOpen, false);
-  assert.equal(detailView.readiness?.blocker, "door_unconfirmed");
+  assert.equal(detailView.readiness?.canOpen, true);
+  assert.equal(detailView.readiness?.blocker, undefined);
   assert.equal(detailView.runtime?.doorState, "unknown");
 
   store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });

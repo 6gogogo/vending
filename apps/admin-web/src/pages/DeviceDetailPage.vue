@@ -260,7 +260,7 @@ const getDeviceStatusPresentation = (device?: DeviceRecord) => {
     return {
       label: "状态已过期",
       tone: "warning",
-      hint: "最近心跳已超过有效时限，请先主动刷新状态；刷新成功前不能远程开门。"
+      hint: "最近一次平台确认已超过有效时限，请先刷新；刷新成功前不能远程开门。"
     } as const;
   }
 
@@ -276,11 +276,11 @@ const getDeviceStatusPresentation = (device?: DeviceRecord) => {
     return {
       label: "离线",
       tone: "danger",
-      hint: "柜机已明确离线，请先排查连接并主动刷新状态。"
+      hint: "尚未取得可用的平台确认，请先排查连接并刷新状态。"
     } as const;
   }
 
-  return { label: "在线", tone: "success", hint: "最近心跳在有效时限内。" } as const;
+  return { label: "平台已识别", tone: "success", hint: "最近一次平台确认在有效时限内；门状态以后续设备回调为准。" } as const;
 };
 
 const deviceCanOpen = computed(() => {
@@ -1487,7 +1487,7 @@ onUnmounted(() => {
           <div class="device-detail-status__item">
             <span class="admin-kicker">待处理</span>
             <strong class="admin-code">{{ pendingTasks.length }} 项</strong>
-            <span class="admin-table__subtext">最近心跳：{{ formatDateTime(detail.device.lastSeenAt) }}</span>
+            <span class="admin-table__subtext">最近平台确认：{{ formatDateTime(detail.device.lastSeenAt) }}</span>
           </div>
         </div>
       </article>
