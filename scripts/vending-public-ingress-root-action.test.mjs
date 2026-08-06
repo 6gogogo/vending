@@ -812,7 +812,13 @@ test("受限 root action 工件与受管服务使用同一固定令牌和 payloa
   assert.equal(planTemplate.status, "candidate");
   assert.equal(planTemplate.targets.secretTarget, "/etc/vending/credentials/vnc/private-api-relay.token");
   assert.match(service, /PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE=\/etc\/vending\/credentials\/vnc\/private-api-relay\.token/u);
-  for (const wrapper of [prepareWrapper, activateWrapper, rollbackReadinessWrapper, rollbackWrapper]) {
+  for (const rawWrapper of [
+    prepareWrapper,
+    activateWrapper,
+    rollbackReadinessWrapper,
+    rollbackWrapper
+  ]) {
+    const wrapper = rawWrapper.replace(/\r\n?/gu, "\n");
     assert.match(wrapper, /\[ "\$#" -ne 0 \]/u);
     assert.match(wrapper, /\ncd \/\n/u);
     assert.match(wrapper, /\/usr\/bin\/env -i PATH=\/usr\/bin:\/bin HOME=\/root/u);

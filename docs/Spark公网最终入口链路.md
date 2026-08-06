@@ -1,6 +1,6 @@
 # Spark 公网最终入口链路
 
-本文件定义当前上线的唯一入口：**VNC 只运行 Nginx；Spark 运行完整应用。**它替代旧的 VNC API Unix socket、VNC 私网 API relay、VNC 静态 relay 三段入口设计。旧设计仍保留在仓库中作为历史回退资料，但不是这次上线的部署步骤。
+本文件定义当前上线的业务入口：**VNC 运行 Nginx，Spark 运行完整应用。**它替代旧的 VNC API Unix socket、VNC 私网 API relay、VNC 静态 relay 三段入口设计。旧设计仍保留在仓库中作为历史回退资料，但不是这次上线的部署步骤。供应商尚未切换旧回调地址期间，VNC 另运行一个只允许四个固定 POST 路径的临时兼容进程；它不恢复旧 API。
 
 ```text
 用户 HTTPS 请求
@@ -10,9 +10,13 @@
        -> 后台与移动 H5 静态内容
        -> 受限内部 API relay
        -> Spark API 127.0.0.1:8100
+
+SmartVM 旧回调 http://5gogogo.top:4000
+  -> VNC 固定路径兼容进程
+  -> 同一 WireGuard 10.66.66.2:5795 受限 API relay
 ```
 
-VNC 不运行 vending 的 Node API、静态站点、Unix socket edge、私网 API relay，也不把 Spark 原始端口直接暴露到公网。`10.66.66.2:5795` 只经 WireGuard 由 VNC Nginx 访问；防火墙放宽不改变这一条边界。
+VNC 不运行 vending 的完整 Node API、静态站点、Unix socket edge 或私网 API relay，也不把 Spark 原始端口直接暴露到公网。`10.66.66.2:5795` 只经 WireGuard 由 VNC Nginx 或[旧回调兼容进程](SmartVM旧回调兼容转发.md)访问；兼容进程只在供应商仍使用旧地址期间保留。
 
 ## Spark 就绪门槛
 

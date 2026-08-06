@@ -1,0 +1,35 @@
+[Unit]
+Description=Temporary exact-path relay for legacy SmartVM callbacks
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vnc/vending-legacy-callback-current
+Environment=PATH=/home/vnc/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/vnc/.nvm/versions/node/v22.22.2/bin/node scripts/serve-legacy-smartvm-callback-relay.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=1024
+TasksMax=64
+
+[Install]
+WantedBy=default.target
