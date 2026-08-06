@@ -203,6 +203,11 @@ test("旧入口拒绝非 POST、未登记路径和非 JSON 正文", async (conte
     headers: { "Content-Type": "application/json" },
     body: "{}"
   });
+  const unknownGetResponse = await send({
+    port: relayAddress.port,
+    method: "GET",
+    path: "/api/health"
+  });
   const queryResponse = await send({
     port: relayAddress.port,
     path: `${callbackPath}?debug=1`,
@@ -228,6 +233,7 @@ test("旧入口拒绝非 POST、未登记路径和非 JSON 正文", async (conte
   assert.equal(getResponse.status, 405);
   assert.equal(getResponse.headers.allow, "POST");
   assert.equal(unknownResponse.status, 404);
+  assert.equal(unknownGetResponse.status, 404);
   assert.equal(queryResponse.status, 404);
   assert.equal(nonJsonResponse.status, 415);
   assert.equal(wrongHostResponse.status, 403);

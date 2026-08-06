@@ -175,14 +175,14 @@ export const createLegacySmartVmCallbackRelayServer = (config) => {
       writeEmptyResponse(outgoing, 403);
       return;
     }
-    if (incoming.method !== "POST") {
-      incoming.resume();
-      writeEmptyResponse(outgoing, 405, { Allow: "POST" });
-      return;
-    }
     if (!allowedCallbackPaths.has(incoming.url)) {
       incoming.resume();
       writeEmptyResponse(outgoing, 404);
+      return;
+    }
+    if (incoming.method !== "POST") {
+      incoming.resume();
+      writeEmptyResponse(outgoing, 405, { Allow: "POST" });
       return;
     }
     if (!hasJsonContentType(incoming.headers)) {
