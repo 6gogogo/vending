@@ -300,7 +300,7 @@ test("公开手机号状态查询有来源限流，注册资料字段有长度�
   );
 });
 
-test("远程开门在服务层统一拒绝无效条件，拒绝时不调用柜机网关", async () => {
+test("远程开门统一拒绝无效条件，并接受任意长度的非空原因", async () => {
   const store = createIsolatedStore();
   const device = store.devices[0];
   const admin = store.users.find((entry) => entry.role === "admin");
@@ -334,8 +334,8 @@ test("远程开门在服务层统一拒绝无效条件，拒绝时不调用柜�
   const service = new DevicesService(store, {} as never, gateway as never);
 
   await assert.rejects(
-    service.remoteOpen(device.deviceCode, { reason: "复 核 中" }, admin.id),
-    /远程开门原因需包含至少 4 个非空字符/
+    service.remoteOpen(device.deviceCode, { reason: " \t\n " }, admin.id),
+    /请填写远程开门原因/
   );
   assert.equal(gatewayCalls, 0);
 
@@ -380,13 +380,42 @@ test("远程开门在服务层统一拒绝无效条件，拒绝时不调用柜�
 
   await service.remoteOpen(
     device.deviceCode,
-    { doorNum: "1", reason: "  现场维修复核  " },
+    { doorNum: "1", reason: "  测试  " },
     admin.id
   );
 
   assert.equal(gatewayCalls, 1);
-  const log = store.logs.find((entry) => entry.type === "remote-open-device");
-  assert.equal(log?.metadata?.reason, "现场维修复核");
+  const shortReasonLog = store.logs.find(
+    (entry) => entry.type === "remote-open-device" && entry.metadata?.reason === "测试"
+  );
+  assert.ok(shortReasonLog);
+
+  const longReasonStore = createIsolatedStore();
+  const longReasonDevice = longReasonStore.devices[0];
+  const longReasonAdmin = longReasonStore.users.find((entry) => entry.role === "admin");
+  assert.ok(longReasonDevice);
+  assert.ok(longReasonAdmin);
+  longReasonDevice.status = "online";
+  longReasonDevice.lastSeenAt = new Date().toISOString();
+  const longReasonService = new DevicesService(
+    longReasonStore,
+    {} as never,
+    gateway as never
+  );
+  const longReason = "现场排查说明".repeat(60);
+  assert.ok(longReason.length > 200);
+  await longReasonService.remoteOpen(
+    longReasonDevice.deviceCode,
+    { doorNum: "1", reason: longReason },
+    longReasonAdmin.id
+  );
+
+  assert.equal(gatewayCalls, 2);
+  assert.ok(
+    longReasonStore.logs.some(
+      (entry) => entry.type === "remote-open-device" && entry.metadata?.reason === longReason
+    )
+  );
 });
 
 test("系统审计统一入口脱敏签名、会话、手机号和 URL 查询参数", () => {

@@ -614,10 +614,16 @@ assert.ok(
 assert.match(adminDeviceSource, /max-height:\s*calc\(100dvh - 48px\)/, "远程开门对话框必须适应低高度和页面缩放");
 assert.match(adminDeviceSource, /确认并立即下发/, "远程开门最终按钮必须明确表达立即后果");
 assert.match(remoteOpenSource, /remoteOpenDevice\([^\n]+reason\)/, "远程开门原因必须传给服务端审计");
+assert.doesNotMatch(remoteOpenSource, /reason\.length\s*[<>]/, "远程开门原因只能校验非空，不得设置字符数上下限");
+assert.match(adminDeviceSource, /操作原因（必填）/, "远程开门原因必须保持必填");
+assert.doesNotMatch(adminDeviceSource, /4[–至-]200|maxlength="200"|不能只填“测试”/, "远程开门原因不得保留字数限制或禁止短原因");
+assert.match(adminDeviceSource, /:disabled="!remoteOpenReason\.trim\(\)"/, "远程开门下一步只应在原因为空时禁用");
 assert.match(remoteOpenSource, /device\.status === "offline"/, "离线柜机必须阻止远程开门");
 assert.match(remoteOpenSource, /doorState === "open"/, "门已开启时必须阻止重复下发开门指令");
 assert.doesNotMatch(remoteOpenSource, /doorState !== "closed"/, "门状态未知不得阻断受审计开门");
 assert.match(adminDeviceSource, /runtime\.lastCommandAt/, "后台必须展示最近一次开门指令时间");
+assert.match(adminDeviceSource, /发生 \{\{ formatDateTime\(task\.createdAt\) \}\}/, "柜机任务必须明确展示真实发生时间");
+assert.match(adminDeviceSource, /应处理：\{\{ formatDateTime\(task\.dueAt\) \}\}/, "柜机任务必须把未来时间明确标为应处理时间");
 
 const mobileAdminDeviceSource = readSource("apps/mobile/src/pages/admin/device-detail.vue");
 assert.doesNotMatch(

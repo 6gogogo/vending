@@ -905,6 +905,11 @@ test("预约只在可信 SUCCESS 回调后履约，FAIL 回调保持预约有效
     "unknown"
   );
   assert.equal(store.getDeviceRuntime(device.deviceCode).doorState, "unknown");
+  const failureAlert = store.alerts.find(
+    (entry) => entry.relatedEventId === "event-reservation-fail"
+  );
+  assert.match(failureAlert?.detail ?? "", /order-reservation-fail/);
+  assert.match(failureAlert?.detail ?? "", /SmartVM 1\.1 门状态回调未提供具体故障原因/);
 
   service.handleDoorStatus({
     ...callbackBase,

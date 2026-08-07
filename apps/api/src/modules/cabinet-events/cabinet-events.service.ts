@@ -670,7 +670,7 @@ export class CabinetEventsService {
         deviceCode: payload.deviceCode,
         targetUserId: event.userId,
         dueAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-        detail: `设备 ${payload.deviceCode} 对事件 ${payload.eventId} 返回了 FAIL。`,
+        detail: `柜机平台已受理订单 ${event.orderNo}，但设备 ${payload.deviceCode} 对事件 ${payload.eventId} 返回了 FAIL；SmartVM 1.1 门状态回调未提供具体故障原因。`,
         relatedEventId: event.eventId
       });
     }

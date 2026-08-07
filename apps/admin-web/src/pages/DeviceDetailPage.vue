@@ -822,8 +822,8 @@ const remoteOpen = async () => {
 
 const continueRemoteOpen = async () => {
   const reason = remoteOpenReason.value.trim();
-  if (!reason || reason.length < 4 || reason.length > 200) {
-    showActionMessage("error", "请填写 4 至 200 个字符的明确操作原因。");
+  if (!reason) {
+    showActionMessage("error", "请填写操作原因。");
     return;
   }
 
@@ -866,9 +866,9 @@ const confirmRemoteOpen = async () => {
     return;
   }
 
-  if (reason.length < 4 || reason.length > 200) {
+  if (!reason) {
     remoteOpenDialogStep.value = "reason";
-    showActionMessage("error", "请填写 4 至 200 个字符的明确操作原因。");
+    showActionMessage("error", "请填写操作原因。");
     await nextTick();
     remoteOpenReasonInput.value?.focus();
     return;
@@ -1687,8 +1687,9 @@ onUnmounted(() => {
                   <span class="admin-list__title">{{ task.title }}</span>
                   <span class="admin-context-main">{{ taskContextSummary(task) }}</span>
                   <span class="admin-list__meta">
-                    {{ taskGradeLabel(task.grade) }} · {{ task.status === "acknowledged" ? "已知晓" : "待处理" }} · {{ formatDateTime(task.dueAt) }}
+                    {{ taskGradeLabel(task.grade) }} · {{ task.status === "acknowledged" ? "已知晓" : "待处理" }} · 发生 {{ formatDateTime(task.createdAt) }}
                   </span>
+                  <span class="admin-table__subtext">应处理：{{ formatDateTime(task.dueAt) }}</span>
                   <span class="admin-table__subtext">{{ task.previewDetail || task.detail }}</span>
                   <span v-if="taskIdentitySummary(task)" class="admin-context-meta admin-code">{{ taskIdentitySummary(task) }}</span>
                   <span v-if="taskReferenceSummary(task)" class="admin-context-meta admin-code">{{ taskReferenceSummary(task) }}</span>
@@ -2027,24 +2028,20 @@ onUnmounted(() => {
 
       <div v-if="remoteOpenDialogStep === 'reason'" class="remote-open-dialog__body">
           <p id="remote-open-dialog-description" class="admin-copy">
-            原因会随操作写入审计日志。请说明现场诉求、授权来源或故障背景，不能只填“测试”。
+            原因会随操作写入审计日志，不能为空。
           </p>
           <label class="admin-field">
-            <span class="admin-field__label">操作原因（必填，4–200 字符）</span>
+            <span class="admin-field__label">操作原因（必填）</span>
             <textarea
               ref="remoteOpenReasonInput"
               v-model="remoteOpenReason"
               class="admin-input remote-open-dialog__reason"
-              maxlength="200"
               placeholder="例如：现场工作人员来电确认柜门卡滞，需远程开门排查"
               @keydown.ctrl.enter.prevent="continueRemoteOpen"
             />
           </label>
           <div class="remote-open-dialog__reason-meta">
             <span class="admin-table__subtext">Ctrl + Enter 可继续</span>
-            <span class="admin-code" :class="{ 'remote-open-dialog__counter--invalid': remoteOpenReason.trim().length > 0 && remoteOpenReason.trim().length < 4 }">
-              {{ remoteOpenReason.trim().length }}/200
-            </span>
           </div>
           <div class="admin-note">此步骤不会向柜机发送任何请求。</div>
           <div class="remote-open-dialog__actions">
@@ -2052,7 +2049,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="admin-button"
-              :disabled="remoteOpenReason.trim().length < 4 || remoteOpenReason.trim().length > 200"
+              :disabled="!remoteOpenReason.trim()"
               @click="continueRemoteOpen"
             >
               下一步：核对信息
@@ -2677,10 +2674,6 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.remote-open-dialog__counter--invalid {
-  color: #b42318;
 }
 
 .remote-open-dialog__summary {

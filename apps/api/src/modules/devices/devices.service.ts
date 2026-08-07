@@ -728,10 +728,9 @@ export class DevicesService {
     actorTenantId?: string
   ) {
     const reason = payload?.reason?.trim();
-    const nonWhitespaceReasonLength = reason ? [...reason.replace(/\s/gu, "")].length : 0;
 
-    if (!reason || nonWhitespaceReasonLength < 4 || reason.length > 200) {
-      throw new BadRequestException("远程开门原因需包含至少 4 个非空字符，且总长度不能超过 200 个字符。");
+    if (!reason) {
+      throw new BadRequestException("请填写远程开门原因。");
     }
 
     const device = this.getByCodeForTenant(deviceCode, actorTenantId);
