@@ -14,6 +14,7 @@ import type {
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { toSafeFilenameSegment, toSafeSpreadsheetCell } from "../../common/export/html-workbook";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import { findActiveWarehouse } from "../../common/store/default-warehouse";
 
 @Injectable()
 export class WarehousesService {
@@ -729,10 +730,10 @@ export class WarehousesService {
   }
 
   private getDefaultWarehouse(): WarehouseRecord {
-    const warehouse = this.store.warehouses[0];
+    const warehouse = findActiveWarehouse(this.store.warehouses);
 
     if (!warehouse) {
-      throw new NotFoundException("未配置本地仓库。");
+      throw new NotFoundException("未配置启用的本地仓库。");
     }
 
     return warehouse;

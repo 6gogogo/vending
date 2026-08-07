@@ -72,6 +72,12 @@ const reservationOnlyProductionConfig: Record<string, string | undefined> = {
   ALIPAY_PUBLIC_KEY: undefined
 };
 
+const activeDefaultWarehouse = {
+  code: "WAREHOUSE-LOCAL",
+  name: "本地仓库",
+  status: "active" as const
+};
+
 const createController = (
   config: Record<string, string | undefined> = validProductionConfig,
   overrides: Record<string, unknown> = {}
@@ -85,6 +91,7 @@ const createController = (
   const snapshot = {
     ...createEmptyPersistedState("live"),
     initializationSource: "live-bootstrap" as const,
+    warehouses: [activeDefaultWarehouse],
     users: [
       {
         id: "live-super-admin",
@@ -208,6 +215,18 @@ test("生产就绪健康契约仅在完整生产门禁通过时返回最小成�
         message: "成功",
         data: { status: "就绪" }
       });
+    }
+  );
+});
+
+test("已完成初始化的真实数据平面缺少启用仓库时拒绝生产就绪", () => {
+  withRuntimeEnvironment(
+    {
+      NODE_ENV: "production",
+      APP_ENV: "production"
+    },
+    () => {
+      assertReadinessUnavailable(createController(validProductionConfig, { warehouses: [] }));
     }
   );
 });

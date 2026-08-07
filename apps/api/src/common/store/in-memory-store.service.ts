@@ -76,6 +76,7 @@ import {
   writePersistedState
 } from "./persistence";
 import { validatePersistedState } from "./persisted-state-integrity";
+import { findActiveWarehouse } from "./default-warehouse";
 import { isProductionRuntime } from "../config/runtime-environment";
 import {
   assertFullSimulationIsolation,
@@ -360,6 +361,10 @@ export class InMemoryStoreService {
     }
 
     assertLivePlatformTenantConfiguration(this.platformTenants);
+
+    if (!findActiveWarehouse(this.warehouses)) {
+      throw new BadRequestException("真实数据平面初始化必须先创建启用的本地仓库。");
+    }
 
     if (this.adminCredentials.length > 0) {
       throw new BadRequestException("真实数据平面不能在初始化时写入旧管理员密码凭据。");

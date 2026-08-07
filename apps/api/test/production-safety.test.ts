@@ -71,9 +71,16 @@ const createConfigService = (overrides: Record<string, string | undefined> = {})
   } as unknown as ConfigService;
 };
 
+const activeDefaultWarehouse = {
+  code: "WAREHOUSE-LOCAL",
+  name: "本地仓库",
+  status: "active" as const
+};
+
 const emptyCredentialStore = {
   ...createEmptyPersistedState("live"),
   initializationSource: "live-bootstrap" as const,
+  warehouses: [activeDefaultWarehouse],
   users: [
     {
       id: "live-super-admin",
@@ -172,6 +179,19 @@ test("APP_ENV=production 即使 NODE_ENV=development 也执行完整生产门禁
         emptyCredentialStore as never,
         readyAuditLog as never
       )
+    );
+
+    assert.throws(
+      () =>
+        assertProductionSafety(
+          createConfigService(),
+          {
+            ...emptyCredentialStore,
+            warehouses: []
+          } as never,
+          readyAuditLog as never
+        ),
+      /真实数据平面至少需要一个启用的本地仓库/
     );
 
     assert.throws(

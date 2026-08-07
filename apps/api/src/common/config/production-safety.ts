@@ -4,6 +4,7 @@ import { isIP } from "node:net";
 
 import type { InMemoryStoreService } from "../store/in-memory-store.service";
 import type { SystemAuditLogService } from "../store/system-audit-log.service";
+import { findActiveWarehouse } from "../store/default-warehouse";
 import { isProductionRuntime } from "./runtime-environment";
 import {
   RUNTIME_DATA_PLANE_ENV_KEY,
@@ -585,6 +586,10 @@ export const assertProductionSafety = (
 
   if (!store.isPersistedStateIntegrityReady()) {
     throw new BadRequestException("生产运行数据完整性检查未通过。");
+  }
+
+  if (!findActiveWarehouse(store.warehouses)) {
+    throw new BadRequestException("真实数据平面至少需要一个启用的本地仓库。");
   }
 
   const defaultCredentialCount = [

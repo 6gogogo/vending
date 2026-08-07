@@ -1055,6 +1055,10 @@ test("真实初始化可只迁入现有非默认服务商与首管理员凭据�
   assert.equal(targetState.users.length, 2);
   assert.equal(targetState.backofficeCredentials.length, 2);
   assert.equal(targetState.adminCredentials.length, 0);
+  assert.equal(targetState.warehouses.length, 1);
+  assert.equal(targetState.warehouses[0]?.code, "WAREHOUSE-LOCAL");
+  assert.equal(targetState.warehouses[0]?.name, "本地仓库");
+  assert.equal(targetState.warehouses[0]?.status, "active");
   assert.equal(targetState.goodsCatalog.length, 0);
   assert.equal(targetState.devices.length, 0);
   assert.equal(targetState.paymentOrders.length, 0);

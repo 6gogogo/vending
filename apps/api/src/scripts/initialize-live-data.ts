@@ -16,6 +16,7 @@ import { acquireFinancialSingleWriterForMaintenance } from "../common/coordinati
 import { SystemAuditLogService } from "../common/store/system-audit-log.service.js";
 import { hashAdminPassword } from "../modules/auth/admin-password.utils.js";
 import { assertRuntimePathsSafe } from "../common/store/runtime-path-safety.js";
+import { ensureDefaultWarehouse } from "../common/store/default-warehouse.js";
 
 const MIN_INITIAL_PASSWORD_LENGTH = 12;
 const usernamePattern = /^[a-z0-9][a-z0-9._-]{2,63}$/;
@@ -325,6 +326,7 @@ try {
 
   try {
     store.initializeLivePlatformTenant();
+    ensureDefaultWarehouse(store.warehouses);
     const tenantId = store.getDefaultTenantId();
 
     if (credentialSource) {
