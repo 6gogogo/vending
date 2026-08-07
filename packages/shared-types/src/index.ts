@@ -155,14 +155,17 @@ export type DeviceReadinessBlocker =
 /**
  * 柜机当前是否适合执行开门操作的服务端派生快照。
  * `reportedStatus` 保留设备上报值，`connectivity` 单独表达心跳是否陈旧，
- * 避免把“状态已过期”误显示成设备明确上报的“离线”。物理柜门明确打开
- * 时始终阻断；已有开门命令后若状态未知也保持阻断。首次接入且尚无任何
- * 开门命令时，可在平台只读确认设备后执行一次受审计的联机试开。
+ * 避免把“状态已过期”误显示成设备明确上报的“离线”。平台只读接口只能
+ * 证明凭据与设备编号可被识别，不能伪造物理在线或门状态；但在平台确认仍
+ * 有效、且不存在未决开门结果时，可执行一次受审计开门。物理柜门明确打开
+ * 或上一条开门结果仍未知时始终阻断，直到可信关门回调或管理员现场确认。
  */
 export interface DeviceReadiness {
   reportedStatus: DeviceStatus;
   effectiveStatus: DeviceStatus;
   connectivity: DeviceConnectivity;
+  platformRecognition: "confirmed" | "unconfirmed";
+  lastPlatformRecognizedAt?: string;
   canOpen: boolean;
   blocker?: DeviceReadinessBlocker;
   lastObservedAt: string;
@@ -868,6 +871,8 @@ export interface DeviceRuntimeState {
   lastOpenedAt?: string;
   lastClosedAt?: string;
   lastRefreshAt?: string;
+  /** 最近一次由供应商只读接口确认凭据与设备编号有效的时间；不等同于设备心跳。 */
+  lastPlatformRecognizedAt?: string;
   openedAfterLastCommand: boolean;
 }
 

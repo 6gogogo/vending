@@ -1773,6 +1773,13 @@ test("新实例管理员不能通过已知用户 ID、柜机编号或凭证接�
         headers: authorizedHeaders
       }
     );
+    const confirmDoorClosedResponse = await fetch(
+      `${baseUrl}/devices/${encodeURIComponent(defaultDevice.deviceCode)}/confirm-door-closed`,
+      {
+        method: "POST",
+        headers: authorizedHeaders
+      }
+    );
     const remoteOpenResponse = await fetch(
       `${baseUrl}/devices/${encodeURIComponent(defaultDevice.deviceCode)}/remote-open`,
       {
@@ -1810,6 +1817,7 @@ test("新实例管理员不能通过已知用户 ID、柜机编号或凭证接�
     assert.equal(updateLocationResponse.status, 403);
     assert.equal(goodsResponse.status, 403);
     assert.equal(refreshResponse.status, 403);
+    assert.equal(confirmDoorClosedResponse.status, 403);
     assert.equal(remoteOpenResponse.status, 403);
     assert.equal(removeDeviceResponse.status, 403);
     assert.deepEqual(gatewayCalls, {

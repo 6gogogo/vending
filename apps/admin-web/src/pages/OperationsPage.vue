@@ -87,6 +87,22 @@ const showActionMessage = (type: "success" | "error", text: string) => {
 };
 
 const getDeviceStatusPresentation = (device: DeviceRecord) => {
+  if (device.readiness?.blocker === "door_open") {
+    return {
+      label: "柜门未关闭",
+      pillClass: "admin-pill--danger",
+      hint: "柜门仍处于开启状态。"
+    };
+  }
+
+  if (device.readiness?.blocker === "door_unconfirmed") {
+    return {
+      label: "门状态待确认",
+      pillClass: "admin-pill--warning",
+      hint: "上一条开门结果尚未确认，当前不会再次下发。"
+    };
+  }
+
   if (device.readiness?.blocker === "stale") {
     return {
       label: "状态已过期",
@@ -103,7 +119,7 @@ const getDeviceStatusPresentation = (device: DeviceRecord) => {
     };
   }
 
-  if (device.readiness?.blocker === "offline" || device.status === "offline") {
+  if (device.readiness?.blocker === "offline" || (!device.readiness && device.status === "offline")) {
     return {
       label: "离线",
       pillClass: "admin-pill--danger",
@@ -111,10 +127,18 @@ const getDeviceStatusPresentation = (device: DeviceRecord) => {
     };
   }
 
+  if (device.readiness?.platformRecognition === "confirmed" && device.readiness.connectivity !== "online") {
+    return {
+      label: "平台已识别",
+      pillClass: "admin-pill--warning",
+      hint: "平台已识别设备编号；物理在线状态仍以设备回调为准。"
+    };
+  }
+
   return {
-    label: "平台已识别",
+    label: "在线",
     pillClass: "admin-pill--success",
-    hint: "最近一次平台确认在有效时限内；门状态以后续设备回调为准。"
+    hint: "最近收到可信设备回调。"
   };
 };
 

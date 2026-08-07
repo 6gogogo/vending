@@ -343,7 +343,7 @@ test("远程开门统一拒绝无效条件，并接受任意长度的非空原�
   device.status = "offline";
   await assert.rejects(
     service.remoteOpen(device.deviceCode, { reason: "现场维修复核" }, admin.id),
-    /柜机当前离线，不能远程开门/
+    /柜机当前离线，不能开门/
   );
   assert.equal(gatewayCalls, 0);
   device.status = originalStatus;
@@ -351,7 +351,7 @@ test("远程开门统一拒绝无效条件，并接受任意长度的非空原�
   store.updateDeviceRuntime(device.deviceCode, { doorState: "open" });
   await assert.rejects(
     service.remoteOpen(device.deviceCode, { reason: "现场维修复核" }, admin.id),
-    /柜门当前已开启，不能重复远程开门/
+    /柜门当前已开启，不能重复开门/
   );
   assert.equal(gatewayCalls, 0);
   store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });

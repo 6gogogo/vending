@@ -13,7 +13,11 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { createEmptyPersistedState } from "../src/common/store/persistence.js";
+import {
+  createEmptyPersistedState,
+  PersistedStateWriteError
+} from "../src/common/store/persistence.js";
+import { applyDefaultWarehouseRepair } from "../src/scripts/repair-missing-default-warehouse.js";
 
 const apiRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const tsxCli = resolve(apiRoot, "../../node_modules/tsx/dist/cli.mjs");
@@ -74,6 +78,28 @@ const runRepair = (
     encoding: "utf8"
   });
 
+const createRepairAudit = (completedResult: boolean) => {
+  const outcomes: string[] = [];
+  const audit = {
+    beginCriticalIntent: () => ({ operationId: "repair-test", startedAt: 100 }),
+    completeCriticalOperation: (
+      _operation: unknown,
+      input: { outcome: string }
+    ) => {
+      outcomes.push(input.outcome);
+      return input.outcome === "completed" ? completedResult : true;
+    }
+  } as Parameters<typeof applyDefaultWarehouseRepair>[1];
+
+  return { audit, outcomes };
+};
+
+const createRepairStore = (persist: () => void) => ({
+  warehouses: [],
+  logOperation: () => undefined,
+  persist
+}) as unknown as Parameters<typeof applyDefaultWarehouseRepair>[0];
+
 test("缺少显式备份确认时拒绝修复且不改写 live 数据", (t) => {
   const runtime = createLiveRuntime();
   t.after(() => rmSync(runtime.root, { recursive: true, force: true }));
@@ -127,4 +153,60 @@ test("受控修复为已完成初始化的 live 数据幂等补建默认仓库�
     rerun.logs.filter((entry) => entry.type === "repair-missing-default-warehouse").length,
     1
   );
+});
+
+test("默认仓库已持久化后完成审计失败时不再伪造失败终态", () => {
+  let persisted = false;
+  const { audit, outcomes } = createRepairAudit(false);
+  const store = createRepairStore(() => {
+    persisted = true;
+  });
+
+  const result = applyDefaultWarehouseRepair(store, audit, () => 200);
+
+  assert.equal(persisted, true);
+  assert.equal(store.warehouses.length, 1);
+  assert.equal(result.auditCompleted, false);
+  assert.equal(result.persistenceDurabilityConfirmed, true);
+  assert.deepEqual(outcomes, ["completed"]);
+});
+
+test("默认仓库文件已替换但目录同步未确认时保留真实提交结果", () => {
+  const { audit, outcomes } = createRepairAudit(true);
+  const store = createRepairStore(() => {
+    throw new PersistedStateWriteError("目录同步未确认", true);
+  });
+
+  const result = applyDefaultWarehouseRepair(store, audit, () => 200);
+
+  assert.equal(store.warehouses.length, 1);
+  assert.equal(result.auditCompleted, true);
+  assert.equal(result.persistenceDurabilityConfirmed, false);
+  assert.deepEqual(outcomes, ["completed"]);
+});
+
+test("默认仓库持久化未提交时记录失败终态并保持失败结果", () => {
+  const { audit, outcomes } = createRepairAudit(true);
+  const store = createRepairStore(() => {
+    throw new PersistedStateWriteError("写入前失败", false);
+  });
+
+  assert.throws(
+    () => applyDefaultWarehouseRepair(store, audit, () => 200),
+    /写入前失败/
+  );
+  assert.deepEqual(outcomes, ["failed"]);
+});
+
+test("发布流程包含旧 live 实例默认仓库修复门禁且禁止提交后重试", () => {
+  const releaseGuide = readFileSync(
+    resolve(apiRoot, "../../docs/发布与公网部署验证流程.md"),
+    "utf8"
+  );
+
+  assert.match(
+    releaseGuide,
+    /repair:missing-default-warehouse -- --confirm-backed-up-live-data/
+  );
+  assert.match(releaseGuide, /真实数据已经发生提交；不得重复执行修复/);
 });

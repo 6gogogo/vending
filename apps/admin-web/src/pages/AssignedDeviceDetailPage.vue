@@ -19,14 +19,22 @@ const roleLabel = computed(() =>
 );
 const deviceStatusLabel = computed(() => {
   if (!device.value) return "状态待确认";
-  if (device.value.readiness?.blocker === "offline" || device.value.status === "offline") return "离线";
+  if (device.value.readiness?.blocker === "door_open") return "柜门未关闭";
+  if (device.value.readiness?.blocker === "door_unconfirmed") return "门状态待确认";
+  if (device.value.readiness?.blocker === "offline" || (!device.value.readiness && device.value.status === "offline")) return "离线";
   if (device.value.readiness?.blocker === "maintenance" || device.value.status === "maintenance") return "维护中";
   if (device.value.readiness?.blocker === "stale") return "状态已过期";
-  return "平台已识别";
+  if (device.value.readiness?.platformRecognition === "confirmed" && device.value.readiness.connectivity !== "online") return "平台已识别";
+  return "在线";
 });
 const deviceStatusClass = computed(() => {
-  if (!device.value || device.value.status === "offline") return "admin-pill--danger";
-  if (device.value.readiness?.blocker === "maintenance" || device.value.readiness?.blocker === "stale") {
+  if (!device.value || device.value.readiness?.blocker === "offline" || device.value.readiness?.blocker === "door_open") return "admin-pill--danger";
+  if (
+    device.value.readiness?.blocker === "maintenance" ||
+    device.value.readiness?.blocker === "stale" ||
+    device.value.readiness?.blocker === "door_unconfirmed" ||
+    (device.value.readiness?.platformRecognition === "confirmed" && device.value.readiness.connectivity !== "online")
+  ) {
     return "admin-pill--warning";
   }
   return "admin-pill--success";

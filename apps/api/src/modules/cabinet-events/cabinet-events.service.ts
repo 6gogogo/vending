@@ -275,7 +275,7 @@ export class CabinetEventsService {
             detail: commandRejected
               ? `柜机平台明确拒绝：${detail}`
               : outcomeUnknown
-                ? `柜机平台结果未知：${detail}；为避免重复开门，命令租约仍保留。`
+              ? `柜机平台结果未知：${detail}；为避免重复开门，未决状态将保留到可信关门回调或管理员现场确认。`
                 : `柜机网关响应异常，但设备回调已确认事件状态为 ${commandEvent.status}。`,
             relatedEventId: eventId,
             metadata: {
@@ -656,7 +656,8 @@ export class CabinetEventsService {
       });
     } else if (payload.status === "FAIL") {
       // FAIL 只说明开门指令失败，并不等同于可信的物理关门信号。
-      // 在 CLOSED 回调明确确认前保持 unknown，以免把指令失败误记为物理关门；unknown 本身不阻断后续开门。
+      // 在 CLOSED 回调明确确认前保持 unknown，以免把指令失败误记为物理关门；
+      // 该未决状态会阻断后续开门，直到可信关门回调或管理员现场确认。
       event.physicalDoorState = "unknown";
       if (nextStatus) {
         event.status = nextStatus;

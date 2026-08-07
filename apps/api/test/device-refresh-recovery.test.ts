@@ -47,7 +47,7 @@ after(() => {
   }
 });
 
-test("刷新真实柜机时通过 1.1 只读接口确认平台识别，不伪造物理门状态", async () => {
+test("刷新真实柜机时通过 1.1 只读接口确认平台识别，不伪造在线或物理门状态", async () => {
   const store = createIsolatedStore();
   const device = store.devices[0];
   assert.ok(device);
@@ -68,18 +68,26 @@ test("刷新真实柜机时通过 1.1 只读接口确认平台识别，不伪造
     extractErrorMessage: () => "柜机平台请求失败。"
   });
 
-  await service.refreshDevice(device.deviceCode, "admin-refresh");
+  const detail = await service.refreshDevice(device.deviceCode, "admin-refresh");
 
   assert.deepEqual(calls, [
     { deviceCode: device.deviceCode, doorNum: device.doors[0]?.doorNum }
   ]);
-  assert.equal(device.status, "online");
-  assert.notEqual(device.lastSeenAt, "2026-01-01T00:00:00.000Z");
+  assert.equal(device.status, "offline");
+  assert.equal(device.lastSeenAt, "2026-01-01T00:00:00.000Z");
   assert.equal(store.getDeviceRuntime(device.deviceCode).doorState, "unknown");
-  assert.equal(
+  assert.notEqual(
     store.getDeviceRuntime(device.deviceCode).lastRefreshAt,
     device.lastSeenAt
   );
+  assert.equal(
+    store.getDeviceRuntime(device.deviceCode).lastPlatformRecognizedAt,
+    store.getDeviceRuntime(device.deviceCode).lastRefreshAt
+  );
+  assert.equal(detail.device.status, "offline");
+  assert.equal(detail.device.readiness?.effectiveStatus, "offline");
+  assert.equal(detail.device.readiness?.platformRecognition, "confirmed");
+  assert.equal(detail.device.readiness?.canOpen, true);
 
   const refreshLog = store.logs.find((entry) => entry.type === "manual-refresh-device");
   assert.equal(refreshLog?.status, "success");
@@ -111,6 +119,7 @@ test("未配置 SmartVM 时刷新只更新操作时间，不伪造平台识别�
     store.getDeviceRuntime(device.deviceCode).lastRefreshAt,
     "2026-01-01T00:00:00.000Z"
   );
+  assert.equal(store.getDeviceRuntime(device.deviceCode).lastPlatformRecognizedAt, undefined);
 
   const refreshLog = store.logs.find((entry) => entry.type === "manual-refresh-device");
   assert.equal(refreshLog?.metadata?.platformRecognition, "not-configured");
@@ -123,6 +132,9 @@ test("平台确认失败时保留原设备状态并返回经过收敛的错误",
   assert.ok(device);
   device.status = "offline";
   const originalLastSeenAt = device.lastSeenAt;
+  store.updateDeviceRuntime(device.deviceCode, {
+    lastPlatformRecognizedAt: new Date().toISOString()
+  });
   const service = createService(store, {
     probeDevice: async () => {
       throw new Error("<!doctype html><title>HTTP Status 405</title>");
@@ -140,6 +152,7 @@ test("平台确认失败时保留原设备状态并返回经过收敛的错误",
 
   assert.equal(device.status, "offline");
   assert.equal(device.lastSeenAt, originalLastSeenAt);
+  assert.equal(store.getDeviceRuntime(device.deviceCode).lastPlatformRecognizedAt, undefined);
   const refreshLog = store.logs.find((entry) => entry.type === "manual-refresh-device");
   assert.equal(refreshLog?.status, "failed");
   assert.ok(!/doctype|html|Tomcat/i.test(refreshLog?.detail ?? ""));

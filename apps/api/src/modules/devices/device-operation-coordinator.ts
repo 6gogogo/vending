@@ -23,12 +23,12 @@ interface OpenOperationTarget {
 const DEFAULT_STATUS_STALE_AFTER_MS = 5 * 60_000;
 const MIN_STATUS_STALE_AFTER_MS = 30_000;
 const MAX_STATUS_STALE_AFTER_MS = 24 * 60 * 60_000;
-const DEFAULT_OPEN_COMMAND_LEASE_MS = 2 * 60_000;
 
-const ACTIVE_DOOR_EVENT_STATUSES = new Set<CabinetEventRecord["status"]>([
+const UNRESOLVED_DOOR_EVENT_STATUSES = new Set<CabinetEventRecord["status"]>([
   "created",
   "opening",
   "opened",
+  "timeout_unopened",
   "stuck_open"
 ]);
 
@@ -62,26 +62,39 @@ export class DeviceOperationCoordinator {
       }
     }
 
+    const runtime = this.store.getDeviceRuntime(device.deviceCode);
     const lastObservedAtMs = Date.parse(device.lastSeenAt);
     const heartbeatIsStale =
       device.status === "online" &&
       (!Number.isFinite(lastObservedAtMs) || now - lastObservedAtMs > staleAfterMs);
     const connectivity: DeviceConnectivity =
       device.status === "offline" ? "offline" : heartbeatIsStale ? "stale" : "online";
+    const lastPlatformRecognizedAtMs = Date.parse(runtime.lastPlatformRecognizedAt ?? "");
+    const platformRecognitionIsFresh =
+      Number.isFinite(lastPlatformRecognizedAtMs) &&
+      now >= lastPlatformRecognizedAtMs &&
+      now - lastPlatformRecognizedAtMs <= staleAfterMs;
+    const unresolvedDoorEvent = this.findUnresolvedDoorEvent(device.deviceCode);
+    const doorState = runtime.doorState;
+    const platformRecognitionAllowsOpen =
+      platformRecognitionIsFresh && doorState !== "open" && !unresolvedDoorEvent;
     const statusBlocker =
       device.status === "maintenance"
         ? "maintenance"
-        : connectivity === "offline"
+        : connectivity === "offline" && !platformRecognitionAllowsOpen
           ? "offline"
-          : connectivity === "stale"
+          : connectivity === "stale" && !platformRecognitionAllowsOpen
             ? "stale"
             : undefined;
-    const runtime = this.store.getDeviceRuntime(device.deviceCode);
-    const doorState = runtime.doorState;
-    // unknown 只表示尚未收到可信门状态回调，不阻断新的受审计开门；
-    // 明确 open 仍会阻断，进行中的指令则由下方活动事件租约防止重复下发。
-    const physicalDoorBlocker = doorState === "open" ? "door_open" : undefined;
-    const blocker = statusBlocker ?? physicalDoorBlocker;
+    const physicalDoorBlocker =
+      doorState === "open"
+        ? "door_open"
+        : unresolvedDoorEvent
+          ? "door_unconfirmed"
+          : undefined;
+    const blocker = statusBlocker === "maintenance"
+      ? statusBlocker
+      : physicalDoorBlocker ?? statusBlocker;
     const staleAt = Number.isFinite(lastObservedAtMs)
       ? new Date(lastObservedAtMs + staleAfterMs).toISOString()
       : undefined;
@@ -89,8 +102,14 @@ export class DeviceOperationCoordinator {
     return {
       reportedStatus: device.status,
       effectiveStatus:
-        statusBlocker === "maintenance" ? "maintenance" : statusBlocker ? "offline" : "online",
+        device.status === "maintenance"
+          ? "maintenance"
+          : connectivity === "online"
+            ? "online"
+            : "offline",
       connectivity,
+      platformRecognition: platformRecognitionIsFresh ? "confirmed" : "unconfirmed",
+      lastPlatformRecognizedAt: runtime.lastPlatformRecognizedAt,
       canOpen: !blocker,
       blocker,
       lastObservedAt: device.lastSeenAt,
@@ -132,11 +151,12 @@ export class DeviceOperationCoordinator {
       throw new ConflictException("柜门当前已开启，不能重复开门。");
     }
 
-    const activeEvent = this.findActiveDoorEvent(device.deviceCode, doorNum, now);
-
-    if (activeEvent) {
+    if (readiness.blocker === "door_unconfirmed") {
+      const unresolvedEvent = this.findUnresolvedDoorEvent(device.deviceCode, doorNum);
       throw new ConflictException(
-        `该柜门已有未结束的开门操作（${activeEvent.eventId}），请等待当前操作完成。`
+        unresolvedEvent
+          ? `该柜门上一条开门操作（${unresolvedEvent.eventId}）结果仍待确认，请等待关门回调或由管理员现场确认柜门已关闭。`
+          : "柜门物理状态尚未确认，请等待关门回调或由管理员现场确认柜门已关闭。"
       );
     }
 
@@ -208,29 +228,23 @@ export class DeviceOperationCoordinator {
     return device;
   }
 
-  private findActiveDoorEvent(deviceCode: string, doorNum: string, now: number) {
-    const commandLeaseMs = this.readBoundedMilliseconds(
-      "SMARTVM_OPEN_COMMAND_LEASE_MS",
-      DEFAULT_OPEN_COMMAND_LEASE_MS,
-      30_000,
-      30 * 60_000
-    );
-
+  private findUnresolvedDoorEvent(deviceCode: string, doorNum?: string) {
     return this.store.events.find((event) => {
       if (
         event.deviceCode !== deviceCode ||
-        event.doorNum !== doorNum ||
-        !ACTIVE_DOOR_EVENT_STATUSES.has(event.status)
+        (doorNum !== undefined && event.doorNum !== doorNum)
       ) {
         return false;
       }
 
-      if (event.status === "opened" || event.status === "stuck_open") {
+      if (event.physicalDoorState === "open" || event.physicalDoorState === "unknown") {
         return true;
       }
 
-      const updatedAt = Date.parse(event.updatedAt);
-      return !Number.isFinite(updatedAt) || now - updatedAt <= commandLeaseMs;
+      return (
+        event.physicalDoorState !== "closed" &&
+        UNRESOLVED_DOOR_EVENT_STATUSES.has(event.status)
+      );
     });
   }
 

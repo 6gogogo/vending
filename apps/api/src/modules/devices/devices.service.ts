@@ -659,7 +659,8 @@ export class DevicesService {
     const now = new Date().toISOString();
     let platformRecognition: "confirmed" | "not-configured" = "not-configured";
     const runtimePatch: Partial<DeviceRuntimeState> = {
-      lastRefreshAt: now
+      lastRefreshAt: now,
+      lastPlatformRecognizedAt: undefined
     };
 
     try {
@@ -670,8 +671,7 @@ export class DevicesService {
 
       if (probe?.recognized) {
         platformRecognition = "confirmed";
-        device.status = "online";
-        device.lastSeenAt = now;
+        runtimePatch.lastPlatformRecognizedAt = now;
       }
     } catch (error) {
       const detail = this.smartVmGateway.extractErrorMessage(error);
@@ -721,6 +721,60 @@ export class DevicesService {
     return this.monitoringDetail(deviceCode, actorTenantId);
   }
 
+  confirmDoorClosed(
+    deviceCode: string,
+    actorUserId?: string,
+    actorTenantId?: string
+  ) {
+    const device = this.getByCodeForTenant(deviceCode, actorTenantId);
+    const confirmedAt = new Date().toISOString();
+    let reconciledEventCount = 0;
+
+    for (const event of this.store.events) {
+      if (event.deviceCode !== device.deviceCode || !this.isDoorEventAwaitingPhysicalClose(event)) {
+        continue;
+      }
+
+      event.physicalDoorState = "closed";
+      event.updatedAt = confirmedAt;
+
+      if (["created", "opening", "timeout_unopened"].includes(event.status)) {
+        event.status = "failed";
+      } else if (event.status === "opened" || event.status === "stuck_open") {
+        event.status = "closed";
+      }
+
+      reconciledEventCount += 1;
+    }
+
+    this.store.updateDeviceRuntime(device.deviceCode, {
+      doorState: "closed",
+      lastClosedAt: confirmedAt
+    });
+    this.store.logOperation({
+      category: "device",
+      type: "confirm-device-door-closed",
+      status: "success",
+      actor: this.getAdminActor(actorUserId),
+      primarySubject: {
+        type: "device",
+        id: device.deviceCode,
+        label: device.name
+      },
+      description: `管理员现场确认 ${device.name} 的全部柜门均已关闭。`,
+      detail: `设备 ${device.deviceCode} 的全部柜门已由管理员现场确认关闭；协调未决开门事件 ${reconciledEventCount} 笔。`,
+      metadata: {
+        deviceCode: device.deviceCode,
+        reconciledEventCount,
+        evidence: "admin-physical-confirmation",
+        undoState: "not_undoable"
+      }
+    });
+    this.store.persist();
+
+    return this.monitoringDetail(device.deviceCode, actorTenantId);
+  }
+
   async remoteOpen(
     deviceCode: string,
     payload: { doorNum?: string; reason: string },
@@ -734,14 +788,6 @@ export class DevicesService {
     }
 
     const device = this.getByCodeForTenant(deviceCode, actorTenantId);
-
-    if (device.status === "offline") {
-      throw new BadRequestException("柜机当前离线，不能远程开门。");
-    }
-
-    if (this.store.getDeviceRuntime(deviceCode).doorState === "open") {
-      throw new BadRequestException("柜门当前已开启，不能重复远程开门。");
-    }
 
     const requestedDoorNum: unknown = payload?.doorNum ?? "1";
 
@@ -775,6 +821,7 @@ export class DevicesService {
         deviceCode,
         doorNum,
         status: "created",
+        physicalDoorState: "unknown",
         createdAt,
         updatedAt: createdAt,
         amount: 0,
@@ -807,6 +854,10 @@ export class DevicesService {
         if (commandEvent.status === "created" || commandEvent.status === "opening") {
           commandEvent.status = definitelyRejected ? "failed" : commandEvent.status;
           commandEvent.updatedAt = new Date().toISOString();
+
+          if (definitelyRejected) {
+            commandEvent.physicalDoorState = "closed";
+          }
         }
 
         const commandRejected = definitelyRejected || commandEvent.status === "failed";
@@ -836,7 +887,7 @@ export class DevicesService {
           detail: commandRejected
             ? `柜机平台明确拒绝：${detail}`
             : outcomeUnknown
-              ? `柜机平台结果未知：${detail}；为避免重复开门，命令租约仍保留。`
+              ? `柜机平台结果未知：${detail}；为避免重复开门，未决状态将保留到可信关门回调或管理员现场确认。`
               : `柜机网关响应异常，但设备回调已确认事件状态为 ${commandEvent.status}。`,
           relatedEventId: eventId,
           metadata: {
@@ -1313,6 +1364,17 @@ export class DevicesService {
       }
     });
     return created;
+  }
+
+  private isDoorEventAwaitingPhysicalClose(event: CabinetEventRecord) {
+    if (event.physicalDoorState === "open" || event.physicalDoorState === "unknown") {
+      return true;
+    }
+
+    return (
+      event.physicalDoorState !== "closed" &&
+      ["created", "opening", "opened", "timeout_unopened", "stuck_open"].includes(event.status)
+    );
   }
 
   private isLocalMockDeviceApiEnabled() {

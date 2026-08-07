@@ -328,11 +328,6 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     description: "设备最后一次可信在线活动超过该时长后按状态过期处理，并在重新验证前禁止开门。",
     inputType: "number"
   },
-  SMARTVM_OPEN_COMMAND_LEASE_MS: {
-    label: "开门命令在途保护毫秒",
-    description: "开门命令等待设备响应期间，同一柜门禁止重复下发的最长保护时间。",
-    inputType: "number"
-  },
   SMARTVM_ALLOWED_NOTIFY_ORIGINS: {
     label: "柜机回写允许来源",
     description: "额外允许的付款回写 URL 来源，多个用英文逗号分隔；柜机平台根地址会自动允许。",

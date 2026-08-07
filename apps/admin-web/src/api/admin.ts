@@ -534,6 +534,10 @@ export const adminApi = {
     requireBackofficePermission("devices:operate");
     return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/refresh`);
   },
+  confirmDeviceDoorClosed(deviceCode: string) {
+    requireBackofficePermission("devices:operate");
+    return adminClient.post<DeviceMonitoringDetail>(`/devices/${deviceCode}/confirm-door-closed`);
+  },
   remoteOpenDevice(deviceCode: string, doorNum: string, reason: string) {
     requireBackofficePermission("devices:operate");
     return adminClient.post<{ eventId: string; orderNo: string; deviceCode: string; doorNum: string }>(

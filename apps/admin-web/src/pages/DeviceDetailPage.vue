@@ -66,6 +66,10 @@ interface FinancialActionDraft {
 const detail = ref<Awaited<ReturnType<typeof adminApi.deviceDetail>>>();
 const loading = ref(false);
 const refreshing = ref(false);
+const confirmingDoorClosed = ref(false);
+const doorClosedDialog = ref<HTMLDialogElement>();
+const doorClosedSafeButton = ref<HTMLButtonElement>();
+const doorClosedSubmitError = ref("");
 const syncing = ref(false);
 const remoteOpening = ref(false);
 const remoteOpenDialogStep = ref<"reason" | "confirm">();
@@ -111,6 +115,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let visibilityHandler: (() => void) | undefined;
 let remoteOpenPreviousFocus: HTMLElement | undefined;
 let financialPreviousFocus: HTMLElement | undefined;
+let doorClosedPreviousFocus: HTMLElement | undefined;
 
 const createCompactReference = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -256,14 +261,6 @@ const getDeviceStatusPresentation = (device?: DeviceRecord) => {
     return { label: "状态加载中", tone: "warning", hint: "请等待柜机状态加载完成。" } as const;
   }
 
-  if (device.readiness?.blocker === "stale") {
-    return {
-      label: "状态已过期",
-      tone: "warning",
-      hint: "最近一次平台确认已超过有效时限，请先刷新；刷新成功前不能远程开门。"
-    } as const;
-  }
-
   if (device.readiness?.blocker === "maintenance" || device.status === "maintenance") {
     return {
       label: "维护中",
@@ -272,7 +269,34 @@ const getDeviceStatusPresentation = (device?: DeviceRecord) => {
     } as const;
   }
 
-  if (device.readiness?.blocker === "offline" || device.status === "offline") {
+  if (device.readiness?.blocker === "door_open") {
+    return {
+      label: "柜门未关闭",
+      tone: "danger",
+      hint: "柜门仍处于开启状态；请先在现场关闭柜门并等待回调，或由管理员现场确认已关闭。"
+    } as const;
+  }
+
+  if (device.readiness?.blocker === "door_unconfirmed") {
+    return {
+      label: "门状态待确认",
+      tone: "warning",
+      hint: "上一条开门操作结果仍未知；收到可信关门回调或管理员现场确认前，不会再次下发。"
+    } as const;
+  }
+
+  if (device.readiness?.blocker === "stale") {
+    return {
+      label: "状态已过期",
+      tone: "warning",
+      hint: "最近一次平台确认已超过有效时限，请先刷新；刷新成功前不能远程开门。"
+    } as const;
+  }
+
+  if (
+    device.readiness?.blocker === "offline" ||
+    (!device.readiness && device.status === "offline")
+  ) {
     return {
       label: "离线",
       tone: "danger",
@@ -280,7 +304,18 @@ const getDeviceStatusPresentation = (device?: DeviceRecord) => {
     } as const;
   }
 
-  return { label: "平台已识别", tone: "success", hint: "最近一次平台确认在有效时限内；门状态以后续设备回调为准。" } as const;
+  if (
+    device.readiness?.platformRecognition === "confirmed" &&
+    device.readiness.connectivity !== "online"
+  ) {
+    return {
+      label: "平台已识别",
+      tone: "warning",
+      hint: "平台已确认凭据与设备编号，但这不等同于物理在线；开门结果仍以设备回调为准。"
+    } as const;
+  }
+
+  return { label: "在线", tone: "success", hint: "最近收到可信设备回调，可继续操作。" } as const;
 };
 
 const deviceCanOpen = computed(() => {
@@ -289,12 +324,17 @@ const deviceCanOpen = computed(() => {
     return false;
   }
 
-  // 兼容尚未升级的服务端：door_unconfirmed 只代表回调待确认，不再作为开门阻断条件。
-  if (device.readiness?.blocker === "door_unconfirmed") {
-    return device.status === "online";
-  }
-
   return device.readiness?.canOpen ?? device.status === "online";
+});
+const doorNeedsPhysicalConfirmation = computed(() => {
+  const deviceDetail = detail.value;
+
+  return Boolean(
+    deviceDetail &&
+    canOperateDevice.value &&
+    (deviceDetail.device.readiness?.blocker === "door_unconfirmed" ||
+      deviceDetail.runtime.doorState !== "closed")
+  );
 });
 const remoteOpenBlockedHint = computed(() => {
   if (!detail.value?.device) {
@@ -715,6 +755,57 @@ const refreshDevice = async () => {
   }
 };
 
+const closeDoorClosedDialog = async (restoreFocus = true) => {
+  if (confirmingDoorClosed.value) {
+    return;
+  }
+
+  if (doorClosedDialog.value?.open) {
+    doorClosedDialog.value.close();
+  }
+  doorClosedSubmitError.value = "";
+  if (restoreFocus) {
+    await nextTick();
+    doorClosedPreviousFocus?.focus();
+  }
+  doorClosedPreviousFocus = undefined;
+};
+
+const openDoorClosedDialog = async () => {
+  if (!doorNeedsPhysicalConfirmation.value || confirmingDoorClosed.value) {
+    return;
+  }
+
+  doorClosedPreviousFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : undefined;
+  doorClosedSubmitError.value = "";
+  await nextTick();
+  if (doorClosedDialog.value && !doorClosedDialog.value.open) {
+    doorClosedDialog.value.showModal();
+  }
+  doorClosedSafeButton.value?.focus();
+};
+
+const confirmDoorClosed = async () => {
+  if (!doorNeedsPhysicalConfirmation.value || confirmingDoorClosed.value) {
+    return;
+  }
+
+  confirmingDoorClosed.value = true;
+  try {
+    detail.value = await adminApi.confirmDeviceDoorClosed(String(route.params.deviceCode));
+    lastUpdatedAt.value = formatNowInBeijing();
+    confirmingDoorClosed.value = false;
+    await closeDoorClosedDialog();
+    showActionMessage("success", "已记录全部柜门关闭确认；请再次刷新平台状态后再决定是否开门。");
+  } catch (error) {
+    doorClosedSubmitError.value = `确认失败：${readErrorMessage(error, "请稍后重试")}`;
+  } finally {
+    confirmingDoorClosed.value = false;
+  }
+};
+
 const syncGoods = async () => {
   if (!canManageGoods.value) {
     showActionMessage("error", "当前账号没有货品资料管理权限，不能同步货品种类。");
@@ -788,18 +879,8 @@ const remoteOpen = async () => {
     return;
   }
 
-  if (device.status === "offline") {
-    showActionMessage("error", "当前柜机处于离线状态，不能下发远程开门指令。请先排查连接状态。");
-    return;
-  }
-
-  if (device.readiness?.blocker === "stale") {
-    showActionMessage("error", "柜机状态已过期，不能下发远程开门指令。请先点击“立即刷新”，确认状态恢复后再操作。");
-    return;
-  }
-
-  if (device.readiness?.blocker === "maintenance" || device.status === "maintenance") {
-    showActionMessage("error", "当前柜机处于维护状态，不能下发远程开门指令。请先解除维护状态。");
+  if (!deviceCanOpen.value) {
+    showActionMessage("error", remoteOpenBlockedHint.value || "当前柜机不可开门，请先核对状态。");
     return;
   }
 
@@ -857,7 +938,6 @@ const confirmRemoteOpen = async () => {
 
   if (
     !device ||
-    device.status === "offline" ||
     !deviceCanOpen.value ||
     detail.value?.runtime.doorState === "open"
   ) {
@@ -1420,6 +1500,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  doorClosedDialog.value?.close();
   remoteOpenDialog.value?.close();
   financialDialog.value?.close();
   if (timer) {
@@ -1472,7 +1553,7 @@ onUnmounted(() => {
           <div class="device-detail-status__item">
             <span class="admin-kicker">门状态</span>
             <strong>{{ formatDoorState(detail.runtime.doorState) }}</strong>
-            <span class="admin-table__subtext">{{ detail.runtime.doorState === "unknown" ? "状态待回传，不阻断受审计开门" : detail.runtime.openedAfterLastCommand ? "已收到开门反馈" : "未收到开门反馈" }}</span>
+            <span class="admin-table__subtext">{{ detail.runtime.doorState === "unknown" ? "状态待回传；存在未决开门记录时会阻止重复下发" : detail.runtime.openedAfterLastCommand ? "已收到开门反馈" : "未收到开门反馈" }}</span>
           </div>
           <div class="device-detail-status__item">
             <span class="admin-kicker">最近开门指令</span>
@@ -1492,7 +1573,12 @@ onUnmounted(() => {
           <div class="device-detail-status__item">
             <span class="admin-kicker">待处理</span>
             <strong class="admin-code">{{ pendingTasks.length }} 项</strong>
-            <span class="admin-table__subtext">最近平台确认：{{ formatDateTime(detail.device.lastSeenAt) }}</span>
+            <span class="admin-table__subtext">
+              最近设备回调：{{ formatDateTime(detail.device.lastSeenAt) }}
+              <template v-if="detail.device.readiness?.lastPlatformRecognizedAt">
+                · 最近平台识别：{{ formatDateTime(detail.device.readiness.lastPlatformRecognizedAt) }}
+              </template>
+            </span>
           </div>
         </div>
       </article>
@@ -1661,10 +1747,18 @@ onUnmounted(() => {
               <button v-if="canOperateDevice" class="admin-button" :disabled="remoteOpenDisabled" @click="remoteOpen">
                 {{ remoteOpening ? "下发中" : remoteOpenBlockedHint ? "暂不可开门" : "远程开门" }}
               </button>
+              <button
+                v-if="doorNeedsPhysicalConfirmation"
+                class="admin-button admin-button--ghost"
+                :disabled="confirmingDoorClosed"
+                @click="openDoorClosedDialog"
+              >
+                {{ confirmingDoorClosed ? "确认中" : "现场确认全部柜门已关闭" }}
+              </button>
               <span v-if="!canOperateDevice" class="admin-table__subtext">当前账号没有柜机操作权限。</span>
             </div>
             <div class="admin-note">
-              门状态未知不会阻断受审计开门；每次下发都会记录最近指令时间，后续开门、关门回调会继续更新最近状态。明确门已开或仍有进行中的指令时仍会防止重复下发。
+              平台识别只证明凭据与设备编号有效，不代表柜机物理在线。上一条开门结果未知时，系统会持续阻止重复下发；只有可信关门回调或现场确认才能解除。
             </div>
             <div v-if="canOperateDevice && remoteOpenBlockedHint" class="admin-alert admin-alert--danger" role="alert">
               {{ remoteOpenBlockedHint }}
@@ -2110,6 +2204,68 @@ onUnmounted(() => {
               </button>
             </template>
           </div>
+      </div>
+    </dialog>
+
+    <dialog
+      ref="doorClosedDialog"
+      class="remote-open-dialog admin-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="door-closed-dialog-title"
+      aria-describedby="door-closed-dialog-description"
+      @cancel.prevent="closeDoorClosedDialog"
+    >
+      <header class="remote-open-dialog__head">
+        <div>
+          <p class="admin-kicker">现场状态确认</p>
+          <h2 id="door-closed-dialog-title" class="remote-open-dialog__title">确认全部柜门均已关闭</h2>
+        </div>
+        <button
+          type="button"
+          class="admin-button admin-button--ghost"
+          :disabled="confirmingDoorClosed"
+          aria-label="关闭现场状态确认对话框"
+          @click="closeDoorClosedDialog"
+        >
+          取消
+        </button>
+      </header>
+      <div class="remote-open-dialog__body">
+        <p id="door-closed-dialog-description" class="admin-copy">
+          仅在现场或视频已经确认这台柜机的全部柜门均已关闭时继续。
+        </p>
+        <div class="admin-alert admin-alert--danger">
+          此操作会协调该柜机全部未决开门记录并写入审计日志，不能撤销；它不会向柜机发送开门指令。
+        </div>
+        <div
+          v-if="doorClosedSubmitError"
+          class="admin-alert admin-alert--danger"
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
+        >
+          {{ doorClosedSubmitError }}
+        </div>
+        <div class="remote-open-dialog__actions">
+          <button
+            ref="doorClosedSafeButton"
+            type="button"
+            class="admin-button admin-button--ghost"
+            :disabled="confirmingDoorClosed"
+            @click="closeDoorClosedDialog"
+          >
+            返回核对
+          </button>
+          <button
+            type="button"
+            class="admin-button admin-button--danger"
+            :disabled="confirmingDoorClosed"
+            @click="confirmDoorClosed"
+          >
+            {{ confirmingDoorClosed ? "正在记录" : "确认全部柜门已关闭" }}
+          </button>
+        </div>
       </div>
     </dialog>
 

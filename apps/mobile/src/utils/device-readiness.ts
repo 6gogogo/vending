@@ -27,7 +27,6 @@ const fallbackReadiness = (device: DeviceRecord): Pick<DeviceReadiness, "canOpen
 
 export const getDeviceStatusPresentation = (device: DeviceRecord): DeviceStatusPresentation => {
   const readiness = device.readiness ?? fallbackReadiness(device);
-  // unknown 只代表门状态回调待确认；明确 open 才阻断，旧版 door_unconfirmed 响应也按此语义兼容。
   const blocker = readiness.blocker;
 
   if (blocker === "stale") {
@@ -48,7 +47,7 @@ export const getDeviceStatusPresentation = (device: DeviceRecord): DeviceStatusP
     };
   }
 
-  if (blocker === "offline" || device.status === "offline") {
+  if (blocker === "offline" || (!device.readiness && device.status === "offline")) {
     return {
       canOpen: false,
       label: "离线",
@@ -68,22 +67,27 @@ export const getDeviceStatusPresentation = (device: DeviceRecord): DeviceStatusP
 
   if (blocker === "door_unconfirmed") {
     return {
-      canOpen: true,
-      label: "在线",
+      canOpen: false,
+      label: "开门结果待确认",
       tone: "warning",
-      actionHint: "柜门状态尚未回传，但不阻止开柜；系统会继续记录最近一次开门状态。"
+      actionHint: "上一条开门操作尚未收到可信关门结果，请勿重复开柜，并联系工作人员核对。"
     };
   }
 
   const doorStateUnknown =
     device.runtime?.doorState !== "open" && device.runtime?.doorState !== "closed";
+  const platformOnly =
+    device.readiness?.platformRecognition === "confirmed" &&
+    device.readiness.connectivity !== "online";
 
   return {
     canOpen: readiness.canOpen,
-    label: "在线",
-    tone: "success",
-    actionHint: doorStateUnknown
-      ? "柜门状态尚未回传，但不阻止开柜；系统会继续记录最近一次开门状态。"
+    label: platformOnly ? "平台已识别" : "在线",
+    tone: platformOnly || doorStateUnknown ? "warning" : "success",
+    actionHint: platformOnly
+      ? "平台已识别当前柜机，但物理在线状态仍以设备回调为准；提交后请等待本次结果。"
+      : doorStateUnknown
+        ? "柜门尚无历史状态；提交后请等待设备回调，不要重复开柜。"
       : "设备状态正常，可继续选择物资并开柜。"
   };
 };

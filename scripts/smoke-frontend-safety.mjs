@@ -330,22 +330,43 @@ assert.doesNotMatch(
   /to\.path === "\/manual"/,
   "登录后手册不得加入公开路由白名单"
 );
-for (const [manualSource, screenshotName] of [
-  [instanceAdminManualSource, "backoffice-login-public-1280x720-20260729.png"],
-  [instanceAdminManualSource, "backoffice-instance-settings-live-1440x900-20260730.jpg"],
-  [merchantManualSource, "backoffice-login-public-1280x720-20260729.png"],
-  [restockerManualSource, "backoffice-login-public-1280x720-20260729.png"],
-  [appUserManualSource, "app-public-login-390x844-20260729.png"],
-  [appUserManualSource, "app-public-manual-login-390x844-20260729.png"]
+for (const [roleName, manualSource] of [
+  ["实例管理员", instanceAdminManualSource],
+  ["商户", merchantManualSource],
+  ["补货员", restockerManualSource],
+  ["App 用户", appUserManualSource]
 ]) {
-  assert.ok(
-    manualSource.includes("../assets/" + screenshotName),
-    "分角色手册必须引用截图 " + screenshotName
-  );
-  assert.ok(
-    existsSync(resolve(process.cwd(), "docs", "assets", screenshotName)),
-    "分角色手册截图必须存在：" + screenshotName
-  );
+  const taskSections = manualSource
+    .split(/^##\s+/mu)
+    .slice(1)
+    .filter((section) => !section.startsWith("遇到问题"));
+
+  assert.ok(taskSections.length > 0, `${roleName}手册必须包含任务章节`);
+
+  for (const section of taskSections) {
+    const title = section.split(/\r?\n/u, 1)[0];
+    const screenshotPaths = [...section.matchAll(/^!\[[^\]]+\]\(([^)]+)\)$/gmu)]
+      .map((match) => match[1]);
+
+    assert.ok(screenshotPaths.length > 0, `${roleName}手册任务“${title}”必须关联截图`);
+
+    for (const screenshotPath of screenshotPaths) {
+      assert.match(
+        screenshotPath,
+        /^\.\.\/assets\/manuals\/final\//u,
+        `${roleName}手册任务“${title}”必须引用当前手册成品截图`
+      );
+      assert.doesNotMatch(
+        screenshotPath,
+        /local-isolated/u,
+        `${roleName}手册不得引用旧的本地隔离截图`
+      );
+      assert.ok(
+        existsSync(resolve(process.cwd(), "docs", "用户手册", screenshotPath)),
+        `${roleName}手册截图必须存在：${screenshotPath}`
+      );
+    }
+  }
 }
 assert.match(
   systemSettingsPageSource,
@@ -630,7 +651,12 @@ assert.doesNotMatch(adminDeviceSource, /4[–至-]200|maxlength="200"|不能只�
 assert.match(adminDeviceSource, /:disabled="!remoteOpenReason\.trim\(\)"/, "远程开门下一步只应在原因为空时禁用");
 assert.match(remoteOpenSource, /device\.status === "offline"/, "离线柜机必须阻止远程开门");
 assert.match(remoteOpenSource, /doorState === "open"/, "门已开启时必须阻止重复下发开门指令");
-assert.doesNotMatch(remoteOpenSource, /doorState !== "closed"/, "门状态未知不得阻断受审计开门");
+const remoteOpenBlockerSource = adminDeviceSource.slice(
+  adminDeviceSource.indexOf("const remoteOpenBlockedHint"),
+  adminDeviceSource.indexOf("const remoteOpenDisabled")
+);
+assert.doesNotMatch(remoteOpenBlockerSource, /doorState !== "closed"/, "没有未决开门记录时，未知门状态不得阻断受审计开门");
+assert.match(adminDeviceSource, /现场确认全部柜门已关闭/, "未决开门记录必须提供带审计的现场关闭确认入口");
 assert.match(adminDeviceSource, /runtime\.lastCommandAt/, "后台必须展示最近一次开门指令时间");
 assert.match(adminDeviceSource, /发生 \{\{ formatDateTime\(task\.createdAt\) \}\}/, "柜机任务必须明确展示真实发生时间");
 assert.match(adminDeviceSource, /应处理：\{\{ formatDateTime\(task\.dueAt\) \}\}/, "柜机任务必须把未来时间明确标为应处理时间");

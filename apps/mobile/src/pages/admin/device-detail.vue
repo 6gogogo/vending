@@ -44,10 +44,7 @@ const operationOpenBlockedHint = computed(() => {
   }
 
   const readiness = detail.value.device.readiness;
-  const readinessAllowsOpen =
-    readiness?.blocker === "door_unconfirmed"
-      ? detail.value.device.status === "online"
-      : (readiness?.canOpen ?? detail.value.device.status === "online");
+  const readinessAllowsOpen = readiness?.canOpen ?? detail.value.device.status === "online";
 
   if (!readinessAllowsOpen) {
     return "柜机当前离线、维护中或状态已过期，请先刷新并排查连接。";

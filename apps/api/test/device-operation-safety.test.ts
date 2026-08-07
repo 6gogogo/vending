@@ -86,7 +86,7 @@ test("在线标记超过心跳时限后按状态过期处理，维护态始终�
   assert.equal(maintenance.blocker, "maintenance");
 });
 
-test("门状态未知不阻断受审计开门，只有明确开门状态才阻止重复下发", () => {
+test("首次未知门状态可受审计开门，未决结果不会因等待超时而释放", () => {
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
   const device = store.devices[0];
@@ -102,10 +102,29 @@ test("门状态未知不阻断受审计开门，只有明确开门状态才阻�
     coordinator.assertOpenable({ deviceCode: device.deviceCode, doorNum: door.doorNum })
   );
 
-  store.updateDeviceRuntime(device.deviceCode, {
-    doorState: "unknown",
-    lastCommandAt: new Date().toISOString()
+  const createdAt = new Date(Date.now() - 10 * 60_000).toISOString();
+  store.events.unshift({
+    eventId: "event-unresolved-open",
+    orderNo: "order-unresolved-open",
+    userId: "admin-test",
+    phone: "13800000001",
+    role: "admin",
+    deviceCode: device.deviceCode,
+    doorNum: door.doorNum,
+    status: "timeout_unopened",
+    physicalDoorState: "unknown",
+    createdAt,
+    updatedAt: createdAt,
+    amount: 0,
+    goods: []
   });
+  assert.throws(
+    () => coordinator.assertOpenable({ deviceCode: device.deviceCode, doorNum: door.doorNum }),
+    /结果仍待确认/
+  );
+
+  store.events[0]!.status = "failed";
+  delete store.events[0]!.physicalDoorState;
   assert.doesNotThrow(() =>
     coordinator.assertOpenable({ deviceCode: device.deviceCode, doorNum: door.doorNum })
   );
@@ -122,32 +141,30 @@ test("门状态未知不阻断受审计开门，只有明确开门状态才阻�
   );
 });
 
-test("设备就绪度保留未知门状态但不把它作为开柜阻断条件", () => {
+test("平台只读识别可提供开门依据，但不伪造物理在线状态", () => {
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
   const device = store.devices[0];
   assert.ok(device);
-  device.status = "online";
-  device.lastSeenAt = new Date().toISOString();
+  device.status = "offline";
+  device.lastSeenAt = new Date(Date.now() - 60_001).toISOString();
   store.events.splice(0, store.events.length);
+
+  store.updateDeviceRuntime(device.deviceCode, {
+    doorState: "unknown",
+    lastPlatformRecognizedAt: new Date().toISOString()
+  });
+  const recognized = coordinator.getReadiness(device.deviceCode);
+  assert.equal(recognized.connectivity, "offline");
+  assert.equal(recognized.effectiveStatus, "offline");
+  assert.equal(recognized.platformRecognition, "confirmed");
+  assert.equal(recognized.canOpen, true);
+  assert.equal(recognized.blocker, undefined);
 
   store.updateDeviceRuntime(device.deviceCode, { doorState: "open" });
   const openDoor = coordinator.getReadiness(device.deviceCode);
   assert.equal(openDoor.canOpen, false);
   assert.equal(openDoor.blocker, "door_open");
-
-  store.updateDeviceRuntime(device.deviceCode, {
-    doorState: "unknown",
-    lastCommandAt: new Date().toISOString()
-  });
-  const unknownDoor = coordinator.getReadiness(device.deviceCode);
-  assert.equal(unknownDoor.canOpen, true);
-  assert.equal(unknownDoor.blocker, undefined);
-
-  store.deviceRuntime.delete(device.deviceCode);
-  const missingRuntime = coordinator.getReadiness(device.deviceCode);
-  assert.equal(missingRuntime.canOpen, true);
-  assert.equal(missingRuntime.blocker, undefined);
 
   const devices = new DevicesService(
     store,
@@ -156,9 +173,9 @@ test("设备就绪度保留未知门状态但不把它作为开柜阻断条件",
     coordinator
   );
   const detailView = devices.getViewByCode(device.deviceCode, "special");
-  assert.equal(detailView.readiness?.canOpen, true);
-  assert.equal(detailView.readiness?.blocker, undefined);
-  assert.equal(detailView.runtime?.doorState, "unknown");
+  assert.equal(detailView.readiness?.canOpen, false);
+  assert.equal(detailView.readiness?.blocker, "door_open");
+  assert.equal(detailView.runtime?.doorState, "open");
 
   store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
   const closedDoor = coordinator.getReadiness(device.deviceCode);
@@ -704,7 +721,7 @@ test("用户开柜在回调已确认后网关报错时返回不可重试的确�
   assert.equal(coordinator.getReadiness(device.deviceCode).blocker, "door_open");
 });
 
-test("后台远程开门在响应超时后不会重复下发，明确拒绝则释放命令租约", async () => {
+test("后台远程开门结果未知时持续阻断，现场关门确认或明确拒绝后才释放", async () => {
   process.env.SMARTVM_STATUS_STALE_AFTER_MS = "60000";
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
@@ -778,6 +795,21 @@ test("后台远程开门在响应超时后不会重复下发，明确拒绝则�
   assert.equal(store.getDeviceRuntime(device.deviceCode).openedAfterLastCommand, false);
 
   store.events[0]!.updatedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+  await assert.rejects(
+    devices.remoteOpen(device.deviceCode, request, admin.id),
+    /结果仍待确认/
+  );
+  assert.equal(gatewayCalls, 1, "等待超过旧命令租约也不能重复下发");
+
+  const confirmed = devices.confirmDoorClosed(device.deviceCode, admin.id);
+  assert.equal(confirmed.runtime.doorState, "closed");
+  assert.equal(store.events[0]?.status, "failed");
+  assert.equal(store.events[0]?.physicalDoorState, "closed");
+  assert.equal(
+    store.logs.find((entry) => entry.type === "confirm-device-door-closed")?.metadata?.evidence,
+    "admin-physical-confirmation"
+  );
+
   definitelyRejected = true;
   await assert.rejects(
     devices.remoteOpen(device.deviceCode, request, admin.id),
@@ -795,6 +827,7 @@ test("后台远程开门在响应超时后不会重复下发，明确拒绝则�
     }
   );
   assert.equal(store.events[0]?.status, "failed");
+  assert.equal(store.events[0]?.physicalDoorState, "closed");
 
   shouldSucceed = true;
   const retried = await devices.remoteOpen(device.deviceCode, request, admin.id);
@@ -803,7 +836,8 @@ test("后台远程开门在响应超时后不会重复下发，明确拒绝则�
   assert.equal(store.events.length, 3);
   assert.equal(store.events[0]?.orderNo, "remote-open-order-3");
   assert.equal(store.events[1]?.status, "failed");
-  assert.equal(store.events[2]?.status, "created");
+  assert.equal(store.events[2]?.status, "failed");
+  assert.equal(store.events[2]?.physicalDoorState, "closed");
   assert.equal(
     store.getDeviceRuntime(device.deviceCode).lastCommandAt,
     store.events[0]?.createdAt

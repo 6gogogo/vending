@@ -1,0 +1,416 @@
+{
+  "version": 1,
+  "updatedAt": "2026-08-07",
+  "forbiddenSourceFragments": [
+    "local-isolated",
+    "devtools",
+    "console"
+  ],
+  "images": [
+    {
+      "id": "backoffice-login",
+      "source": "docs/assets/manuals/shared/backoffice-login-source.png",
+      "output": "docs/assets/manuals/final/shared/backoffice-login.png",
+      "crop": [480, 380, 960, 690],
+      "redactions": [{ "box": [50, 35, 430, 80], "label": "示例账号" }],
+      "markers": [
+        { "x": 30, "y": 32, "label": "1" },
+        { "x": 30, "y": 110, "label": "2" },
+        { "x": 30, "y": 180, "label": "3" }
+      ]
+    },
+    {
+      "id": "admin-settings",
+      "source": "docs/assets/manuals/admin/admin-settings-source.png",
+      "output": "docs/assets/manuals/final/admin/settings.png",
+      "crop": [250, 185, 1410, 570],
+      "redactions": [
+        { "box": [0, 55, 1160, 115], "label": "保存前先核对领取方式和额度规则" }
+      ],
+      "markers": [
+        { "x": 60, "y": 270, "label": "1" },
+        { "x": 650, "y": 270, "label": "2" },
+        { "x": 1050, "y": 20, "label": "3" }
+      ]
+    },
+    {
+      "id": "admin-registration-review",
+      "source": "docs/assets/manuals/admin/admin-registration-review-source.png",
+      "output": "docs/assets/manuals/final/admin/registration-review.png",
+      "crop": [250, 340, 1410, 835],
+      "redactions": [
+        { "box": [20, 220, 560, 315], "label": "匿名申请资料" },
+        { "box": [20, 355, 560, 450], "label": "匿名申请资料" }
+      ],
+      "markers": [
+        { "x": 455, "y": 105, "label": "1" },
+        { "x": 780, "y": 315, "label": "2" },
+        { "x": 875, "y": 315, "label": "3" }
+      ]
+    },
+    {
+      "id": "admin-create-person",
+      "source": "docs/assets/manuals/admin/admin-create-person-source.png",
+      "output": "docs/assets/manuals/final/admin/create-person.png",
+      "crop": [835, 0, 1425, 835],
+      "markers": [
+        { "x": 25, "y": 95, "label": "1" },
+        { "x": 25, "y": 165, "label": "2" },
+        { "x": 25, "y": 235, "label": "3" },
+        { "x": 25, "y": 485, "label": "4" }
+      ]
+    },
+    {
+      "id": "admin-excel",
+      "source": "docs/assets/manuals/admin/admin-users-source.png",
+      "output": "docs/assets/manuals/final/admin/excel-import.png",
+      "crop": [250, 80, 1410, 365],
+      "markers": [
+        { "x": 850, "y": 165, "label": "1" },
+        { "x": 990, "y": 165, "label": "2" },
+        { "x": 1090, "y": 165, "label": "3" }
+      ]
+    },
+    {
+      "id": "admin-role-account",
+      "source": "docs/assets/manuals/admin/admin-role-account-source.png",
+      "output": "docs/assets/manuals/final/admin/role-account.png",
+      "crop": [835, 0, 1425, 740],
+      "redactions": [
+        { "box": [15, 50, 575, 120], "label": "按当前实例岗位配置权限" },
+        { "box": [15, 205, 575, 265], "label": "示例登录账号" }
+      ],
+      "markers": [
+        { "x": 25, "y": 150, "label": "1" },
+        { "x": 25, "y": 295, "label": "2" },
+        { "x": 25, "y": 410, "label": "3" },
+        { "x": 25, "y": 680, "label": "4" }
+      ]
+    },
+    {
+      "id": "admin-device-assignment",
+      "source": "docs/assets/manuals/admin/admin-device-assignment-source.png",
+      "output": "docs/assets/manuals/final/admin/device-assignment.png",
+      "crop": [835, 0, 1425, 430],
+      "redactions": [
+        { "box": [55, 185, 370, 210], "label": "示例编号" },
+        { "box": [55, 260, 370, 285], "label": "示例编号" }
+      ],
+      "markers": [
+        { "x": 25, "y": 175, "label": "1" },
+        { "x": 25, "y": 320, "label": "2" }
+      ]
+    },
+    {
+      "id": "admin-manual-code",
+      "source": "docs/assets/manuals/admin/admin-manual-code-source.png",
+      "output": "docs/assets/manuals/final/admin/manual-code.png",
+      "crop": [835, 0, 1425, 510],
+      "redactions": [
+        { "box": [15, 50, 575, 120], "label": "仅为当前实例已启用账号签发" },
+        { "box": [15, 210, 575, 265], "label": "验证码仅交付本人" },
+        { "box": [15, 375, 575, 435], "label": "默认有效期为 10 分钟" }
+      ],
+      "markers": [
+        { "x": 25, "y": 165, "label": "1" },
+        { "x": 25, "y": 350, "label": "2" }
+      ]
+    },
+    {
+      "id": "admin-code-records",
+      "source": "docs/assets/manuals/admin/admin-manual-code-records-source.png",
+      "output": "docs/assets/manuals/final/admin/code-records.png",
+      "crop": [250, 330, 1410, 665],
+      "redactions": [{ "box": [25, 235, 310, 300], "label": "匿名测试账号" }],
+      "markers": [
+        { "x": 1075, "y": 95, "label": "1" },
+        { "x": 965, "y": 245, "label": "2" }
+      ]
+    },
+    {
+      "id": "admin-goods",
+      "source": "docs/assets/manuals/admin/admin-goods-source.png",
+      "output": "docs/assets/manuals/final/admin/goods.png",
+      "crop": [250, 80, 1410, 850],
+      "markers": [{ "x": 1080, "y": 165, "label": "1" }]
+    },
+    {
+      "id": "admin-warehouse",
+      "source": "docs/assets/manuals/admin/admin-warehouse-source.png",
+      "output": "docs/assets/manuals/final/admin/warehouse.png",
+      "crop": [250, 80, 1410, 850],
+      "markers": [{ "x": 1080, "y": 165, "label": "1" }]
+    },
+    {
+      "id": "admin-operations",
+      "source": "docs/assets/manuals/admin/admin-operations-source.png",
+      "output": "docs/assets/manuals/final/admin/operations.png",
+      "crop": [250, 80, 1410, 850],
+      "markers": [{ "x": 90, "y": 245, "label": "1" }]
+    },
+    {
+      "id": "admin-logs",
+      "source": "docs/assets/manuals/admin/admin-logs-source.png",
+      "output": "docs/assets/manuals/final/admin/logs.png",
+      "crop": [250, 80, 1410, 850],
+      "markers": [{ "x": 1020, "y": 245, "label": "1" }]
+    },
+    {
+      "id": "merchant-workbench",
+      "source": "docs/assets/manuals/merchant/merchant-workbench-source.png",
+      "output": "docs/assets/manuals/final/merchant/workbench.png",
+      "crop": [250, 80, 1410, 850],
+      "markers": [
+        { "x": 70, "y": 170, "label": "1" },
+        { "x": 70, "y": 510, "label": "2" }
+      ]
+    },
+    {
+      "id": "merchant-template",
+      "source": "docs/assets/manuals/merchant/merchant-template-source.png",
+      "output": "docs/assets/manuals/final/merchant/template.png",
+      "crop": [470, 40, 955, 890],
+      "markers": [
+        { "x": 25, "y": 175, "label": "1" },
+        { "x": 25, "y": 545, "label": "2" },
+        { "x": 240, "y": 605, "label": "3" },
+        { "x": 25, "y": 745, "label": "4" }
+      ]
+    },
+    {
+      "id": "merchant-devices",
+      "source": "docs/assets/manuals/merchant/merchant-devices-source.png",
+      "output": "docs/assets/manuals/final/merchant/devices.png",
+      "crop": [250, 80, 1410, 850],
+      "redactions": [{ "box": [70, 300, 420, 335], "label": "示例柜机" }],
+      "markers": [{ "x": 1040, "y": 305, "label": "1" }]
+    },
+    {
+      "id": "merchant-mobile-home",
+      "source": "docs/assets/manuals/merchant/merchant-mobile-home-source.png",
+      "output": "docs/assets/manuals/final/merchant/mobile-home.png",
+      "markers": [
+        { "x": 55, "y": 510, "label": "1" },
+        { "x": 335, "y": 760, "label": "2" }
+      ]
+    },
+    {
+      "id": "merchant-open",
+      "source": "docs/assets/manuals/merchant/merchant-operation-open-selected-source.png",
+      "output": "docs/assets/manuals/final/merchant/open.png",
+      "redactions": [{ "box": [40, 180, 350, 215], "label": "示例柜机" }],
+      "markers": [
+        { "x": 55, "y": 470, "label": "1" },
+        { "x": 330, "y": 470, "label": "2" }
+      ]
+    },
+    {
+      "id": "merchant-restock-entry",
+      "source": "docs/assets/manuals/merchant/merchant-restock-submit-source.png",
+      "output": "docs/assets/manuals/final/merchant/restock-entry.png",
+      "crop": [470, 0, 955, 885],
+      "markers": [
+        { "x": 25, "y": 335, "label": "1" },
+        { "x": 25, "y": 415, "label": "2" },
+        { "x": 25, "y": 655, "label": "3" },
+        { "x": 240, "y": 750, "label": "4" }
+      ]
+    },
+    {
+      "id": "merchant-restock-result",
+      "source": "docs/assets/manuals/merchant/merchant-restock-result-complete-source.png",
+      "output": "docs/assets/manuals/final/merchant/restock-result.png",
+      "crop": [470, 0, 955, 860],
+      "markers": [
+        { "x": 25, "y": 315, "label": "1" },
+        { "x": 25, "y": 730, "label": "2" }
+      ]
+    },
+    {
+      "id": "merchant-records",
+      "source": "docs/assets/manuals/merchant/merchant-traces-source.png",
+      "output": "docs/assets/manuals/final/merchant/records.png",
+      "crop": [470, 40, 955, 860],
+      "redactions": [
+        { "box": [25, 440, 460, 515], "label": "匿名补货记录" }
+      ],
+      "markers": [
+        { "x": 25, "y": 175, "label": "1" },
+        { "x": 25, "y": 315, "label": "2" },
+        { "x": 25, "y": 445, "label": "3" }
+      ]
+    },
+    {
+      "id": "restocker-pc-devices",
+      "source": "docs/assets/manuals/restocker/restocker-pc-devices-source.png",
+      "output": "docs/assets/manuals/final/restocker/pc-devices.png",
+      "crop": [250, 80, 1410, 850],
+      "redactions": [{ "box": [70, 300, 420, 335], "label": "示例柜机" }],
+      "markers": [{ "x": 1040, "y": 305, "label": "1" }]
+    },
+    {
+      "id": "restocker-pc-detail",
+      "source": "docs/assets/manuals/restocker/restocker-pc-device-detail-source.png",
+      "output": "docs/assets/manuals/final/restocker/pc-detail.png",
+      "crop": [250, 80, 1410, 850],
+      "redactions": [{ "box": [35, 110, 420, 145], "label": "示例柜机" }],
+      "markers": [{ "x": 1040, "y": 165, "label": "1" }]
+    },
+    {
+      "id": "restocker-mobile-home",
+      "source": "docs/assets/manuals/restocker/restocker-mobile-home-current-source.png",
+      "output": "docs/assets/manuals/final/restocker/mobile-home.png",
+      "crop": [470, 0, 955, 860],
+      "markers": [{ "x": 25, "y": 185, "label": "1" }]
+    },
+    {
+      "id": "restocker-mobile-devices",
+      "source": "docs/assets/manuals/restocker/restocker-mobile-devices-source.png",
+      "output": "docs/assets/manuals/final/restocker/mobile-devices.png",
+      "redactions": [{ "box": [55, 300, 345, 340], "label": "示例柜机" }],
+      "markers": [{ "x": 330, "y": 520, "label": "1" }]
+    },
+    {
+      "id": "restocker-open",
+      "source": "docs/assets/manuals/restocker/restocker-operation-open-source.png",
+      "output": "docs/assets/manuals/final/restocker/open.png",
+      "redactions": [{ "box": [40, 180, 350, 215], "label": "示例柜机" }],
+      "markers": [{ "x": 330, "y": 470, "label": "1" }]
+    },
+    {
+      "id": "restocker-entry",
+      "source": "docs/assets/manuals/restocker/restocker-restock-submit-source.png",
+      "output": "docs/assets/manuals/final/restocker/restock-entry.png",
+      "crop": [470, 0, 955, 885],
+      "markers": [
+        { "x": 25, "y": 335, "label": "1" },
+        { "x": 25, "y": 415, "label": "2" },
+        { "x": 25, "y": 655, "label": "3" },
+        { "x": 240, "y": 750, "label": "4" }
+      ]
+    },
+    {
+      "id": "restocker-result",
+      "source": "docs/assets/manuals/restocker/restocker-restock-result-current-source.png",
+      "output": "docs/assets/manuals/final/restocker/restock-result.png",
+      "crop": [470, 0, 955, 860],
+      "markers": [
+        { "x": 25, "y": 315, "label": "1" },
+        { "x": 25, "y": 730, "label": "2" }
+      ]
+    },
+    {
+      "id": "app-registration",
+      "source": "docs/assets/manuals/app/app-registration-submit-source.png",
+      "output": "docs/assets/manuals/final/app/registration.png",
+      "crop": [470, 40, 955, 885],
+      "redactions": [
+        { "box": [30, 125, 240, 190], "label": "本人手机号" }
+      ],
+      "markers": [
+        { "x": 25, "y": 160, "label": "1" },
+        { "x": 400, "y": 160, "label": "2" },
+        { "x": 25, "y": 360, "label": "3" },
+        { "x": 25, "y": 475, "label": "4" },
+        { "x": 240, "y": 745, "label": "5" }
+      ]
+    },
+    {
+      "id": "app-sms-login",
+      "source": "docs/assets/manuals/app/app-sms-login-source.png",
+      "output": "docs/assets/manuals/final/app/sms-login.png",
+      "redactions": [{ "box": [35, 375, 355, 425], "label": "本人手机号" }],
+      "markers": [
+        { "x": 25, "y": 410, "label": "1" },
+        { "x": 25, "y": 515, "label": "2" },
+        { "x": 25, "y": 625, "label": "3" }
+      ]
+    },
+    {
+      "id": "app-manual-login",
+      "source": "docs/assets/manuals/app/app-manual-login-source.png",
+      "output": "docs/assets/manuals/final/app/manual-login.png",
+      "redactions": [
+        { "box": [35, 375, 355, 425], "label": "本人手机号" },
+        { "box": [35, 470, 355, 520], "label": "一次性人工码" }
+      ],
+      "markers": [
+        { "x": 25, "y": 410, "label": "1" },
+        { "x": 25, "y": 505, "label": "2" },
+        { "x": 25, "y": 625, "label": "3" }
+      ]
+    },
+    {
+      "id": "app-home",
+      "source": "docs/assets/manuals/app/app-home-ready-source.png",
+      "output": "docs/assets/manuals/final/app/home.png",
+      "markers": [
+        { "x": 330, "y": 315, "label": "1" },
+        { "x": 330, "y": 530, "label": "2" }
+      ]
+    },
+    {
+      "id": "app-nearby",
+      "source": "docs/assets/manuals/app/app-nearby-list-source.png",
+      "output": "docs/assets/manuals/final/app/nearby.png",
+      "redactions": [{ "box": [55, 300, 345, 340], "label": "示例柜机" }],
+      "markers": [{ "x": 330, "y": 520, "label": "1" }]
+    },
+    {
+      "id": "app-device",
+      "source": "docs/assets/manuals/app/app-device-detail-source.png",
+      "output": "docs/assets/manuals/final/app/device.png",
+      "redactions": [{ "box": [40, 95, 310, 140], "label": "示例柜机" }],
+      "markers": [
+        { "x": 330, "y": 315, "label": "1" },
+        { "x": 330, "y": 565, "label": "2" }
+      ]
+    },
+    {
+      "id": "app-select",
+      "source": "docs/assets/manuals/app/app-select-goods-source.png",
+      "output": "docs/assets/manuals/final/app/select.png",
+      "markers": [
+        { "x": 320, "y": 605, "label": "1" },
+        { "x": 195, "y": 690, "label": "2" }
+      ]
+    },
+    {
+      "id": "app-reservation-success",
+      "source": "docs/assets/manuals/app/app-reservation-success-source.png",
+      "output": "docs/assets/manuals/final/app/reservation-success.png",
+      "markers": [{ "x": 330, "y": 360, "label": "1" }]
+    },
+    {
+      "id": "app-reservation-active",
+      "source": "docs/assets/manuals/app/app-reservation-active-source.png",
+      "output": "docs/assets/manuals/final/app/reservation-active.png",
+      "markers": [{ "x": 320, "y": 105, "label": "1" }]
+    },
+    {
+      "id": "app-arrival",
+      "source": "docs/assets/manuals/app/app-arrival-confirm-source.png",
+      "output": "docs/assets/manuals/final/app/arrival.png",
+      "markers": [
+        { "x": 330, "y": 315, "label": "1" },
+        { "x": 300, "y": 785, "label": "2" }
+      ]
+    },
+    {
+      "id": "app-pickup-confirm",
+      "source": "docs/assets/manuals/app/app-pickup-confirm-source.png",
+      "output": "docs/assets/manuals/final/app/pickup-confirm.png",
+      "redactions": [{ "box": [220, 395, 360, 435], "label": "示例编号" }],
+      "markers": [
+        { "x": 45, "y": 285, "label": "1" },
+        { "x": 330, "y": 670, "label": "2" }
+      ]
+    },
+    {
+      "id": "app-pickup-complete",
+      "source": "docs/assets/manuals/app/app-pickup-complete-source.png",
+      "output": "docs/assets/manuals/final/app/pickup-complete.png",
+      "markers": [{ "x": 330, "y": 690, "label": "1" }]
+    }
+  ]
+}
