@@ -115,6 +115,16 @@ const platformOverviewSource = readSource(
   "apps/admin-web/src/pages/PlatformOverviewPage.vue"
 );
 const adminOperationsSource = readSource("apps/admin-web/src/pages/OperationsPage.vue");
+assert.doesNotMatch(
+  adminOperationsSource,
+  /最近一次平台确认已超过有效时限/,
+  "柜机总览只应显示状态已过期徽标，不得重复详情控制区的刷新提示"
+);
+assert.match(
+  adminDeviceSource,
+  /最近一次平台确认已超过有效时限，请先刷新；刷新成功前不能远程开门。/,
+  "柜机详情控制区必须保留可就地处理的状态过期提示"
+);
 const deviceWorkspaceSource = readSource("apps/admin-web/src/pages/DeviceWorkspacePage.vue");
 const assignedDeviceDetailPageSource = readSource("apps/admin-web/src/pages/AssignedDeviceDetailPage.vue");
 const merchantBackofficeSource = readSource("apps/admin-web/src/pages/MerchantBackofficePage.vue");

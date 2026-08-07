@@ -91,7 +91,7 @@ const getDeviceStatusPresentation = (device: DeviceRecord) => {
     return {
       label: "状态已过期",
       pillClass: "admin-pill--warning",
-      hint: "最近一次平台确认已超过有效时限，请进入详情刷新；刷新前不能开门。"
+      hint: ""
     };
   }
 
@@ -430,7 +430,10 @@ onUnmounted(() => {
         <div v-if="hasDoorWarning(device)" class="admin-note operations-card__warning">
           该柜机最近一次开门后未收到“门已打开”确认。
         </div>
-        <div v-if="!(device.readiness?.canOpen ?? device.status === 'online')" class="admin-note operations-card__warning">
+        <div
+          v-if="!(device.readiness?.canOpen ?? device.status === 'online') && getDeviceStatusPresentation(device).hint"
+          class="admin-note operations-card__warning"
+        >
           {{ getDeviceStatusPresentation(device).hint }}
         </div>
 
