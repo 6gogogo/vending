@@ -34,21 +34,27 @@ const lastOpenedText = computed(() =>
 const lastClosedText = computed(() =>
   formatBeijingDateTime(detail.value?.runtime.lastClosedAt, "暂无")
 );
+
+const lastCommandText = computed(() =>
+  formatBeijingDateTime(detail.value?.runtime.lastCommandAt, "暂无")
+);
 const operationOpenBlockedHint = computed(() => {
   if (!detail.value) {
     return "柜机状态尚未加载。";
   }
 
-  if (!(detail.value.device.readiness?.canOpen ?? detail.value.device.status === "online")) {
+  const readiness = detail.value.device.readiness;
+  const readinessAllowsOpen =
+    readiness?.blocker === "door_unconfirmed"
+      ? detail.value.device.status === "online"
+      : (readiness?.canOpen ?? detail.value.device.status === "online");
+
+  if (!readinessAllowsOpen) {
     return "柜机当前离线、维护中或状态已过期，请先刷新并排查连接。";
   }
 
   if (detail.value.runtime.doorState === "open") {
     return "柜门当前已开启，请等待关门。";
-  }
-
-  if (detail.value.runtime.doorState !== "closed") {
-    return "柜门物理状态尚未确认，请先手动刷新，确认平台返回门已关。";
   }
 
   return "";
@@ -185,6 +191,10 @@ onLoad((query) => {
             <text class="vm-status" :class="detail?.runtime.doorState === 'open' ? 'vm-status--warning' : 'vm-status--online'">
               {{ detail?.runtime.doorState ?? "unknown" }}
             </text>
+          </view>
+          <view class="runtime-row">
+            <text class="runtime-row__label">最近开门指令</text>
+            <text class="runtime-row__value">{{ lastCommandText }}</text>
           </view>
           <view class="runtime-row">
             <text class="runtime-row__label">最近开门</text>

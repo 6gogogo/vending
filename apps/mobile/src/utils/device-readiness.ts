@@ -22,17 +22,12 @@ const fallbackReadiness = (device: DeviceRecord): Pick<DeviceReadiness, "canOpen
     return { canOpen: false, blocker: "door_open" };
   }
 
-  if (device.runtime?.doorState !== "closed") {
-    return { canOpen: false, blocker: "door_unconfirmed" };
-  }
-
   return { canOpen: true, blocker: undefined };
 };
 
 export const getDeviceStatusPresentation = (device: DeviceRecord): DeviceStatusPresentation => {
   const readiness = device.readiness ?? fallbackReadiness(device);
-  // 新版 API 已把首次联机试开、命令历史和物理门状态统一折算进 readiness。
-  // 只有旧响应缺少 readiness 时才使用上方关闭式兼容逻辑。
+  // unknown 只代表门状态回调待确认；明确 open 才阻断，旧版 door_unconfirmed 响应也按此语义兼容。
   const blocker = readiness.blocker;
 
   if (blocker === "stale") {
@@ -73,18 +68,23 @@ export const getDeviceStatusPresentation = (device: DeviceRecord): DeviceStatusP
 
   if (blocker === "door_unconfirmed") {
     return {
-      canOpen: false,
-      label: "柜门状态待确认",
+      canOpen: true,
+      label: "在线",
       tone: "warning",
-      actionHint: "尚未确认柜门已经关闭。请先刷新设备状态，确认关门后再开柜，避免重复开门。"
+      actionHint: "柜门状态尚未回传，但不阻止开柜；系统会继续记录最近一次开门状态。"
     };
   }
+
+  const doorStateUnknown =
+    device.runtime?.doorState !== "open" && device.runtime?.doorState !== "closed";
 
   return {
     canOpen: readiness.canOpen,
     label: "在线",
     tone: "success",
-    actionHint: "设备状态正常，可继续选择物资并开柜。"
+    actionHint: doorStateUnknown
+      ? "柜门状态尚未回传，但不阻止开柜；系统会继续记录最近一次开门状态。"
+      : "设备状态正常，可继续选择物资并开柜。"
   };
 };
 

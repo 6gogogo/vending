@@ -656,7 +656,7 @@ export class CabinetEventsService {
       });
     } else if (payload.status === "FAIL") {
       // FAIL 只说明开门指令失败，并不等同于可信的物理关门信号。
-      // 在平台刷新或 CLOSED 回调明确确认前保持 unknown，避免账务失败状态误解锁用户。
+      // 在 CLOSED 回调明确确认前保持 unknown，以免把指令失败误记为物理关门；unknown 本身不阻断后续开门。
       event.physicalDoorState = "unknown";
       if (nextStatus) {
         event.status = nextStatus;

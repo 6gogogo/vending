@@ -616,14 +616,17 @@ assert.match(adminDeviceSource, /确认并立即下发/, "远程开门最终按�
 assert.match(remoteOpenSource, /remoteOpenDevice\([^\n]+reason\)/, "远程开门原因必须传给服务端审计");
 assert.match(remoteOpenSource, /device\.status === "offline"/, "离线柜机必须阻止远程开门");
 assert.match(remoteOpenSource, /doorState === "open"/, "门已开启时必须阻止重复下发开门指令");
-assert.match(remoteOpenSource, /doorState !== "closed"/, "门状态未知时必须保持关闭式阻断");
+assert.doesNotMatch(remoteOpenSource, /doorState !== "closed"/, "门状态未知不得阻断受审计开门");
+assert.match(adminDeviceSource, /runtime\.lastCommandAt/, "后台必须展示最近一次开门指令时间");
 
 const mobileAdminDeviceSource = readSource("apps/mobile/src/pages/admin/device-detail.vue");
-assert.match(
+assert.doesNotMatch(
   mobileAdminDeviceSource,
   /runtime\.doorState !== "closed"/,
-  "移动管理端也必须在门状态未知时禁用运营开门"
+  "移动管理端不得因门状态未知禁用运营开门"
 );
+assert.match(mobileAdminDeviceSource, /runtime\.doorState === "open"/, "移动管理端仍须阻止明确已开启的柜门重复开门");
+assert.match(mobileAdminDeviceSource, /runtime\.lastCommandAt/, "移动管理端必须展示最近一次开门指令时间");
 
 const financialActionSource = adminDeviceSource.slice(
   adminDeviceSource.indexOf("const openFinancialDialog"),

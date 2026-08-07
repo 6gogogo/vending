@@ -78,18 +78,9 @@ export class DeviceOperationCoordinator {
             : undefined;
     const runtime = this.store.getDeviceRuntime(device.deviceCode);
     const doorState = runtime.doorState;
-    const hasPriorOpenCommand = Boolean(
-      runtime.lastCommandAt ||
-      this.store.events.some((event) => event.deviceCode === device.deviceCode)
-    );
-    const physicalDoorBlocker =
-      doorState === "open"
-        ? "door_open"
-        : doorState === "closed"
-          ? undefined
-          : hasPriorOpenCommand
-            ? "door_unconfirmed"
-            : undefined;
+    // unknown 只表示尚未收到可信门状态回调，不阻断新的受审计开门；
+    // 明确 open 仍会阻断，进行中的指令则由下方活动事件租约防止重复下发。
+    const physicalDoorBlocker = doorState === "open" ? "door_open" : undefined;
     const blocker = statusBlocker ?? physicalDoorBlocker;
     const staleAt = Number.isFinite(lastObservedAtMs)
       ? new Date(lastObservedAtMs + staleAfterMs).toISOString()
@@ -139,10 +130,6 @@ export class DeviceOperationCoordinator {
 
     if (readiness.blocker === "door_open") {
       throw new ConflictException("柜门当前已开启，不能重复开门。");
-    }
-
-    if (readiness.blocker === "door_unconfirmed") {
-      throw new ConflictException("柜门物理状态尚未确认，请先从平台刷新并确认柜门已关闭。");
     }
 
     const activeEvent = this.findActiveDoorEvent(device.deviceCode, doorNum, now);

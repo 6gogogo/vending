@@ -285,7 +285,16 @@ const getDeviceStatusPresentation = (device?: DeviceRecord) => {
 
 const deviceCanOpen = computed(() => {
   const device = detail.value?.device;
-  return device ? (device.readiness?.canOpen ?? device.status === "online") : false;
+  if (!device) {
+    return false;
+  }
+
+  // 兼容尚未升级的服务端：door_unconfirmed 只代表回调待确认，不再作为开门阻断条件。
+  if (device.readiness?.blocker === "door_unconfirmed") {
+    return device.status === "online";
+  }
+
+  return device.readiness?.canOpen ?? device.status === "online";
 });
 const remoteOpenBlockedHint = computed(() => {
   if (!detail.value?.device) {
@@ -298,10 +307,6 @@ const remoteOpenBlockedHint = computed(() => {
 
   if (detail.value.runtime.doorState === "open") {
     return "柜门当前已开启，请确认现场并等待关门后再操作。";
-  }
-
-  if (detail.value.runtime.doorState !== "closed") {
-    return "柜门物理状态尚未确认，请先点击“立即刷新”，确认平台返回门已关后再操作。";
   }
 
   return "";
@@ -798,13 +803,8 @@ const remoteOpen = async () => {
     return;
   }
 
-  if (detail.value?.runtime.doorState !== "closed") {
-    showActionMessage(
-      "error",
-      detail.value?.runtime.doorState === "open"
-        ? "当前门状态已是开启，已阻止重复下发开门指令。请先确认现场并等待关门。"
-        : "当前门状态尚未确认，已阻止远程开门。请先点击“立即刷新”，确认平台返回门已关。"
-    );
+  if (detail.value?.runtime.doorState === "open") {
+    showActionMessage("error", "当前门状态已是开启，已阻止重复下发开门指令。请先确认现场并等待关门。");
     return;
   }
 
@@ -858,8 +858,8 @@ const confirmRemoteOpen = async () => {
   if (
     !device ||
     device.status === "offline" ||
-    !(device.readiness?.canOpen ?? device.status === "online") ||
-    detail.value?.runtime.doorState !== "closed"
+    !deviceCanOpen.value ||
+    detail.value?.runtime.doorState === "open"
   ) {
     await closeRemoteOpenDialog();
     showActionMessage("error", "柜机状态已变化，已阻止远程开门。请刷新后重新核对。");
@@ -1472,7 +1472,12 @@ onUnmounted(() => {
           <div class="device-detail-status__item">
             <span class="admin-kicker">门状态</span>
             <strong>{{ formatDoorState(detail.runtime.doorState) }}</strong>
-            <span class="admin-table__subtext">{{ detail.runtime.openedAfterLastCommand ? "已收到开门反馈" : "未收到开门反馈" }}</span>
+            <span class="admin-table__subtext">{{ detail.runtime.doorState === "unknown" ? "状态待回传，不阻断受审计开门" : detail.runtime.openedAfterLastCommand ? "已收到开门反馈" : "未收到开门反馈" }}</span>
+          </div>
+          <div class="device-detail-status__item">
+            <span class="admin-kicker">最近开门指令</span>
+            <strong class="admin-code">{{ formatDateTime(detail.runtime.lastCommandAt) }}</strong>
+            <span class="admin-table__subtext">{{ detail.runtime.openedAfterLastCommand ? "指令后已收到开门反馈" : "指令后尚未收到开门反馈" }}</span>
           </div>
           <div class="device-detail-status__item">
             <span class="admin-kicker">最近开门</span>
@@ -1659,7 +1664,7 @@ onUnmounted(() => {
               <span v-if="!canOperateDevice" class="admin-table__subtext">当前账号没有柜机操作权限。</span>
             </div>
             <div class="admin-note">
-              若门状态长时间不变化或最近一次开门后未收到开门确认，请直接关注右侧待处理任务。
+              门状态未知不会阻断受审计开门；每次下发都会记录最近指令时间，后续开门、关门回调会继续更新最近状态。明确门已开或仍有进行中的指令时仍会防止重复下发。
             </div>
             <div v-if="canOperateDevice && remoteOpenBlockedHint" class="admin-alert admin-alert--danger" role="alert">
               {{ remoteOpenBlockedHint }}
