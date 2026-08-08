@@ -28,7 +28,6 @@ const UNRESOLVED_DOOR_EVENT_STATUSES = new Set<CabinetEventRecord["status"]>([
   "created",
   "opening",
   "opened",
-  "timeout_unopened",
   "stuck_open"
 ]);
 
@@ -83,9 +82,7 @@ export class DeviceOperationCoordinator {
         ? "maintenance"
         : connectivity === "offline" && !platformRecognitionAllowsOpen
           ? "offline"
-          : connectivity === "stale" && !platformRecognitionAllowsOpen
-            ? "stale"
-            : undefined;
+          : undefined;
     const physicalDoorBlocker =
       doorState === "open"
         ? "door_open"
@@ -237,14 +234,14 @@ export class DeviceOperationCoordinator {
         return false;
       }
 
-      if (event.physicalDoorState === "open" || event.physicalDoorState === "unknown") {
+      if (event.physicalDoorState === "open") {
         return true;
       }
 
-      return (
-        event.physicalDoorState !== "closed" &&
-        UNRESOLVED_DOOR_EVENT_STATUSES.has(event.status)
-      );
+      // 超时、失败等终态仍完整保留在事件记录中，但不再因缺少物理门态回调
+      // 永久锁死后续开柜。只有命令仍在处理或已经确认开门时继续阻断。
+      return UNRESOLVED_DOOR_EVENT_STATUSES.has(event.status) &&
+        event.physicalDoorState !== "closed";
     });
   }
 

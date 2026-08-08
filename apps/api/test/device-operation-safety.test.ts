@@ -50,7 +50,7 @@ after(() => {
   }
 });
 
-test("在线标记超过心跳时限后按状态过期处理，维护态始终不可开门", () => {
+test("在线标记超过心跳时限后仍允许受控重试，明确离线和维护态保持阻断", () => {
   process.env.SMARTVM_STATUS_STALE_AFTER_MS = "60000";
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
@@ -61,8 +61,8 @@ test("在线标记超过心跳时限后按状态过期处理，维护态始终�
   device.lastSeenAt = new Date(Date.now() - 60_001).toISOString();
   const stale = coordinator.getReadiness(device.deviceCode);
   assert.equal(stale.connectivity, "stale");
-  assert.equal(stale.canOpen, false);
-  assert.equal(stale.blocker, "stale");
+  assert.equal(stale.canOpen, true);
+  assert.equal(stale.blocker, undefined);
 
   const deviceView = new DevicesService(
     store,
@@ -73,8 +73,14 @@ test("在线标记超过心跳时限后按状态过期处理，维护态始终�
   assert.ok(deviceView);
   assert.equal(deviceView.status, "online");
   assert.equal(deviceView.readiness?.connectivity, "stale");
-  assert.equal(deviceView.readiness?.canOpen, false);
+  assert.equal(deviceView.readiness?.canOpen, true);
 
+  device.status = "offline";
+  const offline = coordinator.getReadiness(device.deviceCode);
+  assert.equal(offline.canOpen, false);
+  assert.equal(offline.blocker, "offline");
+
+  device.status = "online";
   device.lastSeenAt = new Date().toISOString();
   const fresh = coordinator.getReadiness(device.deviceCode);
   assert.equal(fresh.connectivity, "online");
@@ -86,7 +92,7 @@ test("在线标记超过心跳时限后按状态过期处理，维护态始终�
   assert.equal(maintenance.blocker, "maintenance");
 });
 
-test("首次未知门状态可受审计开门，未决结果不会因等待超时而释放", () => {
+test("未知门状态可受审计开门，已形成超时终态后允许再次受控尝试", () => {
   const store = createIsolatedStore();
   const coordinator = new DeviceOperationCoordinator(store);
   const device = store.devices[0];
@@ -118,6 +124,11 @@ test("首次未知门状态可受审计开门，未决结果不会因等待超�
     amount: 0,
     goods: []
   });
+  assert.doesNotThrow(
+    () => coordinator.assertOpenable({ deviceCode: device.deviceCode, doorNum: door.doorNum }),
+  );
+
+  store.events[0]!.status = "opening";
   assert.throws(
     () => coordinator.assertOpenable({ deviceCode: device.deviceCode, doorNum: door.doorNum }),
     /结果仍待确认/
