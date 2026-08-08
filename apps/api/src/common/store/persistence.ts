@@ -106,7 +106,7 @@ export interface ManualVerificationGrantRecord {
 
 export interface SessionRecord {
   token: string;
-  /** 移动端长期会话不按时间过期，但仍受退出、账号和权限变更撤销。 */
+  /** 会话只以令牌摘要持久化；移动端长期保活，后台会话必须设置过期时间。 */
   persistent?: boolean;
   userId: string;
   role: UserRole;

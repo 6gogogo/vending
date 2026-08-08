@@ -571,19 +571,33 @@ test("普通管理员会话不能兼容升级成后台权限会话", () => {
   assert.throws(() => service.getBackofficeSession(ordinaryAdminToken), UnauthorizedException);
 });
 
-test("移动端会话只持久化摘要并可跨重启恢复，资料草稿和旧明文 token 不会恢复", () => {
+test("移动端和一周后台会话只持久化摘要并可跨重启恢复，资料草稿和旧明文 token 不会恢复", () => {
   const store = createIsolatedStore();
   const user = store.users.find(
     (entry) => entry.role === "special" && entry.status === "active"
   );
+  const backofficeCredential = store.backofficeCredentials.find(
+    (entry) => entry.role === "merchant"
+  );
+  const backofficeUser = store.users.find(
+    (entry) => entry.id === backofficeCredential?.userId && entry.status === "active"
+  );
   assert.ok(user);
+  assert.ok(backofficeCredential);
+  assert.ok(backofficeUser);
 
   const sessionToken = store.createSession(user);
+  const backofficeToken = store.createBackofficeSession(
+    backofficeUser,
+    backofficeCredential.role,
+    backofficeCredential.tenantId
+  );
   const draftToken = store.createDraftSession({
     tenantId: store.getDefaultTenantId(),
     phone: "13812345678"
   });
   assert.ok(store.getSession(sessionToken));
+  assert.ok(store.getBackofficeSessionUser(backofficeToken));
   assert.ok(store.getDraftSession(draftToken));
 
   store.persist();
@@ -591,21 +605,46 @@ test("移动端会话只持久化摘要并可跨重启恢复，资料草稿和�
   const persistedState = JSON.parse(persistedText) as {
     sessions: Array<[
       string,
-      { token: string; persistent?: boolean; expiresAt?: string }
+      {
+        token: string;
+        persistent?: boolean;
+        backofficeRole?: string;
+        expiresAt?: string;
+      }
     ]>;
     draftSessions: unknown[];
   };
-  assert.equal(persistedState.sessions.length, 1);
-  const [sessionDigest, persistedSession] = persistedState.sessions[0];
+  assert.equal(persistedState.sessions.length, 2);
+  const [sessionDigest, persistedSession] = persistedState.sessions.find(
+    ([, session]) => !session.backofficeRole
+  )!;
   assert.match(sessionDigest, /^[a-f0-9]{64}$/);
   assert.equal(persistedSession.token, sessionDigest);
   assert.equal(persistedSession.persistent, true);
   assert.equal(persistedSession.expiresAt, undefined);
+  const [backofficeDigest, persistedBackofficeSession] = persistedState.sessions.find(
+    ([, session]) => session.backofficeRole === "merchant"
+  )!;
+  assert.match(backofficeDigest, /^[a-f0-9]{64}$/);
+  assert.equal(persistedBackofficeSession.token, backofficeDigest);
+  assert.equal(persistedBackofficeSession.persistent, true);
+  assert.ok(persistedBackofficeSession.expiresAt);
+  const backofficeTtlMs =
+    Date.parse(persistedBackofficeSession.expiresAt) - Date.now();
+  assert.ok(backofficeTtlMs >= 7 * 24 * 60 * 60_000 - 1_000);
+  assert.ok(backofficeTtlMs <= 7 * 24 * 60 * 60_000);
   assert.deepEqual(persistedState.draftSessions, []);
-  assert.doesNotMatch(persistedText, new RegExp(`${sessionToken}|${draftToken}`));
+  assert.doesNotMatch(
+    persistedText,
+    new RegExp(`${sessionToken}|${backofficeToken}|${draftToken}`)
+  );
 
   const restartedStore = new InMemoryStoreService();
   assert.ok(restartedStore.getSession(sessionToken));
+  assert.equal(
+    restartedStore.getBackofficeSessionUser(backofficeToken)?.user.id,
+    backofficeUser.id
+  );
   assert.equal(restartedStore.getDraftSession(draftToken), undefined);
 
   const legacySessionToken = "session_legacy-token-that-must-not-revive";
@@ -639,6 +678,10 @@ test("移动端会话只持久化摘要并可跨重启恢复，资料草稿和�
 
   const legacyRestartedStore = new InMemoryStoreService();
   assert.ok(legacyRestartedStore.getSession(sessionToken));
+  assert.equal(
+    legacyRestartedStore.getBackofficeSessionUser(backofficeToken)?.user.id,
+    backofficeUser.id
+  );
   assert.equal(legacyRestartedStore.getSession(legacySessionToken), undefined);
   assert.equal(legacyRestartedStore.getDraftSession(legacyDraftToken), undefined);
   legacyRestartedStore.flushBootstrapPersistence();
@@ -646,10 +689,57 @@ test("移动端会话只持久化摘要并可跨重启恢复，资料草稿和�
   assert.doesNotMatch(cleanedLegacyText, /legacy-token-that-must-not-revive/);
 
   assert.equal(legacyRestartedStore.revokeSession(sessionToken), true);
+  assert.equal(legacyRestartedStore.revokeSession(backofficeToken), true);
   legacyRestartedStore.persist();
   const loggedOutRestartedStore = new InMemoryStoreService();
   assert.equal(loggedOutRestartedStore.getSession(sessionToken), undefined);
+  assert.equal(loggedOutRestartedStore.getSession(backofficeToken), undefined);
   assert.equal(loggedOutRestartedStore.revokeSession(sessionToken), false);
+});
+
+test("管理员、商户和补货员的移动会话均可跨 API 重启恢复", () => {
+  const store = createIsolatedStore();
+  const adminCredential = store.backofficeCredentials.find(
+    (entry) => entry.role === "admin"
+  );
+  const admin = store.users.find(
+    (entry) =>
+      entry.id === adminCredential?.userId &&
+      entry.role === "admin" &&
+      entry.status === "active"
+  );
+  const merchant = store.users.find(
+    (entry) => entry.role === "merchant" && entry.status === "active"
+  );
+  assert.ok(adminCredential);
+  assert.ok(admin);
+  assert.ok(merchant);
+
+  const restocker = {
+    ...structuredClone(merchant),
+    id: `${merchant.id}-session-restocker`,
+    role: "restocker" as const,
+    name: "会话恢复补货员",
+    phone: "13812345679",
+    tags: []
+  };
+  store.users.push(restocker);
+
+  const sessions = [admin, merchant, restocker].map((user) => ({
+    role: user.role,
+    token: store.createSession(user)
+  }));
+  store.persist();
+  const persistedText = readFileSync(process.env.API_DATA_FILE!, "utf8");
+
+  for (const session of sessions) {
+    assert.doesNotMatch(persistedText, new RegExp(session.token));
+  }
+
+  const restartedStore = new InMemoryStoreService();
+  for (const session of sessions) {
+    assert.equal(restartedStore.getSessionUser(session.token)?.role, session.role);
+  }
 });
 
 test("移动端 AI 状态隐藏上游配置，助手请求有长度和频率边界", async () => {

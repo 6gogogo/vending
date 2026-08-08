@@ -103,9 +103,15 @@ interface BatchConsumptionEntry {
 
 const MAX_CALLBACK_LOGS = 1000;
 const MAX_VERIFICATION_FAILURES = 5;
-const SESSION_TTL_MS = 24 * 60 * 60_000;
+const BACKOFFICE_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
 const DRAFT_SESSION_TTL_MS = 30 * 60_000;
 const SESSION_TOKEN_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+const BACKOFFICE_SESSION_ROLES = new Set<BackofficeRole>([
+  "super_admin",
+  "admin",
+  "merchant",
+  "restocker"
+]);
 const NEGATIVE_STOCK_BALANCE_NOTE = "库存透支调整";
 export const HIDDEN_BACKOFFICE_USER_TAG = "hidden-backoffice";
 export const SUPER_ADMIN_TAG = "super-admin";
@@ -246,7 +252,7 @@ export class InMemoryStoreService {
           "真实数据平面初始化尚未完成；常规 API 进程不能加载待初始化的真实库。"
         );
       }
-      // 只恢复不含手机号和验证码原文的短期挑战，以及仅含令牌摘要的移动端长期会话。
+      // 只恢复不含手机号和验证码原文的短期挑战，以及仅含令牌摘要的受控会话。
       shouldPersist =
         Boolean(persistedResult?.requiresPrivacyRewrite) ||
         Boolean(persistedResult?.requiresDataPlaneRewrite) ||
@@ -958,12 +964,13 @@ export class InMemoryStoreService {
     const now = Date.now();
     this.sessions.set(token, {
       token,
+      persistent: true,
       userId: user.id,
       role: user.role,
       backofficeRole,
       tenantId,
       createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + SESSION_TTL_MS).toISOString()
+      expiresAt: new Date(now + BACKOFFICE_SESSION_TTL_MS).toISOString()
     });
     return token;
   }
@@ -1038,13 +1045,13 @@ export class InMemoryStoreService {
     }
 
     const directSession = this.sessions.get(token);
-    const directEntryIsPersistedDigest = this.isPersistedMobileSessionEntry(
+    const directEntryIsPersistedDigest = this.isPersistedSessionEntry(
       token,
       directSession
     );
     const tokenDigest = this.createSessionTokenDigest(token);
     const digestSession = this.sessions.get(tokenDigest);
-    const restoredSession = this.isPersistedMobileSessionEntry(
+    const restoredSession = this.isPersistedSessionEntry(
       tokenDigest,
       digestSession
     )
@@ -1059,7 +1066,9 @@ export class InMemoryStoreService {
 
     if (
       !session ||
-      (session.persistent !== true && !this.isFutureExpiration(session.expiresAt))
+      (session.expiresAt
+        ? !this.isFutureExpiration(session.expiresAt)
+        : session.persistent !== true)
     ) {
       this.sessions.delete(sessionKey);
       return undefined;
@@ -1795,21 +1804,31 @@ export class InMemoryStoreService {
     return createHash("sha256").update(token, "utf8").digest("hex");
   }
 
-  private isPersistedMobileSessionEntry(
+  private isPersistedSessionEntry(
     tokenDigest: string,
     session?: SessionRecord
   ): session is SessionRecord {
-    return Boolean(
-      session &&
-        SESSION_TOKEN_DIGEST_PATTERN.test(tokenDigest) &&
-        session.token === tokenDigest &&
-        session.persistent === true &&
-        !session.backofficeRole &&
-        session.expiresAt === undefined &&
-        session.userId &&
-        session.createdAt &&
-        Number.isFinite(Date.parse(session.createdAt))
-    );
+    if (
+      !session ||
+      !SESSION_TOKEN_DIGEST_PATTERN.test(tokenDigest) ||
+      session.token !== tokenDigest ||
+      session.persistent !== true ||
+      !session.userId ||
+      !session.createdAt ||
+      !Number.isFinite(Date.parse(session.createdAt))
+    ) {
+      return false;
+    }
+
+    if (session.backofficeRole) {
+      return Boolean(
+        BACKOFFICE_SESSION_ROLES.has(session.backofficeRole) &&
+          session.expiresAt &&
+          this.isFutureExpiration(session.expiresAt)
+      );
+    }
+
+    return session.expiresAt === undefined;
   }
 
   private hashManualVerificationCode(code: string, salt: string) {
@@ -2862,7 +2881,7 @@ export class InMemoryStoreService {
       alerts: structuredClone(this.alerts),
       logs: structuredClone(this.logs),
       platformTenants: structuredClone(this.platformTenants),
-      // 外部挑战不含手机号和验证码原文；移动端会话只持久化不可直接充当 Bearer 的摘要。
+      // 外部挑战不含手机号和验证码原文；会话只持久化不可直接充当 Bearer 的摘要。
       verificationCodes: Array.from(this.verificationCodes.entries())
         .filter(([key, record]) => this.isPersistableVerificationChallenge(key, record))
         .map(
@@ -2876,8 +2895,15 @@ export class InMemoryStoreService {
         ([token, session]) => {
           if (
             session.persistent !== true ||
-            session.backofficeRole ||
             session.token !== token
+          ) {
+            return [];
+          }
+
+          if (
+            session.backofficeRole
+              ? !session.expiresAt || !this.isFutureExpiration(session.expiresAt)
+              : session.expiresAt !== undefined
           ) {
             return [];
           }
@@ -2887,7 +2913,9 @@ export class InMemoryStoreService {
             : this.createSessionTokenDigest(token);
           const persistedSession = structuredClone(session);
           persistedSession.token = tokenDigest;
-          delete persistedSession.expiresAt;
+          if (!persistedSession.backofficeRole) {
+            delete persistedSession.expiresAt;
+          }
 
           return [
             [tokenDigest, persistedSession] as [string, SessionRecord]
@@ -3008,10 +3036,10 @@ export class InMemoryStoreService {
         );
       }
     }
-    // 只恢复摘要索引的移动端长期会话；旧明文会话、后台会话和资料草稿均关闭式丢弃。
+    // 只恢复摘要索引的移动端长期会话和未过期后台会话；旧明文会话和资料草稿均关闭式丢弃。
     this.sessions.clear();
     for (const [tokenDigest, session] of state.sessions) {
-      if (this.isPersistedMobileSessionEntry(tokenDigest, session)) {
+      if (this.isPersistedSessionEntry(tokenDigest, session)) {
         this.sessions.set(tokenDigest, structuredClone(session));
       }
     }

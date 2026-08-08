@@ -392,7 +392,7 @@ test("失败状态的写请求保留审计记录，但不触发业务状态写�
   assert.doesNotMatch(serialized, /13987654321/);
 });
 
-test("移动端登录态永久保活，后台登录态和资料草稿仍由服务端拒绝过期记录", () => {
+test("移动端登录态永久保活，后台登录态一周保活且仍拒绝过期记录", () => {
   const store = createIsolatedStore();
   const mobileUser = store.users.find(
     (entry) => entry.role === "special" && entry.status === "active"
@@ -426,9 +426,11 @@ test("移动端登录态永久保活，后台登录态和资料草稿仍由服�
   const backofficeSession = store.sessions.get(backofficeToken) as
     | { persistent?: boolean; expiresAt?: string }
     | undefined;
-  assert.equal(backofficeSession?.persistent, undefined);
+  assert.equal(backofficeSession?.persistent, true);
   assert.ok(backofficeSession?.expiresAt);
-  assert.ok(new Date(backofficeSession.expiresAt).getTime() > Date.now());
+  const backofficeTtlMs = new Date(backofficeSession.expiresAt).getTime() - Date.now();
+  assert.ok(backofficeTtlMs >= 7 * 24 * 60 * 60_000 - 1_000);
+  assert.ok(backofficeTtlMs <= 7 * 24 * 60 * 60_000);
 
   backofficeSession.expiresAt = new Date(Date.now() - 1_000).toISOString();
   assert.equal(store.getSession(backofficeToken), undefined);

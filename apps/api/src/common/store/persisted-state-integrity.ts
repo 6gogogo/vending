@@ -48,6 +48,12 @@ const PAYMENT_REFUND_PROVIDER_OUTCOMES = new Set(["unknown", "pending", "success
 const PAYMENT_REFUND_BUSINESS_APPLY_STATES = new Set(["pending", "completed"]);
 const PLATFORM_TENANT_STATUSES = new Set(["active", "trial", "paused"]);
 const MOBILE_USER_ROLES = new Set(["admin", "merchant", "restocker", "special"]);
+const BACKOFFICE_SESSION_ROLES = new Set([
+  "super_admin",
+  "admin",
+  "merchant",
+  "restocker"
+]);
 const SESSION_TOKEN_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const DATA_PLANE_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const SIMULATION_INITIALIZATION_SOURCES = new Set([
@@ -261,9 +267,19 @@ const validatePersistedSessions = (
       result.errors.push(`sessions[${index}].token 必须与摘要键一致。`);
     }
     if (session.backofficeRole !== undefined) {
-      result.errors.push(`sessions[${index}] 不能持久化后台会话。`);
-    }
-    if (session.expiresAt !== undefined) {
+      if (
+        typeof session.backofficeRole !== "string" ||
+        !BACKOFFICE_SESSION_ROLES.has(session.backofficeRole)
+      ) {
+        result.errors.push(`sessions[${index}].backofficeRole 不是有效后台角色。`);
+      }
+      if (
+        typeof session.expiresAt !== "string" ||
+        !Number.isFinite(Date.parse(session.expiresAt))
+      ) {
+        result.errors.push(`sessions[${index}] 的后台会话必须设置有效过期时间。`);
+      }
+    } else if (session.expiresAt !== undefined) {
       result.errors.push(`sessions[${index}] 的移动端长期会话不能设置时间过期。`);
     }
     if (typeof session.userId !== "string" || !session.userId.trim()) {
