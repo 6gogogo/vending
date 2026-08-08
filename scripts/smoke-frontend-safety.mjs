@@ -635,7 +635,7 @@ assert.match(
   "地点搜索结果必须按严重程度播报"
 );
 const remoteOpenSource = adminDeviceSource.slice(
-  adminDeviceSource.indexOf("const remoteOpen"),
+  adminDeviceSource.indexOf("const remoteOpen = async"),
   adminDeviceSource.indexOf("const notifyPaymentSuccess")
 );
 assert.doesNotMatch(remoteOpenSource, /window\.(prompt|confirm)/, "远程开门不应依赖无法稳定审查的浏览器原生弹窗");
@@ -665,7 +665,7 @@ assert.doesNotMatch(remoteOpenSource, /reason\.length\s*[<>]/, "远程开门原�
 assert.match(adminDeviceSource, /操作原因（必填）/, "远程开门原因必须保持必填");
 assert.doesNotMatch(adminDeviceSource, /4[–至-]200|maxlength="200"|不能只填“测试”/, "远程开门原因不得保留字数限制或禁止短原因");
 assert.match(adminDeviceSource, /:disabled="!remoteOpenReason\.trim\(\)"/, "远程开门下一步只应在原因为空时禁用");
-assert.match(remoteOpenSource, /device\.status === "offline"/, "离线柜机必须阻止远程开门");
+assert.match(remoteOpenSource, /if \(!deviceCanOpen\.value\)/, "服务端签发为不可开门的柜机必须阻止远程操作");
 assert.match(remoteOpenSource, /doorState === "open"/, "门已开启时必须阻止重复下发开门指令");
 const remoteOpenBlockerSource = adminDeviceSource.slice(
   adminDeviceSource.indexOf("const remoteOpenBlockedHint"),
