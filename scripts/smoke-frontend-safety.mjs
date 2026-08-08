@@ -16,69 +16,85 @@ assert.match(scanSource, /onlyFromCamera:\s*true/, "扫码必须仅允许相机�
 assert.doesNotMatch(scanSource, /onlyFromCamera:\s*false/, "扫码不得重新开放相册来源");
 
 const deviceDetailSource = readSource("apps/mobile/src/pages/special/device-detail.vue");
-assert.match(deviceDetailSource, /const previewAndConfirmOpen\s*=\s*async/, "开柜必须保留统一预览确认入口");
-const reservationOpenSource = deviceDetailSource.slice(
-  deviceDetailSource.indexOf("const openWithReservation"),
-  deviceDetailSource.indexOf("const cancelReservation")
+const appLoginPageSource = readSource("apps/mobile/src/pages/common/app-login.vue");
+const cabinetCopySource = readSource("apps/mobile/src/constants/copy.ts");
+assert.match(deviceDetailSource, /resolveCabinetEntry\(query\)/, "柜机页必须统一解析微信 q 与内部扫码入口");
+assert.match(deviceDetailSource, /buildPickupLoginUrl\(deviceCode\.value\)/, "未登录扫码必须保留柜机目标进入登录页");
+assert.match(
+  appLoginPageSource,
+  /createAppLoginContinuation\([\s\S]+bootstrapSession:[\s\S]+getSessionRole:[\s\S]+setSession:[\s\S]+redirectTo:[\s\S]+routeRoleHome:/,
+  "登录页必须通过可测试控制器统一恢复扫码柜机目标"
 );
-assert.match(reservationOpenSource, /previewAndConfirmOpen\(payload, reservation\)/, "预约开柜必须经过预览确认");
-assert.doesNotMatch(reservationOpenSource, /performOpen\(payload\)/, "预约开柜不得绕过统一确认入口");
-for (const reservationCopy of [
-  "预约不锁定当前批次或当前保质期",
-  "到柜开门时将使用仍有效的库存",
-  "预约仍在，但当前没有可履约的有效批次",
-  "重新查看物资",
-  "取消预约"
+assert.match(
+  appLoginPageSource,
+  /onShow\(\(\) => \{[\s\S]+restoreExistingSession\(\)/,
+  "已有会话必须直接恢复扫码柜机目标"
+);
+const loginSubmitSource = appLoginPageSource.slice(
+  appLoginPageSource.indexOf("const submit = async"),
+  appLoginPageSource.indexOf("const openDisclaimer")
+);
+assert.match(
+  loginSubmitSource,
+  /response\.state === "approved"[\s\S]+continueApprovedLogin\(response\)/,
+  "验证码登录成功必须直接恢复扫码柜机目标"
+);
+assert.match(deviceDetailSource, /const requestOpenConfirmation\s*=\s*\(payload/, "开柜必须保留统一确认入口");
+const pickupSource = deviceDetailSource.slice(
+  deviceDetailSource.indexOf("const handlePickup"),
+  deviceDetailSource.indexOf("const createReservation =")
+);
+assert.ok(
+  pickupSource.indexOf("requestOpenConfirmation") >= 0 &&
+    pickupSource.indexOf("requestOpenConfirmation") < pickupSource.indexOf("createReservationFromItems") &&
+    pickupSource.indexOf("createReservationFromItems") < pickupSource.indexOf("performOpen"),
+  "扫码即时领取必须先确认，再创建临时预约，最后只下发一次开柜请求"
+);
+assert.match(pickupSource, /existingReservation\s*\?\?/, "已有预约必须优先复用，不能重复占用额度");
+assert.match(pickupSource, /cancelTemporaryReservation/, "明确开柜拒绝时必须自动取消新建临时预约");
+assert.match(deviceDetailSource, /v-if="!scanMode && nearestReservation"/, "普通预约成功后必须只在非扫码模式显示页内凭条");
+assert.match(cabinetCopySource, /eyebrow: "预约凭条"/, "普通入口必须展示页内预约凭条");
+assert.match(cabinetCopySource, /cancel: "取消预约"/, "页内预约凭条必须提供取消入口");
+assert.match(deviceDetailSource, /appCopy\.cabinetPickup/, "柜机领取页文案必须集中从移动端文案表读取");
+for (const removedSection of [
+  "<FlowSteps",
+  "<ServiceMetric",
+  'class="device-readiness"',
+  'class="distance-banner"',
+  'class="settlement-preview"',
+  "openNavigation",
+  "goFeedback"
 ]) {
-  assert.ok(deviceDetailSource.includes(reservationCopy), `预约流程必须明确展示：${reservationCopy}`);
+  assert.ok(!deviceDetailSource.includes(removedSection), `精简领取页不得恢复冗余区域：${removedSection}`);
 }
-assert.doesNotMatch(
-  deviceDetailSource,
-  /v-if="[^"]*!accessibilityEnabled[^"]*" class="(?:reservation-panel|reservation-rules|settlement-preview|distance-banner)/,
-  "无障碍模式不得隐藏预约、预结算或距离风险信息"
-);
-assert.match(deviceDetailSource, /:aria-label="`为\$\{goods\.name\}减少一件`"/, "减少商品数量按钮必须有具体可访问名称");
-assert.match(deviceDetailSource, /:aria-label="`为\$\{goods\.name\}增加一件`"/, "增加商品数量按钮必须有具体可访问名称");
+assert.match(deviceDetailSource, /goods\.decreaseAriaLabel\(goods\.name\)/, "减少商品数量按钮必须有具体可访问名称");
+assert.match(deviceDetailSource, /goods\.increaseAriaLabel\(goods\.name\)/, "增加商品数量按钮必须有具体可访问名称");
 assert.match(deviceDetailSource, /class="stepper__value" aria-live="polite" aria-atomic="true"/, "商品数量变化必须向辅助技术播报");
-for (const requiredContext of ["柜机编号", "柜门", "距离验证"]) {
-  assert.ok(deviceDetailSource.includes(requiredContext), `开柜最终确认必须展示${requiredContext}`);
+const openConfirmationSource = deviceDetailSource.slice(
+  deviceDetailSource.indexOf("const requestOpenConfirmation"),
+  deviceDetailSource.indexOf("const handlePickup")
+);
+assert.match(openConfirmationSource, /uni\.showModal/, "精简开柜确认必须使用小程序受管模态框");
+for (const requiredContext of ["deviceName.value", "confirmation.content", "goodsSummary"]) {
+  assert.ok(openConfirmationSource.includes(requiredContext), `开柜确认必须展示：${requiredContext}`);
 }
-assert.match(
-  deviceDetailSource,
-  /appCopy\.reservationPickup\.openConfirmSummary/,
-  "开柜最终确认必须展示预约物资摘要"
-);
-assert.match(
-  deviceDetailSource,
-  /class="open-confirmation-dialog"[\s\S]+role="dialog"[\s\S]+aria-modal="true"/,
-  "开柜最终确认必须使用有明确模态语义的结构化核对单"
-);
-assert.doesNotMatch(deviceDetailSource, /class="open-confirmation-settlement__amount"/, "预约取货确认不得展示支付金额");
-assert.match(deviceDetailSource, /class="open-confirmation-risk"/, "预约取货确认必须继续独立展示距离风险");
+assert.doesNotMatch(openConfirmationSource, /金额|距离|柜门/, "精简开柜确认只展示柜机与商品数量");
+assert.doesNotMatch(deviceDetailSource, /支付金额/, "预约取货确认不得展示支付金额");
 assert.doesNotMatch(deviceDetailSource, /quoteExpiresAt/, "预约取货确认不得依赖服务端支付报价有效期");
 assert.match(
   deviceDetailSource,
-  /:disabled="submitting"/,
-  "预约取货确认提交中必须禁止重复开柜"
+  /const actionBusy = computed[\s\S]+openFlowLocked\.value/,
+  "领取、确认和提交期间必须统一锁定重复操作"
 );
-assert.match(deviceDetailSource, /@keydown\.tab\.stop="trapOpenConfirmationFocus"/, "开柜确认必须限制键盘焦点在弹窗内");
-assert.match(deviceDetailSource, /@keydown\.esc\.stop\.prevent="finishOpenConfirmation\('cancelled'\)"/, "开柜确认必须支持 Escape 安全取消");
-assert.match(deviceDetailSource, /:inert="Boolean\(openConfirmation\)"/, "开柜确认显示时必须隔离背景交互");
-const performOpenSource = deviceDetailSource.slice(
-  deviceDetailSource.indexOf("const performOpen"),
-  deviceDetailSource.indexOf("const showOpenBlocked")
+assert.match(deviceDetailSource, /openFlowLocked\.value = true/, "进入开门状态或待确认结果后必须持续禁止重复操作");
+const openRecoverySource = deviceDetailSource.slice(
+  deviceDetailSource.indexOf("const navigateToOpening"),
+  deviceDetailSource.indexOf("const createReservationFromItems")
 );
-assert.match(performOpenSource, /findLikelyOpenEvent/, "开柜结果不确定时必须优先查询当前用户事件");
-assert.match(performOpenSource, /resultType=open-pending/, "查不到开柜事件时必须进入待确认结果页");
-assert.doesNotMatch(performOpenSource, /isOpenQuoteRefreshRequired|requote/, "预约取货开柜不得走支付报价重新预览链路");
-assert.doesNotMatch(performOpenSource, /actionText=\$\{encodeURIComponent\("重新尝试"\)\}/, "开柜结果不确定时不得诱导立即重试");
-const previewConfirmationSource = deviceDetailSource.slice(
-  deviceDetailSource.indexOf("const previewAndConfirmOpen"),
-  deviceDetailSource.indexOf("const createReservation")
-);
-assert.doesNotMatch(previewConfirmationSource, /uni\.showModal/, "预结算不得再压缩到居中的原生文本弹窗");
-assert.doesNotMatch(previewConfirmationSource, /previewOpenSettlement|openResult === "requote"/, "预约取货确认不得请求支付报价或重报价");
-assert.match(deviceDetailSource, /警告：未确认（手动模式/, "手动模式距离未知时必须明确告警但允许继续");
+assert.match(openRecoverySource, /findLikelyOpenEvent/, "开柜结果不确定时必须优先查询当前用户事件");
+assert.match(openRecoverySource, /resultType=open-pending/, "查不到开柜事件时必须进入待确认结果页");
+assert.doesNotMatch(openRecoverySource, /isOpenQuoteRefreshRequired|requote/, "预约取货开柜不得走支付报价重新预览链路");
+assert.doesNotMatch(openConfirmationSource, /previewOpenSettlement|openResult === "requote"/, "预约取货确认不得请求支付报价或重报价");
 
 const openingSource = readSource("apps/mobile/src/pages/common/opening.vue");
 assert.match(openingSource, /resultType=open-stopped/, "开门终止状态必须使用不会诱导重试的结果类型");

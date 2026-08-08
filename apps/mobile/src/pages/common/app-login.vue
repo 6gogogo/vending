@@ -13,6 +13,11 @@ import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?r
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { getErrorMessage } from "../../utils/error-message";
+import {
+  resolvePickupLoginTarget,
+  type PickupLoginTarget
+} from "../../utils/cabinet-entry";
+import { createAppLoginContinuation } from "../../utils/app-login-continuation";
 import { syncNativeInputAccessibility } from "../../utils/native-input-accessibility";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 import {
@@ -37,6 +42,7 @@ const disclaimerValidationMessage = ref("");
 const disclaimerDialog = ref<HTMLElement | { $el?: HTMLElement }>();
 let disclaimerPreviousFocus: HTMLElement | undefined;
 const verificationProvider = ref<VerificationProvider>();
+const pickupLoginTarget = ref<PickupLoginTarget>();
 const showVerificationPreview =
   import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
 
@@ -102,18 +108,18 @@ const disclaimerLines = computed(() =>
     .filter(Boolean)
 );
 
-const bootstrap = async () => {
-  await sessionStore.bootstrap();
-
-  if (!sessionStore.user) {
-    return;
-  }
-
-  syncRoleTabBar(sessionStore.user.role);
-  uni.switchTab({
-    url: resolveHomePath(sessionStore.user.role)
+const { continueApprovedLogin, restoreExistingSession } =
+  createAppLoginContinuation({
+    getPickupTarget: () => pickupLoginTarget.value,
+    bootstrapSession: () => sessionStore.bootstrap(),
+    getSessionRole: () => sessionStore.user?.role,
+    setSession: (session) => sessionStore.setSession(session),
+    redirectTo: (url) => uni.redirectTo({ url }),
+    routeRoleHome: (role) => {
+      syncRoleTabBar(role);
+      uni.switchTab({ url: resolveHomePath(role) });
+    }
   });
-};
 
 const loadVerificationProvider = async () => {
   try {
@@ -200,11 +206,7 @@ const submit = async () => {
     loginState.value = response;
 
     if (response.state === "approved") {
-      sessionStore.setSession(response);
-      syncRoleTabBar(response.user.role);
-      uni.switchTab({
-        url: resolveHomePath(response.user.role)
-      });
+      continueApprovedLogin(response);
       return;
     }
 
@@ -313,13 +315,15 @@ const closeDisclaimer = async () => {
 };
 
 onLoad((query) => {
+  pickupLoginTarget.value = resolvePickupLoginTarget(query);
+
   if (typeof query.phone === "string" && query.phone) {
     phone.value = query.phone;
   }
 });
 
 onShow(() => {
-  void bootstrap();
+  void restoreExistingSession();
   void loadVerificationProvider();
 });
 

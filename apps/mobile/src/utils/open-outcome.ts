@@ -19,11 +19,34 @@ const uncertainOpenOutcomeKeywords = [
 
 const confirmedOpenRejectionKeywords = [
   "柜机平台开柜失败",
+  "柜机平台已拒绝开门请求",
   "设备明确拒绝"
 ];
 
+const getOperationCode = (error: ApiError) => {
+  if (!error.body || typeof error.body !== "object" || !("code" in error.body)) {
+    return "";
+  }
+
+  const code = error.body.code;
+  return typeof code === "string" ? code : "";
+};
+
 export const isOpenOutcomeUncertain = (message: string, error?: unknown) => {
   const normalized = message.toLowerCase();
+  if (error instanceof ApiError) {
+    const operationCode = getOperationCode(error);
+    if (operationCode === "operation_rejected") {
+      return false;
+    }
+    if (
+      operationCode === "operation_indeterminate" ||
+      operationCode === "operation_confirmed"
+    ) {
+      return true;
+    }
+  }
+
   if (confirmedOpenRejectionKeywords.some((keyword) => normalized.includes(keyword.toLowerCase()))) {
     return false;
   }

@@ -29,6 +29,32 @@ test("明确业务拒绝不被误判为结果未知", () => {
   assert.equal(isOpenOutcomeUncertain("当前柜机处于维护状态"), false);
 });
 
+test("柜机平台明确拒绝的 409 按确定结果处理", () => {
+  assert.equal(
+    isOpenOutcomeUncertain(
+      "柜机平台已拒绝开门请求。",
+      new ApiError("柜机平台已拒绝开门请求。", 409, {
+        code: "operation_rejected",
+        retryable: false
+      })
+    ),
+    false
+  );
+});
+
+test("结果不确定或已确认受理的 409 仍禁止取消预约和重复开门", () => {
+  for (const code of ["operation_indeterminate", "operation_confirmed"] as const) {
+    assert.equal(
+      isOpenOutcomeUncertain(
+        `HTTP 409 ${code}`,
+        new ApiError(`HTTP 409 ${code}`, 409, { code, retryable: false })
+      ),
+      true,
+      code
+    );
+  }
+});
+
 test("非幂等开门的 408、409、5xx 和非 JSON 响应均按结果未知处理", () => {
   for (const status of [408, 409, 500, 502]) {
     assert.equal(
