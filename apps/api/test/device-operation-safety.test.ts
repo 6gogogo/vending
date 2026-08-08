@@ -207,6 +207,12 @@ test("SmartVM 只把白名单业务拒绝视为可释放租约，畸形 2xx 响�
 
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, { code: 400 })), true);
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(400, { code: 400 })), true);
+  assert.equal(
+    gateway.isDefiniteOpenDoorRejection(
+      createError(200, { code: 300, message: "存在非友好购买行为！" })
+    ),
+    true
+  );
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, "")), false);
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, "<html>proxy response</html>")), false);
   assert.equal(gateway.isDefiniteOpenDoorRejection(createError(200, { message: "缺少业务 code" })), false);
@@ -497,6 +503,67 @@ test("用户开柜与后台远程开门共用同一柜门互斥", async () => {
   const opened = await userOpen;
   assert.equal(opened.deviceCode, device.deviceCode);
   assert.equal(gatewayCalls, 1);
+});
+
+test("实例管理员运营开门使用受控服务商上游身份，事件仍记录实际操作者", async () => {
+  const store = createIsolatedStore();
+  const coordinator = new DeviceOperationCoordinator(store);
+  const device = store.devices[0];
+  const door = device?.doors[0];
+  const tenantAdmin = store.users.find(
+    (entry) => entry.role === "admin" && entry.status === "active" && Boolean(entry.tenantId)
+  );
+  const providerCredential = store.backofficeCredentials.find(
+    (entry) => entry.role === "super_admin" && entry.tenantId === undefined
+  );
+  const providerUser = store.users.find((entry) => entry.id === providerCredential?.userId);
+  assert.ok(device);
+  assert.ok(door);
+  assert.ok(tenantAdmin);
+  assert.ok(providerCredential);
+  assert.ok(providerUser);
+  device.status = "online";
+  device.lastSeenAt = new Date().toISOString();
+  store.events.splice(0, store.events.length);
+  store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
+
+  let outboundIdentity: { userId: string; phone: string } | undefined;
+  const gateway = {
+    async openDoor(payload: { userId: string; phone: string }) {
+      outboundIdentity = { userId: payload.userId, phone: payload.phone };
+      return { orderNo: "operator-open-order" };
+    }
+  };
+  const accessRules = {} as AccessRulesService;
+  const cabinetEvents = new CabinetEventsService(
+    store,
+    accessRules,
+    gateway as never,
+    {} as InventoryOrdersService,
+    new AlertsService(store),
+    new ReservationsService(store, accessRules),
+    new ConfigService({}),
+    coordinator
+  );
+
+  await cabinetEvents.openCabinet(
+    {
+      phone: tenantAdmin.phone,
+      deviceCode: device.deviceCode,
+      doorNum: door.doorNum,
+      hasInboundGoods: false,
+      openReason: "现场设备巡检"
+    },
+    { id: tenantAdmin.id, role: "admin", tenantId: tenantAdmin.tenantId }
+  );
+
+  assert.deepEqual(outboundIdentity, {
+    userId: providerUser.id,
+    phone: providerUser.phone
+  });
+  assert.equal(store.events[0]?.userId, tenantAdmin.id);
+  assert.equal(store.events[0]?.phone, tenantAdmin.phone);
+  assert.equal(store.events[0]?.operationType, "service");
 });
 
 test("用户开柜在 SmartVM 2xx 空响应后保留已落盘命令租约，第二次请求不会重复下发", async () => {

@@ -220,14 +220,15 @@ export class CabinetEventsService {
         this.store.persist();
 
         let openResult: Awaited<ReturnType<SmartVmGateway["openDoor"]>>;
+        const smartVmIdentity = this.resolveSmartVmOpenIdentity(user, operationType);
 
         try {
           openResult = await this.smartVmGateway.openDoor({
-            userId: user.id,
+            userId: smartVmIdentity.id,
             eventId,
             deviceCode: payload.deviceCode,
             doorNum,
-            phone: payload.phone
+            phone: smartVmIdentity.phone
           });
         } catch (error) {
           const detail = this.smartVmGateway.extractErrorMessage(error);
@@ -1171,6 +1172,55 @@ export class CabinetEventsService {
       requiredPaymentOrderId: paymentOrderId.trim(),
       assertRuntimeSafety
     }, Boolean(financialOperationLease));
+  }
+
+  async retryZeroCostPlatformCompletion(eventId: string, actorUserId?: string) {
+    const actor = this.getAdminActor(actorUserId);
+    const event = this.store.events.find((entry) => entry.eventId === eventId);
+
+    if (!event) {
+      throw new BadRequestException("未找到对应开柜事件。");
+    }
+
+    const freeOnlyPickup = this.isFreeOnlyPickupEvent(event);
+    const noChargeOperationalOpen = this.isNoChargeOperationalOpen(event);
+
+    if (
+      event.status !== "settled" ||
+      event.amount !== 0 ||
+      (!freeOnlyPickup && !noChargeOperationalOpen)
+    ) {
+      throw new BadRequestException("只有已结算的公益零元领取或零元运营开柜才能重试平台完成回写。");
+    }
+
+    if (event.billingStatus !== "free" && event.billingStatus !== "admin_confirmed") {
+      throw new BadRequestException("请先完成领取差异核对，再重试平台完成回写。");
+    }
+
+    if (!event.paymentNotifyUrl) {
+      throw new BadRequestException("当前订单缺少平台付款成功通知地址，不能重试。");
+    }
+
+    const transactionId =
+      event.paymentTransactionId ??
+      this.store.createReference(freeOnlyPickup ? "pickup-completion" : "operation-completion");
+
+    return this.forwardPaymentSuccessToPlatform(
+      {
+        orderNo: event.orderNo,
+        eventId: event.eventId,
+        transactionId,
+        deviceCode: event.deviceCode,
+        amount: 0
+      },
+      {
+        actor,
+        logType: freeOnlyPickup
+          ? "manual-free-pickup-completion-retry"
+          : "manual-zero-cost-operation-completion-retry",
+        targetUrl: event.paymentNotifyUrl
+      }
+    );
   }
 
   confirmBillingResolution(
@@ -2161,6 +2211,29 @@ export class CabinetEventsService {
       user,
       doorNum
     };
+  }
+
+  private resolveSmartVmOpenIdentity(user: UserRecord, operationType: CabinetOpenPurpose) {
+    if (operationType === "pickup") {
+      return user;
+    }
+
+    for (const credential of this.store.backofficeCredentials) {
+      if (credential.role !== "super_admin" || credential.tenantId !== undefined) {
+        continue;
+      }
+
+      const providerUser = this.store.users.find((entry) => entry.id === credential.userId);
+      if (
+        providerUser &&
+        this.store.isBackofficeCredentialValidForUser(providerUser, credential)
+      ) {
+        return providerUser;
+      }
+    }
+
+    // 模拟或旧数据平面可能没有服务商凭据，保留原调用身份以维持兼容。
+    return user;
   }
 
   private prepareOpenContext(

@@ -160,6 +160,24 @@ export class CabinetEventsController {
     );
   }
 
+  @Post("event/:eventId/platform-completion-retry")
+  @HttpCode(200)
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficePermissions("devices:operate")
+  async retryPlatformCompletion(
+    @Param("eventId") eventId: string,
+    @Req() request: { authUser?: { id: string } }
+  ) {
+    return ok(
+      await this.cabinetEventsService.retryZeroCostPlatformCompletion(
+        eventId,
+        request.authUser?.id
+      ),
+      "操作成功"
+    );
+  }
+
   @Post("event/:eventId/billing-confirmation")
   @HttpCode(200)
   @UseGuards(RoleGuard)

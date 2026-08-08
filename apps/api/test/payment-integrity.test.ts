@@ -4977,4 +4977,76 @@ describe("SmartVM 回调完整性", () => {
     assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
     assert.match(harness.event.adjustments?.[0]?.paymentNotifyMessage ?? "", /公益领取完成状态/);
   });
+
+  test("已结算零元订单可由管理员显式重试平台完成回写", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "settled",
+        role: "special",
+        amount: 0,
+        billingStatus: "free",
+        paymentNotifyStatus: "failed",
+        paymentNotifyUrl:
+          "https://pre.smartvm.cn/api/pay/container/openapipayback/merchant/order",
+        preSettlement: createFreeOnlyPreSettlement()
+      })
+    });
+
+    const result = await harness.service.retryZeroCostPlatformCompletion(
+      harness.event.eventId,
+      "admin-1"
+    );
+
+    assert.equal(result.forwarded, true);
+    assert.equal(harness.paymentNotifyCalls, 1);
+    assert.equal(harness.event.paymentNotifyStatus, "success");
+    assert.match(harness.event.paymentNotifyMessage ?? "", /公益领取完成状态/);
+  });
+
+  test("未完成差异核对的零元订单不能重试平台完成回写", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "settled",
+        role: "special",
+        amount: 0,
+        billingStatus: "mismatch",
+        paymentNotifyStatus: "pending",
+        paymentNotifyUrl:
+          "https://pre.smartvm.cn/api/pay/container/openapipayback/merchant/order",
+        preSettlement: createFreeOnlyPreSettlement()
+      })
+    });
+
+    await assert.rejects(
+      harness.service.retryZeroCostPlatformCompletion(harness.event.eventId, "admin-1"),
+      /先完成领取差异核对/
+    );
+    assert.equal(harness.paymentNotifyCalls, 0);
+  });
+
+  test("已结算零元运营开柜也可显式重试平台完成回写", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "settled",
+        role: "admin",
+        userId: "admin-1",
+        operationType: "service",
+        hasInboundGoods: false,
+        amount: 0,
+        billingStatus: "free",
+        paymentNotifyStatus: "failed",
+        paymentNotifyUrl:
+          "https://pre.smartvm.cn/api/pay/container/openapipayback/merchant/order"
+      })
+    });
+
+    const result = await harness.service.retryZeroCostPlatformCompletion(
+      harness.event.eventId,
+      "admin-1"
+    );
+
+    assert.equal(result.forwarded, true);
+    assert.equal(harness.paymentNotifyCalls, 1);
+    assert.equal(harness.event.paymentNotifyStatus, "success");
+  });
 });

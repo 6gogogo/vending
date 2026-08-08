@@ -41,7 +41,11 @@ export interface SmartVmExchangeTrace {
 }
 
 // 仅收录已由 SmartVM 开门接口契约验证的“请求未受理”业务码；新增码前必须补充契约与回归测试。
-const DEFINITE_OPEN_DOOR_REJECTION_CODES = new Set<number>([400]);
+const DEFINITE_OPEN_DOOR_REJECTION_CODES = new Set<number>([
+  // SmartVM 已实机确认：300 表示平台风控明确拒绝，柜门不会执行动作。
+  300,
+  400
+]);
 
 @Injectable()
 export class SmartVmGateway {
