@@ -54,7 +54,9 @@ const pageEyebrow = computed(() => (isStockOperator.value ? "补货" : "附近�
 
 const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
-    return isAccessibleSpecial.value ? "显示柜机名称、地点、距离、柜内数量和今日免费数量。" : "地图和列表都能查看，先确认可领取再开柜。";
+    return isAccessibleSpecial.value
+      ? "显示柜机名称、地点、距离、柜内数量和今日免费数量。"
+      : "地图和列表都能查看；选择柜机后先预约，到柜扫码后才能开柜。";
   }
 
   if (isStockOperator.value) {
@@ -164,7 +166,7 @@ const mapFocusStatusLabel = computed(() => {
     return "可操作";
   }
 
-  return "可领取";
+  return "可预约";
 });
 const mapFocusStatusTone = computed(() =>
   highlightedDevice.value
@@ -644,7 +646,7 @@ onShow(() => {
                   {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按推荐顺序显示" }}
                 </text>
                 <text v-if="sessionStore.user?.role === 'special' && !isAccessibleSpecial" class="device-card__highlight">
-                  展示柜内有货的物资，超出免费额度会按价格计费
+                  展示柜内有货且在当前领取额度内的物资
                 </text>
               </view>
               <text class="vm-status" :class="`vm-status--${getDeviceStatusPresentation(entry.device).tone}`">
@@ -689,9 +691,11 @@ onShow(() => {
               <button class="vm-button" :disabled="!canOpenDevice(entry.device)" @tap.stop="openDevice(entry.device.deviceCode)">
                 {{
                   !canOpenDevice(entry.device)
-                    ? "暂不可开柜"
+                    ? sessionStore.user?.role === "special"
+                      ? "暂不可预约"
+                      : "暂不可开柜"
                     : sessionStore.user?.role === "special"
-                    ? "进入领取"
+                    ? "预约领取"
                     : isStockOperator
                       ? "补货 / 开门"
                   : "运营开门"

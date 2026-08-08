@@ -16,6 +16,7 @@ assert.match(scanSource, /onlyFromCamera:\s*true/, "扫码必须仅允许相机�
 assert.doesNotMatch(scanSource, /onlyFromCamera:\s*false/, "扫码不得重新开放相册来源");
 
 const deviceDetailSource = readSource("apps/mobile/src/pages/special/device-detail.vue");
+const nearbyPageSource = readSource("apps/mobile/src/pages/tabs/nearby.vue");
 const appLoginPageSource = readSource("apps/mobile/src/pages/common/app-login.vue");
 const cabinetCopySource = readSource("apps/mobile/src/constants/copy.ts");
 assert.match(deviceDetailSource, /resolveCabinetEntry\(query\)/, "柜机页必须统一解析微信 q 与内部扫码入口");
@@ -55,6 +56,27 @@ assert.match(pickupSource, /cancelTemporaryReservation/, "明确开柜拒绝时�
 assert.match(deviceDetailSource, /v-if="!scanMode && nearestReservation"/, "普通预约成功后必须只在非扫码模式显示页内凭条");
 assert.match(cabinetCopySource, /eyebrow: "预约凭条"/, "普通入口必须展示页内预约凭条");
 assert.match(cabinetCopySource, /cancel: "取消预约"/, "页内预约凭条必须提供取消入口");
+const nearbyDeviceActionSource = nearbyPageSource.slice(
+  nearbyPageSource.indexOf("const openDevice"),
+  nearbyPageSource.indexOf("const focusDevice")
+);
+assert.match(
+  nearbyDeviceActionSource,
+  /sessionStore\.user\?\.role === "special"[\s\S]+pages\/special\/device-detail\?deviceCode=/,
+  "附近柜机的特殊用户入口必须进入预约详情页"
+);
+assert.doesNotMatch(
+  nearbyDeviceActionSource,
+  /scan=1/,
+  "附近柜机卡片不得伪装成扫码入口或直接进入开柜模式"
+);
+assert.match(nearbyPageSource, /\? "预约领取"/, "附近柜机卡片必须明确表达预约行为");
+assert.match(nearbyPageSource, /\? "暂不可预约"/, "附近柜机不可用时不得显示开柜语义");
+const nearbyScanSource = nearbyPageSource.slice(
+  nearbyPageSource.indexOf("const scanAndOpen"),
+  nearbyPageSource.indexOf("const formatDistance")
+);
+assert.match(nearbyScanSource, /scan=1/, "只有完成扫码后才能进入即时开柜模式");
 assert.match(deviceDetailSource, /appCopy\.cabinetPickup/, "柜机领取页文案必须集中从移动端文案表读取");
 for (const removedSection of [
   "<FlowSteps",
