@@ -105,6 +105,7 @@ const MAX_CALLBACK_LOGS = 1000;
 const MAX_VERIFICATION_FAILURES = 5;
 const SESSION_TTL_MS = 24 * 60 * 60_000;
 const DRAFT_SESSION_TTL_MS = 30 * 60_000;
+const SESSION_TOKEN_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const NEGATIVE_STOCK_BALANCE_NOTE = "库存透支调整";
 export const HIDDEN_BACKOFFICE_USER_TAG = "hidden-backoffice";
 export const SUPER_ADMIN_TAG = "super-admin";
@@ -245,14 +246,14 @@ export class InMemoryStoreService {
           "真实数据平面初始化尚未完成；常规 API 进程不能加载待初始化的真实库。"
         );
       }
-      // 只恢复不含手机号和验证码原文的短期挑战；旧版明文认证状态仍会被清除。
+      // 只恢复不含手机号和验证码原文的短期挑战，以及仅含令牌摘要的移动端长期会话。
       shouldPersist =
         Boolean(persistedResult?.requiresPrivacyRewrite) ||
         Boolean(persistedResult?.requiresDataPlaneRewrite) ||
         persisted.verificationCodes.length !== this.verificationCodes.size ||
         persisted.manualVerificationGrants.length !==
           this.manualVerificationGrants.length ||
-        persisted.sessions.length > 0 ||
+        persisted.sessions.length !== this.sessions.size ||
         persisted.draftSessions.length > 0;
     } else {
       shouldPersist = true;
@@ -940,14 +941,14 @@ export class InMemoryStoreService {
       user.role === "admin" ? this.findBackofficeCredentialByUserId(user.id, "admin") : undefined;
     this.sessions.set(token, {
       token,
+      persistent: true,
       userId: user.id,
       role: user.role,
       tenantId:
         mobileAdminTenantCredential?.tenantId ?? this.getUserTenantId(user),
       mobileAdminCredentialUpdatedAt: mobileAdminCredential?.passwordUpdatedAt,
       mobileAdminTenantCredentialUpdatedAt: mobileAdminTenantCredential?.passwordUpdatedAt,
-      createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + SESSION_TTL_MS).toISOString()
+      createdAt: new Date(now).toISOString()
     });
     return token;
   }
@@ -1036,10 +1037,31 @@ export class InMemoryStoreService {
       return undefined;
     }
 
-    const session = this.sessions.get(token);
+    const directSession = this.sessions.get(token);
+    const directEntryIsPersistedDigest = this.isPersistedMobileSessionEntry(
+      token,
+      directSession
+    );
+    const tokenDigest = this.createSessionTokenDigest(token);
+    const digestSession = this.sessions.get(tokenDigest);
+    const restoredSession = this.isPersistedMobileSessionEntry(
+      tokenDigest,
+      digestSession
+    )
+      ? digestSession
+      : undefined;
+    const sessionKey = directSession && !directEntryIsPersistedDigest
+      ? token
+      : tokenDigest;
+    const session = directSession && !directEntryIsPersistedDigest
+      ? directSession
+      : restoredSession;
 
-    if (!session || !this.isFutureExpiration(session.expiresAt)) {
-      this.sessions.delete(token);
+    if (
+      !session ||
+      (session.persistent !== true && !this.isFutureExpiration(session.expiresAt))
+    ) {
+      this.sessions.delete(sessionKey);
       return undefined;
     }
 
@@ -1129,14 +1151,23 @@ export class InMemoryStoreService {
       return false;
     }
 
-    return this.sessions.delete(token);
+    const revokedRuntimeSession = this.sessions.delete(token);
+    const revokedPersistedSession = this.sessions.delete(
+      this.createSessionTokenDigest(token)
+    );
+    return revokedRuntimeSession || revokedPersistedSession;
   }
 
   revokeSessionsForUser(userId: string, exceptToken?: string) {
     let revokedCount = 0;
+    const exceptSessionKeys = new Set(
+      exceptToken
+        ? [exceptToken, this.createSessionTokenDigest(exceptToken)]
+        : []
+    );
 
     for (const [token, session] of this.sessions.entries()) {
-      if (session.userId !== userId || token === exceptToken) {
+      if (session.userId !== userId || exceptSessionKeys.has(token)) {
         continue;
       }
 
@@ -1758,6 +1789,27 @@ export class InMemoryStoreService {
     prefix: "session" | "draft" | "challenge" | "manual-code"
   ) {
     return `${prefix}_${randomBytes(32).toString("base64url")}`;
+  }
+
+  private createSessionTokenDigest(token: string) {
+    return createHash("sha256").update(token, "utf8").digest("hex");
+  }
+
+  private isPersistedMobileSessionEntry(
+    tokenDigest: string,
+    session?: SessionRecord
+  ): session is SessionRecord {
+    return Boolean(
+      session &&
+        SESSION_TOKEN_DIGEST_PATTERN.test(tokenDigest) &&
+        session.token === tokenDigest &&
+        session.persistent === true &&
+        !session.backofficeRole &&
+        session.expiresAt === undefined &&
+        session.userId &&
+        session.createdAt &&
+        Number.isFinite(Date.parse(session.createdAt))
+    );
   }
 
   private hashManualVerificationCode(code: string, salt: string) {
@@ -2810,7 +2862,7 @@ export class InMemoryStoreService {
       alerts: structuredClone(this.alerts),
       logs: structuredClone(this.logs),
       platformTenants: structuredClone(this.platformTenants),
-      // 仅持久化不含手机号和验证码原文的外部挑战；Bearer 会话与资料草稿仍只在进程内。
+      // 外部挑战不含手机号和验证码原文；移动端会话只持久化不可直接充当 Bearer 的摘要。
       verificationCodes: Array.from(this.verificationCodes.entries())
         .filter(([key, record]) => this.isPersistableVerificationChallenge(key, record))
         .map(
@@ -2820,7 +2872,28 @@ export class InMemoryStoreService {
       manualVerificationGrants: structuredClone(
         this.manualVerificationGrants
       ),
-      sessions: [],
+      sessions: Array.from(this.sessions.entries()).flatMap(
+        ([token, session]) => {
+          if (
+            session.persistent !== true ||
+            session.backofficeRole ||
+            session.token !== token
+          ) {
+            return [];
+          }
+
+          const tokenDigest = SESSION_TOKEN_DIGEST_PATTERN.test(token)
+            ? token
+            : this.createSessionTokenDigest(token);
+          const persistedSession = structuredClone(session);
+          persistedSession.token = tokenDigest;
+          delete persistedSession.expiresAt;
+
+          return [
+            [tokenDigest, persistedSession] as [string, SessionRecord]
+          ];
+        }
+      ),
       draftSessions: [],
       adminCredentials: structuredClone(this.adminCredentials),
       backofficeCredentials: structuredClone(this.backofficeCredentials),
@@ -2935,8 +3008,13 @@ export class InMemoryStoreService {
         );
       }
     }
-    // Bearer 会话和资料草稿仍不从快照恢复，避免复活旧登录态。
+    // 只恢复摘要索引的移动端长期会话；旧明文会话、后台会话和资料草稿均关闭式丢弃。
     this.sessions.clear();
+    for (const [tokenDigest, session] of state.sessions) {
+      if (this.isPersistedMobileSessionEntry(tokenDigest, session)) {
+        this.sessions.set(tokenDigest, structuredClone(session));
+      }
+    }
     this.draftSessions.clear();
 
     this.replaceArray(this.adminCredentials, state.adminCredentials);

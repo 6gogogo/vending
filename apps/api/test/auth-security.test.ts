@@ -392,33 +392,57 @@ test("失败状态的写请求保留审计记录，但不触发业务状态写�
   assert.doesNotMatch(serialized, /13987654321/);
 });
 
-test("登录态和资料草稿使用高熵 token，并由服务端拒绝过期记录", () => {
+test("移动端登录态永久保活，后台登录态和资料草稿仍由服务端拒绝过期记录", () => {
   const store = createIsolatedStore();
-  const user = store.users.find((entry) => entry.status === "active");
-  assert.ok(user);
+  const mobileUser = store.users.find(
+    (entry) => entry.role === "special" && entry.status === "active"
+  );
+  const backofficeCredential = store.backofficeCredentials.find(
+    (entry) => entry.role !== "super_admin"
+  );
+  const backofficeUser = store.users.find(
+    (entry) => entry.id === backofficeCredential?.userId && entry.status === "active"
+  );
+  assert.ok(mobileUser);
+  assert.ok(backofficeCredential);
+  assert.ok(backofficeUser);
 
-  const firstToken = store.createSession(user);
-  const secondToken = store.createSession(user);
-  const firstSession = store.sessions.get(firstToken) as { expiresAt?: string } | undefined;
+  const firstToken = store.createSession(mobileUser);
+  const secondToken = store.createSession(mobileUser);
+  const firstSession = store.sessions.get(firstToken) as
+    | { persistent?: boolean; expiresAt?: string }
+    | undefined;
 
   assert.notEqual(firstToken, secondToken);
   assert.ok(firstToken.length >= 40);
-  assert.ok(firstSession?.expiresAt);
-  assert.ok(new Date(firstSession.expiresAt).getTime() > Date.now());
+  assert.equal(firstSession?.persistent, true);
+  assert.equal(firstSession?.expiresAt, undefined);
 
-  firstSession.expiresAt = new Date(Date.now() - 1_000).toISOString();
-  assert.equal(store.getSession(firstToken), undefined);
-  assert.equal(store.sessions.has(firstToken), false);
+  const backofficeToken = store.createBackofficeSession(
+    backofficeUser,
+    backofficeCredential.role,
+    backofficeCredential.tenantId
+  );
+  const backofficeSession = store.sessions.get(backofficeToken) as
+    | { persistent?: boolean; expiresAt?: string }
+    | undefined;
+  assert.equal(backofficeSession?.persistent, undefined);
+  assert.ok(backofficeSession?.expiresAt);
+  assert.ok(new Date(backofficeSession.expiresAt).getTime() > Date.now());
 
-  const inactiveToken = store.createSession(user);
-  user.status = "inactive";
+  backofficeSession.expiresAt = new Date(Date.now() - 1_000).toISOString();
+  assert.equal(store.getSession(backofficeToken), undefined);
+  assert.equal(store.sessions.has(backofficeToken), false);
+
+  const inactiveToken = store.createSession(mobileUser);
+  mobileUser.status = "inactive";
   assert.equal(store.getSessionUser(inactiveToken), undefined);
   assert.equal(store.sessions.has(inactiveToken), false);
-  user.status = "active";
+  mobileUser.status = "active";
 
   const draftToken = store.createDraftSession({
-    tenantId: store.getUserTenantId(user)!,
-    phone: user.phone
+    tenantId: store.getUserTenantId(mobileUser)!,
+    phone: mobileUser.phone
   });
   const draft = store.draftSessions.get(draftToken) as { expiresAt?: string } | undefined;
   assert.ok(draftToken.length >= 40);

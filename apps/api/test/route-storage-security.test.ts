@@ -571,12 +571,14 @@ test("普通管理员会话不能兼容升级成后台权限会话", () => {
   assert.throws(() => service.getBackofficeSession(ordinaryAdminToken), UnauthorizedException);
 });
 
-test("认证会话和资料草稿只保存在进程内，旧快照中的 token 也不会恢复", () => {
+test("移动端会话只持久化摘要并可跨重启恢复，资料草稿和旧明文 token 不会恢复", () => {
   const store = createIsolatedStore();
-  const admin = store.users.find((entry) => entry.role === "admin" && entry.status === "active");
-  assert.ok(admin);
+  const user = store.users.find(
+    (entry) => entry.role === "special" && entry.status === "active"
+  );
+  assert.ok(user);
 
-  const sessionToken = store.createSession(admin);
+  const sessionToken = store.createSession(user);
   const draftToken = store.createDraftSession({
     tenantId: store.getDefaultTenantId(),
     phone: "13812345678"
@@ -587,29 +589,41 @@ test("认证会话和资料草稿只保存在进程内，旧快照中的 token �
   store.persist();
   const persistedText = readFileSync(process.env.API_DATA_FILE!, "utf8");
   const persistedState = JSON.parse(persistedText) as {
-    sessions: unknown[];
+    sessions: Array<[
+      string,
+      { token: string; persistent?: boolean; expiresAt?: string }
+    ]>;
     draftSessions: unknown[];
   };
-  assert.deepEqual(persistedState.sessions, []);
+  assert.equal(persistedState.sessions.length, 1);
+  const [sessionDigest, persistedSession] = persistedState.sessions[0];
+  assert.match(sessionDigest, /^[a-f0-9]{64}$/);
+  assert.equal(persistedSession.token, sessionDigest);
+  assert.equal(persistedSession.persistent, true);
+  assert.equal(persistedSession.expiresAt, undefined);
   assert.deepEqual(persistedState.draftSessions, []);
   assert.doesNotMatch(persistedText, new RegExp(`${sessionToken}|${draftToken}`));
 
+  const restartedStore = new InMemoryStoreService();
+  assert.ok(restartedStore.getSession(sessionToken));
+  assert.equal(restartedStore.getDraftSession(draftToken), undefined);
+
   const legacySessionToken = "session_legacy-token-that-must-not-revive";
   const legacyDraftToken = "draft_legacy-token-that-must-not-revive";
-  const legacyState = store.snapshot();
+  const legacyState = restartedStore.snapshot();
   const now = Date.now();
-  legacyState.sessions = [
+  legacyState.sessions.push(
     [
       legacySessionToken,
       {
         token: legacySessionToken,
-        userId: admin.id,
-        role: admin.role,
+        userId: user.id,
+        role: user.role,
         createdAt: new Date(now).toISOString(),
         expiresAt: new Date(now + 60_000).toISOString()
       }
     ]
-  ];
+  );
   legacyState.draftSessions = [
     [
       legacyDraftToken,
@@ -623,16 +637,19 @@ test("认证会话和资料草稿只保存在进程内，旧快照中的 token �
   ];
   writeFileSync(process.env.API_DATA_FILE!, JSON.stringify(legacyState), "utf8");
 
-  const restartedStore = new InMemoryStoreService();
-  assert.equal(restartedStore.getSession(legacySessionToken), undefined);
-  assert.equal(restartedStore.getDraftSession(legacyDraftToken), undefined);
-  restartedStore.flushBootstrapPersistence();
+  const legacyRestartedStore = new InMemoryStoreService();
+  assert.ok(legacyRestartedStore.getSession(sessionToken));
+  assert.equal(legacyRestartedStore.getSession(legacySessionToken), undefined);
+  assert.equal(legacyRestartedStore.getDraftSession(legacyDraftToken), undefined);
+  legacyRestartedStore.flushBootstrapPersistence();
   const cleanedLegacyText = readFileSync(process.env.API_DATA_FILE!, "utf8");
   assert.doesNotMatch(cleanedLegacyText, /legacy-token-that-must-not-revive/);
 
-  assert.equal(store.revokeSession(sessionToken), true);
-  assert.equal(store.getSession(sessionToken), undefined);
-  assert.equal(store.revokeSession(sessionToken), false);
+  assert.equal(legacyRestartedStore.revokeSession(sessionToken), true);
+  legacyRestartedStore.persist();
+  const loggedOutRestartedStore = new InMemoryStoreService();
+  assert.equal(loggedOutRestartedStore.getSession(sessionToken), undefined);
+  assert.equal(loggedOutRestartedStore.revokeSession(sessionToken), false);
 });
 
 test("移动端 AI 状态隐藏上游配置，助手请求有长度和频率边界", async () => {

@@ -47,6 +47,8 @@ const PAYMENT_REFUND_STATUSES = new Set(["pending", "success", "failed"]);
 const PAYMENT_REFUND_PROVIDER_OUTCOMES = new Set(["unknown", "pending", "success", "failed"]);
 const PAYMENT_REFUND_BUSINESS_APPLY_STATES = new Set(["pending", "completed"]);
 const PLATFORM_TENANT_STATUSES = new Set(["active", "trial", "paused"]);
+const MOBILE_USER_ROLES = new Set(["admin", "merchant", "restocker", "special"]);
+const SESSION_TOKEN_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const DATA_PLANE_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const SIMULATION_INITIALIZATION_SOURCES = new Set([
   "simulation-seed",
@@ -220,6 +222,68 @@ const validatePairArray = (
     }
 
     seenKeys.add(item[0]);
+  }
+};
+
+const validatePersistedSessions = (
+  state: Record<string, unknown>,
+  result: PersistedStateValidationResult
+) => {
+  const sessions = state.sessions;
+
+  if (!Array.isArray(sessions)) {
+    return;
+  }
+
+  let legacySessionCount = 0;
+
+  for (const [index, item] of sessions.entries()) {
+    if (
+      !Array.isArray(item) ||
+      item.length !== 2 ||
+      typeof item[0] !== "string" ||
+      !isRecord(item[1])
+    ) {
+      continue;
+    }
+
+    const [tokenDigest, session] = item;
+
+    if (session.persistent !== true) {
+      legacySessionCount += 1;
+      continue;
+    }
+
+    if (!SESSION_TOKEN_DIGEST_PATTERN.test(tokenDigest)) {
+      result.errors.push(`sessions[${index}] 的长期会话键必须是 SHA-256 摘要。`);
+    }
+    if (session.token !== tokenDigest) {
+      result.errors.push(`sessions[${index}].token 必须与摘要键一致。`);
+    }
+    if (session.backofficeRole !== undefined) {
+      result.errors.push(`sessions[${index}] 不能持久化后台会话。`);
+    }
+    if (session.expiresAt !== undefined) {
+      result.errors.push(`sessions[${index}] 的移动端长期会话不能设置时间过期。`);
+    }
+    if (typeof session.userId !== "string" || !session.userId.trim()) {
+      result.errors.push(`sessions[${index}].userId 缺失或为空字符串。`);
+    }
+    if (typeof session.role !== "string" || !MOBILE_USER_ROLES.has(session.role)) {
+      result.errors.push(`sessions[${index}].role 不是有效移动端角色。`);
+    }
+    if (
+      typeof session.createdAt !== "string" ||
+      !Number.isFinite(Date.parse(session.createdAt))
+    ) {
+      result.errors.push(`sessions[${index}].createdAt 不是有效时间。`);
+    }
+  }
+
+  if (legacySessionCount > 0) {
+    result.warnings.push(
+      `存在 ${legacySessionCount} 条旧式或明文认证会话，启动时将关闭式丢弃。`
+    );
   }
 };
 
@@ -587,6 +651,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   for (const key of REQUIRED_PAIR_ARRAY_KEYS) {
     validatePairArray(parsed, key, result);
   }
+  validatePersistedSessions(parsed, result);
 
   if (!isRecord(parsed.reservationSettings)) {
     result.errors.push("reservationSettings 必须是对象。");

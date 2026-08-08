@@ -106,6 +106,8 @@ export interface ManualVerificationGrantRecord {
 
 export interface SessionRecord {
   token: string;
+  /** 移动端长期会话不按时间过期，但仍受退出、账号和权限变更撤销。 */
+  persistent?: boolean;
   userId: string;
   role: UserRole;
   backofficeRole?: BackofficeRole;
@@ -113,7 +115,7 @@ export interface SessionRecord {
   mobileAdminCredentialUpdatedAt?: string;
   mobileAdminTenantCredentialUpdatedAt?: string;
   createdAt: string;
-  expiresAt: string;
+  expiresAt?: string;
 }
 
 export interface DraftSessionRecord {

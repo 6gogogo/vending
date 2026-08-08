@@ -89,3 +89,97 @@ test("缓存会话经服务端确认前不会向页面放行，并合并并发�
     runtimeGlobals.uni = originalUni;
   }
 });
+
+test("服务端暂时不可用时保留本地登录态，不把网络故障当成退出登录", async () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    uni?: Record<string, unknown>;
+  };
+  const originalUni = runtimeGlobals.uni;
+  const cachedUser = {
+    id: "cached-user",
+    role: "special" as const,
+    name: "缓存用户",
+    phone: "13000000000",
+    tags: []
+  };
+  const storage = new Map<string, unknown>([
+    [MOBILE_SESSION_STORAGE_KEY, { token: "cached-token", user: cachedUser }]
+  ]);
+
+  runtimeGlobals.uni = {
+    getStorageSync: (key: string) => storage.get(key),
+    setStorageSync: (key: string, value: unknown) => storage.set(key, value),
+    removeStorageSync: (key: string) => storage.delete(key),
+    request: (options: {
+      success: (response: { statusCode: number; data: unknown }) => void;
+    }) => options.success({
+      statusCode: 503,
+      data: { code: 503, message: "服务暂不可用。", data: null }
+    })
+  };
+
+  try {
+    setActivePinia(createPinia());
+    const store = useSessionStore();
+
+    const user = await store.bootstrap();
+
+    assert.equal(user?.id, cachedUser.id);
+    assert.equal(store.bootstrapped, true);
+    assert.equal(store.token, "cached-token");
+    assert.equal(
+      (storage.get(MOBILE_SESSION_STORAGE_KEY) as { token?: string }).token,
+      "cached-token"
+    );
+  } finally {
+    runtimeGlobals.uni = originalUni;
+  }
+});
+
+test("服务端明确拒绝失效凭证时清除本地登录态", async () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    uni?: Record<string, unknown>;
+  };
+  const originalUni = runtimeGlobals.uni;
+  const storage = new Map<string, unknown>([
+    [
+      MOBILE_SESSION_STORAGE_KEY,
+      {
+        token: "revoked-token",
+        user: {
+          id: "revoked-user",
+          role: "special",
+          name: "失效用户",
+          phone: "13000000001",
+          tags: []
+        }
+      }
+    ]
+  ]);
+
+  runtimeGlobals.uni = {
+    getStorageSync: (key: string) => storage.get(key),
+    setStorageSync: (key: string, value: unknown) => storage.set(key, value),
+    removeStorageSync: (key: string) => storage.delete(key),
+    request: (options: {
+      success: (response: { statusCode: number; data: unknown }) => void;
+    }) => options.success({
+      statusCode: 401,
+      data: { code: 401, message: "当前登录态已失效，请重新登录。", data: null }
+    })
+  };
+
+  try {
+    setActivePinia(createPinia());
+    const store = useSessionStore();
+
+    const user = await store.bootstrap();
+
+    assert.equal(user, undefined);
+    assert.equal(store.token, undefined);
+    assert.equal(store.bootstrapped, true);
+    assert.equal(storage.has(MOBILE_SESSION_STORAGE_KEY), false);
+  } finally {
+    runtimeGlobals.uni = originalUni;
+  }
+});

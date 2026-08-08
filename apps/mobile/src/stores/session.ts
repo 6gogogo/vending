@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 
+import { ApiError } from "@vm/shared-client";
 import type {
   MobileAuthDraft,
   MobileSessionSnapshot,
@@ -118,8 +119,13 @@ export const useSessionStore = defineStore("mobile-session", {
         try {
           const snapshot = await mobileApi.appSession();
           this.setSession(snapshot);
-        } catch {
-          this.clear();
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 401) {
+            this.clear();
+          } else {
+            // 断网、超时或服务维护不等于退出登录；保留本地会话供下次启动继续校验。
+            this.bootstrapped = true;
+          }
         }
 
         return this.user;
