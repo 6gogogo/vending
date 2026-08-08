@@ -128,6 +128,39 @@ test("访问规则失败更新保持原值，且每日总额度会约束各品�
   assert.ok(Object.values(summary.remainingByGoods).every((value) => value === 0));
 });
 
+test("平台完成回写恢复后自动关闭同一订单的历史回写故障", () => {
+  const store = createIsolatedStore();
+  const event = buildEvent({
+    eventId: "event-recovered-completion-alert",
+    orderNo: "order-recovered-completion-alert",
+    amount: 0,
+    billingStatus: "free",
+    paymentNotifyStatus: "failed"
+  });
+  store.events.push(event);
+  const alerts = new AlertsService(store);
+  const alert = alerts.create({
+    type: "callback",
+    title: "预约取货完成状态回写平台失败",
+    deviceCode: event.deviceCode,
+    targetUserId: event.userId,
+    dueAt: event.updatedAt,
+    detail: `订单 ${event.orderNo} 回写平台预约取货完成状态失败：连接超时`,
+    relatedEventId: event.eventId
+  });
+
+  alerts.list();
+  assert.equal(alert.status, "open");
+
+  alert.status = "acknowledged";
+  event.paymentNotifyStatus = "success";
+  event.paymentNotifiedAt = new Date().toISOString();
+  alerts.list();
+
+  assert.equal(alert.status, "resolved");
+  assert.match(alert.resolutionNote ?? "", /平台回写已成功/);
+});
+
 test("读取预约列表触发过期后会持久化，重载不会重复累计超时", () => {
   const store = createIsolatedStore();
   store.reservations.splice(0, store.reservations.length);

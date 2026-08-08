@@ -4,6 +4,12 @@ import type { AlertGrade, AlertTask } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 
+const RECOVERABLE_CALLBACK_ALERT_TITLES = new Set([
+  "预约取货完成状态回写平台失败",
+  "公益领取完成状态回写平台失败",
+  "付款成功回写平台失败"
+]);
+
 @Injectable()
 export class AlertsService {
   private readonly feedbackSubmissionHistory = new Map<string, number[]>();
@@ -11,8 +17,12 @@ export class AlertsService {
   constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
 
   list(status?: AlertTask["status"], targetUserId?: string) {
+    const recoveredCallbackCount = this.resolveRecoveredCallbackFailures();
     this.refreshOperationalTasks();
     this.store.refreshAlertPresentation();
+    if (recoveredCallbackCount > 0) {
+      this.store.persist();
+    }
 
     const alerts = this.store.alerts.filter((alert) => {
       if (status && alert.status !== status) {
@@ -41,6 +51,74 @@ export class AlertsService {
 
         return left.dueAt.localeCompare(right.dueAt);
       });
+  }
+
+  resolveRecoveredCallbackFailures(relatedEventId?: string) {
+    const resolvedAt = new Date().toISOString();
+    let resolvedCount = 0;
+
+    for (const alert of this.store.alerts) {
+      if (
+        alert.status === "resolved" ||
+        alert.type !== "callback" ||
+        !alert.relatedEventId ||
+        (relatedEventId && alert.relatedEventId !== relatedEventId) ||
+        !RECOVERABLE_CALLBACK_ALERT_TITLES.has(alert.title)
+      ) {
+        continue;
+      }
+
+      const orderNo = /(?:^|；)订单 (\S+) 回写平台/.exec(alert.detail)?.[1];
+      const event = this.store.events.find(
+        (entry) => entry.eventId === alert.relatedEventId
+      );
+      if (!orderNo || !event) {
+        continue;
+      }
+
+      const paymentNotifyStatus =
+        event.orderNo === orderNo
+          ? event.paymentNotifyStatus
+          : event.adjustments?.find((entry) => entry.orderNo === orderNo)
+              ?.paymentNotifyStatus;
+      if (paymentNotifyStatus !== "success") {
+        continue;
+      }
+
+      alert.status = "resolved";
+      alert.resolvedAt = resolvedAt;
+      alert.resolutionNote = "平台回写已成功，系统自动关闭历史故障。";
+      this.store.decorateAlert(alert);
+      this.store.logOperation({
+        category: "alert",
+        type: "resolve-alert",
+        status: "success",
+        actor: {
+          type: "system",
+          name: "平台回写恢复"
+        },
+        primarySubject: {
+          type: "alert",
+          id: alert.id,
+          label: alert.title
+        },
+        secondarySubject: {
+          type: "event",
+          id: event.eventId,
+          label: orderNo
+        },
+        description: `订单 ${orderNo} 的平台回写已恢复，历史故障已自动关闭。`,
+        relatedEventId: event.eventId,
+        relatedOrderNo: orderNo,
+        metadata: {
+          recoverySource: "payment-notify-success",
+          undoState: "not_undoable"
+        }
+      });
+      resolvedCount += 1;
+    }
+
+    return resolvedCount;
   }
 
   create(payload: Omit<AlertTask, "id" | "createdAt" | "status" | "grade"> & { grade?: AlertGrade }) {
