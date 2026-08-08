@@ -717,6 +717,104 @@ test("人工码 App 登录取得的移动会话可完成预约，且同一码不
   }
 });
 
+test("个人每日可领取物资不应被存量零总额度压成零", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const adminToken = createTenantAdminToken(store);
+    const adminHeaders = {
+      authorization: `Bearer ${adminToken}`,
+      "content-type": "application/json"
+    };
+    const goods = store.goodsCatalog[0];
+    assert.ok(goods);
+
+    const createUserResponse = await fetch(`${baseUrl}/users`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        role: "special",
+        phone: "18800000922",
+        name: "个人物资额度回归账号",
+        quota: {
+          dailyLimit: 0,
+          categoryLimit: {}
+        }
+      })
+    });
+    const createUserPayload = (await createUserResponse.json()) as {
+      data?: { id?: string };
+    };
+    const targetUserId = createUserPayload.data?.id;
+    assert.equal(createUserResponse.status, 201);
+    assert.ok(targetUserId);
+
+    const policyResponse = await fetch(
+      `${baseUrl}/users/${encodeURIComponent(targetUserId)}/access-policies`,
+      {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          name: "个人每日物资额度回归",
+          weekdays: [0, 1, 2, 3, 4, 5, 6],
+          startHour: 0,
+          endHour: 24,
+          goodsLimits: [{ goodsId: goods.goodsId, quantity: 2 }],
+          status: "active"
+        })
+      }
+    );
+    assert.equal(policyResponse.status, 201);
+
+    const issueResponse = await fetch(`${baseUrl}/auth/manual-verification-codes`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        userId: targetUserId,
+        purpose: "app-login",
+        code: "642731",
+        expiresInSeconds: 300
+      })
+    });
+    assert.equal(issueResponse.status, 201);
+
+    const loginResponse = await fetch(`${baseUrl}/auth/app-login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        phone: "18800000922",
+        code: "642731"
+      })
+    });
+    const loginPayload = (await loginResponse.json()) as {
+      data?: { token?: string; user?: { id?: string } };
+    };
+    const appToken = loginPayload.data?.token;
+    assert.equal(loginResponse.status, 201);
+    assert.equal(loginPayload.data?.user?.id, targetUserId);
+    assert.ok(appToken);
+
+    const summaryResponse = await fetch(`${baseUrl}/access-rules/summary`, {
+      headers: { authorization: `Bearer ${appToken}` }
+    });
+    const summaryPayload = (await summaryResponse.json()) as {
+      data?: {
+        remainingDaily?: number;
+        remainingFreeTotal?: number;
+        remainingByGoods?: Record<string, number>;
+        activeWindows?: Array<{ goodsLimits?: Array<{ goodsId?: string; quantity?: number }> }>;
+      };
+    };
+    assert.equal(summaryResponse.status, 200);
+    assert.equal(summaryPayload.data?.activeWindows?.[0]?.goodsLimits?.[0]?.quantity, 2);
+    assert.equal(summaryPayload.data?.remainingByGoods?.[goods.goodsId], 2);
+    assert.equal(summaryPayload.data?.remainingDaily, 2);
+    assert.equal(summaryPayload.data?.remainingFreeTotal, 2);
+  } finally {
+    await app.close();
+  }
+});
+
 test("未完成移动资料的既有人员不能签发 APP 登录人工码", async () => {
   const { app, baseUrl, store } = await startApi();
 

@@ -130,7 +130,21 @@ export class AccessRulesService {
         entry.userId === user.id &&
         getBusinessDayKey(entry.happenedAt) === currentBusinessDayKey
     );
-    const remainingDaily = Math.max(0, (quota?.dailyLimit ?? 0) - usedCount);
+    const configuredRemainingDaily = Math.max(0, (quota?.dailyLimit ?? 0) - usedCount);
+    const policyRemainingTotal = Object.values(policyQuota.remainingByGoods).reduce(
+      (sum, value) => sum + Math.max(0, value),
+      0
+    );
+    const personalPolicyIds = new Set((user.accessPolicies ?? []).map((entry) => entry.id));
+    const hasActivePersonalPolicy = policyQuota.activeWindows.some((window) =>
+      personalPolicyIds.has(window.policyId)
+    );
+    // 个人每日可领取物资是当前后台的明确授权来源。存量人员可能仍带有旧版零总额度；
+    // 此时不能让废弃字段覆盖已生效的个人设定。模板规则和正数总额度仍保留原上限语义。
+    const remainingDaily =
+      (quota?.dailyLimit ?? 0) > 0 || !hasActivePersonalPolicy || policyRemainingTotal === 0
+        ? configuredRemainingDaily
+        : policyRemainingTotal;
     const uncappedRemainingToday =
       Object.keys(policyQuota.remainingByCategory).length > 0
         ? policyQuota.remainingByCategory
