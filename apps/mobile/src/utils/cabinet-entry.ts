@@ -70,6 +70,9 @@ export const buildPickupLoginUrl = (deviceCode: string) =>
 export const buildPickupDeviceUrl = (deviceCode: string) =>
   `/pages/special/device-detail?deviceCode=${requireDeviceCode(deviceCode)}&scan=1`;
 
+export const shouldPreparePickupHomeStack = (pageCount: number | undefined) =>
+  pageCount === 1;
+
 export const resolvePickupLoginTarget = (
   query: Record<string, unknown>
 ): PickupLoginTarget | undefined => {

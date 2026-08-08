@@ -7,7 +7,8 @@ import {
   parseWechatCabinetQr,
   resolveCabinetEntry,
   resolvePickupLoginTarget,
-  resolvePickupPostLoginUrl
+  resolvePickupPostLoginUrl,
+  shouldPreparePickupHomeStack
 } from "./cabinet-entry";
 
 test("微信普通链接二维码解析出柜机编号", () => {
@@ -75,6 +76,12 @@ test("登录回跳 URL 只携带规范柜机编号和即时领取模式", () => 
     buildPickupDeviceUrl("SIM-APP-ACCEPTANCE-001"),
     "/pages/special/device-detail?deviceCode=SIM-APP-ACCEPTANCE-001&scan=1"
   );
+});
+
+test("二维码把领取页作为根页面时先补首页返回栈", () => {
+  assert.equal(shouldPreparePickupHomeStack(1), true);
+  assert.equal(shouldPreparePickupHomeStack(2), false);
+  assert.equal(shouldPreparePickupHomeStack(undefined), false);
 });
 
 test("登录页只恢复有效的扫码领取目标", () => {

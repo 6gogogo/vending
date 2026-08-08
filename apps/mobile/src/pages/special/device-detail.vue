@@ -20,8 +20,10 @@ import { appCopy } from "../../constants/copy";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import {
+  buildPickupDeviceUrl,
   buildPickupLoginUrl,
-  resolveCabinetEntry
+  resolveCabinetEntry,
+  shouldPreparePickupHomeStack
 } from "../../utils/cabinet-entry";
 import { formatBeijingShortDateTime } from "../../utils/datetime";
 import { getDeviceStatusPresentation } from "../../utils/device-readiness";
@@ -61,6 +63,7 @@ const selectedMap = reactive<Record<string, number>>({});
 const reservationSettings = ref<ReservationSettings>();
 const reservations = ref<CabinetReservationRecord[]>([]);
 const actionError = ref("");
+const pickupHomeStackAttempted = ref(false);
 
 const selectedItems = computed<IntentItem[]>(() =>
   goodsList.value
@@ -238,6 +241,37 @@ const redirectUnsupportedRole = () => {
   uni.switchTab({ url: resolveHomePath(role) });
 };
 
+const getCurrentPageCount = () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    getCurrentPages?: () => unknown[];
+  };
+  return runtimeGlobals.getCurrentPages?.().length;
+};
+
+const preparePickupHomeStack = () => {
+  if (
+    !scanMode.value ||
+    pickupHomeStackAttempted.value ||
+    !shouldPreparePickupHomeStack(getCurrentPageCount())
+  ) {
+    return false;
+  }
+
+  pickupHomeStackAttempted.value = true;
+  uni.switchTab({
+    url: resolveHomePath(sessionStore.user?.role),
+    success: () => {
+      uni.navigateTo({
+        url: buildPickupDeviceUrl(deviceCode.value)
+      });
+    },
+    fail: () => {
+      void load();
+    }
+  });
+  return true;
+};
+
 const load = async () => {
   if (!deviceCode.value) {
     return;
@@ -256,6 +290,10 @@ const load = async () => {
 
   if (sessionStore.user.role !== "special") {
     redirectUnsupportedRole();
+    return;
+  }
+
+  if (preparePickupHomeStack()) {
     return;
   }
 
