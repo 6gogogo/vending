@@ -1084,6 +1084,21 @@ const dashboardSource = readSource("apps/admin-web/src/pages/DashboardPage.vue")
 const adminGlobalStyleSource = readSource("apps/admin-web/src/styles/global.css");
 assert.doesNotMatch(dashboardSource, /待办 TOPS/, "后台待办标题不得使用不自然的 TOPS 文案");
 assert.match(appLoginSource, />\s*获取验证码\s*<\/button>/, "登录验证码按钮必须说明具体动作");
+assert.match(
+  appLoginSource,
+  /class="vm-field-shell app-login-code-shell"[\s\S]+id="app-login-code"[\s\S]+class="vm-field-shell__button"/,
+  "登录验证码输入框与获取按钮必须位于同一个横向字段容器"
+);
+assert.doesNotMatch(
+  appLoginSource,
+  /vm-field-shell--stacked-action/,
+  "登录页不得把获取验证码按钮堆叠到输入框下方"
+);
+assert.match(
+  appLoginSource,
+  /\.app-login-code-shell\s*\{[\s\S]{0,180}grid-template-columns:\s*auto minmax\(0, 1fr\) auto/,
+  "验证码字段必须显式保留图标、输入框、右侧操作三列布局"
+);
 assert.match(adminGlobalStyleSource, /"brand nav" auto[\s\S]{0,120}"status nav" auto/, "后台窄屏布局必须并排压缩导航，避免主内容被整页导航推离首屏");
 
 const mobileAdminUsersSource = readSource("apps/mobile/src/pages/admin/users.vue");

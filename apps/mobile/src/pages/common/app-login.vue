@@ -380,7 +380,7 @@ onMounted(() => {
             <text id="app-login-code-label" class="vm-field__label">验证码</text>
             <text class="vm-field__helper">{{ verificationPresentation.codeHelper }}</text>
           </view>
-          <view class="vm-field-shell vm-field-shell--stacked-action">
+          <view class="vm-field-shell app-login-code-shell">
             <MenuIcon name="code" size="sm" tone="neutral" />
             <input
               v-model="code"
@@ -521,6 +521,22 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
+}
+
+.app-login-code-shell {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 12rpx;
+  min-height: 88rpx;
+}
+
+.app-login-code-shell .vm-field-shell__input,
+.app-login-code-shell .vm-field-shell__button {
+  min-height: 88rpx;
+}
+
+.app-login-code-shell .vm-field-shell__button {
+  min-width: 176rpx;
+  padding: 0 14rpx;
 }
 
 .login-card {
