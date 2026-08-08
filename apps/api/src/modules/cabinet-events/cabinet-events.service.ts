@@ -1223,7 +1223,7 @@ export class CabinetEventsService {
     );
   }
 
-  confirmBillingResolution(
+  async confirmBillingResolution(
     eventId: string,
     actorUserId?: string,
     payload?: {
@@ -1283,7 +1283,7 @@ export class CabinetEventsService {
         event.paymentNotifyMessage = "管理员已完成领取差异核对，准备回写平台领取完成状态。";
       }
 
-      void this.tryAutoForwardPaymentSuccess(
+      await this.tryAutoForwardPaymentSuccess(
         event,
         {
           orderNo: completionOrderNo,

@@ -4011,7 +4011,7 @@ describe("SmartVM 回调完整性", () => {
     assert.match(harness.event.settlementComparison?.summary ?? "", /仍按开柜前确认的报价计算/);
   });
 
-  test("管理员不能在物理流程或账务状态未满足时提前解除用户阻断", () => {
+  test("管理员不能在物理流程或账务状态未满足时提前解除用户阻断", async () => {
     const harness = createCabinetHarness({
       event: createEvent({
         status: "opened",
@@ -4020,15 +4020,15 @@ describe("SmartVM 回调完整性", () => {
       })
     });
 
-    assert.throws(
-      () => harness.service.confirmBillingResolution(harness.event.eventId, "admin-1"),
+    await assert.rejects(
+      harness.service.confirmBillingResolution(harness.event.eventId, "admin-1"),
       /只有已结算且存在待处理费用或差异/
     );
     assert.equal(harness.event.billingResolvedAt, undefined);
 
     harness.event.status = "settled";
     harness.event.billingStatus = "mismatch";
-    harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
+    await harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
       note: "已核对平台价差"
     });
     assert.equal(harness.event.billingStatus, "admin_confirmed");
@@ -4912,11 +4912,10 @@ describe("SmartVM 回调完整性", () => {
       /不能手工回写付款成功/
     );
 
-    harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
+    await harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
       note: "已核对实际领取差异"
     });
     assert.equal(harness.event.billingStatus, "admin_confirmed");
-    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(harness.paymentNotifyCalls, 1);
     assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
     assert.match(harness.event.adjustments?.[0]?.paymentNotifyMessage ?? "", /预约取货完成状态/);
@@ -4969,10 +4968,9 @@ describe("SmartVM 回调完整性", () => {
       /不能手工回写付款成功/
     );
 
-    harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
+    await harness.service.confirmBillingResolution(harness.event.eventId, "admin-1", {
       note: "已核对公益领取差异"
     });
-    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(harness.paymentNotifyCalls, 1);
     assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
     assert.match(harness.event.adjustments?.[0]?.paymentNotifyMessage ?? "", /公益领取完成状态/);

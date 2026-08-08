@@ -106,6 +106,7 @@ const debugCallbackLimit = ref(100);
 const debugCallbackLogs = ref<Awaited<ReturnType<typeof adminApi.deviceCallbackLogs>>>([]);
 const debugSystemAuditLogs = ref<Awaited<ReturnType<typeof adminApi.systemAuditLogs>>>([]);
 const notifyingPaymentOrderNo = ref("");
+const completingZeroCostEventId = ref("");
 const refundingOrderNo = ref("");
 const reconcilingRefundId = ref("");
 const loadError = ref("");
@@ -752,6 +753,61 @@ const refreshDevice = async () => {
 
   if (debugPanelVisible.value) {
     await loadDebugPanel();
+  }
+};
+
+const canRecoverZeroCostCompletion = (event: DeviceRecentEvent) =>
+  canOperateDevice.value &&
+  event.status === "settled" &&
+  event.amount === 0 &&
+  Boolean(event.paymentNotifyUrl) &&
+  event.paymentNotifyStatus !== "success" &&
+  ["free", "admin_confirmed", "mismatch", "blocked"].includes(event.billingStatus ?? "");
+
+const recoverZeroCostCompletion = async (event: DeviceRecentEvent) => {
+  if (!canRecoverZeroCostCompletion(event) || completingZeroCostEventId.value) {
+    return;
+  }
+
+  const requiresConfirmation = event.billingStatus === "mismatch" || event.billingStatus === "blocked";
+  const prompt = requiresConfirmation
+    ? "确认已核对本次公益领取差异，并向柜机平台回写零元订单完成状态？"
+    : "确认重试向柜机平台回写这笔零元订单的完成状态？";
+
+  if (!window.confirm(prompt)) {
+    return;
+  }
+
+  completingZeroCostEventId.value = event.eventId;
+  try {
+    if (requiresConfirmation) {
+      await adminApi.confirmBillingResolution(
+        event.eventId,
+        "已核对公益零元领取结果，确认订单结束并回写平台。"
+      );
+    } else {
+      await adminApi.retryZeroCostPlatformCompletion(event.eventId);
+    }
+    await load();
+
+    const refreshed = recentEvents.value.find((entry) => entry.eventId === event.eventId);
+    if (refreshed?.paymentNotifyStatus === "success") {
+      showActionMessage("success", "平台已确认零元订单完成。");
+    } else {
+      showActionMessage(
+        "error",
+        refreshed?.paymentNotifyMessage
+          ? `平台回写尚未完成：${refreshed.paymentNotifyMessage}`
+          : "平台回写尚未完成，请查看订单同步状态。"
+      );
+    }
+  } catch (error) {
+    showActionMessage(
+      "error",
+      `零元订单回写失败：${readErrorMessage(error, "请稍后重试")}`
+    );
+  } finally {
+    completingZeroCostEventId.value = "";
   }
 };
 
@@ -1847,6 +1903,14 @@ onUnmounted(() => {
                   </div>
                   <div class="device-event-order-row__actions">
                     <button
+                      v-if="canRecoverZeroCostCompletion(event)"
+                      class="admin-button admin-button--ghost"
+                      :disabled="Boolean(completingZeroCostEventId)"
+                      @click="recoverZeroCostCompletion(event)"
+                    >
+                      {{ completingZeroCostEventId === event.eventId ? "回写中" : event.billingStatus === "mismatch" || event.billingStatus === "blocked" ? "核对并结束订单" : "重试完成回写" }}
+                    </button>
+                    <button
                       v-if="canManualPaymentSuccess && shouldShowPaymentAction(event)"
                       class="admin-button admin-button--ghost"
                       :disabled="notifyingPaymentOrderNo === event.orderNo || isFinancialOutcomePending('payment', event.orderNo)"
@@ -1863,7 +1927,7 @@ onUnmounted(() => {
                       {{ refundingOrderNo === event.orderNo ? "退款中" : findPersistedPendingRefund(event.orderNo) ? "核对退款状态" : isFinancialOutcomePending('refund', event.orderNo) ? "结果待确认" : resolvePlatformOrderContext(event, 'refund').refundedAt ? "已退款" : refundActionLabel(event) }}
                     </button>
                     <span
-                      v-if="(!canManualPaymentSuccess || !shouldShowPaymentAction(event)) && (!canRefundPayments || !shouldShowRefundAction(event))"
+                      v-if="!canRecoverZeroCostCompletion(event) && (!canManualPaymentSuccess || !shouldShowPaymentAction(event)) && (!canRefundPayments || !shouldShowRefundAction(event))"
                       class="admin-table__subtext"
                     >
                       当前没有待平台确认动作或权限不足

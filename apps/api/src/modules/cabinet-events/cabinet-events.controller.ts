@@ -183,13 +183,17 @@ export class CabinetEventsController {
   @UseGuards(RoleGuard)
   @AllowedRoles("admin")
   @AllowedBackofficePermissions("devices:operate")
-  confirmBilling(
+  async confirmBilling(
     @Param("eventId") eventId: string,
     @Body() body: { note?: string },
     @Req() request: { authUser?: { id: string } }
   ) {
     return ok(
-      this.cabinetEventsService.confirmBillingResolution(eventId, request.authUser?.id, body),
+      await this.cabinetEventsService.confirmBillingResolution(
+        eventId,
+        request.authUser?.id,
+        body
+      ),
       "操作成功"
     );
   }

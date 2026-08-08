@@ -560,6 +560,14 @@ export const adminApi = {
     requireBackofficePermission("payments:refund");
     return adminClient.post("/cabinet-events/payment-success", payload);
   },
+  retryZeroCostPlatformCompletion(eventId: string) {
+    requireBackofficePermission("devices:operate");
+    return adminClient.post(`/cabinet-events/event/${eventId}/platform-completion-retry`);
+  },
+  confirmBillingResolution(eventId: string, note: string) {
+    requireBackofficePermission("devices:operate");
+    return adminClient.post(`/cabinet-events/event/${eventId}/billing-confirmation`, { note });
+  },
   refundOrder(payload: {
     orderNo: string;
     transactionId: string;
