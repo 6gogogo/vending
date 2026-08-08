@@ -1070,11 +1070,11 @@ export class InMemoryStoreService {
         "admin"
       );
       const mobileAdminBindingIsValid = Boolean(
-        mobileAdminCredential &&
+        user &&
           mobileAdminTenantCredential &&
-          session.tenantId === this.getDefaultTenantId() &&
+          this.getUserTenantId(user) === session.tenantId &&
           mobileAdminTenantCredential.tenantId === session.tenantId &&
-          session.mobileAdminCredentialUpdatedAt === mobileAdminCredential.passwordUpdatedAt &&
+          session.mobileAdminCredentialUpdatedAt === mobileAdminCredential?.passwordUpdatedAt &&
           session.mobileAdminTenantCredentialUpdatedAt ===
             mobileAdminTenantCredential.passwordUpdatedAt
       );

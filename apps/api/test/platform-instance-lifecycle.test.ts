@@ -122,6 +122,76 @@ const createDefaultAdminToken = (store: InMemoryStoreService) => {
   return store.createBackofficeSession(user, credential.role, credential.tenantId);
 };
 
+test("非默认实例首管理员的 App 会话签发后可立即访问实例接口", async () => {
+  const { app, baseUrl, store } = await startApi();
+
+  try {
+    const providerToken = createProviderToken(store);
+    const tenantHostname = "tenant-mobile-admin.example.test";
+    const adminPhone = "18800000998";
+    const createTenantResponse = await fetch(`${baseUrl}/platform/tenants`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${providerToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        code: "tenant-mobile-admin",
+        name: "移动管理员实例",
+        instanceUrl: `https://${tenantHostname}`,
+        firstAdmin: {
+          name: "移动端首管理员",
+          phone: adminPhone,
+          username: "tenant-mobile-admin",
+          password: "tenant-mobile-admin-password"
+        }
+      })
+    });
+    assert.equal(createTenantResponse.status, 201);
+
+    const loginCode = store.issueVerificationCode(adminPhone, "app-login");
+    const appLoginResponse = await fetch(`${baseUrl}/auth/app-login`, {
+      method: "POST",
+      headers: {
+        "x-forwarded-host": tenantHostname,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        phone: adminPhone,
+        code: loginCode
+      })
+    });
+    const appLoginPayload = (await appLoginResponse.json()) as {
+      data?: {
+        state?: string;
+        token?: string;
+        user?: { role?: string };
+      };
+    };
+    const mobileToken = appLoginPayload.data?.token;
+    assert.equal(appLoginResponse.status, 201);
+    assert.equal(appLoginPayload.data?.state, "approved");
+    assert.equal(appLoginPayload.data?.user?.role, "admin");
+    assert.ok(mobileToken);
+
+    const mobileHeaders = {
+      authorization: `Bearer ${mobileToken}`,
+      "x-forwarded-host": tenantHostname
+    };
+    const appSessionResponse = await fetch(`${baseUrl}/auth/app-session`, {
+      headers: mobileHeaders
+    });
+    const devicesResponse = await fetch(`${baseUrl}/devices`, {
+      headers: mobileHeaders
+    });
+
+    assert.equal(appSessionResponse.status, 200);
+    assert.equal(devicesResponse.status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
 test("实例管理员侧不存在向上认领服务商账号的接口", async () => {
   const { app, baseUrl } = await startApi();
 
