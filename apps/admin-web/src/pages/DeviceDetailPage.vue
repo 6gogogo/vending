@@ -756,13 +756,29 @@ const refreshDevice = async () => {
   }
 };
 
-const canRecoverZeroCostCompletion = (event: DeviceRecentEvent) =>
-  canOperateDevice.value &&
-  event.status === "settled" &&
+const isClosedZeroCostRestockWithoutSettlement = (event: DeviceRecentEvent) =>
+  event.status === "closed" &&
+  event.role !== "special" &&
+  event.hasInboundGoods === true &&
   event.amount === 0 &&
-  Boolean(event.paymentNotifyUrl) &&
-  event.paymentNotifyStatus !== "success" &&
-  ["free", "admin_confirmed", "mismatch", "blocked"].includes(event.billingStatus ?? "");
+  !event.orderNo.startsWith("pending-");
+
+const canRecoverZeroCostCompletion = (event: DeviceRecentEvent) => {
+  if (!canOperateDevice.value || event.paymentNotifyStatus === "success") {
+    return false;
+  }
+
+  if (isClosedZeroCostRestockWithoutSettlement(event)) {
+    return true;
+  }
+
+  return (
+    event.status === "settled" &&
+    event.amount === 0 &&
+    Boolean(event.paymentNotifyUrl) &&
+    ["free", "admin_confirmed", "mismatch", "blocked"].includes(event.billingStatus ?? "")
+  );
+};
 
 const recoverZeroCostCompletion = async (event: DeviceRecentEvent) => {
   if (!canRecoverZeroCostCompletion(event) || completingZeroCostEventId.value) {
@@ -770,7 +786,9 @@ const recoverZeroCostCompletion = async (event: DeviceRecentEvent) => {
   }
 
   const requiresConfirmation = event.billingStatus === "mismatch" || event.billingStatus === "blocked";
-  const prompt = requiresConfirmation
+  const prompt = isClosedZeroCostRestockWithoutSettlement(event)
+    ? "确认本次为已关门的零元补货操作，并结束柜机平台中的对应订单？"
+    : requiresConfirmation
     ? "确认已核对本次公益领取差异，并向柜机平台回写零元订单完成状态？"
     : "确认重试向柜机平台回写这笔零元订单的完成状态？";
 
@@ -1908,7 +1926,7 @@ onUnmounted(() => {
                       :disabled="Boolean(completingZeroCostEventId)"
                       @click="recoverZeroCostCompletion(event)"
                     >
-                      {{ completingZeroCostEventId === event.eventId ? "回写中" : event.billingStatus === "mismatch" || event.billingStatus === "blocked" ? "核对并结束订单" : "重试完成回写" }}
+                      {{ completingZeroCostEventId === event.eventId ? "回写中" : isClosedZeroCostRestockWithoutSettlement(event) ? "结束零元补货订单" : event.billingStatus === "mismatch" || event.billingStatus === "blocked" ? "核对并结束订单" : "重试完成回写" }}
                     </button>
                     <button
                       v-if="canManualPaymentSuccess && shouldShowPaymentAction(event)"

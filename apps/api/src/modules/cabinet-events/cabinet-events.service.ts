@@ -153,6 +153,10 @@ export class CabinetEventsService {
           return this.buildOpenQuoteReplayResult(lockedExistingEvent);
         }
 
+        // SmartVM 可能只回传补货开门的门状态，并在关门后稍晚才生成零元平台订单。
+        // 新一轮开门前先结束同柜机遗留的零元补货订单，避免平台以“非友好购买”拒绝新请求。
+        await this.recoverPendingZeroCostRestockCompletions(payload.deviceCode);
+
         // 获取同柜门互斥锁后重新计算额度、价格和预约状态，避免排队期间状态变化。
         const {
           user,
@@ -910,7 +914,7 @@ export class CabinetEventsService {
         : shouldAutoForwardFreeSettlement
         ? "本次预结算金额为 0，系统将自动回写平台付款成功。"
         : "已收到结算回调，系统将自动回写平台付款成功。";
-      void this.tryAutoForwardPaymentSuccess(
+      const autoForwardCompletion = this.tryAutoForwardPaymentSuccess(
         event,
         {
           orderNo: event.orderNo,
@@ -921,6 +925,13 @@ export class CabinetEventsService {
         },
         payload.notifyUrl
       );
+
+      return autoForwardCompletion.then(() => ({
+        movements: settlementAlreadyRecorded.movements,
+        duplicated: settlementAlreadyRecorded.duplicated,
+        paymentNotifyStatus: event.paymentNotifyStatus,
+        paymentNotifyMessage: event.paymentNotifyMessage
+      }));
     } else if (event.paymentNotifyStatus !== "success") {
       event.paymentNotifyStatus = "pending";
       event.paymentNotifyMessage =
@@ -1087,7 +1098,7 @@ export class CabinetEventsService {
     adjustment.paymentNotifyStatus = "pending";
     adjustment.paymentNotifyMessage = `补扣订单 ${payload.orderNo} 金额为 0，准备自动回写平台。`;
     this.syncLatestAdjustmentFields(event);
-    void this.tryAutoForwardPaymentSuccess(event, {
+    const autoForwardCompletion = this.tryAutoForwardPaymentSuccess(event, {
       orderNo: payload.orderNo,
       eventId: event.eventId,
       transactionId: this.store.createReference("txn"),
@@ -1095,11 +1106,14 @@ export class CabinetEventsService {
       amount: payload.amount
     }, payload.noticeUrl);
 
-    return {
+    return autoForwardCompletion.then(() => ({
       code: 200,
-      message: "补扣回调已接收",
+      message:
+        adjustment.paymentNotifyStatus === "success"
+          ? "补扣回调已接收，付款回写已完成"
+          : "补扣回调已接收，付款回写失败",
       duplicated: adjustmentRecorded.duplicated
-    };
+    }));
   }
 
   private shouldAutoForwardSettlementPaymentSuccess() {
@@ -1185,27 +1199,57 @@ export class CabinetEventsService {
     const freeOnlyPickup = this.isFreeOnlyPickupEvent(event);
     const noChargeOperationalOpen = this.isNoChargeOperationalOpen(event);
 
+    const closedRestockWithoutSettlement =
+      event.status === "closed" &&
+      event.role !== "special" &&
+      event.hasInboundGoods === true &&
+      !event.orderNo.startsWith("pending-");
+
     if (
-      event.status !== "settled" ||
+      (event.status !== "settled" && !closedRestockWithoutSettlement) ||
       event.amount !== 0 ||
       (!freeOnlyPickup && !noChargeOperationalOpen)
     ) {
-      throw new BadRequestException("只有已结算的公益零元领取或零元运营开柜才能重试平台完成回写。");
+      throw new BadRequestException(
+        "只有已结算的公益零元领取、零元运营开柜，或已关门但未收到结算回调的零元补货订单才能重试平台完成回写。"
+      );
     }
 
-    if (event.billingStatus !== "free" && event.billingStatus !== "admin_confirmed") {
+    if (
+      !closedRestockWithoutSettlement &&
+      event.billingStatus !== "free" &&
+      event.billingStatus !== "admin_confirmed"
+    ) {
       throw new BadRequestException("请先完成领取差异核对，再重试平台完成回写。");
     }
 
-    if (!event.paymentNotifyUrl) {
-      throw new BadRequestException("当前订单缺少平台付款成功通知地址，不能重试。");
+    const paymentNotifyUrl =
+      event.paymentNotifyUrl ??
+      (closedRestockWithoutSettlement
+        ? this.resolveUniqueSuccessfulPaymentNotifyTarget(event.deviceCode)
+        : undefined);
+
+    if (!paymentNotifyUrl) {
+      throw new BadRequestException(
+        "当前订单缺少平台付款成功通知地址，且同柜机没有唯一的历史成功回写目标，不能重试。"
+      );
     }
 
     const transactionId =
       event.paymentTransactionId ??
       this.store.createReference(freeOnlyPickup ? "pickup-completion" : "operation-completion");
 
-    return this.forwardPaymentSuccessToPlatform(
+    if (closedRestockWithoutSettlement) {
+      event.billingStatus = "free";
+      event.paymentNotifyUrl = paymentNotifyUrl;
+      event.paymentNotifyStatus = "pending";
+      event.paymentNotifyMessage = "补货开门已关门但平台未回传结算，正在结束零元平台订单。";
+      event.paymentTransactionId = transactionId;
+      event.updatedAt = new Date().toISOString();
+      this.store.persist();
+    }
+
+    const result = await this.forwardPaymentSuccessToPlatform(
       {
         orderNo: event.orderNo,
         eventId: event.eventId,
@@ -1218,9 +1262,17 @@ export class CabinetEventsService {
         logType: freeOnlyPickup
           ? "manual-free-pickup-completion-retry"
           : "manual-zero-cost-operation-completion-retry",
-        targetUrl: event.paymentNotifyUrl
+        targetUrl: paymentNotifyUrl
       }
     );
+
+    if (closedRestockWithoutSettlement) {
+      event.status = "settled";
+      event.updatedAt = new Date().toISOString();
+      this.store.persist();
+    }
+
+    return result;
   }
 
   async confirmBillingResolution(
@@ -1691,7 +1743,7 @@ export class CabinetEventsService {
     try {
       const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
       const freeOnlyPickup = this.isFreeOnlyPickupEvent(event);
-      await this.forwardPaymentSuccessToPlatform(payload, {
+      return await this.forwardPaymentSuccessToPlatform(payload, {
         actor: {
           type: "system",
           name: reservationOnlyPickup
@@ -1766,6 +1818,7 @@ export class CabinetEventsService {
           undoState: "not_undoable"
         }
       });
+      return undefined;
     }
   }
 
@@ -2382,6 +2435,117 @@ export class CabinetEventsService {
     }
   ) {
     return event.role !== "special" && typeof event.hasInboundGoods === "boolean";
+  }
+
+  private isClosedZeroCostRestockAwaitingCompletion(event: CabinetEventRecord) {
+    return (
+      event.status === "closed" &&
+      event.role !== "special" &&
+      event.hasInboundGoods === true &&
+      event.amount === 0 &&
+      !event.orderNo.startsWith("pending-") &&
+      event.paymentNotifyStatus !== "success"
+    );
+  }
+
+  private async recoverPendingZeroCostRestockCompletions(deviceCode: string) {
+    const pendingEvents = this.store.events
+      .filter(
+        (event) =>
+          event.deviceCode === deviceCode &&
+          this.isClosedZeroCostRestockAwaitingCompletion(event)
+      )
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+
+    for (const event of pendingEvents) {
+      const closedAt = Date.parse(event.updatedAt);
+      if (Number.isFinite(closedAt) && Date.now() - closedAt < 90_000) {
+        throw new ConflictException(
+          "上一笔补货开柜的零元平台订单仍在生成，请稍后重试开门。"
+        );
+      }
+
+      const targetUrl =
+        event.paymentNotifyUrl ??
+        this.resolveUniqueSuccessfulPaymentNotifyTarget(event.deviceCode);
+      if (!targetUrl) {
+        throw new ConflictException(
+          "上一笔补货开柜缺少唯一可信的平台完成回写目标，请由管理员处理后再开门。"
+        );
+      }
+
+      const transactionId =
+        event.paymentTransactionId ?? this.store.createReference("operation-completion");
+      event.billingStatus = "free";
+      event.paymentNotifyUrl = targetUrl;
+      event.paymentNotifyStatus = "pending";
+      event.paymentNotifyMessage = "正在结束上一笔零元补货平台订单。";
+      event.paymentTransactionId = transactionId;
+      event.updatedAt = new Date().toISOString();
+      this.store.persist();
+
+      const result = await this.tryAutoForwardPaymentSuccess(
+        event,
+        {
+          orderNo: event.orderNo,
+          eventId: event.eventId,
+          transactionId,
+          deviceCode: event.deviceCode,
+          amount: 0
+        },
+        targetUrl
+      );
+      this.store.persist();
+
+      if (!result) {
+        throw new ConflictException(
+          "上一笔零元补货平台订单尚未完成回写，请稍后重试或由管理员处理。"
+        );
+      }
+
+      event.status = "settled";
+      event.updatedAt = new Date().toISOString();
+      this.store.persist();
+    }
+  }
+
+  private resolveUniqueSuccessfulPaymentNotifyTarget(deviceCode: string) {
+    const candidates = new Set<string>();
+
+    for (const event of this.store.events) {
+      if (
+        event.deviceCode !== deviceCode ||
+        event.paymentNotifyStatus !== "success" ||
+        !event.paymentNotifyUrl
+      ) {
+        continue;
+      }
+
+      const normalized = this.normalizeSuccessfulPaymentNotifyTarget(event.paymentNotifyUrl);
+      if (normalized) {
+        candidates.add(normalized);
+      }
+    }
+
+    return candidates.size === 1 ? [...candidates][0] : undefined;
+  }
+
+  private normalizeSuccessfulPaymentNotifyTarget(rawTarget: string) {
+    try {
+      const target = new URL(rawTarget.trim());
+      if (
+        target.protocol !== "https:" ||
+        target.username ||
+        target.password ||
+        target.hash
+      ) {
+        return undefined;
+      }
+
+      return `${target.origin}${target.pathname}${target.search}`;
+    } catch {
+      return undefined;
+    }
   }
 
   private isReservationOnlyPickup() {

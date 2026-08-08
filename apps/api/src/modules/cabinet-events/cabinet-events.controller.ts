@@ -123,15 +123,15 @@ export class CabinetEventsController {
 
   @Post("callbacks/settlement")
   @HttpCode(200)
-  settlement(@Body() body: SmartVmSettlementPayload & Record<string, unknown>) {
-    this.cabinetEventsService.handleSettlement(body);
+  async settlement(@Body() body: SmartVmSettlementPayload & Record<string, unknown>) {
+    await this.cabinetEventsService.handleSettlement(body);
     return ack();
   }
 
   @Post("callbacks/adjustment")
   @HttpCode(200)
-  adjustment(@Body() body: SmartVmAdjustmentPayload & Record<string, unknown>) {
-    this.cabinetEventsService.handleAdjustment(body);
+  async adjustment(@Body() body: SmartVmAdjustmentPayload & Record<string, unknown>) {
+    await this.cabinetEventsService.handleAdjustment(body);
     return ack();
   }
 

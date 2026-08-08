@@ -3584,6 +3584,7 @@ const createCabinetHarness = (options?: {
   signatureValid?: boolean;
   config?: Record<string, string>;
   financialOperations?: FinancialOperationCoordinator;
+  paymentNotifyGate?: Promise<void>;
   quotaSummary?: {
     remainingToday: Record<string, number>;
     remainingByGoods: Record<string, number>;
@@ -3635,6 +3636,9 @@ const createCabinetHarness = (options?: {
     },
     getDeviceRuntime() {
       return deviceRuntime;
+    },
+    persist() {
+      return undefined;
     }
   };
   let settlementCalls = 0;
@@ -3686,6 +3690,7 @@ const createCabinetHarness = (options?: {
     },
     async notifyPaymentSuccess() {
       paymentNotifyCalls += 1;
+      await options?.paymentNotifyGate;
       return { smartVmExchange: undefined };
     },
     extractErrorMessage(error: unknown) {
@@ -3869,7 +3874,7 @@ describe("SmartVM 回调完整性", () => {
     assert.equal(harness.deviceRuntime.doorState, "closed");
   });
 
-  test("结算回调精确去重，冲突重放不会覆盖金额或重复库存副作用", () => {
+  test("结算回调精确去重，冲突重放不会覆盖金额或重复库存副作用", async () => {
     const harness = createCabinetHarness({
       event: createEvent({
         status: "closed",
@@ -3899,12 +3904,12 @@ describe("SmartVM 回调完整性", () => {
       sign: "verified"
     };
 
-    const first = harness.service.handleSettlement(payload);
-    const duplicate = harness.service.handleSettlement({
+    const first = await Promise.resolve(harness.service.handleSettlement(payload));
+    const duplicate = await Promise.resolve(harness.service.handleSettlement({
       ...payload,
       nonceStr: "nonce-settlement-2",
       sign: "verified-again"
-    });
+    }));
     assert.equal(first.duplicated, false);
     assert.equal(duplicate.duplicated, true);
     assert.equal(harness.settlementCalls, 1);
@@ -4651,11 +4656,11 @@ describe("SmartVM 回调完整性", () => {
     );
     assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
 
-    const replay = harness.service.handleAdjustment({
+    const replay = await Promise.resolve(harness.service.handleAdjustment({
       ...callback,
       nonceStr: "adjustment-nonce-2",
       sign: "verified-again"
-    });
+    }));
     assert.equal(replay.duplicated, true);
     assert.equal(harness.event.adjustments?.[0]?.paymentNotifyStatus, "success");
     assert.equal(harness.paymentNotifyCalls, 1);
@@ -4786,6 +4791,68 @@ describe("SmartVM 回调完整性", () => {
     assert.match(harness.event.paymentNotifyMessage ?? "", /公益领取完成状态/);
   });
 
+  test("零元结算回调等待平台完成回写后才返回最终状态", async () => {
+    let releasePaymentNotify!: () => void;
+    const paymentNotifyGate = new Promise<void>((resolve) => {
+      releasePaymentNotify = resolve;
+    });
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "closed",
+        role: "special",
+        amount: 0,
+        intentItems: [
+          {
+            goodsId: "goods-1",
+            goodsName: "测试商品",
+            category: "daily",
+            quantity: 1
+          }
+        ],
+        preSettlement: createFreeOnlyPreSettlement()
+      }),
+      paymentNotifyGate
+    });
+
+    const completion = Promise.resolve(
+      harness.service.handleSettlement({
+        orderNo: harness.event.orderNo,
+        eventId: harness.event.eventId,
+        phone: harness.event.phone,
+        deviceCode: harness.event.deviceCode,
+        amount: 500,
+        notifyUrl: "http://127.0.0.1/mock-payment-notify",
+        detail: [
+          {
+            goodsId: "goods-1",
+            goodsName: "测试商品",
+            quantity: 1,
+            unitPrice: 500
+          }
+        ],
+        clientId: "smartvm-client",
+        nonceStr: "await-zero-cost-completion",
+        timestamp: Math.floor(Date.now() / 1000),
+        sign: "verified"
+      })
+    );
+    let callbackCompleted = false;
+    void completion.then(() => {
+      callbackCompleted = true;
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(harness.paymentNotifyCalls, 1);
+    assert.equal(callbackCompleted, false);
+    assert.notEqual(harness.event.paymentNotifyStatus, "success");
+
+    releasePaymentNotify();
+    const result = await completion;
+    assert.equal(callbackCompleted, true);
+    assert.equal(result.paymentNotifyStatus, "success");
+    assert.equal(harness.event.paymentNotifyStatus, "success");
+  });
+
   test("历史预约支付事件不因当前切换预约取货模式而被改写", async () => {
     const now = new Date().toISOString();
     const harness = createCabinetHarness({
@@ -4890,7 +4957,7 @@ describe("SmartVM 回调完整性", () => {
       sign: "verified"
     };
 
-    const result = harness.service.handleAdjustment(callback);
+    const result = await Promise.resolve(harness.service.handleAdjustment(callback));
     assert.match(result.message, /等待管理员核对/);
     assert.equal(harness.event.amount, 0);
     assert.equal(harness.event.billingStatus, "mismatch");
@@ -4946,7 +5013,7 @@ describe("SmartVM 回调完整性", () => {
       sign: "verified"
     };
 
-    const result = harness.service.handleAdjustment(callback);
+    const result = await Promise.resolve(harness.service.handleAdjustment(callback));
     assert.match(result.message, /等待管理员核对/);
     assert.equal(harness.event.amount, 0);
     assert.equal(harness.event.billingStatus, "mismatch");
@@ -5046,5 +5113,90 @@ describe("SmartVM 回调完整性", () => {
     assert.equal(result.forwarded, true);
     assert.equal(harness.paymentNotifyCalls, 1);
     assert.equal(harness.event.paymentNotifyStatus, "success");
+  });
+
+  test("已关门零元补货未收到结算回调时复用同柜机唯一成功目标完成订单", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "closed",
+        role: "admin",
+        userId: "admin-1",
+        operationType: "restock",
+        hasInboundGoods: true,
+        amount: 0,
+        billingStatus: "pending",
+        paymentNotifyStatus: undefined,
+        paymentNotifyUrl: undefined
+      })
+    });
+    harness.store.events.push(
+      createEvent({
+        eventId: "historical-completed-event",
+        orderNo: "historical-completed-order",
+        deviceCode: harness.event.deviceCode,
+        status: "settled",
+        paymentNotifyStatus: "success",
+        paymentNotifyUrl:
+          "https://pre.smartvm.cn/api/pay/container/openapipayback/merchant/order"
+      })
+    );
+
+    const result = await harness.service.retryZeroCostPlatformCompletion(
+      harness.event.eventId,
+      "admin-1"
+    );
+
+    assert.equal(result.forwarded, true);
+    assert.equal(harness.paymentNotifyCalls, 1);
+    assert.equal(harness.event.status, "settled");
+    assert.equal(harness.event.billingStatus, "free");
+    assert.equal(harness.event.paymentNotifyStatus, "success");
+    assert.equal(
+      harness.event.paymentNotifyUrl,
+      "https://pre.smartvm.cn/api/pay/container/openapipayback/merchant/order"
+    );
+  });
+
+  test("已关门零元补货存在多个历史回写目标时保持关闭且不外呼", async () => {
+    const harness = createCabinetHarness({
+      event: createEvent({
+        status: "closed",
+        role: "admin",
+        userId: "admin-1",
+        operationType: "restock",
+        hasInboundGoods: true,
+        amount: 0,
+        billingStatus: "pending",
+        paymentNotifyStatus: undefined,
+        paymentNotifyUrl: undefined
+      })
+    });
+    harness.store.events.push(
+      createEvent({
+        eventId: "historical-target-a",
+        orderNo: "historical-order-a",
+        deviceCode: harness.event.deviceCode,
+        status: "settled",
+        paymentNotifyStatus: "success",
+        paymentNotifyUrl:
+          "https://pre.smartvm.cn/api/pay/container/openapipayback/merchant/a"
+      }),
+      createEvent({
+        eventId: "historical-target-b",
+        orderNo: "historical-order-b",
+        deviceCode: harness.event.deviceCode,
+        status: "settled",
+        paymentNotifyStatus: "success",
+        paymentNotifyUrl:
+          "https://pre.smartvm.cn/api/pay/container/openapipayback/merchant/b"
+      })
+    );
+
+    await assert.rejects(
+      harness.service.retryZeroCostPlatformCompletion(harness.event.eventId, "admin-1"),
+      /没有唯一的历史成功回写目标/
+    );
+    assert.equal(harness.paymentNotifyCalls, 0);
+    assert.equal(harness.event.status, "closed");
   });
 });
