@@ -84,6 +84,17 @@ export const hasBackofficeRouteAccess = (
   return requiredPermissions.every((permission) => sessionPermissions.includes(permission));
 };
 
+export const canRecoverManualSettlement = (
+  role: BackofficeRole | undefined,
+  permissions?: readonly string[]
+) =>
+  hasBackofficeRouteAccess(
+    role,
+    permissions,
+    ["devices:operate", "goods:stock-adjust"],
+    ["super_admin", "admin"]
+  );
+
 export const resolveBackofficeDefaultPath = (
   role: BackofficeRole | undefined,
   permissions?: readonly string[]

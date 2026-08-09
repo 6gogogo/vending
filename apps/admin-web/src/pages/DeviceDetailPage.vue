@@ -6,7 +6,10 @@ import type { DeviceRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
-import { useAdminSessionStore } from "../stores/session";
+import {
+  canRecoverManualSettlement as canRecoverManualSettlementAccess,
+  useAdminSessionStore
+} from "../stores/session";
 import { formatDate, formatDateTime, formatDateTimeSeconds, formatNowInBeijing } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 import {
@@ -31,10 +34,10 @@ const route = useRoute();
 const sessionStore = useAdminSessionStore();
 const canOperateDevice = computed(() => sessionStore.can("devices:operate"));
 const canRecoverManualSettlement = computed(
-  () =>
-    sessionStore.isAdmin &&
-    canOperateDevice.value &&
-    sessionStore.can("goods:stock-adjust")
+  () => canRecoverManualSettlementAccess(
+    sessionStore.user?.backofficeRole,
+    sessionStore.permissions
+  )
 );
 const canManageDevice = computed(() => sessionStore.can("devices:manage"));
 const canManageGoods = computed(() => sessionStore.can("goods:manage"));

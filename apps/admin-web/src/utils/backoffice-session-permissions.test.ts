@@ -7,6 +7,7 @@ import {
 } from "@vm/shared-types";
 
 import {
+  canRecoverManualSettlement,
   hasBackofficeRouteAccess,
   hasBackofficeRouteRole,
   resolveBackofficeDefaultPath,
@@ -96,5 +97,23 @@ test("服务商与实例态超级管理员按会话权限进入对应工作台",
   assert.equal(
     resolveBackofficeDefaultPath("super_admin", BACKOFFICE_TENANT_BOOTSTRAP_PERMISSIONS),
     "/operations"
+  );
+});
+
+test("服务商进入实例后可按实际权限处理缺失结算", () => {
+  const settlementPermissions = ["devices:operate", "goods:stock-adjust"] as const;
+
+  assert.equal(
+    canRecoverManualSettlement("super_admin", settlementPermissions),
+    true
+  );
+  assert.equal(canRecoverManualSettlement("admin", settlementPermissions), true);
+  assert.equal(
+    canRecoverManualSettlement("super_admin", ["devices:operate"]),
+    false
+  );
+  assert.equal(
+    canRecoverManualSettlement("merchant", settlementPermissions),
+    false
   );
 });

@@ -13,7 +13,7 @@ import type {
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
-import { useAdminSessionStore } from "../stores/session";
+import { canRecoverManualSettlement, useAdminSessionStore } from "../stores/session";
 import { resolveActorLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
@@ -110,10 +110,10 @@ const selectedDateSummary = computed(() => detail.value?.policyCalendar?.selecte
 const selectedDeviceGoods = computed(() => devices.value.find((entry) => entry.deviceCode === form.value.deviceCode)?.doors.flatMap((door) => door.goods) ?? []);
 const selectedGoods = computed(() => selectedDeviceGoods.value.find((entry) => entry.goodsId === form.value.goodsId));
 const canRecoverSettlement = computed(
-  () =>
-    sessionStore.isAdmin &&
-    sessionStore.can("devices:operate") &&
-    sessionStore.can("goods:stock-adjust")
+  () => canRecoverManualSettlement(
+    sessionStore.user?.backofficeRole,
+    sessionStore.permissions
+  )
 );
 const selectedManualSettlementCandidate = computed(() =>
   manualSettlementCandidates.value.find(
