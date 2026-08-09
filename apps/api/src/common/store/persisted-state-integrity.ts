@@ -46,6 +46,15 @@ const PAYMENT_ORDER_STATUSES = new Set([
 const PAYMENT_REFUND_STATUSES = new Set(["pending", "success", "failed"]);
 const PAYMENT_REFUND_PROVIDER_OUTCOMES = new Set(["unknown", "pending", "success", "failed"]);
 const PAYMENT_REFUND_BUSINESS_APPLY_STATES = new Set(["pending", "completed"]);
+const MANUAL_SETTLEMENT_STATUSES = new Set([
+  "awaiting_order",
+  "awaiting_platform_completion",
+  "platform_completed",
+  "callback_reconciled",
+  "conflict",
+  "reverted"
+]);
+const RESERVATION_STATUSES = new Set(["active", "fulfilled", "cancelled", "expired"]);
 const PLATFORM_TENANT_STATUSES = new Set(["active", "trial", "paused"]);
 const MOBILE_USER_ROLES = new Set(["admin", "merchant", "restocker", "special"]);
 const BACKOFFICE_SESSION_ROLES = new Set([
@@ -172,6 +181,44 @@ const validateUniqueField = (
     }
 
     seen.add(normalized);
+  }
+};
+
+const validateUniqueEventOrderNoByTenant = (
+  state: Record<string, unknown>,
+  result: PersistedStateValidationResult
+) => {
+  const events = state.events;
+  const users = state.users;
+  if (!Array.isArray(events) || !Array.isArray(users)) return;
+
+  const userTenantIds = new Map<string, string>();
+  for (const user of users) {
+    if (!isRecord(user) || typeof user.id !== "string") continue;
+    userTenantIds.set(
+      user.id,
+      typeof user.tenantId === "string" && user.tenantId.trim()
+        ? user.tenantId.trim()
+        : "legacy-default-tenant"
+    );
+  }
+
+  const seen = new Set<string>();
+  for (const event of events) {
+    if (
+      !isRecord(event) ||
+      typeof event.orderNo !== "string" ||
+      !event.orderNo.trim() ||
+      typeof event.userId !== "string"
+    ) {
+      continue;
+    }
+    const tenantId = userTenantIds.get(event.userId) ?? "unknown-tenant";
+    const scopedOrderNo = `${tenantId}\0${event.orderNo.trim()}`;
+    if (seen.has(scopedOrderNo)) {
+      result.errors.push("events 当前实例存在重复 orderNo。");
+    }
+    seen.add(scopedOrderNo);
   }
 };
 
@@ -454,6 +501,283 @@ const isNonNegativeSafeInteger = (value: unknown): value is number =>
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && Boolean(value.trim());
 
+const validateReservationRecords = (
+  state: Record<string, unknown>,
+  result: PersistedStateValidationResult
+) => {
+  const reservations = Array.isArray(state.reservations) ? state.reservations : [];
+  const users = Array.isArray(state.users) ? state.users : [];
+  const usersById = new Map(
+    users
+      .filter((entry): entry is Record<string, unknown> => isRecord(entry) && isNonEmptyString(entry.id))
+      .map((entry) => [entry.id as string, entry])
+  );
+
+  for (const [index, reservation] of reservations.entries()) {
+    if (!isRecord(reservation)) {
+      continue;
+    }
+    const path = `reservations[${index}]`;
+    if (!isNonEmptyString(reservation.status) || !RESERVATION_STATUSES.has(reservation.status)) {
+      result.errors.push(`${path}.status 不是允许的预约状态。`);
+      continue;
+    }
+    if (reservation.status !== "cancelled") {
+      continue;
+    }
+    if (
+      !isNonEmptyString(reservation.cancelledAt) ||
+      !Number.isFinite(Date.parse(reservation.cancelledAt))
+    ) {
+      result.errors.push(`${path}.cancelledAt 在已取消状态下必须是有效时间。`);
+    }
+    if (!isNonEmptyString(reservation.cancelledByUserId)) {
+      result.errors.push(`${path}.cancelledByUserId 在已取消状态下不能为空。`);
+      continue;
+    }
+    const actor = usersById.get(reservation.cancelledByUserId);
+    if (actor?.role === "admin") {
+      const reason =
+        typeof reservation.cancellationReason === "string"
+          ? reservation.cancellationReason.trim()
+          : "";
+      if (reason.length < 2 || reason.length > 200) {
+        result.errors.push(`${path}.cancellationReason 在管理员取消时必须为 2 至 200 字。`);
+      }
+    }
+  }
+};
+
+const validateManualSettlementRecords = (
+  state: Record<string, unknown>,
+  result: PersistedStateValidationResult
+) => {
+  const events = state.events;
+  const inventory = state.inventory;
+  if (!Array.isArray(events) || !Array.isArray(inventory)) {
+    return;
+  }
+
+  const movementsById = new Map<string, Record<string, unknown>>();
+  for (const movement of inventory) {
+    if (isRecord(movement) && isNonEmptyString(movement.id)) {
+      movementsById.set(movement.id, movement);
+    }
+  }
+
+  const validateTime = (value: unknown, path: string) => {
+    if (!isNonEmptyString(value) || !Number.isFinite(Date.parse(value))) {
+      result.errors.push(`${path} 必须是有效时间。`);
+    }
+  };
+
+  const validateItems = (value: unknown, path: string) => {
+    if (!Array.isArray(value) || value.length === 0) {
+      result.errors.push(`${path} 必须是非空数组。`);
+      return;
+    }
+    const goodsIds = new Set<string>();
+    for (const [itemIndex, item] of value.entries()) {
+      if (!isRecord(item)) {
+        result.errors.push(`${path}[${itemIndex}] 必须是对象。`);
+        continue;
+      }
+      for (const field of ["goodsId", "goodsName", "category"] as const) {
+        if (!isNonEmptyString(item[field])) {
+          result.errors.push(`${path}[${itemIndex}].${field} 缺失或为空字符串。`);
+        }
+      }
+      if (isNonEmptyString(item.goodsId)) {
+        if (goodsIds.has(item.goodsId)) {
+          result.errors.push(`${path} 存在重复 goodsId。`);
+        }
+        goodsIds.add(item.goodsId);
+      }
+      if (
+        typeof item.quantity !== "number" ||
+        !Number.isSafeInteger(item.quantity) ||
+        item.quantity <= 0
+      ) {
+        result.errors.push(`${path}[${itemIndex}].quantity 必须是正安全整数。`);
+      }
+      if (!isNonNegativeSafeInteger(item.unitPrice)) {
+        result.errors.push(`${path}[${itemIndex}].unitPrice 必须是非负安全整数。`);
+      }
+    }
+  };
+
+  const validateMovementIds = (
+    value: unknown,
+    path: string,
+    eventId: string | undefined,
+    expectedType: string,
+    expectedSource?: string,
+    optional = false
+  ) => {
+    if (value === undefined && optional) {
+      return;
+    }
+    if (!Array.isArray(value) || value.length === 0) {
+      result.errors.push(`${path} 必须是非空数组。`);
+      return;
+    }
+    const ids = new Set<string>();
+    for (const [movementIndex, movementId] of value.entries()) {
+      if (!isNonEmptyString(movementId)) {
+        result.errors.push(`${path}[${movementIndex}] 必须是非空字符串。`);
+        continue;
+      }
+      if (ids.has(movementId)) {
+        result.errors.push(`${path} 存在重复流水编号。`);
+        continue;
+      }
+      ids.add(movementId);
+      const movement = movementsById.get(movementId);
+      if (
+        !movement ||
+        movement.eventId !== eventId ||
+        movement.type !== expectedType ||
+        (expectedSource !== undefined && movement.settlementSource !== expectedSource)
+      ) {
+        result.errors.push(`${path}[${movementIndex}] 未引用同事件的有效${expectedType}流水。`);
+      }
+    }
+  };
+
+  for (const [eventIndex, event] of events.entries()) {
+    if (!isRecord(event) || event.manualSettlement === undefined) {
+      continue;
+    }
+    const path = `events[${eventIndex}].manualSettlement`;
+    if (!isRecord(event.manualSettlement)) {
+      result.errors.push(`${path} 必须是对象。`);
+      continue;
+    }
+    const record = event.manualSettlement;
+    for (const field of ["id", "eventId", "status", "reason", "handledAt", "handledByUserId"] as const) {
+      if (!isNonEmptyString(record[field])) {
+        result.errors.push(`${path}.${field} 缺失或为空字符串。`);
+      }
+    }
+    if (record.eventId !== event.eventId) {
+      result.errors.push(`${path}.eventId 必须与所属开柜事件一致。`);
+    }
+    if (!isNonEmptyString(record.status) || !MANUAL_SETTLEMENT_STATUSES.has(record.status)) {
+      result.errors.push(`${path}.status 不是允许的人工结算状态。`);
+    }
+    validateTime(record.handledAt, `${path}.handledAt`);
+    validateItems(record.items, `${path}.items`);
+    validateMovementIds(
+      record.movementIds,
+      `${path}.movementIds`,
+      isNonEmptyString(event.eventId) ? event.eventId : undefined,
+      "pickup",
+      "manual_recovery"
+    );
+
+    if (record.status === "awaiting_order") {
+      if (record.platformOrderNo !== undefined) {
+        result.errors.push(`${path}.platformOrderNo 在待补订单号状态下必须为空。`);
+      }
+    } else if (
+      record.status !== "reverted" &&
+      !isNonEmptyString(record.platformOrderNo)
+    ) {
+      result.errors.push(`${path}.platformOrderNo 在当前状态下不能为空。`);
+    }
+    if (
+      isNonEmptyString(record.platformOrderNo) &&
+      record.platformOrderNo !== event.orderNo
+    ) {
+      result.errors.push(`${path}.platformOrderNo 必须与所属开柜事件订单号一致。`);
+    }
+
+    if (record.status === "platform_completed") {
+      validateTime(record.platformCompletedAt, `${path}.platformCompletedAt`);
+    }
+
+    if (record.lateCallback !== undefined) {
+      if (!isRecord(record.lateCallback)) {
+        result.errors.push(`${path}.lateCallback 必须是对象。`);
+      } else {
+        const callback = record.lateCallback;
+        if (!isNonEmptyString(callback.callbackLogId)) {
+          result.errors.push(`${path}.lateCallback.callbackLogId 缺失或为空字符串。`);
+        }
+        validateTime(callback.receivedAt, `${path}.lateCallback.receivedAt`);
+        if (!isNonNegativeSafeInteger(callback.platformAmount)) {
+          result.errors.push(`${path}.lateCallback.platformAmount 必须是非负安全整数。`);
+        }
+        if (!isNonEmptyString(callback.notifyUrl)) {
+          result.errors.push(`${path}.lateCallback.notifyUrl 缺失或为空字符串。`);
+        }
+        if (typeof callback.matched !== "boolean") {
+          result.errors.push(`${path}.lateCallback.matched 必须是布尔值。`);
+        }
+        validateItems(callback.items, `${path}.lateCallback.items`);
+      }
+    }
+
+    if (record.status === "conflict") {
+      if (!isRecord(record.lateCallback) || record.lateCallback.matched !== false) {
+        result.errors.push(`${path} 的明细冲突状态必须绑定未匹配的迟到回调。`);
+      }
+    }
+    if (
+      record.status === "callback_reconciled" &&
+      (
+        !isRecord(record.lateCallback) ||
+        (
+          record.lateCallback.matched !== true &&
+          record.conflictResolution === undefined
+        )
+      )
+    ) {
+      result.errors.push(`${path} 的已核对状态必须绑定明细一致的迟到回调。`);
+    }
+
+    validateMovementIds(
+      record.platformMovementIds,
+      `${path}.platformMovementIds`,
+      isNonEmptyString(event.eventId) ? event.eventId : undefined,
+      "pickup",
+      "platform_callback",
+      record.conflictResolution !== "use_platform"
+    );
+    validateMovementIds(
+      record.reversalMovementIds,
+      `${path}.reversalMovementIds`,
+      isNonEmptyString(event.eventId) ? event.eventId : undefined,
+      "refund",
+      undefined,
+      record.status !== "reverted" && record.conflictResolution !== "use_platform"
+    );
+
+    if (record.conflictResolution !== undefined) {
+      if (record.conflictResolution !== "keep_manual" && record.conflictResolution !== "use_platform") {
+        result.errors.push(`${path}.conflictResolution 不是允许的冲突处理结果。`);
+      }
+      validateTime(record.conflictResolvedAt, `${path}.conflictResolvedAt`);
+      if (!isNonEmptyString(record.conflictResolvedByUserId)) {
+        result.errors.push(`${path}.conflictResolvedByUserId 缺失或为空字符串。`);
+      }
+      if (!isNonEmptyString(record.conflictResolutionReason)) {
+        result.errors.push(`${path}.conflictResolutionReason 缺失或为空字符串。`);
+      }
+    }
+
+    if (record.status === "reverted") {
+      validateTime(record.revertedAt, `${path}.revertedAt`);
+      if (!isNonEmptyString(record.revertedByUserId)) {
+        result.errors.push(`${path}.revertedByUserId 缺失或为空字符串。`);
+      }
+      if (!isNonEmptyString(record.revertReason)) {
+        result.errors.push(`${path}.revertReason 缺失或为空字符串。`);
+      }
+    }
+  }
+};
+
 const validatePaymentRefundCompletionMarkers = (
   state: Record<string, unknown>,
   result: PersistedStateValidationResult
@@ -710,7 +1034,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateUniqueField(parsed, "inventoryTransfers", "id", result);
   validateUniqueField(parsed, "stocktakes", "id", result);
   validateUniqueField(parsed, "events", "eventId", result);
-  validateUniqueField(parsed, "events", "orderNo", result);
+  validateUniqueEventOrderNoByTenant(parsed, result);
   validateUniqueField(parsed, "inventory", "id", result);
   validateUniqueField(parsed, "paymentOrders", "id", result);
   validateUniqueField(parsed, "paymentOrders", "paymentNo", result);
@@ -754,6 +1078,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateRequiredStringFields(parsed, "paymentOrders", ["id", "paymentNo", "provider", "phase", "status"], result);
   validateRequiredStringFields(parsed, "paymentRefunds", ["id", "paymentOrderId", "paymentNo", "refundNo", "provider", "status"], result);
   validateRequiredStringFields(parsed, "reservations", ["id", "userId", "deviceCode", "status"], result);
+  validateReservationRecords(parsed, result);
   validateRequiredStringFields(
     parsed,
     "platformTenants",
@@ -871,6 +1196,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateReferenceField(parsed, "paymentRefunds", "paymentOrderId", paymentOrderIds, "支付单", result);
   validateReferenceField(parsed, "paymentOrders", "eventId", eventIds, "开柜事件", result, true);
   validateReferenceField(parsed, "goodsBatches", "goodsId", catalogGoodsIds, "货品", result);
+  validateManualSettlementRecords(parsed, result);
   validatePaymentRefundCompletionMarkers(parsed, result);
   validatePaymentRefundBindings(parsed, result);
 

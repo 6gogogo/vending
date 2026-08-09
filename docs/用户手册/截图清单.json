@@ -149,6 +149,27 @@
       "markers": [{ "x": 90, "y": 245, "label": "1" }]
     },
     {
+      "id": "admin-manual-settlement-candidate",
+      "source": "docs/assets/manuals/admin/admin-manual-settlement-candidate-source.png",
+      "output": "docs/assets/manuals/final/admin/manual-settlement-candidate.png",
+      "crop": [880, 130, 1235, 710],
+      "markers": [
+        { "x": 25, "y": 175, "label": "1" },
+        { "x": 25, "y": 355, "label": "2" }
+      ]
+    },
+    {
+      "id": "admin-manual-settlement-form",
+      "source": "docs/assets/manuals/admin/admin-manual-settlement-form-source.png",
+      "output": "docs/assets/manuals/final/admin/manual-settlement-form.png",
+      "crop": [880, 0, 1235, 500],
+      "markers": [
+        { "x": 25, "y": 155, "label": "1" },
+        { "x": 25, "y": 265, "label": "2" },
+        { "x": 25, "y": 405, "label": "3" }
+      ]
+    },
+    {
       "id": "admin-logs",
       "source": "docs/assets/manuals/admin/admin-logs-source.png",
       "output": "docs/assets/manuals/final/admin/logs.png",

@@ -305,6 +305,7 @@ export class AlertsService {
     this.refreshExpiryAlerts();
     this.refreshInventoryAlerts();
     this.refreshDeviceFaultTasks();
+    this.refreshManualSettlementTasks();
     this.refreshLogDrivenTasks();
   }
 
@@ -423,6 +424,62 @@ export class AlertsService {
           relatedEventId: event.eventId
         });
       }
+    }
+  }
+
+  refreshManualSettlementTasks(deviceCode?: string) {
+    const now = Date.now();
+    for (const event of this.store.events) {
+      const ignoredMovementIds =
+        event.manualSettlement?.status === "reverted"
+          ? new Set(event.manualSettlement.movementIds)
+          : undefined;
+      if (
+        (deviceCode && event.deviceCode !== deviceCode) ||
+        event.role !== "special" ||
+        event.status !== "closed" ||
+        event.physicalDoorState !== "closed" ||
+        (event.manualSettlement && event.manualSettlement.status !== "reverted") ||
+        event.refundedAt ||
+        event.refundNo ||
+        this.store.inventory.some(
+          (entry) =>
+            !ignoredMovementIds?.has(entry.id) &&
+            (
+              entry.eventId === event.eventId ||
+              (
+                !entry.eventId &&
+                entry.orderNo === event.orderNo &&
+                entry.deviceCode === event.deviceCode &&
+                entry.userId === event.userId
+              )
+            ) &&
+            (entry.type === "pickup" || entry.type === "donation")
+        )
+      ) {
+        continue;
+      }
+      const closeLog = this.store.callbackLog.find(
+        (entry) =>
+          entry.type === "door-status" &&
+          entry.payload.eventId === event.eventId &&
+          entry.payload.deviceCode === event.deviceCode &&
+          entry.payload.status === "CLOSED"
+      );
+      const closedAtMs = closeLog ? Date.parse(closeLog.receivedAt) : Number.NaN;
+      if (!Number.isFinite(closedAtMs) || now - closedAtMs < 10 * 60_000) {
+        continue;
+      }
+      this.create({
+        type: "callback",
+        grade: "warning",
+        title: "结算回调超时待补记",
+        deviceCode: event.deviceCode,
+        targetUserId: event.userId,
+        dueAt: new Date(closedAtMs + 10 * 60_000).toISOString(),
+        detail: `事件 ${event.eventId} 已可信关门满 10 分钟但尚无结算流水，请核对实际取走商品。`,
+        relatedEventId: event.eventId
+      });
     }
   }
 

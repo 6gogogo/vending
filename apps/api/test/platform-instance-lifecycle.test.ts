@@ -1872,13 +1872,18 @@ test("新实例管理员不能通过已知用户 ID、柜机编号或凭证接�
       (await unrelatedModuleResponses[1]!.json()) as {
         data?: Array<{ id?: string }>;
       };
+    const scopedReservationPayload =
+      (await unrelatedModuleResponses[3]!.json()) as {
+        data?: Array<{ id?: string }>;
+      };
 
     assert.equal(detailUserResponse.status, 404);
     assert.deepEqual(
       unrelatedModuleResponses.map((response) => response.status),
-      [403, 200, 403, 403, 403, 403]
+      [403, 200, 403, 200, 403, 403]
     );
     assert.deepEqual(scopedRegistrationPayload.data, []);
+    assert.deepEqual(scopedReservationPayload.data, []);
     assert.equal(updateUserResponse.status, 404);
     assert.equal(assignDeviceResponse.status, 404);
     assert.equal(credentialResponse.status, 403);

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -23,7 +24,7 @@ import { InMemoryStoreService } from "../../common/store/in-memory-store.service
 import { isReservationOnlyPickup } from "../../common/config/reservation-only-pickup";
 import { AccessRulesService } from "../access-rules/access-rules.service";
 
-type Actor = { id: string; role: UserRole };
+type Actor = { id: string; role: UserRole; tenantId?: string };
 
 @Injectable()
 export class ReservationsService {
@@ -122,11 +123,26 @@ export class ReservationsService {
     }
   }
 
-  list(actor?: Actor) {
+  list(actor?: Actor, targetUserId?: string) {
     this.expireOverdueReservations();
 
-    if (!actor || actor.role === "admin") {
+    if (!actor) {
       return this.store.reservations;
+    }
+
+    if (actor.role === "admin") {
+      if (!actor.tenantId) {
+        throw new ForbiddenException("当前后台会话未绑定客户实例。");
+      }
+      return this.store.reservations
+        .filter(
+          (entry) =>
+            this.reservationBelongsToTenant(entry, actor.tenantId!) &&
+            (!targetUserId || entry.userId === targetUserId)
+        )
+        .slice()
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, 50);
     }
 
     return this.store.reservations.filter((entry) => entry.userId === actor.id);
@@ -222,15 +238,27 @@ export class ReservationsService {
     return record;
   }
 
-  cancel(id: string, actor: Actor) {
+  cancel(id: string, actor: Actor, reasonInput?: unknown) {
     this.expireOverdueReservations();
     const reservation = this.findReservation(id);
 
-    if (actor.role !== "admin" && reservation.userId !== actor.id) {
+    let cancellationReason: string | undefined;
+    if (actor.role === "admin") {
+      if (!actor.tenantId || !this.reservationBelongsToTenant(reservation, actor.tenantId)) {
+        throw new NotFoundException("未找到对应预约记录。");
+      }
+      cancellationReason = typeof reasonInput === "string" ? reasonInput.trim() : "";
+      if (cancellationReason.length < 2 || cancellationReason.length > 200) {
+        throw new BadRequestException("管理员取消预约时，请填写 2 至 200 字的处理原因。");
+      }
+    } else if (reservation.userId !== actor.id) {
       throw new ForbiddenException("不能取消其他用户的预约。");
     }
 
     if (reservation.status !== "active") {
+      if (actor.role === "admin") {
+        throw new ConflictException("只有当前有效的预约可以由管理员取消。");
+      }
       return reservation;
     }
 
@@ -238,6 +266,7 @@ export class ReservationsService {
     reservation.status = "cancelled";
     reservation.cancelledAt = now;
     reservation.cancelledByUserId = actor.id;
+    reservation.cancellationReason = cancellationReason;
     reservation.updatedAt = now;
 
     this.store.logOperation({
@@ -255,14 +284,35 @@ export class ReservationsService {
         id: reservation.userId,
         label: reservation.userName ?? reservation.phone
       },
-      description: `预约 ${reservation.id} 已取消。`,
+      description:
+        actor.role === "admin"
+          ? `管理员取消了 ${reservation.userName ?? reservation.userId} 的预约 ${reservation.id}。`
+          : `预约 ${reservation.id} 已由用户取消。`,
+      detail: cancellationReason,
       metadata: {
         reservationId: reservation.id,
+        reason: cancellationReason,
         undoState: "not_undoable"
       }
     });
 
     return reservation;
+  }
+
+  private reservationBelongsToTenant(
+    reservation: CabinetReservationRecord,
+    tenantId: string
+  ) {
+    const user = this.store.users.find((entry) => entry.id === reservation.userId);
+    const device = this.store.devices.find(
+      (entry) => entry.deviceCode === reservation.deviceCode
+    );
+    return Boolean(
+      user &&
+      device &&
+      this.store.getUserTenantId(user) === tenantId &&
+      this.store.getDeviceTenantId(device) === tenantId
+    );
   }
 
   resetUserTimeouts(userId: string, actorUserId?: string) {

@@ -16,6 +16,7 @@ import type {
   BackofficeRole,
   BackofficeSessionSnapshot,
   CallbackLogRecord,
+  CabinetReservationRecord,
   DataMonitorRange,
   DataMonitorSnapshot,
   DashboardSnapshot,
@@ -33,6 +34,12 @@ import type {
   InstanceRuntimeRestartPayload,
   InstanceRuntimeRestartResult,
   MerchantGoodsTemplate,
+  ManualSettlementCandidate,
+  ManualSettlementConflictResolutionPayload,
+  ManualSettlementCreatePayload,
+  ManualSettlementOrderLinkPayload,
+  ManualSettlementRecord,
+  ManualSettlementRevertPayload,
   ManualVerificationGrantSnapshot,
   ManualVerificationPurpose,
   OperationLogCategory,
@@ -377,6 +384,59 @@ export const adminApi = {
     requireBackofficePermission("goods:stock-adjust");
     return adminClient.post(`/users/${userId}/manual-adjustment`, payload);
   },
+  manualSettlementCandidates(userId?: string) {
+    requireBackofficePermission("devices:operate");
+    requireBackofficePermission("goods:stock-adjust");
+    return adminClient.get<ManualSettlementCandidate[]>(
+      "/cabinet-events/manual-settlement-candidates",
+      { query: { userId } }
+    );
+  },
+  createManualSettlement(eventId: string, payload: ManualSettlementCreatePayload) {
+    requireBackofficePermission("devices:operate");
+    requireBackofficePermission("goods:stock-adjust");
+    return adminClient.post<ManualSettlementRecord>(
+      `/cabinet-events/event/${encodeURIComponent(eventId)}/manual-settlement`,
+      payload
+    );
+  },
+  linkManualSettlementOrder(eventId: string, payload: ManualSettlementOrderLinkPayload) {
+    requireBackofficePermission("devices:operate");
+    requireBackofficePermission("goods:stock-adjust");
+    return adminClient.post<ManualSettlementRecord>(
+      `/cabinet-events/event/${encodeURIComponent(eventId)}/manual-settlement/order-link`,
+      payload
+    );
+  },
+  completeManualSettlementPlatform(eventId: string) {
+    requireBackofficePermission("devices:operate");
+    requireBackofficePermission("goods:stock-adjust");
+    return adminClient.post<{
+      manualSettlement: ManualSettlementRecord;
+      platformCompletion: unknown;
+    }>(
+      `/cabinet-events/event/${encodeURIComponent(eventId)}/manual-settlement/platform-completion`
+    );
+  },
+  revertManualSettlement(eventId: string, payload: ManualSettlementRevertPayload) {
+    requireBackofficePermission("devices:operate");
+    requireBackofficePermission("goods:stock-adjust");
+    return adminClient.post<ManualSettlementRecord>(
+      `/cabinet-events/event/${encodeURIComponent(eventId)}/manual-settlement/revert`,
+      payload
+    );
+  },
+  resolveManualSettlementConflict(
+    eventId: string,
+    payload: ManualSettlementConflictResolutionPayload
+  ) {
+    requireBackofficePermission("devices:operate");
+    requireBackofficePermission("goods:stock-adjust");
+    return adminClient.post<ManualSettlementRecord>(
+      `/cabinet-events/event/${encodeURIComponent(eventId)}/manual-settlement/conflict-resolution`,
+      payload
+    );
+  },
   saveUserAccessPolicy(
     userId: string,
     payload: {
@@ -431,6 +491,19 @@ export const adminApi = {
   saveReservationSettings(payload: Partial<Pick<ReservationSettings, "enabled" | "holdMinutes" | "maxTimeouts">>) {
     requireBackofficePermission("reservations:manage");
     return adminClient.patch<ReservationSettings>("/reservations/settings", payload);
+  },
+  reservations(userId: string) {
+    requireBackofficePermission("users:view");
+    return adminClient.get<CabinetReservationRecord[]>(
+      `/reservations?userId=${encodeURIComponent(userId)}`
+    );
+  },
+  cancelReservation(id: string, reason: string) {
+    requireBackofficePermission("reservations:manage");
+    return adminClient.post<CabinetReservationRecord>(
+      `/reservations/${encodeURIComponent(id)}/cancel`,
+      { reason }
+    );
   },
   resolveAlert(id: string, note?: string) {
     requireBackofficePermission("alerts:manage");

@@ -1038,6 +1038,99 @@ export interface CabinetSettlementComparison {
   }>;
 }
 
+export type ManualSettlementOrderState = "recorded" | "awaiting_order";
+
+export interface ManualSettlementCandidate {
+  eventId: string;
+  user: {
+    id: string;
+    name: string;
+  };
+  device: {
+    deviceCode: string;
+    name: string;
+  };
+  orderState: ManualSettlementOrderState;
+  platformOrderNo?: string;
+  closedAt: string;
+  eligibleAt: string;
+  waitingSeconds: number;
+  intentItems: CabinetIntentItem[];
+}
+
+export type ManualSettlementStatus =
+  | "awaiting_order"
+  | "awaiting_platform_completion"
+  | "platform_completed"
+  | "callback_reconciled"
+  | "conflict"
+  | "reverted";
+
+export interface ManualSettlementItem {
+  goodsId: string;
+  goodsName: string;
+  category: GoodsCategory;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface ManualSettlementLateCallback {
+  callbackLogId: string;
+  receivedAt: string;
+  platformAmount: number;
+  notifyUrl: string;
+  items: ManualSettlementItem[];
+  matched: boolean;
+}
+
+export interface ManualSettlementRecord {
+  id: string;
+  eventId: string;
+  status: ManualSettlementStatus;
+  platformOrderNo?: string;
+  items: ManualSettlementItem[];
+  movementIds: string[];
+  reason: string;
+  handledAt: string;
+  handledByUserId: string;
+  orderLinkedAt?: string;
+  orderLinkedByUserId?: string;
+  platformCompletedAt?: string;
+  lateCallback?: ManualSettlementLateCallback;
+  platformMovementIds?: string[];
+  reversalMovementIds?: string[];
+  conflictResolution?: "keep_manual" | "use_platform";
+  conflictResolvedAt?: string;
+  conflictResolvedByUserId?: string;
+  conflictResolutionReason?: string;
+  revertedAt?: string;
+  revertedByUserId?: string;
+  revertReason?: string;
+}
+
+export interface ManualSettlementCreatePayload {
+  items: Array<{
+    goodsId: string;
+    quantity: number;
+  }>;
+  reason: string;
+  confirmed: boolean;
+  platformOrderNo?: string;
+}
+
+export interface ManualSettlementOrderLinkPayload {
+  platformOrderNo: string;
+}
+
+export interface ManualSettlementRevertPayload {
+  reason: string;
+}
+
+export interface ManualSettlementConflictResolutionPayload {
+  resolution: "keep_manual" | "use_platform";
+  reason: string;
+}
+
 export interface CabinetEventRecord {
   eventId: string;
   orderNo: string;
@@ -1086,6 +1179,7 @@ export interface CabinetEventRecord {
   paymentNotifiedAt?: string;
   paymentTransactionId?: string;
   paymentRecovery?: PaymentRecoveryState;
+  manualSettlement?: ManualSettlementRecord;
   adjustments?: CabinetAdjustmentRecord[];
   adjustmentOrderNo?: string;
   adjustmentNoticeUrl?: string;
@@ -1138,6 +1232,7 @@ export interface CabinetReservationRecord {
   fulfilledEventId?: string;
   cancelledAt?: string;
   cancelledByUserId?: string;
+  cancellationReason?: string;
   expiredAt?: string;
   timeoutCountAtCreation?: number;
 }
@@ -1194,6 +1289,7 @@ export interface InventoryMovement {
    * 旧流水未保存该字段时，额度统计按 `quantity` 兼容处理。
    */
   quotaQuantity?: number;
+  settlementSource?: "platform_callback" | "manual_recovery";
   unitPrice: number;
   type: InventoryMovementType;
   happenedAt: string;

@@ -89,7 +89,7 @@ const createHarness = () => {
     device,
     event,
     service,
-    controller: new CabinetEventsController(service)
+    controller: new CabinetEventsController(service, {} as never)
   };
 };
 

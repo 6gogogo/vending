@@ -9,6 +9,7 @@ coverage
 .vscode
 *.log
 .codex-run/
+.codex-tmp/
 apps/mobile/unpackage
 apps/api/runtime-data/
 apps/api/apps/api/runtime-data/

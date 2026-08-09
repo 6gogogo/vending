@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 
 import type { ReservationSettings, UserRole } from "@vm/shared-types";
 
@@ -7,7 +7,8 @@ import { parseCabinetReservationCreatePayload } from "../../common/validation/ca
 import {
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { ReservationsService } from "./reservations.service";
@@ -16,6 +17,7 @@ type AuthRequest = {
   authUser?: {
     id: string;
     role: UserRole;
+    tenantId?: string;
   };
 };
 
@@ -43,8 +45,12 @@ export class ReservationsController {
   @Get()
   @AllowedRoles("admin")
   @AllowedBackofficePermissions("users:view")
-  list(@Req() request: AuthRequest) {
-    return ok(this.reservationsService.list(request.authUser));
+  @TenantScopedBackofficeRoute()
+  list(
+    @Query("userId") userId: string | undefined,
+    @Req() request: AuthRequest
+  ) {
+    return ok(this.reservationsService.list(request.authUser, userId?.trim() || undefined));
   }
 
   @Get("my")
@@ -69,8 +75,13 @@ export class ReservationsController {
   @HttpCode(200)
   @AllowedRoles("admin", "special")
   @AllowedBackofficeSessionPermissions("reservations:manage")
-  cancel(@Param("id") id: string, @Req() request: Required<AuthRequest>) {
-    return ok(this.reservationsService.cancel(id, request.authUser));
+  @TenantScopedBackofficeRoute()
+  cancel(
+    @Param("id") id: string,
+    @Body() body: { reason?: unknown },
+    @Req() request: Required<AuthRequest>
+  ) {
+    return ok(this.reservationsService.cancel(id, request.authUser, body?.reason));
   }
 
   @Post("users/:userId/reset-timeouts")

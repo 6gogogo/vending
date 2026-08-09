@@ -49,6 +49,7 @@ import { SmartVmGateway } from "../devices/smartvm.gateway";
 import { InventoryOrdersService } from "../inventory-orders/inventory-orders.service";
 import { ReservationsService } from "../reservations/reservations.service";
 import { CabinetOpenQuoteService } from "./cabinet-open-quote.service";
+import { ManualSettlementRecoveryService } from "./manual-settlement-recovery.service";
 
 type CallbackBilling = Pick<
   CabinetPreSettlement,
@@ -80,7 +81,10 @@ export class CabinetEventsService {
     @Optional() @Inject(CabinetOpenQuoteService) openQuotes?: CabinetOpenQuoteService,
     @Optional()
     @Inject(FinancialOperationCoordinator)
-    financialOperations?: FinancialOperationCoordinator
+    financialOperations?: FinancialOperationCoordinator,
+    @Optional()
+    @Inject(ManualSettlementRecoveryService)
+    private readonly manualSettlementRecoveryService?: ManualSettlementRecoveryService
   ) {
     this.deviceOperations = deviceOperations ?? new DeviceOperationCoordinator(store);
     this.openQuotes = openQuotes ?? new CabinetOpenQuoteService();
@@ -716,12 +720,73 @@ export class CabinetEventsService {
 
   handleSettlement(payload: SmartVmSettlementPayload & Record<string, unknown>) {
     this.assertSignature(payload);
-    const event = this.getEventByPlatformOrderNo(payload.orderNo);
+    const event = this.getSettlementEvent(payload);
     this.assertSmartVmCallbackBinding(event, payload);
     this.assertSmartVmCallbackFreshness(payload, event);
 
     const callbackReplay = this.isSmartVmCallbackReplay("settlement", payload);
-    const settlementWasAlreadyRecorded = this.hasSettlementRecord(payload.orderNo);
+    if (
+      event.manualSettlement &&
+      event.manualSettlement.status !== "reverted" &&
+      this.manualSettlementRecoveryService
+    ) {
+      this.inventoryOrdersService.validateSettlementPayload(event, payload);
+      const callbackLog = this.getOrCreateSmartVmCallbackLog(
+        "settlement",
+        payload,
+        callbackReplay
+      );
+      const reconciled = this.manualSettlementRecoveryService.recordLateCallback(
+        event,
+        payload,
+        callbackLog
+      );
+      const movements = this.store.inventory.filter((entry) =>
+        event.manualSettlement?.movementIds.includes(entry.id)
+      );
+      if (!reconciled?.matched) {
+        return {
+          movements,
+          duplicated: reconciled?.duplicated ?? false,
+          paymentNotifyStatus: event.paymentNotifyStatus,
+          paymentNotifyMessage: event.paymentNotifyMessage
+        };
+      }
+
+      if (event.paymentNotifyStatus === "success") {
+        return {
+          movements,
+          duplicated: reconciled.duplicated,
+          paymentNotifyStatus: event.paymentNotifyStatus,
+          paymentNotifyMessage: event.paymentNotifyMessage
+        };
+      }
+
+      const transactionId =
+        event.paymentTransactionId ?? this.store.createReference("manual-settlement-completion");
+      event.paymentTransactionId = transactionId;
+      event.paymentNotifyStatus = "pending";
+      event.paymentNotifyMessage =
+        "迟到结算回调与人工补记一致，正在结束零元平台订单。";
+      this.store.persist();
+      return this.tryAutoForwardPaymentSuccess(
+        event,
+        {
+          orderNo: event.orderNo,
+          eventId: event.eventId,
+          transactionId,
+          deviceCode: event.deviceCode,
+          amount: 0
+        },
+        payload.notifyUrl
+      ).then(() => ({
+        movements,
+        duplicated: reconciled.duplicated,
+        paymentNotifyStatus: event.paymentNotifyStatus,
+        paymentNotifyMessage: event.paymentNotifyMessage
+      }));
+    }
+    const settlementWasAlreadyRecorded = this.hasSettlementRecord(event);
 
     if (
       callbackReplay &&
@@ -729,11 +794,7 @@ export class CabinetEventsService {
       settlementWasAlreadyRecorded
     ) {
       return {
-        movements: this.store.inventory.filter(
-          (entry) =>
-            entry.orderNo === payload.orderNo &&
-            (entry.type === "pickup" || entry.type === "donation")
-        ),
+        movements: this.findSettlementMovements(event),
         duplicated: true,
         paymentNotifyStatus: event.paymentNotifyStatus,
         paymentNotifyMessage: event.paymentNotifyMessage
@@ -746,11 +807,7 @@ export class CabinetEventsService {
     if (event.status === "settled" && settlementWasAlreadyRecorded) {
       this.assertHistoricalSettlementReplayMatches(event, payload);
       return {
-        movements: this.store.inventory.filter(
-          (entry) =>
-            entry.orderNo === payload.orderNo &&
-            (entry.type === "pickup" || entry.type === "donation")
-        ),
+        movements: this.findSettlementMovements(event),
         duplicated: true,
         paymentNotifyStatus: event.paymentNotifyStatus,
         paymentNotifyMessage: event.paymentNotifyMessage
@@ -954,7 +1011,10 @@ export class CabinetEventsService {
 
   handleAdjustment(payload: SmartVmAdjustmentPayload & Record<string, unknown>) {
     this.assertSignature(payload);
-    const event = this.getEventByPlatformOrderNo(payload.orgOrderNo);
+    const event = this.getEventByPlatformOrderNo(payload.orgOrderNo, {
+      eventId: payload.eventId,
+      deviceCode: payload.deviceCode
+    });
     this.assertSmartVmCallbackBinding(event, payload);
     this.assertSmartVmCallbackFreshness(payload, event);
 
@@ -1145,7 +1205,10 @@ export class CabinetEventsService {
       throw new UnauthorizedException("当前登录态已失效，请重新登录。");
     }
 
-    const event = this.getEventByPlatformOrderNo(payload.orderNo);
+    const event = this.getEventByPlatformOrderNo(payload.orderNo, {
+      eventId: payload.eventId,
+      deviceCode: payload.deviceCode
+    });
     if (this.isFreeOnlyPickupEvent(event)) {
       throw new BadRequestException(
         "当前公益领取不能手工回写付款成功；请在差异核对完成后由系统回写领取完成状态。"
@@ -1188,16 +1251,32 @@ export class CabinetEventsService {
     }, Boolean(financialOperationLease));
   }
 
-  async retryZeroCostPlatformCompletion(eventId: string, actorUserId?: string) {
+  async retryZeroCostPlatformCompletion(
+    eventId: string,
+    actorUserId?: string,
+    actorTenantId?: string,
+    allowManualSettlement = false
+  ) {
     const actor = this.getAdminActor(actorUserId);
     const event = this.store.events.find((entry) => entry.eventId === eventId);
 
     if (!event) {
       throw new BadRequestException("未找到对应开柜事件。");
     }
+    if (actorTenantId && !this.eventBelongsToTenant(event, actorTenantId)) {
+      throw new BadRequestException("未找到对应开柜事件。");
+    }
 
     const freeOnlyPickup = this.isFreeOnlyPickupEvent(event);
     const noChargeOperationalOpen = this.isNoChargeOperationalOpen(event);
+    const manualSettlementPickup =
+      event.manualSettlement !== undefined &&
+      event.manualSettlement.status !== "reverted";
+    if (manualSettlementPickup && !allowManualSettlement) {
+      throw new ForbiddenException(
+        "人工结算补记只能通过专用平台完成回写入口处理。"
+      );
+    }
 
     const closedRestockWithoutSettlement =
       event.status === "closed" &&
@@ -1225,7 +1304,7 @@ export class CabinetEventsService {
 
     const paymentNotifyUrl =
       event.paymentNotifyUrl ??
-      (closedRestockWithoutSettlement
+      (closedRestockWithoutSettlement || manualSettlementPickup
         ? this.resolveUniqueSuccessfulPaymentNotifyTarget(event.deviceCode)
         : undefined);
 
@@ -1237,38 +1316,69 @@ export class CabinetEventsService {
 
     const transactionId =
       event.paymentTransactionId ??
-      this.store.createReference(freeOnlyPickup ? "pickup-completion" : "operation-completion");
+      this.store.createReference(
+        manualSettlementPickup
+          ? "manual-settlement-completion"
+          : freeOnlyPickup
+            ? "pickup-completion"
+            : "operation-completion"
+      );
 
-    if (closedRestockWithoutSettlement) {
+    if (closedRestockWithoutSettlement || manualSettlementPickup) {
       event.billingStatus = "free";
       event.paymentNotifyUrl = paymentNotifyUrl;
       event.paymentNotifyStatus = "pending";
-      event.paymentNotifyMessage = "补货开门已关门但平台未回传结算，正在结束零元平台订单。";
+      event.paymentNotifyMessage = manualSettlementPickup
+        ? "本地人工结算补记已完成，正在结束零元平台订单。"
+        : "补货开门已关门但平台未回传结算，正在结束零元平台订单。";
       event.paymentTransactionId = transactionId;
       event.updatedAt = new Date().toISOString();
       this.store.persist();
     }
 
-    const result = await this.forwardPaymentSuccessToPlatform(
-      {
-        orderNo: event.orderNo,
-        eventId: event.eventId,
-        transactionId,
-        deviceCode: event.deviceCode,
-        amount: 0
-      },
-      {
-        actor,
-        logType: freeOnlyPickup
-          ? "manual-free-pickup-completion-retry"
-          : "manual-zero-cost-operation-completion-retry",
-        targetUrl: paymentNotifyUrl
+    let result: Awaited<ReturnType<CabinetEventsService["forwardPaymentSuccessToPlatform"]>>;
+    try {
+      result = await this.forwardPaymentSuccessToPlatform(
+        {
+          orderNo: event.orderNo,
+          eventId: event.eventId,
+          transactionId,
+          deviceCode: event.deviceCode,
+          amount: 0
+        },
+        {
+          actor,
+          logType: manualSettlementPickup
+            ? "manual-settlement-platform-completion"
+            : freeOnlyPickup
+              ? "manual-free-pickup-completion-retry"
+              : "manual-zero-cost-operation-completion-retry",
+          targetUrl: paymentNotifyUrl
+        }
+      );
+    } catch (error) {
+      if (manualSettlementPickup) {
+        event.paymentNotifyStatus = "failed";
+        event.paymentNotifyMessage = "平台完成回写失败，可安全重试；系统会复用原交易号。";
+        event.updatedAt = new Date().toISOString();
+        this.store.persist();
       }
-    );
+      throw error;
+    }
 
     if (closedRestockWithoutSettlement) {
       event.status = "settled";
       event.updatedAt = new Date().toISOString();
+      this.store.persist();
+    }
+
+    if (manualSettlementPickup && event.manualSettlement) {
+      if (!event.manualSettlement.lateCallback?.matched) {
+        event.manualSettlement.status = "platform_completed";
+      }
+      event.manualSettlement.platformCompletedAt =
+        event.paymentNotifiedAt ?? new Date().toISOString();
+      event.updatedAt = event.manualSettlement.platformCompletedAt;
       this.store.persist();
     }
 
@@ -1720,16 +1830,39 @@ export class CabinetEventsService {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
   }
 
-  private getEventByPlatformOrderNo(orderNo: string) {
+  private getEventByPlatformOrderNo(
+    orderNo: string,
+    binding?: { eventId?: string; deviceCode?: string }
+  ) {
     const event = this.store.events.find(
       (entry) =>
-        entry.orderNo === orderNo ||
-        entry.adjustmentOrderNo === orderNo ||
-        entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo)
+        (!binding?.eventId || entry.eventId === binding.eventId) &&
+        (!binding?.deviceCode || entry.deviceCode === binding.deviceCode) &&
+        (entry.orderNo === orderNo ||
+          entry.adjustmentOrderNo === orderNo ||
+          entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo))
     );
 
     if (!event) {
       throw new BadRequestException(`订单 ${orderNo} 不存在。`);
+    }
+
+    return event;
+  }
+
+  private getSettlementEvent(payload: SmartVmSettlementPayload) {
+    const event = this.store.events.find(
+      (entry) =>
+        entry.eventId === payload.eventId &&
+        entry.deviceCode === payload.deviceCode &&
+        (entry.orderNo === payload.orderNo ||
+          entry.manualSettlement?.platformOrderNo === payload.orderNo ||
+          (entry.manualSettlement !== undefined &&
+            entry.manualSettlement.status !== "reverted"))
+    );
+
+    if (!event) {
+      throw new BadRequestException(`订单 ${payload.orderNo} 不存在。`);
     }
 
     return event;
@@ -1847,7 +1980,10 @@ export class CabinetEventsService {
     targetUrl: string;
     duplicated?: boolean;
   }> {
-    const event = this.getEventByPlatformOrderNo(payload.orderNo);
+    const event = this.getEventByPlatformOrderNo(payload.orderNo, {
+      eventId: payload.eventId,
+      deviceCode: payload.deviceCode
+    });
     this.assertSmartVmCallbackBinding(event, payload);
     if (!coordinationLockAcquired) {
       return this.withPaymentNotifyLock(event.eventId, payload.orderNo, () =>
@@ -2559,13 +2695,17 @@ export class CabinetEventsService {
   }
 
   private isFreeOnlyPickupEvent(
-    event: Pick<CabinetEventRecord, "role" | "reservationOnlyPickup" | "preSettlement">
+    event: Pick<
+      CabinetEventRecord,
+      "role" | "reservationOnlyPickup" | "preSettlement" | "manualSettlement"
+    >
   ) {
     return (
       event.role === "special" &&
       (
         this.isReservationOnlyPickupEvent(event) ||
-        event.preSettlement?.chargeRequired === false
+        event.preSettlement?.chargeRequired === false ||
+        (event.manualSettlement !== undefined && event.manualSettlement.status !== "reverted")
       )
     );
   }
@@ -2742,12 +2882,24 @@ export class CabinetEventsService {
     };
   }
 
-  private hasSettlementRecord(orderNo: string) {
-    return this.store.inventory.some(
+  private findSettlementMovements(event: CabinetEventRecord) {
+    return this.store.inventory.filter(
       (entry) =>
-        entry.orderNo === orderNo &&
-        (entry.type === "pickup" || entry.type === "donation")
+        (entry.type === "pickup" || entry.type === "donation") &&
+        (
+          entry.eventId === event.eventId ||
+          (
+            !entry.eventId &&
+            entry.orderNo === event.orderNo &&
+            entry.deviceCode === event.deviceCode &&
+            entry.userId === event.userId
+          )
+        )
     );
+  }
+
+  private hasSettlementRecord(event: CabinetEventRecord) {
+    return this.findSettlementMovements(event).length > 0;
   }
 
   private buildCallbackBilling(

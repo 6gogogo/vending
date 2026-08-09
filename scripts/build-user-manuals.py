@@ -224,6 +224,12 @@ def create_numbering_instance(document: Document, abstract_id: int) -> int:
     abstract_ref = OxmlElement("w:abstractNumId")
     abstract_ref.set(qn("w:val"), str(abstract_id))
     num.append(abstract_ref)
+    level_override = OxmlElement("w:lvlOverride")
+    level_override.set(qn("w:ilvl"), "0")
+    start_override = OxmlElement("w:startOverride")
+    start_override.set(qn("w:val"), "1")
+    level_override.append(start_override)
+    num.append(level_override)
     numbering.append(num)
     return num_id
 
@@ -410,7 +416,7 @@ def add_title_block(document: Document, manual: Manual) -> None:
     meta = document.add_paragraph()
     meta.paragraph_format.space_before = Pt(4)
     meta.paragraph_format.space_after = Pt(10)
-    meta_run = meta.add_run("版本日期：2026 年 8 月 7 日　｜　按任务查找，图中编号对应操作顺序")
+    meta_run = meta.add_run("版本日期：2026 年 8 月 9 日　｜　按任务查找，图中编号对应操作顺序")
     set_font(meta_run, 8.5, color=MUTED)
 
 
@@ -512,8 +518,10 @@ def add_task_section(
     abstract_num_id: int,
     bookmark_name: str,
     bookmark_id: int,
+    page_break_before: bool,
 ) -> None:
     heading = document.add_paragraph(style="Heading 1")
+    heading.paragraph_format.page_break_before = page_break_before
     heading.paragraph_format.space_before = Pt(10)
     heading.paragraph_format.space_after = Pt(5)
     set_keep_with_next(heading)
@@ -545,8 +553,8 @@ def add_task_section(
 
 
 def add_issue_page(document: Document, section: ManualSection, bookmark_name: str, bookmark_id: int) -> None:
-    document.add_page_break()
     heading = document.add_paragraph(style="Heading 1")
+    heading.paragraph_format.page_break_before = True
     heading.paragraph_format.space_after = Pt(8)
     run = heading.add_run("遇到问题")
     set_font(run, 16, bold=True)
@@ -599,9 +607,14 @@ def build_manual(role: str, source: Path, output: Path) -> None:
         if section.title == "遇到问题":
             add_issue_page(document, section, bookmark_name, bookmark_id)
         else:
-            if task_index > 0:
-                document.add_page_break()
-            add_task_section(document, section, abstract_num_id, bookmark_name, bookmark_id)
+            add_task_section(
+                document,
+                section,
+                abstract_num_id,
+                bookmark_name,
+                bookmark_id,
+                page_break_before=task_index > 0,
+            )
             task_index += 1
 
     document.core_properties.title = manual.title

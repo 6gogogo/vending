@@ -5,6 +5,10 @@ import type {
   SmartVmDoorStatusPayload,
   SmartVmPaymentPayload,
   SmartVmSettlementPayload,
+  ManualSettlementCreatePayload,
+  ManualSettlementConflictResolutionPayload,
+  ManualSettlementOrderLinkPayload,
+  ManualSettlementRevertPayload,
   UserRole
 } from "@vm/shared-types";
 
@@ -19,10 +23,136 @@ import {
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { CabinetEventsService } from "./cabinet-events.service";
+import { ManualSettlementRecoveryService } from "./manual-settlement-recovery.service";
 
 @Controller("cabinet-events")
 export class CabinetEventsController {
-  constructor(@Inject(CabinetEventsService) private readonly cabinetEventsService: CabinetEventsService) {}
+  constructor(
+    @Inject(CabinetEventsService) private readonly cabinetEventsService: CabinetEventsService,
+    @Inject(ManualSettlementRecoveryService)
+    private readonly manualSettlementRecoveryService: ManualSettlementRecoveryService
+  ) {}
+
+  @Get("manual-settlement-candidates")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficeAllPermissions("devices:operate", "goods:stock-adjust")
+  @TenantScopedBackofficeRoute()
+  manualSettlementCandidates(
+    @Query("userId") userId?: string,
+    @Req() request?: { authUser?: { tenantId?: string } }
+  ) {
+    return ok(
+      this.manualSettlementRecoveryService.listCandidates(
+        userId,
+        request?.authUser?.tenantId
+      )
+    );
+  }
+
+  @Post("event/:eventId/manual-settlement")
+  @HttpCode(200)
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficeAllPermissions("devices:operate", "goods:stock-adjust")
+  @TenantScopedBackofficeRoute()
+  createManualSettlement(
+    @Param("eventId") eventId: string,
+    @Body() body: ManualSettlementCreatePayload,
+    @Req() request: { authUser?: { id?: string; tenantId?: string } }
+  ) {
+    return ok(
+      this.manualSettlementRecoveryService.create(eventId, body, request.authUser),
+      "人工结算补记已完成。"
+    );
+  }
+
+  @Post("event/:eventId/manual-settlement/order-link")
+  @HttpCode(200)
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficeAllPermissions("devices:operate", "goods:stock-adjust")
+  @TenantScopedBackofficeRoute()
+  linkManualSettlementOrder(
+    @Param("eventId") eventId: string,
+    @Body() body: ManualSettlementOrderLinkPayload,
+    @Req() request: { authUser?: { id?: string; tenantId?: string } }
+  ) {
+    return ok(
+      this.manualSettlementRecoveryService.linkOrder(eventId, body, request.authUser),
+      "平台订单号已关联。"
+    );
+  }
+
+  @Post("event/:eventId/manual-settlement/revert")
+  @HttpCode(200)
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficeAllPermissions("devices:operate", "goods:stock-adjust")
+  @TenantScopedBackofficeRoute()
+  revertManualSettlement(
+    @Param("eventId") eventId: string,
+    @Body() body: ManualSettlementRevertPayload,
+    @Req() request: { authUser?: { id?: string; tenantId?: string } }
+  ) {
+    return ok(
+      this.manualSettlementRecoveryService.revert(eventId, body, request.authUser),
+      "人工结算补记已撤销，原批次库存和领取额度已恢复。"
+    );
+  }
+
+  @Post("event/:eventId/manual-settlement/conflict-resolution")
+  @HttpCode(200)
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficeAllPermissions("devices:operate", "goods:stock-adjust")
+  @TenantScopedBackofficeRoute()
+  resolveManualSettlementConflict(
+    @Param("eventId") eventId: string,
+    @Body() body: ManualSettlementConflictResolutionPayload,
+    @Req() request: { authUser?: { id?: string; tenantId?: string } }
+  ) {
+    return ok(
+      this.manualSettlementRecoveryService.resolveConflict(
+        eventId,
+        body,
+        request.authUser
+      ),
+      "人工结算补记明细冲突已核对。"
+    );
+  }
+
+  @Post("event/:eventId/manual-settlement/platform-completion")
+  @HttpCode(200)
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficeAllPermissions("devices:operate", "goods:stock-adjust")
+  @TenantScopedBackofficeRoute()
+  async completeManualSettlementPlatform(
+    @Param("eventId") eventId: string,
+    @Req() request: { authUser?: { id?: string; tenantId?: string } }
+  ) {
+    this.manualSettlementRecoveryService.getPlatformCompletionRecord(
+      eventId,
+      request.authUser
+    );
+    const platformCompletion = await this.cabinetEventsService.retryZeroCostPlatformCompletion(
+      eventId,
+      request.authUser?.id,
+      request.authUser?.tenantId,
+      true
+    );
+    return ok(
+      {
+        manualSettlement: this.manualSettlementRecoveryService.getPlatformCompletionRecord(
+          eventId,
+          request.authUser
+        ),
+        platformCompletion
+      },
+      "平台完成回写已成功。"
+    );
+  }
 
   @Get()
   @UseGuards(RoleGuard)

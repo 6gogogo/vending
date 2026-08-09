@@ -10,6 +10,7 @@ import { ReservationsModule } from "../reservations/reservations.module";
 import { CabinetOpenQuoteService } from "./cabinet-open-quote.service";
 import { CabinetEventsController } from "./cabinet-events.controller";
 import { CabinetEventsService } from "./cabinet-events.service";
+import { ManualSettlementRecoveryService } from "./manual-settlement-recovery.service";
 
 @Module({
   imports: [
@@ -22,7 +23,7 @@ import { CabinetEventsService } from "./cabinet-events.service";
     GuardsModule
   ],
   controllers: [CabinetEventsController],
-  providers: [CabinetEventsService, CabinetOpenQuoteService],
-  exports: [CabinetEventsService]
+  providers: [CabinetEventsService, CabinetOpenQuoteService, ManualSettlementRecoveryService],
+  exports: [CabinetEventsService, ManualSettlementRecoveryService]
 })
 export class CabinetEventsModule {}

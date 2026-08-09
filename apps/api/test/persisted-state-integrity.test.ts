@@ -37,10 +37,315 @@ const createPaymentRefund = (
   ...overrides
 });
 
+const createStateWithManualSettlement = () => {
+  const state = createRawState();
+  const events = state.events as Array<Record<string, unknown>>;
+  const inventory = state.inventory as Array<Record<string, unknown>>;
+  const goodsCatalog = state.goodsCatalog as Array<Record<string, unknown>>;
+  const event = events[0];
+  const goods = goodsCatalog[0];
+  assert.ok(event);
+  assert.ok(goods);
+  const movementId = "movement-manual-settlement-integrity";
+  inventory.push({
+    id: movementId,
+    orderNo: event.orderNo,
+    eventId: event.eventId,
+    userId: event.userId,
+    deviceCode: event.deviceCode,
+    goodsId: goods.goodsId,
+    goodsName: goods.name,
+    category: goods.category,
+    quantity: 1,
+    quotaQuantity: 1,
+    unitPrice: 0,
+    type: "pickup",
+    settlementSource: "manual_recovery",
+    happenedAt: "2026-08-08T00:00:00.000Z"
+  });
+  event.manualSettlement = {
+    id: "manual-settlement-integrity",
+    eventId: event.eventId,
+    status: "awaiting_platform_completion",
+    platformOrderNo: event.orderNo,
+    items: [{
+      goodsId: goods.goodsId,
+      goodsName: goods.name,
+      category: goods.category,
+      quantity: 1,
+      unitPrice: 0
+    }],
+    movementIds: [movementId],
+    reason: "现场盘点确认",
+    handledAt: "2026-08-08T00:10:00.000Z",
+    handledByUserId: event.userId
+  };
+  return { state, event, movementId };
+};
+
 test("持久化状态完整性校验接受默认业务快照", () => {
   const result = validatePersistedState(createRawState());
 
   assert.deepEqual(result.errors, []);
+});
+
+test("持久化状态完整性校验接受结构完整的人工结算补记", () => {
+  const { state } = createStateWithManualSettlement();
+
+  assert.deepEqual(validatePersistedState(state).errors, []);
+});
+
+test("持久化状态完整性校验接受已人工结案的迟到回调明细冲突", () => {
+  const { state, event } = createStateWithManualSettlement();
+  const record = event.manualSettlement as Record<string, unknown>;
+  record.status = "callback_reconciled";
+  record.lateCallback = {
+    callbackLogId: "callback-integrity-resolved-conflict",
+    receivedAt: "2026-08-08T00:20:00.000Z",
+    platformAmount: 0,
+    notifyUrl: "https://smartvm.example.test/payment-success",
+    matched: false,
+    items: structuredClone(record.items)
+  };
+  record.conflictResolution = "keep_manual";
+  record.conflictResolvedAt = "2026-08-08T00:30:00.000Z";
+  record.conflictResolvedByUserId = event.userId;
+  record.conflictResolutionReason = "现场复核后保留人工盘点结果。";
+
+  assert.deepEqual(validatePersistedState(state).errors, []);
+});
+
+test("持久化状态完整性校验拒绝损坏的人工结算状态和流水绑定", () => {
+  const cases: Array<{
+    label: string;
+    mutate: (event: Record<string, unknown>) => void;
+    expectedError: string;
+  }> = [
+    {
+      label: "unknown status",
+      mutate: (event) => {
+        (event.manualSettlement as Record<string, unknown>).status = "private-invalid-status";
+      },
+      expectedError: "events[0].manualSettlement.status 不是允许的人工结算状态。"
+    },
+    {
+      label: "mismatched event",
+      mutate: (event) => {
+        (event.manualSettlement as Record<string, unknown>).eventId = "other-event";
+      },
+      expectedError: "events[0].manualSettlement.eventId 必须与所属开柜事件一致。"
+    },
+    {
+      label: "missing movement",
+      mutate: (event) => {
+        (event.manualSettlement as Record<string, unknown>).movementIds = ["missing-movement"];
+      },
+      expectedError: "events[0].manualSettlement.movementIds[0] 未引用同事件的有效pickup流水。"
+    },
+    {
+      label: "invalid quantity",
+      mutate: (event) => {
+        const record = event.manualSettlement as Record<string, unknown>;
+        (record.items as Array<Record<string, unknown>>)[0]!.quantity = 0;
+      },
+      expectedError: "events[0].manualSettlement.items[0].quantity 必须是正安全整数。"
+    },
+    {
+      label: "conflict without callback",
+      mutate: (event) => {
+        (event.manualSettlement as Record<string, unknown>).status = "conflict";
+      },
+      expectedError: "events[0].manualSettlement 的明细冲突状态必须绑定未匹配的迟到回调。"
+    },
+    {
+      label: "mismatched platform order",
+      mutate: (event) => {
+        (event.manualSettlement as Record<string, unknown>).platformOrderNo = "other-order";
+      },
+      expectedError: "events[0].manualSettlement.platformOrderNo 必须与所属开柜事件订单号一致。"
+    },
+    {
+      label: "reconciled callback marked mismatched",
+      mutate: (event) => {
+        const record = event.manualSettlement as Record<string, unknown>;
+        record.status = "callback_reconciled";
+        record.lateCallback = {
+          callbackLogId: "callback-integrity",
+          receivedAt: "2026-08-08T00:20:00.000Z",
+          platformAmount: 0,
+          notifyUrl: "https://smartvm.example.test/payment-success",
+          matched: false,
+          items: structuredClone(record.items)
+        };
+      },
+      expectedError: "events[0].manualSettlement 的已核对状态必须绑定明细一致的迟到回调。"
+    },
+    {
+      label: "conflict callback marked matched",
+      mutate: (event) => {
+        const record = event.manualSettlement as Record<string, unknown>;
+        record.status = "conflict";
+        record.lateCallback = {
+          callbackLogId: "callback-integrity",
+          receivedAt: "2026-08-08T00:20:00.000Z",
+          platformAmount: 0,
+          notifyUrl: "https://smartvm.example.test/payment-success",
+          matched: true,
+          items: structuredClone(record.items)
+        };
+      },
+      expectedError: "events[0].manualSettlement 的明细冲突状态必须绑定未匹配的迟到回调。"
+    }
+  ];
+
+  for (const testCase of cases) {
+    const { state, event } = createStateWithManualSettlement();
+    testCase.mutate(event);
+    const result = validatePersistedState(state);
+    assert.ok(result.errors.includes(testCase.expectedError), testCase.label);
+    assert.equal(
+      result.errors.some((entry) => entry.includes("private-invalid-status")),
+      false,
+      testCase.label
+    );
+  }
+});
+
+test("持久化状态完整性校验约束预约状态与管理员取消证据", () => {
+  const createStateWithReservation = () => {
+    const state = createRawState();
+    const users = state.users as Array<Record<string, unknown>>;
+    const devices = state.devices as Array<Record<string, unknown>>;
+    const admin = users.find((entry) => entry.role === "admin");
+    const user = users.find((entry) => entry.role === "special");
+    const device = devices[0];
+    assert.ok(admin);
+    assert.ok(user);
+    assert.ok(device);
+    const now = "2026-08-08T00:00:00.000Z";
+    const reservation: Record<string, unknown> = {
+      id: "reservation-integrity",
+      userId: user.id,
+      phone: user.phone,
+      userName: user.name,
+      deviceCode: device.deviceCode,
+      doorNum: "1",
+      status: "cancelled",
+      inventoryReservationMode: "goods_quantity",
+      batchAllocationTiming: "on_open",
+      items: [],
+      reservedAt: now,
+      expiresAt: "2026-08-08T01:00:00.000Z",
+      createdAt: now,
+      updatedAt: now,
+      cancelledAt: now,
+      cancelledByUserId: admin.id,
+      cancellationReason: "用户来电确认不再领取。"
+    };
+    state.reservations = [reservation];
+    return { state, reservation, admin, user };
+  };
+
+  assert.deepEqual(
+    validatePersistedState(createStateWithReservation().state).errors,
+    []
+  );
+
+  const cases: Array<{
+    label: string;
+    mutate: (reservation: Record<string, unknown>) => void;
+    expectedError: string;
+  }> = [
+    {
+      label: "invalid status",
+      mutate: (reservation) => {
+        reservation.status = "private-invalid-status";
+      },
+      expectedError: "reservations[0].status 不是允许的预约状态。"
+    },
+    {
+      label: "missing cancelled time",
+      mutate: (reservation) => {
+        delete reservation.cancelledAt;
+      },
+      expectedError: "reservations[0].cancelledAt 在已取消状态下必须是有效时间。"
+    },
+    {
+      label: "missing cancelled actor",
+      mutate: (reservation) => {
+        delete reservation.cancelledByUserId;
+      },
+      expectedError: "reservations[0].cancelledByUserId 在已取消状态下不能为空。"
+    },
+    {
+      label: "admin cancellation without reason",
+      mutate: (reservation) => {
+        delete reservation.cancellationReason;
+      },
+      expectedError: "reservations[0].cancellationReason 在管理员取消时必须为 2 至 200 字。"
+    }
+  ];
+
+  for (const testCase of cases) {
+    const { state, reservation } = createStateWithReservation();
+    testCase.mutate(reservation);
+    const result = validatePersistedState(state);
+    assert.ok(result.errors.includes(testCase.expectedError), testCase.label);
+    assert.equal(
+      result.errors.some((entry) => entry.includes("private-invalid-status")),
+      false,
+      testCase.label
+    );
+  }
+
+  const selfCancelled = createStateWithReservation();
+  selfCancelled.reservation.cancelledByUserId = selfCancelled.user.id;
+  delete selfCancelled.reservation.cancellationReason;
+  assert.deepEqual(validatePersistedState(selfCancelled.state).errors, []);
+});
+
+test("开柜平台订单号在实例内必须唯一，不同实例可以使用相同订单号", () => {
+  const sameTenantState = createRawState();
+  const sameTenantEvents = sameTenantState.events as Array<Record<string, unknown>>;
+  const sourceEvent = sameTenantEvents[0];
+  assert.ok(sourceEvent);
+  sameTenantEvents.push({
+    ...structuredClone(sourceEvent),
+    eventId: "event-same-tenant-duplicate-order"
+  });
+  assert.ok(
+    validatePersistedState(sameTenantState).errors.includes(
+      "events 当前实例存在重复 orderNo。"
+    )
+  );
+
+  const crossTenantState = createRawState();
+  const crossTenantEvents = crossTenantState.events as Array<Record<string, unknown>>;
+  const crossTenantUsers = crossTenantState.users as Array<Record<string, unknown>>;
+  const crossTenantSourceEvent = crossTenantEvents[0];
+  const sourceUser = crossTenantUsers.find(
+    (entry) => entry.id === crossTenantSourceEvent?.userId
+  );
+  assert.ok(crossTenantSourceEvent);
+  assert.ok(sourceUser);
+  const otherUserId = "user-other-tenant-duplicate-order";
+  crossTenantUsers.push({
+    ...structuredClone(sourceUser),
+    id: otherUserId,
+    phone: "13000009997",
+    tenantId: "tenant-other-order-scope"
+  });
+  crossTenantEvents.push({
+    ...structuredClone(crossTenantSourceEvent),
+    eventId: "event-other-tenant-duplicate-order",
+    userId: otherUserId
+  });
+  assert.equal(
+    validatePersistedState(crossTenantState).errors.includes(
+      "events 当前实例存在重复 orderNo。"
+    ),
+    false
+  );
 });
 
 test("默认密码凭据告警按脱敏存储类别与后台角色分组", () => {

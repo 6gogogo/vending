@@ -144,6 +144,7 @@ export class InventoryOrdersService {
     const existingMovements = this.store.inventory.filter(
       (entry) =>
         entry.orderNo === payload.orderNo &&
+        this.inventoryMovementMatchesEvent(entry, event) &&
         (entry.type === "pickup" || entry.type === "donation")
     );
 
@@ -274,7 +275,10 @@ export class InventoryOrdersService {
   ) {
     this.validateAdjustmentPayload(event, payload);
     const existingMovements = this.store.inventory.filter(
-      (entry) => entry.orderNo === payload.orderNo && entry.type === "adjustment"
+      (entry) =>
+        entry.orderNo === payload.orderNo &&
+        entry.type === "adjustment" &&
+        this.inventoryMovementMatchesEvent(entry, event)
     );
 
     if (existingMovements.length) {
@@ -351,7 +355,9 @@ export class InventoryOrdersService {
   }
 
   handleRefundCallback(payload: SmartVmRefundPayload) {
-    const event = this.findEventByPlatformOrderNo(payload.orderNo);
+    const event = this.findEventByPlatformOrderNo(payload.orderNo, {
+      deviceCode: payload.deviceCode
+    });
 
     if (!event) {
       this.store.logOperation({
@@ -460,7 +466,10 @@ export class InventoryOrdersService {
       return replay;
     }
 
-    const pendingIntent = this.findPendingManualRefundIntent(validated.orderNo);
+    const pendingIntent = this.findPendingManualRefundIntent(
+      validated.orderNo,
+      validated.event.eventId
+    );
 
     if (pendingIntent) {
       throw new ConflictException(
@@ -597,7 +606,10 @@ export class InventoryOrdersService {
     }
 
     if (options?.source === "callback") {
-      const pendingIntent = this.findPendingManualRefundIntent(normalizedOrderNo);
+      const pendingIntent = this.findPendingManualRefundIntent(
+        normalizedOrderNo,
+        event.eventId
+      );
       if (
         pendingIntent &&
         (
@@ -766,9 +778,17 @@ export class InventoryOrdersService {
       throw new BadRequestException("退款金额必须是以分计的正整数。");
     }
 
-    const event = this.findEventByPlatformOrderNo(normalizedOrderNo);
+    const event = this.findEventByPlatformOrderNo(normalizedOrderNo, {
+      deviceCode: options?.deviceCode
+    });
 
     if (!event) {
+      if (
+        options?.deviceCode &&
+        this.findEventByPlatformOrderNo(normalizedOrderNo)
+      ) {
+        throw new BadRequestException("退款订单与柜机不匹配。");
+      }
       throw new NotFoundException("未找到可退款的订单。");
     }
 
@@ -898,12 +918,14 @@ export class InventoryOrdersService {
       (entry) =>
         entry.orderNo === orderNo &&
         entry.type === "refund" &&
+        this.inventoryMovementMatchesEvent(entry, event) &&
         ((refundNo && entry.refundNo === refundNo) || entry.transactionId === transactionId)
     );
 
     if (existingMovements.length) {
       const matchingLog = this.store.logs.find(
         (entry) =>
+          entry.relatedEventId === event.eventId &&
           entry.relatedOrderNo === orderNo &&
           (entry.type === "refund-callback" || entry.type === "manual-refund") &&
           (entry.metadata?.refundNo === refundNo || entry.metadata?.transactionId === transactionId)
@@ -935,13 +957,16 @@ export class InventoryOrdersService {
     return undefined;
   }
 
-  private findPendingManualRefundIntent(orderNo: string) {
-    return this.store.logs.find(
+  private findPendingManualRefundIntent(orderNo: string, eventId?: string) {
+    const matches = this.store.logs.filter(
       (entry) =>
         entry.type === "manual-refund-intent" &&
         entry.relatedOrderNo === orderNo &&
+        (!eventId || entry.relatedEventId === eventId) &&
         entry.status === "pending"
     );
+
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   private reconcileManualRefundIntent(
@@ -950,7 +975,10 @@ export class InventoryOrdersService {
     transactionId: string,
     refundNo?: string
   ) {
-    const pendingIntent = this.findPendingManualRefundIntent(orderNo);
+    const pendingIntent = this.findPendingManualRefundIntent(
+      orderNo,
+      event.eventId
+    );
 
     if (!pendingIntent) {
       return;
@@ -1104,13 +1132,22 @@ export class InventoryOrdersService {
     };
   }
 
-  findEventByPlatformOrderNo(orderNo: string) {
-    return this.store.events.find(
+  findEventByPlatformOrderNo(
+    orderNo: string,
+    binding?: { eventId?: string; deviceCode?: string }
+  ) {
+    const matches = this.store.events.filter(
       (entry) =>
-        entry.orderNo === orderNo ||
-        entry.adjustmentOrderNo === orderNo ||
-        entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo)
+        (!binding?.eventId || entry.eventId === binding.eventId) &&
+        (!binding?.deviceCode || entry.deviceCode === binding.deviceCode.trim()) &&
+        (
+          entry.orderNo === orderNo ||
+          entry.adjustmentOrderNo === orderNo ||
+          entry.adjustments?.some((adjustment) => adjustment.orderNo === orderNo)
+        )
     );
+
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   private syncLatestAdjustmentFields(event: CabinetEventRecord) {
@@ -1142,6 +1179,7 @@ export class InventoryOrdersService {
     const sourceMovements = this.store.inventory.filter(
       (entry) =>
         entry.orderNo === payload.orderNo &&
+        this.inventoryMovementMatchesEvent(entry, event) &&
         entry.type === (payload.adjustment ? "adjustment" : "pickup")
     );
     const quotaQuantityByGoods = new Map<string, number>();
@@ -1211,6 +1249,20 @@ export class InventoryOrdersService {
     }
 
     return Math.min(Math.max(0, rawQuantity), Math.max(0, movement.quantity));
+  }
+
+  private inventoryMovementMatchesEvent(
+    entry: InventoryMovement,
+    event: CabinetEventRecord
+  ) {
+    return (
+      entry.eventId === event.eventId ||
+      (
+        !entry.eventId &&
+        entry.deviceCode === event.deviceCode &&
+        entry.userId === event.userId
+      )
+    );
   }
 
   private getGoodsCategory(deviceCode: string, goodsId: string, fallback: GoodsCategory = "daily") {

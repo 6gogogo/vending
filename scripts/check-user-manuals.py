@@ -196,7 +196,9 @@ def check_docx(path: Path, markdown_path: Path, minimum_tasks: int) -> None:
         expected_images = len(re.findall(r"^!\[", markdown, flags=re.MULTILINE))
         numbered_paragraphs = len(document_root.findall(".//w:pPr/w:numPr", NS))
         drawings = len(document_root.findall(".//a:blip", NS))
-        page_breaks = len(document_root.findall('.//w:br[@w:type="page"]', NS))
+        page_breaks = len(document_root.findall('.//w:br[@w:type="page"]', NS)) + len(
+            document_root.findall('.//w:pageBreakBefore', NS)
+        )
         if numbered_paragraphs != expected_steps:
             fail(f"Word 真编号数量不符：{path.name} / {numbered_paragraphs} != {expected_steps}")
         if drawings != expected_images:

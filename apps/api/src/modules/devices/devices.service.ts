@@ -25,6 +25,7 @@ import { isProductionRuntime } from "../../common/config/runtime-environment";
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
 import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import { AlertsService } from "../alerts/alerts.service";
 import { DeviceOperationCoordinator } from "./device-operation-coordinator";
 import { SmartVmGateway } from "./smartvm.gateway";
 
@@ -36,7 +37,8 @@ export class DevicesService {
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
     @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
     @Inject(SmartVmGateway) private readonly smartVmGateway: SmartVmGateway,
-    @Optional() @Inject(DeviceOperationCoordinator) deviceOperations?: DeviceOperationCoordinator
+    @Optional() @Inject(DeviceOperationCoordinator) deviceOperations?: DeviceOperationCoordinator,
+    @Optional() @Inject(AlertsService) private readonly alertsService?: AlertsService
   ) {
     this.deviceOperations = deviceOperations ?? new DeviceOperationCoordinator(store);
   }
@@ -326,6 +328,7 @@ export class DevicesService {
     viewerTenantId?: string
   ): DeviceMonitoringDetail {
     const device = this.getByCodeForTenant(deviceCode, viewerTenantId);
+    this.alertsService?.refreshManualSettlementTasks(deviceCode);
     const businessDateKey = getBusinessDayKey(new Date());
     const recentEvents = this.store.events
       .filter((entry) => entry.deviceCode === deviceCode)

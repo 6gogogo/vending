@@ -30,6 +30,12 @@ import {
 const route = useRoute();
 const sessionStore = useAdminSessionStore();
 const canOperateDevice = computed(() => sessionStore.can("devices:operate"));
+const canRecoverManualSettlement = computed(
+  () =>
+    sessionStore.isAdmin &&
+    canOperateDevice.value &&
+    sessionStore.can("goods:stock-adjust")
+);
 const canManageDevice = computed(() => sessionStore.can("devices:manage"));
 const canManageGoods = computed(() => sessionStore.can("goods:manage"));
 const canManageAlerts = computed(() => sessionStore.can("alerts:manage"));
@@ -230,6 +236,19 @@ const selectedDoorGoods = computed(() => {
   return device.doors.find((door) => door.doorNum === selectedDoorNum.value)?.goods ?? [];
 });
 const pendingTasks = computed(() => detail.value?.pendingTasks ?? []);
+const manualSettlementTaskEventIds = computed(
+  () =>
+    new Set(
+      pendingTasks.value
+        .filter(
+          (task) =>
+            task.title === "结算回调超时待补记" &&
+            task.status !== "resolved" &&
+            Boolean(task.relatedEventId)
+        )
+        .map((task) => task.relatedEventId as string)
+    )
+);
 const recentEvents = computed(() => detail.value?.recentEvents ?? []);
 const recentLogs = computed(() => detail.value?.recentLogs ?? []);
 const businessDayServedUsers = computed(() => detail.value?.businessDayServedUsers ?? []);
@@ -1863,15 +1882,23 @@ onUnmounted(() => {
                   <span v-if="taskReferenceSummary(task)" class="admin-context-meta admin-code">{{ taskReferenceSummary(task) }}</span>
                 </div>
                 <div class="device-task-actions">
+                  <RouterLink
+                    v-if="canRecoverManualSettlement && task.title === '结算回调超时待补记' && task.targetUserId && task.relatedEventId"
+                    class="admin-button admin-button--ghost"
+                    :to="{ path: `/users/${task.targetUserId}`, query: { manualSettlementEventId: task.relatedEventId } }"
+                  >
+                    处理缺失结算
+                  </RouterLink>
                   <button
-                    v-if="canManageAlerts && task.status === 'open'"
+                    v-if="canManageAlerts && task.status === 'open' && task.title !== '结算回调超时待补记'"
                     class="admin-button admin-button--ghost"
                     :disabled="resolvingTaskId === task.id"
                     @click="resolveTask(task.id)"
                   >
                     {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
                   </button>
-                  <span v-else class="admin-table__subtext">{{ task.status === "open" ? "需要预警处理权限" : "已知晓" }}</span>
+                  <span v-else-if="task.title !== '结算回调超时待补记'" class="admin-table__subtext">{{ task.status === "open" ? "需要预警处理权限" : "已知晓" }}</span>
+                  <span v-else-if="!canRecoverManualSettlement" class="admin-table__subtext">需要实例管理员同时具备柜机操作和库存调整权限</span>
                   <RouterLink class="admin-link" :to="`/logs?subjectType=alert&subjectId=${task.id}`">日志</RouterLink>
                 </div>
               </div>
@@ -1920,6 +1947,13 @@ onUnmounted(() => {
                     </span>
                   </div>
                   <div class="device-event-order-row__actions">
+                    <RouterLink
+                      v-if="canRecoverManualSettlement && event.role === 'special' && event.userId && (Boolean(event.manualSettlement) || manualSettlementTaskEventIds.has(event.eventId))"
+                      class="admin-button admin-button--ghost"
+                      :to="{ path: `/users/${event.userId}`, query: { manualSettlementEventId: event.eventId } }"
+                    >
+                      {{ event.manualSettlement ? "查看人工结算补记" : "处理缺失结算" }}
+                    </RouterLink>
                     <button
                       v-if="canRecoverZeroCostCompletion(event)"
                       class="admin-button admin-button--ghost"

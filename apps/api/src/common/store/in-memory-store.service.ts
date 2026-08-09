@@ -2947,6 +2947,59 @@ export class InMemoryStoreService {
     }
   }
 
+  runAtomicMutation<Result>(mutation: () => Result): Result {
+    const checkpoint = {
+      state: this.snapshot(),
+      verificationCodes: Array.from(this.verificationCodes.entries()).map(
+        ([key, record]) =>
+          [key, structuredClone(record)] as [string, VerificationRecord]
+      ),
+      activeManualVerificationGrantIds: Array.from(
+        this.activeManualVerificationGrantIds.entries()
+      ),
+      sessions: Array.from(this.sessions.entries()).map(
+        ([token, session]) =>
+          [token, structuredClone(session)] as [string, SessionRecord]
+      ),
+      draftSessions: Array.from(this.draftSessions.entries()).map(
+        ([token, session]) =>
+          [token, structuredClone(session)] as [string, DraftSessionRecord]
+      ),
+      persistedStateIntegrityStatus: this.persistedStateIntegrityStatus
+    };
+
+    try {
+      const result = mutation();
+      this.persist();
+      return result;
+    } catch (error) {
+      if (error instanceof PersistedStateWriteError && error.committed) {
+        throw error;
+      }
+
+      this.hydrate(checkpoint.state);
+      this.verificationCodes.clear();
+      for (const [key, record] of checkpoint.verificationCodes) {
+        this.verificationCodes.set(key, record);
+      }
+      this.activeManualVerificationGrantIds.clear();
+      for (const [key, grantId] of checkpoint.activeManualVerificationGrantIds) {
+        this.activeManualVerificationGrantIds.set(key, grantId);
+      }
+      this.sessions.clear();
+      for (const [token, session] of checkpoint.sessions) {
+        this.sessions.set(token, session);
+      }
+      this.draftSessions.clear();
+      for (const [token, session] of checkpoint.draftSessions) {
+        this.draftSessions.set(token, session);
+      }
+      this.persistedStateIntegrityStatus =
+        checkpoint.persistedStateIntegrityStatus;
+      throw error;
+    }
+  }
+
   resetToSeed() {
     if (this.isLiveDataPlane()) {
       throw new BadRequestException("真实数据平面不能重置为测试种子。");
