@@ -141,6 +141,7 @@ export type PaymentEffectiveMode = "mock" | "real" | "disabled";
 export type ReservationStatus = "active" | "fulfilled" | "cancelled" | "expired";
 
 export type GoodsCategory = "food" | "drink" | "daily";
+export type EntitlementTargetType = "taxonomy_node" | "goods";
 export type InventoryLocationType = "device" | "warehouse";
 
 export type DeviceStatus = "online" | "offline" | "maintenance";
@@ -345,6 +346,11 @@ export interface MobileSessionSnapshot {
     limit?: AccessQuota | CabinetAccessRule;
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
+    /** 新版分层额度对每个具体货品计算出的当前可领取数量。 */
+    receivableByGoods?: Record<string, number>;
+    /** 分类树额度池的剩余数量；仅用于展示和服务端预约核算。 */
+    remainingPools?: EntitlementPoolSnapshot[];
+    taxonomyRevision?: number;
     usedCount?: number;
     remainingDaily?: number;
     /**
@@ -359,6 +365,7 @@ export interface MobileSessionSnapshot {
       startHour: number;
       endHour: number;
       goodsLimits: SpecialAccessPolicyGoodsLimit[];
+      entitlementLimits?: EntitlementLimit[];
     }>;
   };
 }
@@ -809,6 +816,10 @@ export interface GoodsCatalogItem {
   fullName?: string;
   category: GoodsCategory;
   categoryName?: string;
+  /** 新版领取分类树中的唯一直接归属节点。 */
+  taxonomyNodeId?: string;
+  /** 服务端派生的只读完整路径。 */
+  taxonomyPath?: Array<Pick<GoodsTaxonomyNode, "id" | "name">>;
   price: number;
   imageUrl: string;
   packageForm?: string;
@@ -827,6 +838,42 @@ export interface GoodsCategoryRecord {
   sortOrder: number;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface GoodsTaxonomyNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  status: PolicyStatus;
+  sortOrder: number;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EntitlementLimit {
+  id: string;
+  targetType: EntitlementTargetType;
+  targetId: string;
+  quantity: number;
+}
+
+export interface EntitlementPoolSnapshot extends EntitlementLimit {
+  poolId: string;
+  limitId: string;
+  policyId: string;
+  policyName: string;
+  remaining: number;
+}
+
+export interface EntitlementAllocationLine {
+  poolId: string;
+  policyId: string;
+  limitId: string;
+  targetType: EntitlementTargetType;
+  targetId: string;
+  goodsId: string;
+  quantity: number;
 }
 
 export interface RegionRecord {
@@ -978,6 +1025,7 @@ export interface CabinetPreSettlementItem {
   originalAmount: number;
   freeAmount: number;
   paidAmount: number;
+  entitlementAllocations?: EntitlementAllocationLine[];
 }
 
 export interface CabinetPreSettlement {
@@ -993,6 +1041,8 @@ export interface CabinetPreSettlement {
   chargeRequired: boolean;
   summary: string;
   items: CabinetPreSettlementItem[];
+  entitlementAllocations?: EntitlementAllocationLine[];
+  taxonomyRevision?: number;
 }
 
 export interface CabinetOpenPreviewResult {
@@ -1226,6 +1276,8 @@ export interface CabinetReservationRecord {
   /** 实际可用批次在开柜前按当时有效库存重新分配。 */
   batchAllocationTiming: "on_open";
   items: CabinetIntentItem[];
+  entitlementAllocations?: EntitlementAllocationLine[];
+  taxonomyRevision?: number;
   reservedAt: string;
   expiresAt: string;
   createdAt: string;
@@ -1291,6 +1343,8 @@ export interface InventoryMovement {
    * 旧流水未保存该字段时，额度统计按 `quantity` 兼容处理。
    */
   quotaQuantity?: number;
+  /** 本次流水占用或恢复的精确额度池；旧流水缺省时按实际货品重新映射。 */
+  entitlementAllocations?: EntitlementAllocationLine[];
   settlementSource?: "platform_callback" | "manual_recovery";
   unitPrice: number;
   type: InventoryMovementType;
@@ -1395,6 +1449,7 @@ export interface SpecialAccessPolicy {
   startHour: number;
   endHour: number;
   goodsLimits: SpecialAccessPolicyGoodsLimit[];
+  entitlementLimits?: EntitlementLimit[];
   applicableUserIds: string[];
   status: PolicyStatus;
 }
@@ -1406,6 +1461,7 @@ export interface UserAccessPolicy {
   startHour: number;
   endHour: number;
   goodsLimits: SpecialAccessPolicyGoodsLimit[];
+  entitlementLimits?: EntitlementLimit[];
   status: PolicyStatus;
   sourcePolicyId?: string;
   effectiveFromDateKey?: string;
@@ -3153,6 +3209,7 @@ export const cloneSeedState = () => ({
   devices: structuredClone(seedDevices),
   goodsCatalog: structuredClone(seedGoodsCatalog),
   goodsCategories: structuredClone(seedGoodsCategories),
+  goodsTaxonomyNodes: [] as GoodsTaxonomyNode[],
   regions: structuredClone(seedRegions),
   warehouses: structuredClone(seedWarehouses),
   specialAccessPolicies: structuredClone(seedSpecialAccessPolicies),

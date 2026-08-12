@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 
-import type { SpecialAccessPolicy, UserRole } from "@vm/shared-types";
+import type { EntitlementLimit, SpecialAccessPolicy, UserRole } from "@vm/shared-types";
 
 import { addDaysToDateKey, getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
@@ -147,19 +147,34 @@ export class SpecialAccessPoliciesService {
           }
         }
 
-        const copiedPolicies = policy.goodsLimits.map((limit) => ({
-          id: this.store.createId("user-policy"),
-          name: `${policy.name} · ${limit.goodsName}`,
-          weekdays: [...policy.weekdays],
-          startHour: policy.startHour,
-          endHour: policy.endHour,
-          goodsLimits: [{ ...limit }],
-          status: policy.status,
-          sourcePolicyId: policy.id,
-          effectiveFromDateKey: nextBusinessDateKey,
-          createdAt: now,
-          updatedAt: now
-        }));
+        const copiedPolicies = policy.entitlementLimits?.length
+          ? [{
+              id: this.store.createId("user-policy"),
+              name: policy.name,
+              weekdays: [...policy.weekdays],
+              startHour: policy.startHour,
+              endHour: policy.endHour,
+              goodsLimits: policy.goodsLimits.map((limit) => ({ ...limit })),
+              entitlementLimits: policy.entitlementLimits.map((limit) => ({ ...limit })),
+              status: policy.status,
+              sourcePolicyId: policy.id,
+              effectiveFromDateKey: nextBusinessDateKey,
+              createdAt: now,
+              updatedAt: now
+            }]
+          : policy.goodsLimits.map((limit) => ({
+              id: this.store.createId("user-policy"),
+              name: `${policy.name} · ${limit.goodsName}`,
+              weekdays: [...policy.weekdays],
+              startHour: policy.startHour,
+              endHour: policy.endHour,
+              goodsLimits: [{ ...limit }],
+              status: policy.status,
+              sourcePolicyId: policy.id,
+              effectiveFromDateKey: nextBusinessDateKey,
+              createdAt: now,
+              updatedAt: now
+            }));
 
         currentPolicies.unshift(...copiedPolicies);
         user.accessPolicies = currentPolicies;
@@ -219,11 +234,14 @@ export class SpecialAccessPoliciesService {
       throw new BadRequestException("请选择有效的可领取星期。");
     }
 
-    if (!payload.goodsLimits?.length) {
+    if (!payload.goodsLimits?.length && !payload.entitlementLimits?.length) {
       throw new BadRequestException("请至少设置一种可领取物资。");
     }
+    if (payload.goodsLimits?.length && payload.entitlementLimits?.length) {
+      throw new BadRequestException("旧货品额度与分类额度不能同时提交，请选择一种规则模型。");
+    }
 
-    const goodsLimits = payload.goodsLimits.map((limit) => {
+    const goodsLimits = (payload.goodsLimits ?? []).map((limit) => {
       const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === limit.goodsId);
       const quantity = Math.floor(Number(limit.quantity));
 
@@ -242,6 +260,7 @@ export class SpecialAccessPoliciesService {
         quantity
       };
     });
+    const entitlementLimits = this.normalizeEntitlementLimits(payload.entitlementLimits ?? []);
 
     return {
       ...payload,
@@ -250,9 +269,46 @@ export class SpecialAccessPoliciesService {
       startHour,
       endHour,
       goodsLimits,
+      entitlementLimits,
       applicableUserIds: Array.from(new Set(payload.applicableUserIds ?? [])),
       status: payload.status === "inactive" ? "inactive" : "active"
     };
+  }
+
+  private normalizeEntitlementLimits(limits: EntitlementLimit[]) {
+    const seenIds = new Set<string>();
+    const seenTargets = new Set<string>();
+    return limits.map((limit) => {
+      const id = String(limit.id ?? "").trim();
+      const targetId = String(limit.targetId ?? "").trim();
+      const quantity = Number(limit.quantity);
+      if (!id || seenIds.has(id)) {
+        throw new BadRequestException("分类额度标识不能为空且不能重复。");
+      }
+      seenIds.add(id);
+      if (!targetId || !Number.isSafeInteger(quantity) || quantity <= 0) {
+        throw new BadRequestException("分类额度必须包含有效目标和正整数数量。");
+      }
+      if (limit.targetType === "taxonomy_node") {
+        const node = this.store.goodsTaxonomyNodes.find(
+          (entry) => entry.id === targetId && entry.status === "active"
+        );
+        if (!node) throw new BadRequestException("分类额度目标不存在或已停用。");
+      } else if (limit.targetType === "goods") {
+        const goods = this.store.goodsCatalog.find(
+          (entry) => entry.goodsId === targetId && entry.status !== "inactive"
+        );
+        if (!goods) throw new BadRequestException("货品额度目标不存在或已停用。");
+      } else {
+        throw new BadRequestException("不支持的额度目标类型。");
+      }
+      const targetKey = `${limit.targetType}:${targetId}`;
+      if (seenTargets.has(targetKey)) {
+        throw new BadRequestException("同一分类或货品只能设置一个额度池。");
+      }
+      seenTargets.add(targetKey);
+      return { id, targetType: limit.targetType, targetId, quantity };
+    });
   }
 
   private getActor(actorUserId?: string) {

@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
-import { cloneSeedState, type AlertTask, type BackofficePermission, type BackofficeRole, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CabinetReservationRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type ExpiredBatchDispositionRecord, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type PaymentOrderRecord, type PaymentRefundRecord, type PlatformTenantRecord, type RegionRecord, type RegistrationApplication, type ReservationSettings, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
+import { cloneSeedState, type AlertTask, type BackofficePermission, type BackofficeRole, type BatchConsumptionTrace, type CabinetAccessRule, type CabinetEventRecord, type CabinetReservationRecord, type CallbackLogRecord, type DeviceGoodsSetting, type DeviceRecord, type DeviceRuntimeState, type ExpiredBatchDispositionRecord, type GoodsAlertPolicy, type GoodsBatchRecord, type GoodsCatalogItem, type GoodsCategoryRecord, type GoodsTaxonomyNode, type InventoryMovement, type InventoryTransferRecord, type MerchantGoodsTemplate, type OperationLogRecord, type PaymentOrderRecord, type PaymentRefundRecord, type PlatformTenantRecord, type RegionRecord, type RegistrationApplication, type ReservationSettings, type SpecialAccessPolicy, type StocktakeRecord, type SystemAuditLogEntry, type UserRecord, type UserRole, type WarehouseRecord } from "@vm/shared-types";
 
 import { sanitizeAuditLogEntry } from "../logging/audit-log-sanitizer";
 import {
@@ -165,6 +165,8 @@ export interface PersistedStoreState {
   devices: DeviceRecord[];
   goodsCatalog: GoodsCatalogItem[];
   goodsCategories: GoodsCategoryRecord[];
+  /** 旧账本可缺省；读取规范化后始终存在。 */
+  goodsTaxonomyNodes: GoodsTaxonomyNode[];
   regions: RegionRecord[];
   warehouses: WarehouseRecord[];
   specialAccessPolicies: SpecialAccessPolicy[];
@@ -579,6 +581,7 @@ export const createEmptyPersistedState = (
     devices: [],
     goodsCatalog: [],
     goodsCategories: [],
+    goodsTaxonomyNodes: [],
     regions: [],
     warehouses: [],
     specialAccessPolicies: [],
@@ -748,6 +751,7 @@ const normalizePersistedState = (
     devices: raw.devices ?? fallbackState.devices,
     goodsCatalog: raw.goodsCatalog ?? fallbackState.goodsCatalog,
     goodsCategories: raw.goodsCategories ?? fallbackState.goodsCategories,
+    goodsTaxonomyNodes: raw.goodsTaxonomyNodes ?? fallbackState.goodsTaxonomyNodes,
     regions: raw.regions ?? fallbackState.regions,
     warehouses: raw.warehouses ?? fallbackState.warehouses,
     specialAccessPolicies: raw.specialAccessPolicies ?? fallbackState.specialAccessPolicies,

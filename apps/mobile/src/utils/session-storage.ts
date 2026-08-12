@@ -15,6 +15,8 @@ export interface StoredMobileSessionState {
     role?: UserRole;
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
+    receivableByGoods?: Record<string, number>;
+    taxonomyRevision?: number;
     usedCount?: number;
     remainingDaily?: number;
     remainingFreeTotal?: number;

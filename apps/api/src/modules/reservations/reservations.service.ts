@@ -23,6 +23,11 @@ import type {
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { isReservationOnlyPickup } from "../../common/config/reservation-only-pickup";
 import { AccessRulesService } from "../access-rules/access-rules.service";
+import {
+  allocateActiveEntitlements,
+  getActiveWindowEntitlementQuota,
+  subtractLockedEntitlements
+} from "../../common/policies/special-access-policy.utils";
 
 type Actor = { id: string; role: UserRole; tenantId?: string };
 
@@ -183,9 +188,68 @@ export class ReservationsService {
     }
 
     const quotaSummary = this.accessRulesService.assertCanOpenSpecialCabinet(user);
+    let entitlementAllocations: CabinetReservationRecord["entitlementAllocations"];
 
     if (this.isReservationOnlyPickup()) {
       this.assertReservationFitsFreeQuota(user, intentItems, quotaSummary);
+      if (quotaSummary.remainingPools?.length) {
+        const quota = getActiveWindowEntitlementQuota(
+          user,
+          this.store.specialAccessPolicies,
+          this.store.inventory,
+          this.store.goodsCatalog,
+          this.store.goodsTaxonomyNodes,
+          new Date()
+        );
+        const activeReservations = this.store.reservations.filter(
+          (reservation) => reservation.userId === user.id && reservation.status === "active"
+        );
+        // 已创建预约保存的是确定的额度池锁。后续预约只能使用锁定后的剩余额度，
+        // 不能按当前规则重新分配旧预约，否则规则变更会把旧锁“搬”到别的池。
+        let quotaAfterLocks;
+        try {
+          quotaAfterLocks = subtractLockedEntitlements(
+            quota,
+            activeReservations.flatMap((reservation) => reservation.entitlementAllocations ?? [])
+          );
+        } catch {
+          throw new BadRequestException(
+            "已有预约锁定的领取额度已发生变化，请先取消对应预约后再创建新预约。"
+          );
+        }
+
+        // 仅旧版本未保存额度池的预约允许按当前规则补算；已经保存的锁绝不参与重排。
+        const legacyActiveReservations = activeReservations.filter(
+          (reservation) => !reservation.entitlementAllocations?.length
+        );
+        const legacyReservedItems = legacyActiveReservations
+          .flatMap((reservation) => reservation.items)
+          .reduce<Map<string, number>>((result, item) => {
+            result.set(item.goodsId, (result.get(item.goodsId) ?? 0) + item.quantity);
+            return result;
+          }, new Map());
+        const planned = new Map(legacyReservedItems);
+        for (const item of intentItems) {
+          planned.set(item.goodsId, (planned.get(item.goodsId) ?? 0) + item.quantity);
+        }
+        const allocation = allocateActiveEntitlements(
+          quotaAfterLocks,
+          this.store.goodsTaxonomyNodes,
+          this.store.goodsCatalog,
+          [...planned].map(([goodsId, quantity]) => ({ goodsId, quantity }))
+        );
+        if (!allocation.fulfilled) {
+          throw new BadRequestException("预约数量超过当前树状领取额度。");
+        }
+        const existingReservationQuantity = new Map(legacyReservedItems);
+        entitlementAllocations = allocation.allocations.flatMap((line) => {
+          const existing = existingReservationQuantity.get(line.goodsId) ?? 0;
+          if (existing <= 0) return [{ ...line }];
+          const retained = Math.min(existing, line.quantity);
+          existingReservationQuantity.set(line.goodsId, existing - retained);
+          return line.quantity > retained ? [{ ...line, quantity: line.quantity - retained }] : [];
+        });
+      }
     }
 
     const now = new Date();
@@ -200,6 +264,8 @@ export class ReservationsService {
       inventoryReservationMode: "goods_quantity",
       batchAllocationTiming: "on_open",
       items: intentItems,
+      entitlementAllocations,
+      taxonomyRevision: quotaSummary.taxonomyRevision,
       reservedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + settings.holdMinutes * 60_000).toISOString(),
       createdAt: now.toISOString(),

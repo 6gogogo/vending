@@ -27,6 +27,7 @@ import MerchantBackofficePage from "../pages/MerchantBackofficePage.vue";
 import OperationsPage from "../pages/OperationsPage.vue";
 import PlatformOverviewPage from "../pages/PlatformOverviewPage.vue";
 import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
+import GoodsTaxonomyPage from "../pages/GoodsTaxonomyPage.vue";
 import SystemSettingsPage from "../pages/SystemSettingsPage.vue";
 import UserDetailPage from "../pages/UserDetailPage.vue";
 import UsersPage from "../pages/UsersPage.vue";
@@ -127,6 +128,18 @@ export const router = createRouter({
             eyebrow: "货品总览",
             title: "货品总览与预警模板",
             description: "查看各商品种类数量、柜机分布，并批量设置货品预警模板。",
+            permission: "goods:view",
+            backofficeRoles: ["super_admin", "admin"]
+          }
+        },
+        {
+          path: "/goods-taxonomy",
+          component: GoodsTaxonomyPage,
+          meta: {
+            group: "总览",
+            eyebrow: "领取分类树",
+            title: "货品领取分类与额度范围",
+            description: "维护货品唯一归属、分类层级和变更影响。",
             permission: "goods:view",
             backofficeRoles: ["super_admin", "admin"]
           }

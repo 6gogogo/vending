@@ -4,6 +4,8 @@ import { RouterLink, useRoute } from "vue-router";
 import type {
   CabinetReservationRecord,
   DeviceRecord,
+  EntitlementLimit,
+  GoodsTaxonomyNode,
   ManualSettlementCandidate,
   ManualSettlementRecord,
   SpecialAccessPolicy,
@@ -48,9 +50,21 @@ interface PersonalPolicyRow {
   effectiveFromDateKey?: string;
 }
 
+interface PersonalEntitlementRow {
+  policyId: string;
+  policyName: string;
+  limits: EntitlementLimit[];
+  weekdays: number[];
+  startHour: number;
+  endHour: number;
+  status: UserAccessPolicy["status"];
+  effectiveLabel: string;
+}
+
 const detail = ref<UserManagementDetail>();
 const devices = ref<DeviceRecord[]>([]);
 const goodsCatalog = ref<Array<{ goodsId: string; name: string; category: "food" | "drink" | "daily" }>>([]);
+const goodsTaxonomyNodes = ref<GoodsTaxonomyNode[]>([]);
 const policyTemplates = ref<SpecialAccessPolicy[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -92,6 +106,15 @@ const accessPolicyForm = ref({
   goodsLimits: [{ goodsId: "", quantity: 1 }]
 });
 
+const entitlementPolicyForm = ref({
+  weekdays: [1, 2, 3, 4, 5],
+  startHour: 8,
+  endHour: 12,
+  status: "active" as UserAccessPolicy["status"],
+  limits: [{ id: "", targetType: "taxonomy_node" as const, targetId: "", quantity: 1 }]
+});
+const editingEntitlementPolicyId = ref("");
+
 const templateApplyForm = ref({
   mode: "bind" as "bind" | "replace",
   policyIds: [] as string[]
@@ -99,6 +122,27 @@ const templateApplyForm = ref({
 
 const goodsCatalogMap = computed(() => new Map(goodsCatalog.value.map((item) => [item.goodsId, item])));
 const policyTemplateMap = computed(() => new Map(policyTemplates.value.map((item) => [item.id, item])));
+const taxonomyNodeMap = computed(() => new Map(goodsTaxonomyNodes.value.map((node) => [node.id, node])));
+const taxonomyNodeOptions = computed(() => {
+  const pathFor = (node: GoodsTaxonomyNode) => {
+    const names = [node.name];
+    const visited = new Set([node.id]);
+    let parentId = node.parentId;
+    while (parentId) {
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      const parent = taxonomyNodeMap.value.get(parentId);
+      if (!parent) break;
+      names.unshift(parent.name);
+      parentId = parent.parentId;
+    }
+    return names.join(" / ");
+  };
+  return goodsTaxonomyNodes.value
+    .filter((node) => node.status === "active")
+    .map((node) => ({ id: node.id, label: pathFor(node) }))
+    .sort((left, right) => left.label.localeCompare(right.label, "zh-Hans-CN"));
+});
 const currentBusinessDateKey = computed(() => detail.value?.businessDaySummary?.businessDateKey ?? new Date().toISOString().slice(0, 10));
 const currentMonthTitle = computed(() => {
   const source = detail.value?.policyCalendar?.monthKey || calendarMonth.value;
@@ -163,6 +207,12 @@ const formatCalendarState = (status?: "complete" | "partial" | "unserved" | "not
 const formatBusinessStatus = (status?: "complete" | "partial" | "unserved" | "not_applicable") => status === "complete" ? "全部领取" : status === "partial" ? "部分领取" : status === "unserved" ? "物资未领取" : "未配置";
 const formatWeekdays = (weekdays: number[]) => weekdayOptions.filter((item) => weekdays.includes(item.value)).map((item) => item.label).join("、");
 const buildPolicyName = (goodsId: string, startHour: number, endHour: number, weekdays: number[]) => `${goodsCatalogMap.value.get(goodsId)?.name || goodsId} ${formatWeekdays(weekdays)} ${String(startHour).padStart(2, "0")}:00-${String(endHour).padStart(2, "0")}:00`;
+const entitlementTargetName = (limit: EntitlementLimit) =>
+  limit.targetType === "taxonomy_node"
+    ? taxonomyNodeOptions.value.find((option) => option.id === limit.targetId)?.label ?? limit.targetId
+    : goodsCatalogMap.value.get(limit.targetId)?.name ?? limit.targetId;
+const buildEntitlementPolicyName = (limits: EntitlementLimit[], startHour: number, endHour: number, weekdays: number[]) =>
+  `${limits.map((limit) => `${entitlementTargetName(limit)}×${limit.quantity}`).join("、")} ${formatWeekdays(weekdays)} ${String(startHour).padStart(2, "0")}:00-${String(endHour).padStart(2, "0")}:00`;
 const isLocalOnlyRecord = (record: UserManagementDetail["recentRecords"][number]) =>
   record.type === "manual-restock" || record.type === "manual-deduction";
 const isPlatformRefundRecord = (record: UserManagementDetail["recentRecords"][number]) =>
@@ -306,6 +356,24 @@ const groupedPersonalPolicies = computed(() => {
   return Array.from(groups.values()).sort((left, right) => left.goodsName.localeCompare(right.goodsName, "zh-Hans-CN"));
 });
 
+const personalEntitlementRows = computed<PersonalEntitlementRow[]>(() =>
+  directPersonalPolicies.value
+    .filter((policy) => (policy.entitlementLimits?.length ?? 0) > 0)
+    .map((policy) => ({
+      policyId: policy.id,
+      policyName: policy.name,
+      limits: structuredClone(policy.entitlementLimits ?? []),
+      weekdays: [...policy.weekdays],
+      startHour: policy.startHour,
+      endHour: policy.endHour,
+      status: policy.status,
+      effectiveLabel:
+        (policy.effectiveFromDateKey ?? currentBusinessDateKey.value) > currentBusinessDateKey.value
+          ? "次日生效"
+          : "当前生效"
+    }))
+);
+
 const inheritedTemplatePolicies = computed(() => {
   const directIds = new Set((detail.value?.user.accessPolicies ?? []).map((item) => item.id));
   return (detail.value?.accessPolicies ?? []).filter((policy) => !directIds.has(policy.id));
@@ -314,6 +382,35 @@ const inheritedTemplatePolicies = computed(() => {
 const resetAccessPolicyForm = () => {
   editingAccessPolicyId.value = "";
   accessPolicyForm.value = { weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }] };
+};
+
+const createEntitlementLimit = (): EntitlementLimit => ({
+  id: globalThis.crypto.randomUUID(),
+  targetType: "taxonomy_node",
+  targetId: taxonomyNodeOptions.value[0]?.id ?? "",
+  quantity: 1
+});
+
+const resetEntitlementPolicyForm = () => {
+  editingEntitlementPolicyId.value = "";
+  entitlementPolicyForm.value = {
+    weekdays: [1, 2, 3, 4, 5],
+    startHour: 8,
+    endHour: 12,
+    status: "active",
+    limits: [createEntitlementLimit()]
+  };
+};
+
+const fillEntitlementPolicyForm = (row: PersonalEntitlementRow) => {
+  editingEntitlementPolicyId.value = row.policyId;
+  entitlementPolicyForm.value = {
+    weekdays: [...row.weekdays],
+    startHour: row.startHour,
+    endHour: row.endHour,
+    status: row.status,
+    limits: structuredClone(row.limits)
+  };
 };
 
 const fillAccessPolicyForm = (row: PersonalPolicyRow) => {
@@ -333,23 +430,30 @@ const load = async () => {
   try {
     const month = calendarMonth.value || new Date().toISOString().slice(0, 7);
     const date = selectedDateKey.value || `${month}-01`;
-    const [detailResponse, devicesResponse, goodsCatalogResponse, templateResponse, reservationsResponse] = await Promise.all([
+    const [detailResponse, devicesResponse, goodsCatalogResponse, templateResponse, reservationsResponse, taxonomyResponse] = await Promise.all([
       adminApi.userDetail(String(route.params.userId), { month, date }),
       adminApi.devices(),
       adminApi.goodsCatalog(),
       adminApi.policies(),
-      adminApi.reservations(String(route.params.userId))
+      adminApi.reservations(String(route.params.userId)),
+      sessionStore.can("goods:view")
+        ? adminApi.goodsTaxonomy()
+        : Promise.resolve({ revision: 0, nodes: [], goods: [], unassignedGoodsIds: [] })
     ]);
     detail.value = detailResponse;
     devices.value = devicesResponse;
     policyTemplates.value = templateResponse;
     reservations.value = reservationsResponse;
     goodsCatalog.value = goodsCatalogResponse.map((item) => ({ goodsId: item.goodsId, name: item.name, category: item.category }));
+    goodsTaxonomyNodes.value = taxonomyResponse.nodes;
     calendarMonth.value = detailResponse.policyCalendar?.monthKey ?? month;
     selectedDateKey.value = detailResponse.policyCalendar?.selectedDateKey ?? date;
     if (!form.value.deviceCode) form.value.deviceCode = devicesResponse[0]?.deviceCode ?? "";
     if (!form.value.goodsId) form.value.goodsId = devicesResponse[0]?.doors.flatMap((door) => door.goods)[0]?.goodsId ?? "";
     if (!accessPolicyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) accessPolicyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
+    if (!entitlementPolicyForm.value.limits[0]?.targetId && taxonomyNodeOptions.value[0]) {
+      entitlementPolicyForm.value.limits[0]!.targetId = taxonomyNodeOptions.value[0].id;
+    }
     if (detailResponse.user.role === "special") {
       await loadManualSettlementCandidates(detailResponse.user.id);
       const requestedEvent = detailResponse.recentEvents.find(
@@ -672,6 +776,82 @@ const submitAccessPolicy = async () => {
   }
 };
 
+const addEntitlementLimit = () => entitlementPolicyForm.value.limits.push(createEntitlementLimit());
+const removeEntitlementLimit = (index: number) => {
+  entitlementPolicyForm.value.limits.splice(index, 1);
+  if (!entitlementPolicyForm.value.limits.length) addEntitlementLimit();
+};
+
+const submitEntitlementPolicy = async () => {
+  if (!detail.value || detail.value.user.role !== "special") return;
+  const weekdays = Array.from(new Set(entitlementPolicyForm.value.weekdays)).sort((left, right) => left - right);
+  const limits = entitlementPolicyForm.value.limits
+    .filter((limit) => limit.targetId && limit.quantity > 0)
+    .map((limit) => ({ ...limit, quantity: Math.floor(limit.quantity) }));
+  if (!canManageUserRules.value) {
+    showActionMessage("error", "当前账号没有取货规则管理权限，不能保存分类额度。");
+    return;
+  }
+  if (!weekdays.length || !limits.length || entitlementPolicyForm.value.endHour <= entitlementPolicyForm.value.startHour) {
+    showActionMessage("error", "保存前请至少选择一个星期和一个分类额度，并保证结束时间晚于开始时间。");
+    return;
+  }
+  if (new Set(limits.map((limit) => `${limit.targetType}:${limit.targetId}`)).size !== limits.length) {
+    showActionMessage("error", "同一条设定中不能重复选择相同分类。");
+    return;
+  }
+  saving.value = true;
+  try {
+    const wasEditing = Boolean(editingEntitlementPolicyId.value);
+    await adminApi.saveUserAccessPolicy(detail.value.user.id, {
+      id: editingEntitlementPolicyId.value || undefined,
+      name: buildEntitlementPolicyName(limits, entitlementPolicyForm.value.startHour, entitlementPolicyForm.value.endHour, weekdays),
+      weekdays,
+      startHour: entitlementPolicyForm.value.startHour,
+      endHour: entitlementPolicyForm.value.endHour,
+      status: entitlementPolicyForm.value.status,
+      goodsLimits: [],
+      entitlementLimits: limits
+    });
+    resetEntitlementPolicyForm();
+    await load();
+    showActionMessage("success", wasEditing ? "分类额度已保存，将按生效日期执行。" : "分类额度已新增。" );
+  } catch (error) {
+    showActionMessage("error", `保存分类额度失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const deleteEntitlementPolicy = async (row: PersonalEntitlementRow) => {
+  if (!detail.value || !window.confirm(`确认删除“${row.policyName}”吗？`)) return;
+  saving.value = true;
+  try {
+    await adminApi.deleteUserAccessPolicy(detail.value.user.id, row.policyId);
+    if (editingEntitlementPolicyId.value === row.policyId) resetEntitlementPolicyForm();
+    await load();
+    showActionMessage("success", "分类额度设定已删除。");
+  } catch (error) {
+    showActionMessage("error", `删除分类额度失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const applyEntitlementPolicyNow = async (row: PersonalEntitlementRow) => {
+  if (!detail.value) return;
+  applyingNowPolicyId.value = row.policyId;
+  try {
+    await adminApi.applyUserAccessPolicyNow(detail.value.user.id, row.policyId);
+    await load();
+    showActionMessage("success", "分类额度已调整为当前业务日生效。");
+  } catch (error) {
+    showActionMessage("error", `立即生效失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    applyingNowPolicyId.value = "";
+  }
+};
+
 const deleteAccessPolicy = async (row: PersonalPolicyRow) => {
   if (!detail.value || !window.confirm(`确认删除 ${row.goodsName} 的这条每日可领取物资设定吗？`)) return;
   if (!canManageUserRules.value) {
@@ -951,6 +1131,52 @@ onMounted(async () => {
         </article>
 
         <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
+            <div><span class="admin-kicker">分类额度</span><h3 class="admin-panel__title">按分类设置每日可领取数量</h3></div>
+            <button v-if="canManageUserRules" class="admin-button admin-button--ghost" type="button" @click="resetEntitlementPolicyForm">新增分类额度</button>
+          </div>
+          <div class="admin-note">额度独立累加并优先使用最具体的分类。例如“食品 1 件＋任意 3 件”时，食品最多可领取 4 件，日用品最多可领取 3 件。</div>
+          <div v-if="personalEntitlementRows.length" class="user-policy-bars">
+            <div v-for="row in personalEntitlementRows" :key="row.policyId" class="user-policy-bar">
+              <div class="user-policy-bar__main">
+                <span class="admin-table__strong">{{ row.limits.map((limit) => `${entitlementTargetName(limit)} × ${limit.quantity}`).join("，") }}</span>
+                <span class="user-policy-bar__meta">{{ formatWeekdays(row.weekdays) }} · {{ String(row.startHour).padStart(2, "0") }}:00-{{ String(row.endHour).padStart(2, "0") }}:00</span>
+                <span class="admin-table__subtext">{{ row.effectiveLabel }}</span>
+              </div>
+              <div v-if="canManageUserRules" class="admin-inline-links">
+                <button class="admin-text-button" type="button" @click="fillEntitlementPolicyForm(row)">修改</button>
+                <button v-if="row.effectiveLabel === '次日生效'" class="admin-text-button" type="button" :disabled="applyingNowPolicyId === row.policyId" @click="applyEntitlementPolicyNow(row)">{{ applyingNowPolicyId === row.policyId ? "处理中" : "立即生效" }}</button>
+                <button class="admin-text-button user-policy-delete" type="button" @click="deleteEntitlementPolicy(row)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="admin-empty"><div class="admin-empty__title">当前还没有分类额度</div><div class="admin-empty__body">迁移完成后可在这里设置“任意、饮食、食品、饮料”等分类额度。</div></div>
+          <div v-if="canManageUserRules && goodsTaxonomyNodes.length" class="user-detail-form user-entitlement-form">
+            <div class="admin-field"><span class="admin-field__label">生效星期</span><div class="user-policy-weekdays"><label v-for="weekday in weekdayOptions" :key="weekday.value" class="user-policy-weekdays__item"><input v-model="entitlementPolicyForm.weekdays" type="checkbox" :value="weekday.value" /><span>{{ weekday.label }}</span></label></div></div>
+            <div class="user-policy-hours">
+              <label class="admin-field"><span class="admin-field__label">开始时间</span><select v-model="entitlementPolicyForm.startHour" class="admin-select"><option v-for="hour in hourOptions" :key="hour" :value="hour">{{ String(hour).padStart(2, "0") }}:00</option></select></label>
+              <label class="admin-field"><span class="admin-field__label">结束时间</span><select v-model="entitlementPolicyForm.endHour" class="admin-select"><option v-for="hour in hourEndOptions" :key="hour" :value="hour">{{ String(hour).padStart(2, "0") }}:00</option></select></label>
+            </div>
+            <label class="admin-field"><span class="admin-field__label">状态</span><select v-model="entitlementPolicyForm.status" class="admin-select"><option value="active">启用</option><option value="inactive">停用</option></select></label>
+            <div class="admin-field">
+              <span class="admin-field__label">额度池</span>
+              <div class="user-policy-limits">
+                <div v-for="(limit, index) in entitlementPolicyForm.limits" :key="limit.id" class="user-entitlement-limit-row">
+                  <select v-model="limit.targetType" class="admin-select"><option value="taxonomy_node">分类</option><option value="goods">指定货品</option></select>
+                  <select v-if="limit.targetType === 'taxonomy_node'" v-model="limit.targetId" class="admin-select"><option v-for="node in taxonomyNodeOptions" :key="node.id" :value="node.id">{{ node.label }}</option></select>
+                  <select v-else v-model="limit.targetId" class="admin-select"><option v-for="goods in goodsCatalog" :key="goods.goodsId" :value="goods.goodsId">{{ goods.name }} / {{ goods.goodsId }}</option></select>
+                  <input v-model.number="limit.quantity" class="admin-input" type="number" min="1" step="1" />
+                  <button class="admin-button admin-button--ghost" type="button" @click="removeEntitlementLimit(index)">删除</button>
+                </div>
+              </div>
+              <button class="admin-text-button" type="button" @click="addEntitlementLimit">继续添加额度池</button>
+            </div>
+            <button class="admin-button" type="button" :disabled="saving || entitlementPolicyForm.endHour <= entitlementPolicyForm.startHour" @click="submitEntitlementPolicy">{{ saving ? "保存中" : editingEntitlementPolicyId ? "保存分类额度" : "新增分类额度" }}</button>
+          </div>
+          <div v-else-if="canManageUserRules" class="admin-note">当前尚未建立分类树；请先到“货品分类”完成分类和货品归属。</div>
+        </article>
+
+        <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">每日可领取物资</span><h3 class="admin-panel__title">按人维护可领取物资、数量和时间</h3></div><button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="resetAccessPolicyForm">新增可领物资</button></div>
           <div v-if="groupedPersonalPolicies.length" class="user-policy-groups">
             <section v-for="group in groupedPersonalPolicies" :key="group.goodsId" class="user-policy-group">
@@ -1003,7 +1229,7 @@ onMounted(async () => {
           <div class="admin-panel__head"><div><span class="admin-kicker">模板操作</span><h3 class="admin-panel__title">用模板批量填入每日可领取物资</h3></div></div>
           <div class="user-detail-form">
             <label class="admin-field"><span class="admin-field__label">应用方式</span><select v-model="templateApplyForm.mode" class="admin-select"><option value="bind">新增到个人设定</option><option value="replace">覆盖个人设定</option></select></label>
-            <div class="admin-field"><span class="admin-field__label">模板选择</span><div class="user-template-checklist"><label v-for="policy in policyTemplates" :key="policy.id" class="user-template-check"><input :checked="templateApplyForm.policyIds.includes(policy.id)" type="checkbox" @change="toggleTemplatePolicy(policy.id)" /><span>{{ policy.name }}</span><span class="admin-table__subtext">{{ formatWeekdays(policy.weekdays) }} · {{ String(policy.startHour).padStart(2, "0") }}:00-{{ String(policy.endHour).padStart(2, "0") }}:00 · {{ policy.goodsLimits.map((limit) => `${limit.goodsName} x${limit.quantity}`).join("，") }}</span></label></div></div>
+            <div class="admin-field"><span class="admin-field__label">模板选择</span><div class="user-template-checklist"><label v-for="policy in policyTemplates" :key="policy.id" class="user-template-check"><input :checked="templateApplyForm.policyIds.includes(policy.id)" type="checkbox" @change="toggleTemplatePolicy(policy.id)" /><span>{{ policy.name }}</span><span class="admin-table__subtext">{{ formatWeekdays(policy.weekdays) }} · {{ String(policy.startHour).padStart(2, "0") }}:00-{{ String(policy.endHour).padStart(2, "0") }}:00 · {{ (policy.entitlementLimits?.length ? policy.entitlementLimits.map((limit) => `${entitlementTargetName(limit)} x${limit.quantity}`) : policy.goodsLimits.map((limit) => `${limit.goodsName} x${limit.quantity}`)).join("，") }}</span></label></div></div>
             <div class="admin-note">{{ templateApplyForm.mode === "replace" ? "覆盖会在二次确认后，于下一个业务日替换当前个人设定。" : "新增会把模板中的每个货品最小单元追加到该人员的个人设定中。" }}</div>
             <button class="admin-button" :disabled="saving || !templateApplyForm.policyIds.length" @click="applyTemplatePolicies">{{ saving ? "处理中" : templateApplyForm.mode === "replace" ? "覆盖个人设定" : "新增到个人设定" }}</button>
           </div>
@@ -1182,6 +1408,8 @@ onMounted(async () => {
 .user-policy-weekdays__item{display:flex;align-items:center;gap:8px}
 .user-policy-hours{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .user-policy-limits__row{display:grid;grid-template-columns:minmax(0,1fr) 100px 84px;gap:8px}
+.user-entitlement-form{margin-top:12px;padding-top:12px;border-top:1px solid var(--admin-line)}
+.user-entitlement-limit-row{display:grid;grid-template-columns:130px minmax(0,1fr) 100px 84px;gap:8px}
 .user-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
 .user-calendar__weekday{padding:6px 4px;text-align:center;color:var(--admin-muted);font-size:.78rem;font-weight:700}
 .user-calendar__day{min-height:68px;display:grid;justify-items:center;align-content:center;gap:8px;border:1px solid var(--admin-line);border-radius:10px;background:var(--admin-panel);cursor:pointer}
@@ -1202,5 +1430,5 @@ onMounted(async () => {
 .user-settlement-history{margin-top:14px;padding-top:12px;border-top:1px solid var(--admin-line);justify-items:start}
 .user-reservation-row{align-items:flex-start}
 .user-reservation-actions{display:grid;min-width:min(100%,320px);gap:8px}
-@media (max-width:720px){.user-policy-hours,.user-policy-limits__row,.user-policy-weekdays,.user-policy-bar{grid-template-columns:1fr}.user-policy-group__head{flex-direction:column;align-items:flex-start}}
+@media (max-width:720px){.user-policy-hours,.user-policy-limits__row,.user-entitlement-limit-row,.user-policy-weekdays,.user-policy-bar{grid-template-columns:1fr}.user-policy-group__head{flex-direction:column;align-items:flex-start}}
 </style>
