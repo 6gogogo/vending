@@ -183,16 +183,14 @@ export class AuthService {
         );
 
     if (existingApplication?.status === "pending") {
-      const draftToken = this.store.createDraftSession({
+      const onboardingToken = this.store.createOnboardingSession({
         tenantId,
-        phone: normalizedPhone,
-        requestedRole: existingApplication.requestedRole,
         applicationId: existingApplication.id
       });
       return {
         state: "pending_review",
         draft: {
-          token: draftToken,
+          token: onboardingToken,
           phone: normalizedPhone,
           requestedRole: existingApplication.requestedRole,
           applicationId: existingApplication.id
@@ -202,16 +200,14 @@ export class AuthService {
     }
 
     if (existingApplication?.status === "rejected") {
-      const draftToken = this.store.createDraftSession({
+      const onboardingToken = this.store.createOnboardingSession({
         tenantId,
-        phone: normalizedPhone,
-        requestedRole: existingApplication.requestedRole,
         applicationId: existingApplication.id
       });
       return {
         state: "rejected",
         draft: {
-          token: draftToken,
+          token: onboardingToken,
           phone: normalizedPhone,
           requestedRole: existingApplication.requestedRole,
           applicationId: existingApplication.id
@@ -350,7 +346,32 @@ export class AuthService {
     const draft = this.store.getDraftSession(payload.draftToken);
 
     if (!draft) {
-      throw new UnauthorizedException("当前资料草稿已失效，请重新获取验证码。");
+      const onboarding = this.store.getOnboardingSession(payload.draftToken);
+      if (!onboarding || onboarding.session.tenantId !== tenantId) {
+        throw new UnauthorizedException("当前资料草稿已失效，请重新获取验证码。");
+      }
+
+      const application = this.registrationApplicationsService.resubmitFromOnboarding(
+        payload.draftToken,
+        {
+          requestedRole: payload.requestedRole,
+          profile: payload.profile
+        }
+      );
+      const onboardingToken = this.store.createOnboardingSession({
+        tenantId,
+        applicationId: application.id
+      });
+      return {
+        state: "pending_review",
+        draft: {
+          token: onboardingToken,
+          phone: application.phone,
+          requestedRole: application.requestedRole,
+          applicationId: application.id
+        },
+        application
+      };
     }
 
     if (draft.tenantId !== tenantId) {

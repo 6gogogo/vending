@@ -9,6 +9,7 @@ type ApprovedAppLoginResult = Extract<AppLoginResult, { state: "approved" }>;
 
 export interface AppLoginContinuationDependencies {
   getPickupTarget: () => PickupLoginTarget | undefined;
+  consumePickupTarget?: () => PickupLoginTarget | undefined;
   bootstrapSession: () => Promise<void>;
   getSessionRole: () => UserRole | undefined;
   setSession: (session: ApprovedAppLoginResult) => void;
@@ -20,10 +21,15 @@ export const createAppLoginContinuation = (
   dependencies: AppLoginContinuationDependencies
 ) => {
   const routeApprovedUser = (role: UserRole) => {
+    const target = dependencies.getPickupTarget();
     const pickupUrl = resolvePickupPostLoginUrl(
       role,
-      dependencies.getPickupTarget()
+      target
     );
+
+    if (target) {
+      dependencies.consumePickupTarget?.();
+    }
 
     if (pickupUrl) {
       dependencies.redirectTo(pickupUrl);

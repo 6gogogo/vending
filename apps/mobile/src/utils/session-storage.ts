@@ -1,4 +1,6 @@
-import type { UserRole } from "@vm/shared-types";
+import type { RegistrationApplicationProfile, UserRole } from "@vm/shared-types";
+
+import type { PickupLoginTarget } from "./cabinet-entry";
 
 export const MOBILE_SESSION_STORAGE_KEY = "vm-mobile-session";
 
@@ -41,16 +43,9 @@ export interface StoredMobileSessionState {
     applicationId?: string;
   };
   application?: Record<string, unknown>;
-  profileDraft?: {
-    name: string;
-    neighborhood?: string;
-    note?: string;
-    merchantName?: string;
-    contactName?: string;
-    address?: string;
-    organization?: string;
-    title?: string;
-  };
+  profileDraft?: RegistrationApplicationProfile;
+  /** 首次扫码后的原柜机目标，跨资料填写、审核和小程序重启保留。 */
+  pickupTarget?: PickupLoginTarget;
 }
 
 export const readStoredMobileSession = (): StoredMobileSessionState | undefined => {

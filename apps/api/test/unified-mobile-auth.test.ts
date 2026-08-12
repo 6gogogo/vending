@@ -224,3 +224,42 @@ test("审核通过后原审核凭证自动升级为永久移动端会话", async
   const restartedStore = new InMemoryStoreService();
   assert.equal(restartedStore.getSessionUser(upgraded.token)?.phone, submitted.application.phone);
 });
+
+test("审核驳回后凭原审核凭证修改资料并重新提交，不再接收第二次验证码", async () => {
+  const { authService, registrationApplicationsService, store } = createHarness();
+  const loginResult = await authService.appLogin("13700009993", "123456");
+  assert.equal(loginResult.state, "needs_profile");
+  if (loginResult.state !== "needs_profile") return;
+
+  const submitted = authService.submitMobileProfile({
+    draftToken: loginResult.draft.token,
+    requestedRole: "special",
+    profile: {
+      name: "待补资料用户",
+      regionId: store.regions[0]?.id,
+      regionName: store.regions[0]?.name,
+      neighborhood: store.regions[0]?.name
+    }
+  });
+  assert.equal(submitted.state, "pending_review");
+  if (submitted.state !== "pending_review") return;
+  registrationApplicationsService.review(submitted.application.id, {
+    decision: "rejected",
+    reason: "请补充备注"
+  });
+
+  const resubmitted = authService.submitMobileProfile({
+    draftToken: submitted.draft.token,
+    requestedRole: "special",
+    profile: {
+      ...submitted.application.profile,
+      note: "已补充"
+    }
+  });
+  assert.equal(resubmitted.state, "pending_review");
+  if (resubmitted.state !== "pending_review") return;
+  assert.equal(resubmitted.application.status, "pending");
+  assert.equal(resubmitted.application.profile.note, "已补充");
+  assert.notEqual(resubmitted.draft.token, submitted.draft.token);
+  assert.equal(store.getOnboardingSession(submitted.draft.token), undefined);
+});

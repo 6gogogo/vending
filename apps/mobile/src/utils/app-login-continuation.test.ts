@@ -90,3 +90,24 @@ test("非特殊角色登录成功后返回角色首页", () => {
 
   assert.deepEqual(homeRoles, ["restocker"]);
 });
+
+test("扫码目标只在特殊角色真正续接柜机时消费", () => {
+  let consumed = 0;
+  const continuation = createAppLoginContinuation({
+    getPickupTarget: () => ({ deviceCode: "CAB-4004" }),
+    consumePickupTarget: () => {
+      consumed += 1;
+      return { deviceCode: "CAB-4004" };
+    },
+    bootstrapSession: async () => undefined,
+    getSessionRole: () => undefined,
+    setSession: () => undefined,
+    redirectTo: () => undefined,
+    routeRoleHome: () => undefined
+  });
+
+  continuation.continueApprovedLogin(approvedSession("merchant"));
+  assert.equal(consumed, 1);
+  continuation.continueApprovedLogin(approvedSession("special"));
+  assert.equal(consumed, 2);
+});
