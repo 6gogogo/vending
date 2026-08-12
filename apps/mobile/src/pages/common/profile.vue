@@ -9,16 +9,19 @@ import type {
 } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
 import { createAppLoginContinuation } from "../../utils/app-login-continuation";
 import { getErrorMessage } from "../../utils/error-message";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
+const profileCopy = appCopy.unifiedAuth.profile;
 const saving = ref(false);
 const initialized = ref(false);
 const regions = ref<RegionRecord[]>([]);
-const selectedRegionIndex = ref(0);
+const selectedRegionIndex = ref(-1);
+const selectedRole = ref<UserRole>();
 const form = reactive<RegistrationApplicationProfile>({
   name: "",
   neighborhood: "",
@@ -30,14 +33,18 @@ const form = reactive<RegistrationApplicationProfile>({
   address: ""
 });
 
-const role = computed<UserRole>(() => sessionStore.draft?.requestedRole ?? "special");
 const isImported = computed(() => Boolean(sessionStore.draft?.linkedUserId));
-const roleLabel = computed(() => role.value === "merchant" ? "爱心商户" : "受助用户");
+const role = computed<UserRole | undefined>(() =>
+  isImported.value ? sessionStore.draft?.requestedRole : selectedRole.value
+);
+const roleLabel = computed(() =>
+  role.value === "merchant" ? profileCopy.merchantRole : profileCopy.specialRole
+);
 const activeRegions = computed(() => regions.value.filter((entry) => entry.status === "active"));
 const regionLabel = computed(() =>
   isImported.value
-    ? form.regionName || form.neighborhood || "未设置"
-    : activeRegions.value[selectedRegionIndex.value]?.name || "请选择所在片区"
+    ? form.regionName || form.neighborhood || profileCopy.unset
+    : activeRegions.value[selectedRegionIndex.value]?.name || profileCopy.regionPlaceholder
 );
 
 const { continueApprovedLogin } = createAppLoginContinuation({
@@ -67,8 +74,8 @@ const syncForm = () => {
   const matchIndex = activeRegions.value.findIndex(
     (entry) => entry.id === form.regionId || entry.name === form.regionName
   );
-  selectedRegionIndex.value = matchIndex >= 0 ? matchIndex : 0;
-  if (!isImported.value) syncSelectedRegion();
+  selectedRegionIndex.value = matchIndex;
+  selectedRole.value = isImported.value ? undefined : sessionStore.draft?.requestedRole;
 };
 
 const syncSelectedRegion = () => {
@@ -81,6 +88,10 @@ const syncSelectedRegion = () => {
 const changeRegion = (event: { detail?: { value?: string | number } }) => {
   selectedRegionIndex.value = Number(event.detail?.value ?? 0);
   syncSelectedRegion();
+};
+
+const selectRole = (nextRole: UserRole) => {
+  selectedRole.value = nextRole;
 };
 
 const ensureDraft = async () => {
@@ -115,13 +126,13 @@ const ensureDraft = async () => {
 };
 
 const validate = () => {
-  if (!form.name.trim()) throw new Error("请输入姓名");
-  if (!isImported.value) syncSelectedRegion();
-  if (!form.regionId || !form.regionName) throw new Error("请选择所在片区");
+  if (!form.name.trim()) throw new Error(profileCopy.validation.name);
+  if (!role.value) throw new Error(profileCopy.validation.role);
+  if (!form.regionId || !form.regionName) throw new Error(profileCopy.validation.region);
   if (role.value === "merchant") {
-    if (!form.merchantName?.trim()) throw new Error("请输入商户名称");
-    if (!form.contactName?.trim()) throw new Error("请输入联系人姓名");
-    if (!form.address?.trim()) throw new Error("请输入经营地址");
+    if (!form.merchantName?.trim()) throw new Error(profileCopy.validation.merchantName);
+    if (!form.contactName?.trim()) throw new Error(profileCopy.validation.contactName);
+    if (!form.address?.trim()) throw new Error(profileCopy.validation.address);
   }
 };
 
@@ -139,7 +150,7 @@ const submit = async () => {
   try {
     const response = await mobileApi.submitMobileProfile({
       draftToken: sessionStore.draft.token,
-      requestedRole: role.value,
+      requestedRole: role.value!,
       profile: { ...form }
     });
     if (response.state === "approved") {
@@ -166,73 +177,79 @@ onShow(() => {
 
 <template>
   <view class="profile-page">
-    <view class="page-header"><text>{{ isImported ? "核对资料" : "完善资料" }}</text></view>
+    <view class="page-header">
+      <text>{{ isImported ? profileCopy.importedPageTitle : profileCopy.newPageTitle }}</text>
+    </view>
 
     <view class="compact-hero">
       <image class="compact-hero__image" src="/static/auth/vm-auth-hero.png" mode="aspectFill" />
       <view class="compact-hero__copy">
-        <text class="compact-hero__eyebrow">{{ isImported ? "资料确认" : "注册申请" }}</text>
-        <text class="compact-hero__title">{{ isImported ? "请核对个人资料" : "请填写个人资料" }}</text>
+        <text class="compact-hero__eyebrow">
+          {{ isImported ? profileCopy.importedEyebrow : profileCopy.newEyebrow }}
+        </text>
+        <text class="compact-hero__title">
+          {{ isImported ? profileCopy.importedHeroTitle : profileCopy.newHeroTitle }}
+        </text>
       </view>
     </view>
 
     <view class="profile-card">
       <view class="verified-phone">
         <view>
-          <text class="verified-phone__label">已验证手机号</text>
+          <text class="verified-phone__label">{{ profileCopy.verifiedPhone }}</text>
           <text class="verified-phone__value">{{ sessionStore.draft?.phone }}</text>
         </view>
-        <text class="verified-phone__mark">已验证</text>
+        <text class="verified-phone__mark">{{ profileCopy.verified }}</text>
       </view>
 
       <view class="field-group">
-        <text class="field-label">姓名</text>
-        <input v-model="form.name" class="text-input" maxlength="100" placeholder="请输入姓名" />
+        <text class="field-label">{{ profileCopy.nameLabel }}</text>
+        <input v-model="form.name" class="text-input" maxlength="100" :placeholder="profileCopy.namePlaceholder" />
       </view>
 
       <view class="field-group">
-        <text class="field-label">身份</text>
+        <text class="field-label">{{ profileCopy.roleLabel }}</text>
         <view v-if="isImported" class="readonly-value">
-          <text>{{ roleLabel }}</text><text class="readonly-value__mark">已确认</text>
+          <text>{{ roleLabel }}</text><text class="readonly-value__mark">{{ profileCopy.confirmed }}</text>
         </view>
         <view v-else class="segment-control">
-          <button :class="{ active: role === 'special' }" @tap="sessionStore.draft!.requestedRole = 'special'">受助用户</button>
-          <button :class="{ active: role === 'merchant' }" @tap="sessionStore.draft!.requestedRole = 'merchant'">爱心商户</button>
+          <button :class="{ active: role === 'special' }" @tap="selectRole('special')">{{ profileCopy.specialRole }}</button>
+          <button :class="{ active: role === 'merchant' }" @tap="selectRole('merchant')">{{ profileCopy.merchantRole }}</button>
         </view>
       </view>
 
       <view class="field-group">
-        <text class="field-label">所在片区</text>
+        <text class="field-label">{{ profileCopy.regionLabel }}</text>
         <view v-if="isImported" class="readonly-value">
-          <text>{{ regionLabel }}</text><text class="readonly-value__mark">已确认</text>
+          <text>{{ regionLabel }}</text><text class="readonly-value__mark">{{ profileCopy.confirmed }}</text>
         </view>
-        <picker v-else :range="activeRegions" range-key="name" :value="selectedRegionIndex" @change="changeRegion">
+        <picker v-else :range="activeRegions" range-key="name" :value="Math.max(selectedRegionIndex, 0)" @change="changeRegion">
           <view class="picker-value">{{ regionLabel }}</view>
         </picker>
       </view>
 
       <template v-if="role === 'merchant'">
         <view class="field-group">
-          <text class="field-label">商户名称</text>
-          <input v-model="form.merchantName" class="text-input" placeholder="请输入商户名称" />
+          <text class="field-label">{{ profileCopy.merchantNameLabel }}</text>
+          <input v-model="form.merchantName" class="text-input" :placeholder="profileCopy.merchantNamePlaceholder" />
         </view>
         <view class="field-group">
-          <text class="field-label">联系人姓名</text>
-          <input v-model="form.contactName" class="text-input" placeholder="请输入联系人姓名" />
+          <text class="field-label">{{ profileCopy.contactNameLabel }}</text>
+          <input v-model="form.contactName" class="text-input" :placeholder="profileCopy.contactNamePlaceholder" />
         </view>
         <view class="field-group">
-          <text class="field-label">经营地址</text>
-          <input v-model="form.address" class="text-input" placeholder="请输入经营地址" />
+          <text class="field-label">{{ profileCopy.addressLabel }}</text>
+          <input v-model="form.address" class="text-input" :placeholder="profileCopy.addressPlaceholder" />
         </view>
       </template>
 
       <view v-if="!isImported" class="field-group">
-        <text class="field-label">备注（选填）</text>
-        <textarea v-model="form.note" class="text-area" maxlength="1000" placeholder="可补充需要说明的信息" />
+        <text class="field-label">{{ profileCopy.noteLabel }}</text>
+        <textarea v-model="form.note" class="text-area" maxlength="1000" :placeholder="profileCopy.notePlaceholder" />
       </view>
 
       <button class="primary-button" :loading="saving" :disabled="saving" @tap="submit">
-        {{ isImported ? "确认资料并继续" : "提交审核" }}
+        {{ isImported ? profileCopy.confirm : profileCopy.submitReview }}
       </button>
     </view>
   </view>

@@ -24,6 +24,7 @@ import {
 import { normalizeVerificationCode } from "../../utils/verification-code";
 
 const sessionStore = useSessionStore();
+const authCopy = appCopy.unifiedAuth;
 const phone = ref("");
 const code = ref("");
 const previewCode = ref("");
@@ -63,14 +64,16 @@ const normalizedPhone = () => phone.value.trim();
 
 const validatePhone = () => {
   if (/^1\d{10}$/.test(normalizedPhone())) return true;
-  uni.showToast({ title: "请输入 11 位手机号", icon: "none" });
+  uni.showToast({ title: authCopy.login.phoneValidation, icon: "none" });
   return false;
 };
 
 const validateCode = () => {
   if (isAppLoginVerificationCode(code.value, verificationProvider.value)) return true;
   uni.showToast({
-    title: verificationProvider.value === "manual" ? "请输入 6 位一次性验证码" : "请输入验证码",
+    title: verificationProvider.value === "manual"
+      ? authCopy.login.manualCodeValidation
+      : authCopy.login.codeValidation,
     icon: "none"
   });
   return false;
@@ -109,8 +112,8 @@ const sendCode = async () => {
   if (!verificationPresentation.value.canRequestCode) {
     uni.showToast({
       title: verificationProvider.value === "manual"
-        ? "请向实例管理员获取一次性验证码"
-        : "正在确认验证码方式，请稍后重试",
+        ? authCopy.login.manualCodeHint
+        : authCopy.login.providerLoadingHint,
       icon: "none"
     });
     return;
@@ -121,7 +124,7 @@ const sendCode = async () => {
   try {
     const response = await mobileApi.requestCode(normalizedPhone(), "app-login");
     previewCode.value = showVerificationPreview ? response.previewCode ?? "" : "";
-    uni.showToast({ title: "验证码已发送", icon: "none" });
+    uni.showToast({ title: authCopy.login.codeSent, icon: "none" });
   } catch (error) {
     uni.showToast({ title: getErrorMessage(error), icon: "none" });
   } finally {
@@ -218,13 +221,13 @@ onMounted(() => {
 
 <template>
   <view class="auth-page">
-    <view class="auth-header"><text>登录</text></view>
+    <view class="auth-header"><text>{{ authCopy.login.pageTitle }}</text></view>
 
     <view class="brand-hero">
       <image class="brand-hero__image" src="/static/auth/vm-auth-hero.png" mode="aspectFill" />
       <view class="brand-hero__copy">
-        <text class="brand-hero__title">小柜大爱</text>
-        <text class="brand-hero__subtitle">让公益更近一点</text>
+        <text class="brand-hero__title">{{ appCopy.title }}</text>
+        <text class="brand-hero__subtitle">{{ authCopy.brandSubtitle }}</text>
       </view>
     </view>
 
@@ -233,10 +236,10 @@ onMounted(() => {
         <view class="auth-card__accent-green" />
         <view class="auth-card__accent-orange" />
       </view>
-      <text class="auth-card__title">登录 / 注册</text>
+      <text class="auth-card__title">{{ authCopy.login.cardTitle }}</text>
 
       <view class="field-group">
-        <text id="app-login-phone-label" class="field-label">手机号</text>
+        <text id="app-login-phone-label" class="field-label">{{ authCopy.login.phoneLabel }}</text>
         <view class="input-shell">
           <input
             id="app-login-phone"
@@ -248,13 +251,13 @@ onMounted(() => {
             name="phone"
             autocomplete="tel"
             aria-label="手机号"
-            placeholder="请输入手机号"
+            :placeholder="authCopy.login.phonePlaceholder"
           />
         </view>
       </view>
 
       <view class="field-group">
-        <text id="app-login-code-label" class="field-label">验证码</text>
+        <text id="app-login-code-label" class="field-label">{{ authCopy.login.codeLabel }}</text>
         <view class="input-shell code-shell">
           <input
             id="app-login-code"
@@ -266,7 +269,7 @@ onMounted(() => {
             name="verification-code"
             autocomplete="one-time-code"
             aria-label="验证码"
-            placeholder="请输入验证码"
+            :placeholder="authCopy.login.codePlaceholder"
           />
           <button
             v-if="verificationPresentation.canRequestCode"
@@ -275,7 +278,7 @@ onMounted(() => {
             :loading="sendingCode"
             @tap="sendCode"
           >
-            获取验证码
+            {{ authCopy.login.requestCode }}
           </button>
         </view>
       </view>
@@ -283,7 +286,7 @@ onMounted(() => {
       <checkbox-group @change="hasAcceptedDisclaimer = $event.detail.value.includes('accepted')">
         <label class="agreement-row">
           <checkbox value="accepted" :checked="hasAcceptedDisclaimer" color="#24854a" />
-          <text>阅读并同意</text>
+          <text>{{ authCopy.login.agreementPrefix }}</text>
           <text class="agreement-link" @tap.stop="showDisclaimer = true">
             《{{ appCopy.disclaimer.title }}》
           </text>
@@ -291,13 +294,13 @@ onMounted(() => {
       </checkbox-group>
 
       <view v-if="showVerificationPreview && previewCode" class="preview-code">
-        <text>当前验证码 {{ previewCode }}</text>
+        <text>{{ authCopy.login.preview(previewCode) }}</text>
       </view>
 
       <button class="primary-button" :loading="submitting" :disabled="submitting" @tap="submit">
-        登录 / 注册
+        {{ authCopy.login.submit }}
       </button>
-      <button class="support-button" @tap="goFeedback">联系工作人员</button>
+      <button class="support-button" @tap="goFeedback">{{ authCopy.login.support }}</button>
     </view>
 
     <view v-if="showDisclaimer" class="disclaimer-mask" @tap.self="showDisclaimer = false">
@@ -312,7 +315,9 @@ onMounted(() => {
             {{ line.replace(/^#{1,2}\s*/, "") }}
           </text>
         </scroll-view>
-        <button class="primary-button" @tap="showDisclaimer = false">关闭并返回</button>
+        <button class="primary-button" @tap="showDisclaimer = false">
+          {{ authCopy.login.closeDisclaimer }}
+        </button>
       </view>
     </view>
   </view>

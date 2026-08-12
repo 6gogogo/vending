@@ -101,6 +101,9 @@ test("新用户提交资料后审核凭证跨服务重启保活且仍不能访�
   if (loginResult.state !== "needs_profile") {
     return;
   }
+  assert.equal(loginResult.role, undefined);
+  assert.equal(loginResult.draft.requestedRole, undefined);
+  assert.equal(loginResult.profile, undefined);
 
   const submitted = authService.submitMobileProfile({
     draftToken: loginResult.draft.token,
@@ -216,13 +219,23 @@ test("审核通过后原审核凭证自动升级为永久移动端会话", async
   if (upgraded.state !== "approved") {
     return;
   }
-  assert.notEqual(upgraded.token, submitted.draft.token);
+  assert.equal(upgraded.token, submitted.draft.token);
   assert.equal(store.getSessionUser(upgraded.token)?.phone, submitted.application.phone);
   assert.equal(store.getOnboardingSession(submitted.draft.token), undefined);
+
+  const retriedAfterLostResponse = authService.getAppSession(submitted.draft.token);
+  assert.equal(retriedAfterLostResponse.state, "approved");
+  if (retriedAfterLostResponse.state !== "approved") {
+    return;
+  }
+  assert.equal(retriedAfterLostResponse.token, submitted.draft.token);
   store.persist();
 
   const restartedStore = new InMemoryStoreService();
-  assert.equal(restartedStore.getSessionUser(upgraded.token)?.phone, submitted.application.phone);
+  assert.equal(
+    restartedStore.getSessionUser(submitted.draft.token)?.phone,
+    submitted.application.phone
+  );
 });
 
 test("审核驳回后凭原审核凭证修改资料并重新提交，不再接收第二次验证码", async () => {

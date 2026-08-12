@@ -2,17 +2,21 @@
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
+import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
 import { createAppLoginContinuation } from "../../utils/app-login-continuation";
 import { getErrorMessage } from "../../utils/error-message";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
+const reviewCopy = appCopy.unifiedAuth.review;
 const loading = ref(false);
 
 const application = computed(() => sessionStore.application);
 const isRejected = computed(() => application.value?.status === "rejected");
-const reviewReason = computed(() => application.value?.reviewReason || "资料需要补充，请修改后重新提交。");
+const reviewReason = computed(() =>
+  application.value?.reviewReason || reviewCopy.rejectedFallback
+);
 
 const { continueApprovedLogin } = createAppLoginContinuation({
   getPickupTarget: () => sessionStore.pickupTarget,
@@ -68,7 +72,7 @@ onShow(() => {
 
 <template>
   <view class="review-page">
-    <view class="page-header"><text>审核状态</text></view>
+    <view class="page-header"><text>{{ reviewCopy.pageTitle }}</text></view>
 
     <view class="status-hero">
       <image class="status-hero__image" src="/static/auth/vm-auth-hero.png" mode="aspectFill" />
@@ -76,16 +80,18 @@ onShow(() => {
 
     <view class="status-card">
       <view class="status-mark" :class="{ 'status-mark--warning': isRejected }">
-        <text>{{ isRejected ? "!" : "审核中" }}</text>
+        <text>{{ isRejected ? reviewCopy.rejectedMark : reviewCopy.pendingMark }}</text>
       </view>
-      <text class="status-title">{{ isRejected ? "资料需要修改" : "资料审核中" }}</text>
+      <text class="status-title">
+        {{ isRejected ? reviewCopy.rejectedTitle : reviewCopy.pendingTitle }}
+      </text>
       <text class="status-detail">
-        {{ isRejected ? reviewReason : "工作人员正在核对你提交的资料。" }}
+        {{ isRejected ? reviewReason : reviewCopy.pendingDetail }}
       </text>
       <button class="primary-button" :loading="loading" @tap="isRejected ? edit() : refresh()">
-        {{ isRejected ? "修改资料" : "刷新审核状态" }}
+        {{ isRejected ? reviewCopy.edit : reviewCopy.refresh }}
       </button>
-      <button class="support-button" @tap="feedback">联系工作人员</button>
+      <button class="support-button" @tap="feedback">{{ reviewCopy.support }}</button>
     </view>
   </view>
 </template>
@@ -103,7 +109,7 @@ onShow(() => {
 .status-hero__image { width: 100%; height: 100%; }
 .status-card { display: flex; flex-direction: column; align-items: center; gap: 28rpx; margin-top: -2rpx; padding: 52rpx 42rpx 48rpx; border: 2rpx solid #d6e2d2; border-radius: 0 0 44rpx 44rpx; background: rgba(255,255,255,.97); box-shadow: 0 24rpx 54rpx rgba(82,65,42,.11); text-align: center; }
 .status-mark { display: flex; align-items: center; justify-content: center; width: 132rpx; height: 132rpx; border-radius: 50%; background: #e6f3e5; color: #24854a; font-size: 26rpx; font-weight: 900; }
-.status-mark--warning { background: #fff1df; color: #b66117; font-size: 58rpx; }
+.status-mark--warning { background: #fff1df; color: #b66117; font-size: 24rpx; }
 .status-title { font-size: 48rpx; line-height: 1.2; font-weight: 900; }
 .status-detail { color: #756d64; font-size: 31rpx; line-height: 1.65; font-weight: 600; }
 .primary-button { width: 100%; min-height: 106rpx; margin: 12rpx 0 0; border: 0; border-radius: 28rpx; background: #24854a; color: #fff; font-size: 36rpx; line-height: 106rpx; font-weight: 900; box-shadow: 0 18rpx 36rpx rgba(28,113,59,.18); }

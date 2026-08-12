@@ -735,7 +735,7 @@ export type MobileLoginResult =
       state: "needs_profile";
       draft: MobileAuthDraft;
       phone: string;
-      role: UserRole;
+      role?: UserRole;
       profile?: RegistrationApplicationProfile;
       isExistingUser: boolean;
     }

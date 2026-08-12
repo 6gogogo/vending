@@ -1024,6 +1024,24 @@ export class InMemoryStoreService {
 
   createSession(user: UserRecord) {
     const token = this.createSecureToken("session");
+    this.setMobileSession(token, user);
+    return token;
+  }
+
+  promoteOnboardingSession(token: string, user: UserRecord) {
+    const directSession = this.onboardingSessions.get(token);
+    const tokenDigest = this.createSessionTokenDigest(token);
+    const restoredSession = this.onboardingSessions.get(tokenDigest);
+    if (!directSession && !restoredSession) {
+      return false;
+    }
+
+    this.onboardingSessions.delete(directSession ? token : tokenDigest);
+    this.setMobileSession(token, user);
+    return true;
+  }
+
+  private setMobileSession(token: string, user: UserRecord) {
     const now = Date.now();
     const mobileAdminCredential =
       user.role === "admin" ? this.findAdminCredentialByUserId(user.id) : undefined;
@@ -1040,7 +1058,6 @@ export class InMemoryStoreService {
       mobileAdminTenantCredentialUpdatedAt: mobileAdminTenantCredential?.passwordUpdatedAt,
       createdAt: new Date(now).toISOString()
     });
-    return token;
   }
 
   createBackofficeSession(user: UserRecord, backofficeRole: BackofficeRole, tenantId?: string) {

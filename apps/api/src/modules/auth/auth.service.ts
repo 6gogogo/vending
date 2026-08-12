@@ -218,18 +218,15 @@ export class AuthService {
 
     const draftToken = this.store.createDraftSession({
       tenantId,
-      phone: normalizedPhone,
-      requestedRole: "special"
+      phone: normalizedPhone
     });
     return {
       state: "needs_profile",
       draft: {
         token: draftToken,
-        phone: normalizedPhone,
-        requestedRole: "special"
+        phone: normalizedPhone
       },
       phone: normalizedPhone,
-      role: "special",
       isExistingUser: false
     };
   }
@@ -633,9 +630,10 @@ export class AuthService {
         throw new UnauthorizedException("审核结果缺少可用账号，请联系工作人员处理。");
       }
       const snapshot = this.store.runAtomicMutation(() => {
-        const created = this.createSessionSnapshot(approvedUser);
-        this.store.revokeOnboardingSession(token);
-        return created;
+        if (!this.store.promoteOnboardingSession(token!, approvedUser)) {
+          throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+        }
+        return this.createSessionSnapshot(approvedUser, token);
       });
       return {
         state: "approved",
