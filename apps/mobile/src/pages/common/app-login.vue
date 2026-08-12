@@ -323,7 +323,10 @@ onMounted(() => {
   box-sizing: border-box;
   min-height: 100vh;
   padding: calc(env(safe-area-inset-top) + 28rpx) 24rpx calc(env(safe-area-inset-bottom) + 54rpx);
-  background: #fffaf3;
+  background:
+    radial-gradient(circle at 5% 14%, rgba(130, 181, 126, 0.16) 0 7%, transparent 7.5%),
+    radial-gradient(circle at 96% 80%, rgba(255, 167, 79, 0.13) 0 8%, transparent 8.5%),
+    linear-gradient(180deg, #fffaf3, #fffdf8);
   color: #191914;
 }
 
@@ -338,7 +341,7 @@ onMounted(() => {
 
 .brand-hero {
   position: relative;
-  height: 350rpx;
+  height: 376rpx;
   overflow: hidden;
   border-radius: 44rpx 44rpx 0 0;
 }
@@ -375,9 +378,9 @@ onMounted(() => {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 34rpx;
+  gap: 30rpx;
   overflow: hidden;
-  padding: 52rpx 38rpx 44rpx;
+  padding: 52rpx 38rpx 38rpx;
   border: 2rpx solid #d6e2d2;
   border-radius: 0 0 44rpx 44rpx;
   background: rgba(255, 255, 255, 0.97);
@@ -408,7 +411,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   min-height: 108rpx;
-  padding: 0 24rpx;
+  padding: 0 20rpx;
   border: 3rpx solid #e5ddd1;
   border-radius: 28rpx;
   background: #ffffff;
@@ -428,7 +431,7 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.code-shell { gap: 16rpx; padding-right: 12rpx; }
+.code-shell { gap: 12rpx; padding-right: 10rpx; }
 .code-button {
   flex: 0 0 auto;
   min-width: 194rpx;
@@ -449,7 +452,7 @@ onMounted(() => {
   align-items: center;
   min-width: 0;
   color: #69645e;
-  font-size: 28rpx;
+  font-size: 26rpx;
   line-height: 1.5;
   font-weight: 600;
 }
