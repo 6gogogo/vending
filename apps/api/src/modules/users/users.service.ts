@@ -756,7 +756,17 @@ export class UsersService {
       }
     }
 
-    const imported = normalizedEntries.map((entry) => {
+    const entriesWithRegions = normalizedEntries.map((entry) => ({
+      ...entry,
+      resolvedRegion: this.resolveImportRegion(
+        entry.regionId,
+        entry.regionName ?? entry.neighborhood,
+        tenantId
+      )
+    }));
+
+    const imported = entriesWithRegions.map((entry) => {
+      const resolvedRegion = entry.resolvedRegion;
       const existing = this.store.users.find(
         (user) => user.phone === entry.phone
       );
@@ -764,14 +774,14 @@ export class UsersService {
       if (existing) {
         Object.assign(existing, {
           name: entry.name,
-          ...(entry.neighborhood !== undefined
-            ? { neighborhood: entry.neighborhood }
+          ...(resolvedRegion.regionName !== undefined
+            ? { neighborhood: resolvedRegion.regionName }
             : {}),
-          ...(entry.regionId !== undefined
-            ? { regionId: entry.regionId }
+          ...(resolvedRegion.regionId !== undefined
+            ? { regionId: resolvedRegion.regionId }
             : {}),
-          ...(entry.regionName !== undefined
-            ? { regionName: entry.regionName }
+          ...(resolvedRegion.regionName !== undefined
+            ? { regionName: resolvedRegion.regionName }
             : {}),
           ...(entry.tags !== undefined ? { tags: [...entry.tags] } : {}),
           ...(importRole === "special" && entry.quota !== undefined
@@ -794,9 +804,9 @@ export class UsersService {
         name: entry.name,
         status: "active",
         tags: entry.tags ?? [],
-        neighborhood: entry.regionName ?? entry.neighborhood,
-        regionId: entry.regionId,
-        regionName: entry.regionName ?? entry.neighborhood,
+        neighborhood: resolvedRegion.regionName,
+        regionId: resolvedRegion.regionId,
+        regionName: resolvedRegion.regionName,
         quota: entry.quota,
         mobileProfileCompleted: importRole !== "special"
       };
@@ -1882,6 +1892,44 @@ export class UsersService {
         regionId: namedRegion.id,
         regionName: namedRegion.name
       };
+    }
+
+    throw new BadRequestException("请选择已配置区域。");
+  }
+
+  private resolveImportRegion(regionId?: string, regionName?: string, tenantId?: string) {
+    const normalizedRegionId = regionId?.trim();
+    const normalizedRegionName = regionName?.trim();
+    if (!normalizedRegionId && !normalizedRegionName) {
+      return { regionId: undefined, regionName: undefined };
+    }
+
+    const matchedById = this.store.getRegion(normalizedRegionId);
+    const matchedByName = normalizedRegionName
+      ? this.store.regions.find(
+          (entry) => entry.status === "active" && entry.name === normalizedRegionName
+        )
+      : undefined;
+
+    if (
+      (normalizedRegionId && matchedById?.status !== "active") ||
+      (normalizedRegionName && !matchedByName)
+    ) {
+      throw new BadRequestException(
+        tenantId
+          ? "导入区域未配置，请先在当前实例新增区域并设置位置。"
+          : "导入区域未配置，请先新增区域并设置位置。"
+      );
+    }
+
+    if (matchedById && matchedByName && matchedById.id !== matchedByName.id) {
+      throw new BadRequestException("区域编号与区域名称不一致。");
+    }
+
+    const matched =
+      matchedById?.status === "active" ? matchedById : matchedByName;
+    if (matched) {
+      return { regionId: matched.id, regionName: matched.name };
     }
 
     throw new BadRequestException("请选择已配置区域。");

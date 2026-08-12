@@ -922,8 +922,52 @@ const refreshPersonnelImportPreview = () => {
     personnelImportRows.value,
     personnelImportRole.value
   );
-  personnelImportEntries.value = result.entries;
-  personnelImportIssues.value = result.issues;
+  const activeRegions = regions.value.filter((region) => region.status === "active");
+  const configuredRegionsById = new Map(activeRegions.map((region) => [region.id, region]));
+  const configuredRegionsByName = new Map(activeRegions.map((region) => [region.name, region]));
+  const regionIssues: PersonnelImportIssue[] = [];
+  const resolvedEntries = result.entries.map((entry, index) => {
+    if (!entry.regionId && !entry.regionName) {
+      return entry;
+    }
+
+    const matchedById = entry.regionId ? configuredRegionsById.get(entry.regionId) : undefined;
+    const matchedByName = entry.regionName
+      ? configuredRegionsByName.get(entry.regionName)
+      : undefined;
+
+    if ((entry.regionId && !matchedById) || (entry.regionName && !matchedByName)) {
+      regionIssues.push({
+        row: index + 2,
+        field: "区域",
+        message: `未找到已配置区域“${entry.regionName || entry.regionId}”，请先在人员页面新增该区域并设置位置。`
+      });
+      return entry;
+    }
+
+    if (matchedById && matchedByName && matchedById.id !== matchedByName.id) {
+      regionIssues.push({
+        row: index + 2,
+        field: "区域",
+        message: "区域编号与区域名称指向不同区域，请修正其中一项。"
+      });
+      return entry;
+    }
+
+    const matched = matchedById ?? matchedByName;
+    if (!matched) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      neighborhood: matched.name,
+      regionId: matched.id,
+      regionName: matched.name
+    };
+  });
+  personnelImportEntries.value = regionIssues.length ? [] : resolvedEntries;
+  personnelImportIssues.value = [...result.issues, ...regionIssues];
   personnelImportSourceRowCount.value = result.sourceRowCount;
 };
 const openPersonnelImport = () => {

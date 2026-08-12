@@ -16,7 +16,8 @@ export class RegionsService {
 
   create(
     payload: { name: string; sortOrder?: number; longitude?: number; latitude?: number },
-    actorUserId?: string
+    actorUserId?: string,
+    actorTenantId?: string
   ) {
     const name = payload.name.trim();
 
@@ -42,6 +43,46 @@ export class RegionsService {
     };
 
     this.store.regions.push(region);
+    const linkedUserIds: string[] = [];
+    const effectiveTenantId =
+      actorTenantId ??
+      (actorUserId
+        ? (() => {
+            const actor = this.store.users.find((entry) => entry.id === actorUserId);
+            return actor ? this.store.getUserTenantId(actor) : undefined;
+          })()
+        : undefined);
+    for (const user of this.store.users) {
+      const legacyRegionName = user.regionName?.trim() || user.neighborhood?.trim();
+      if (
+        effectiveTenantId &&
+        !user.regionId &&
+        legacyRegionName === name &&
+        this.store.getUserTenantId(user) === effectiveTenantId
+      ) {
+        user.regionId = region.id;
+        user.regionName = region.name;
+        user.neighborhood = region.name;
+        linkedUserIds.push(user.id);
+      }
+    }
+    const linkedApplicationIds: string[] = [];
+    for (const application of this.store.registrationApplications) {
+      const legacyRegionName =
+        application.profile.regionName?.trim() ||
+        application.profile.neighborhood?.trim();
+      if (
+        effectiveTenantId &&
+        !application.profile.regionId &&
+        legacyRegionName === name &&
+        application.tenantId === effectiveTenantId
+      ) {
+        application.profile.regionId = region.id;
+        application.profile.regionName = region.name;
+        application.profile.neighborhood = region.name;
+        linkedApplicationIds.push(application.id);
+      }
+    }
     this.store.logOperation({
       category: "user",
       type: "create-region",
@@ -55,6 +96,8 @@ export class RegionsService {
       metadata: {
         regionId: region.id,
         regionName: region.name,
+        linkedUserCount: linkedUserIds.length,
+        linkedApplicationCount: linkedApplicationIds.length,
         undoState: "not_undoable"
       }
     });

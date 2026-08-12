@@ -1115,12 +1115,67 @@ test("柜机详情在刷新后返回待确认退款恢复摘要且不泄露渠�
   const detail = devices.monitoringDetail(device.deviceCode);
   const recovery = detail.recentEvents[0]?.paymentRecovery?.pendingRefund;
 
+  assert.equal(detail.recentEvents[0]?.userName, user.name);
   assert.equal(recovery?.id, refund.id);
   assert.equal(recovery?.refundNo, refund.refundNo);
   assert.equal(recovery?.sourceRequestId, refund.sourceRequestId);
   assert.equal(recovery?.amount, refund.amount);
   assert.equal("callbackPayload" in (recovery ?? {}), false);
   assert.equal(event.paymentRecovery, undefined);
+});
+
+test("柜机详情始终保留超出最近十二条的待完成零元运营订单", () => {
+  const store = createIsolatedStore();
+  store.events.splice(0, store.events.length);
+  const device = store.devices[0];
+  const operator = store.users.find((entry) => entry.role === "admin");
+  assert.ok(device);
+  assert.ok(operator);
+
+  const pendingOperationalEvent = buildEvent({
+    eventId: "event-zero-cost-operational-pending",
+    orderNo: "order-zero-cost-operational-pending",
+    userId: operator.id,
+    phone: operator.phone,
+    role: "admin",
+    deviceCode: device.deviceCode,
+    status: "closed",
+    operationType: "restock",
+    hasInboundGoods: true,
+    amount: 0,
+    paymentNotifyStatus: "failed",
+    createdAt: "2026-08-12T00:00:00.000Z",
+    updatedAt: "2026-08-12T00:00:00.000Z"
+  });
+  store.events.push(pendingOperationalEvent);
+  for (let index = 1; index <= 13; index += 1) {
+    const timestamp = `2026-08-12T00:${String(index).padStart(2, "0")}:00.000Z`;
+    store.events.push(
+      buildEvent({
+        eventId: `event-newer-${index}`,
+        orderNo: `order-newer-${index}`,
+        userId: operator.id,
+        phone: operator.phone,
+        role: "admin",
+        deviceCode: device.deviceCode,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    );
+  }
+
+  const detail = new DevicesService(
+    store,
+    new InventoryBatchChangesService(store),
+    {} as SmartVmGateway
+  ).monitoringDetail(device.deviceCode);
+  const recoveredEvent = detail.recentEvents.find(
+    (event) => event.eventId === pendingOperationalEvent.eventId
+  );
+
+  assert.equal(detail.recentEvents.length, 13);
+  assert.equal(recoveredEvent?.userName, operator.name);
+  assert.equal(recoveredEvent?.paymentNotifyStatus, "failed");
 });
 
 test("InventoryOrdersController 不再暴露旧退款方法或路由", () => {

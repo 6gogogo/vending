@@ -427,6 +427,47 @@ export class InMemoryStoreService {
       this.regions.splice(0, this.regions.length, ...nextRegions);
     }
 
+    const regionsByName = new Map(
+      this.regions
+        .filter((region) => region.status === "active")
+        .map((region) => [region.name.trim(), region])
+    );
+    for (const user of this.users) {
+      if (user.regionId) {
+        continue;
+      }
+
+      const legacyRegionName = user.regionName?.trim() || user.neighborhood?.trim();
+      const matchedRegion = legacyRegionName
+        ? regionsByName.get(legacyRegionName)
+        : undefined;
+      if (matchedRegion) {
+        user.regionId = matchedRegion.id;
+        user.regionName = matchedRegion.name;
+        user.neighborhood = matchedRegion.name;
+        changed = true;
+      }
+    }
+
+    for (const application of this.registrationApplications) {
+      if (application.profile.regionId) {
+        continue;
+      }
+
+      const legacyRegionName =
+        application.profile.regionName?.trim() ||
+        application.profile.neighborhood?.trim();
+      const matchedRegion = legacyRegionName
+        ? regionsByName.get(legacyRegionName)
+        : undefined;
+      if (matchedRegion) {
+        application.profile.regionId = matchedRegion.id;
+        application.profile.regionName = matchedRegion.name;
+        application.profile.neighborhood = matchedRegion.name;
+        changed = true;
+      }
+    }
+
     return changed;
   }
 

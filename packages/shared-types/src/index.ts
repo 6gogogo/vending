@@ -1139,6 +1139,8 @@ export interface CabinetEventRecord {
    */
   openQuoteHash?: string;
   userId: string;
+  /** 仅用于后台展示的人员姓名，不作为事件身份或持久化主键。 */
+  userName?: string;
   phone: string;
   role: UserRole;
   deviceCode: string;

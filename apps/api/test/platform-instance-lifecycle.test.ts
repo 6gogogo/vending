@@ -14,6 +14,7 @@ import { AppModule } from "../src/app.module";
 import { createSeededPersistedState } from "../src/common/store/persistence";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { SmartVmGateway } from "../src/modules/devices/smartvm.gateway";
+import { RegionsService } from "../src/modules/regions/regions.service";
 import { UsersService } from "../src/modules/users/users.service";
 import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
@@ -96,6 +97,32 @@ test("旧模拟快照会在 App 登录前修复默认实例的公网 Host 绑定
       "https://vending.5gogogo.top"
     );
     assert.equal(store.platformTenants[0]?.serviceMode, "simulation");
+  } finally {
+    await app.close();
+  }
+});
+
+test("旧 Excel 地名在重启后自动绑定同名启用区域", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "vm-legacy-import-region-"));
+  temporaryDirectories.push(directory);
+  const dataFile = join(directory, "store.json");
+  const state = createSeededPersistedState();
+  const region = state.regions.find((entry) => entry.status === "active");
+  const user = state.users.find((entry) => entry.role === "special");
+  assert.ok(region);
+  assert.ok(user);
+  user.regionId = undefined;
+  user.regionName = region.name;
+  user.neighborhood = region.name;
+  writeFileSync(dataFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  const { app, store } = await startApiWithDataFile(dataFile);
+
+  try {
+    const recovered = store.users.find((entry) => entry.id === user.id);
+    assert.equal(recovered?.regionId, region.id);
+    assert.equal(recovered?.regionName, region.name);
+    assert.equal(recovered?.neighborhood, region.name);
   } finally {
     await app.close();
   }
@@ -220,6 +247,19 @@ test("实例管理员可通过受保护路由批量导入本实例人员，服�
   try {
     const adminToken = createDefaultAdminToken(store);
     const providerToken = createProviderToken(store);
+    const regionResponse = await fetch(`${baseUrl}/regions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "测试区域",
+        longitude: 120.289415,
+        latitude: 31.533157
+      })
+    });
+    assert.equal(regionResponse.status, 201);
     const response = await fetch(`${baseUrl}/users/import`, {
       method: "POST",
       headers: {
@@ -2420,6 +2460,60 @@ test("人员创建、更新和批量导入都保持手机号全局唯一，失�
     );
     assert.deepEqual(store.users, beforeImport);
 
+    assert.throws(
+      () =>
+        usersService.importUsers(
+          {
+            role: "special",
+            entries: [
+              {
+                phone: "18800000015",
+                name: "批量导入成功账号",
+                regionName: "测试地区"
+              }
+            ]
+          },
+          tenantId
+        ),
+      /导入区域未配置/
+    );
+
+    tenantUser.regionName = "测试地区";
+    tenantUser.neighborhood = "测试地区";
+    const regionsService = app.get(RegionsService);
+    const createdRegion = regionsService.create(
+      {
+        name: "测试地区",
+        longitude: 120.289415,
+        latitude: 31.533157
+      },
+      tenantUser.id,
+      tenantId
+    );
+    assert.equal(tenantUser.regionId, createdRegion.id);
+    assert.equal(tenantUser.regionName, createdRegion.name);
+    assert.throws(
+      () =>
+        usersService.importUsers(
+          {
+            role: "special",
+            entries: [
+              {
+                phone: "18800000016",
+                name: "区域编号名称冲突账号",
+                regionId: "region-not-configured",
+                regionName: createdRegion.name
+              }
+            ]
+          },
+          tenantId
+        ),
+      /导入区域未配置/
+    );
+    assert.equal(
+      store.users.some((entry) => entry.phone === "18800000016"),
+      false
+    );
     const successfulImport = usersService.importUsers(
       {
         role: "special",
@@ -2442,10 +2536,12 @@ test("人员创建、更新和批量导入都保持手机号全局唯一，失�
     assert.equal(successfulImport.imported[0]?.tenantId, tenantId);
     assert.equal(successfulImport.imported[0]?.phone, "18800000015");
     assert.equal(successfulImport.imported[0]?.regionName, "测试地区");
+    assert.equal(successfulImport.imported[0]?.regionId, createdRegion.id);
     assert.deepEqual(successfulImport.imported[0]?.quota, {
       dailyLimit: 2,
       categoryLimit: { food: 1, drink: 1 }
     });
+
   } finally {
     await app.close();
   }
