@@ -750,27 +750,17 @@ export type MobileLoginResult =
       application: RegistrationApplication;
     };
 
-export type AppLoginResult =
-  | ({
-      state: "approved";
-    } & MobileSessionSnapshot)
-  | {
-      state: "not_registered";
-      phone: string;
-      message: string;
-    }
-  | {
-      state: "pending_review";
-      phone: string;
-      application: RegistrationApplication;
-      message: string;
-    }
-  | {
-      state: "rejected";
-      phone: string;
-      application: RegistrationApplication;
-      message: string;
-    };
+/**
+ * 小程序统一登录/注册入口只消费同一套认证状态，避免客户端在验证码后再走
+ * 一条独立注册验证码链路。
+ */
+export type AppLoginResult = MobileLoginResult;
+
+/**
+ * 已保存凭证的启动恢复结果。审核凭证只能恢复审核状态；审核通过后由服务端
+ * 原子升级为正常移动端会话。
+ */
+export type AppSessionResult = MobileLoginResult;
 
 export interface RegistrationPhoneLookup {
   phone: string;
