@@ -2460,38 +2460,69 @@ test("人员创建、更新和批量导入都保持手机号全局唯一，失�
     );
     assert.deepEqual(store.users, beforeImport);
 
-    assert.throws(
-      () =>
-        usersService.importUsers(
+    const importedWithUnmappedRegion = usersService.importUsers(
+      {
+        role: "special",
+        entries: [
           {
-            role: "special",
-            entries: [
-              {
-                phone: "18800000015",
-                name: "批量导入成功账号",
-                regionName: "测试地区"
-              }
-            ]
-          },
-          tenantId
-        ),
-      /导入区域未配置/
+            phone: "18800000015",
+            name: "批量导入成功账号",
+            regionName: "测试地区"
+          }
+        ]
+      },
+      tenantId
     );
+    assert.equal(importedWithUnmappedRegion.count, 1);
+    assert.equal(importedWithUnmappedRegion.createdRegionCount, 1);
+    const importedRegion = store.regions.find((entry) => entry.name === "测试地区");
+    assert.ok(importedRegion);
+    assert.equal(importedRegion.longitude, undefined);
+    assert.equal(importedRegion.latitude, undefined);
+    assert.equal(importedWithUnmappedRegion.imported[0]?.regionId, importedRegion.id);
 
-    tenantUser.regionName = "测试地区";
-    tenantUser.neighborhood = "测试地区";
+    tenantUser.regionName = "待补位置地区";
+    tenantUser.neighborhood = "待补位置地区";
     const regionsService = app.get(RegionsService);
     const createdRegion = regionsService.create(
       {
-        name: "测试地区",
-        longitude: 120.289415,
-        latitude: 31.533157
+        name: "待补位置地区"
       },
       tenantUser.id,
       tenantId
     );
     assert.equal(tenantUser.regionId, createdRegion.id);
     assert.equal(tenantUser.regionName, createdRegion.name);
+    assert.throws(
+      () => regionsService.update(createdRegion.id, { status: "inactive" }, tenantUser.id),
+      /请先批量迁移/
+    );
+    usersService.batchUpdate(
+      {
+        userIds: [tenantUser.id],
+        patch: { regionId: importedRegion.id, regionName: importedRegion.name }
+      },
+      undefined,
+      "admin",
+      tenantId
+    );
+    assert.equal(
+      regionsService.update(createdRegion.id, { status: "inactive" }, tenantUser.id).status,
+      "inactive"
+    );
+    assert.throws(
+      () =>
+        usersService.batchUpdate(
+          {
+            userIds: [tenantUser.id],
+            patch: { regionId: createdRegion.id, regionName: createdRegion.name }
+          },
+          undefined,
+          "admin",
+          tenantId
+        ),
+      /请选择启用中的地区/
+    );
     assert.throws(
       () =>
         usersService.importUsers(
@@ -2502,13 +2533,13 @@ test("人员创建、更新和批量导入都保持手机号全局唯一，失�
                 phone: "18800000016",
                 name: "区域编号名称冲突账号",
                 regionId: "region-not-configured",
-                regionName: createdRegion.name
+                regionName: importedRegion.name
               }
             ]
           },
           tenantId
         ),
-      /导入区域未配置/
+      /区域编号未配置或已停用/
     );
     assert.equal(
       store.users.some((entry) => entry.phone === "18800000016"),
@@ -2521,7 +2552,7 @@ test("人员创建、更新和批量导入都保持手机号全局唯一，失�
           {
             phone: "18800000015",
             name: "批量导入成功账号",
-            regionName: "测试地区",
+            regionName: importedRegion.name,
             tags: ["重点关怀"],
             quota: {
               dailyLimit: 2,
@@ -2536,7 +2567,7 @@ test("人员创建、更新和批量导入都保持手机号全局唯一，失�
     assert.equal(successfulImport.imported[0]?.tenantId, tenantId);
     assert.equal(successfulImport.imported[0]?.phone, "18800000015");
     assert.equal(successfulImport.imported[0]?.regionName, "测试地区");
-    assert.equal(successfulImport.imported[0]?.regionId, createdRegion.id);
+    assert.equal(successfulImport.imported[0]?.regionId, importedRegion.id);
     assert.deepEqual(successfulImport.imported[0]?.quota, {
       dailyLimit: 2,
       categoryLimit: { food: 1, drink: 1 }

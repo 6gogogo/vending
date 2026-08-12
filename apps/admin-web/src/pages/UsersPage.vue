@@ -290,11 +290,18 @@ const supervisorPasswordResetSaving = ref(false);
 const manualCodeSaving = ref(false);
 const revokingManualGrantId = ref("");
 const clearingManualGrantId = ref("");
+const clearingManualGrantHistory = ref(false);
+const selectedManualGrantIds = ref<string[]>([]);
 const manualCodeIssued = ref(false);
 const reviewingApplicationId = ref("");
 const removingUserId = ref("");
 const removingSelectedUsers = ref(false);
 const creatingRegion = ref(false);
+const regionManagementExpanded = ref(false);
+const savingRegionId = ref("");
+const managedRegionLocationId = ref("");
+const migratingUsers = ref(false);
+const migrationRegionId = ref("");
 const drawerMode = ref<DrawerMode>("");
 const editingUserId = ref("");
 const editingPolicyId = ref("");
@@ -495,6 +502,41 @@ const visibleManualVerificationGrants = computed(() =>
   [...manualVerificationGrants.value].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt)
   )
+);
+const terminalManualVerificationGrants = computed(() =>
+  visibleManualVerificationGrants.value.filter((grant) => grant.status !== "active")
+);
+const personnelImportNewRegionNames = computed(() => {
+  const configuredNames = new Set(regions.value.map((region) => region.name));
+  return Array.from(
+    new Set(
+      personnelImportEntries.value
+        .map((entry) => entry.regionName?.trim())
+        .filter((name): name is string => Boolean(name && !configuredNames.has(name)))
+    )
+  );
+});
+const managedRegionLocationTarget = computed(() =>
+  regions.value.find((region) => region.id === managedRegionLocationId.value)
+);
+const regionMapInitialLongitude = computed(
+  () =>
+    managedRegionLocationId.value
+      ? managedRegionLocationTarget.value?.longitude
+      : regionDraftLongitude.value
+);
+const regionMapInitialLatitude = computed(
+  () =>
+    managedRegionLocationId.value
+      ? managedRegionLocationTarget.value?.latitude
+      : regionDraftLatitude.value
+);
+const allTerminalManualGrantsSelected = computed(
+  () =>
+    terminalManualVerificationGrants.value.length > 0 &&
+    terminalManualVerificationGrants.value.every((grant) =>
+      selectedManualGrantIds.value.includes(grant.id)
+    )
 );
 
 const formatRole = (role: UserRecord["role"]) =>
@@ -801,6 +843,10 @@ const load = async () => {
     backofficeCredentials.value = backofficeCredentialsResponse;
     devices.value = devicesResponse;
     manualVerificationGrants.value = manualVerificationGrantsResponse;
+    const loadedManualGrantIds = new Set(manualVerificationGrantsResponse.map((grant) => grant.id));
+    selectedManualGrantIds.value = selectedManualGrantIds.value.filter((id) =>
+      loadedManualGrantIds.has(id)
+    );
     if (reservationSettingsResponse) applyReservationSettings(reservationSettingsResponse);
     if (!policyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) policyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
   } catch (error) {
@@ -925,6 +971,7 @@ const refreshPersonnelImportPreview = () => {
   const activeRegions = regions.value.filter((region) => region.status === "active");
   const configuredRegionsById = new Map(activeRegions.map((region) => [region.id, region]));
   const configuredRegionsByName = new Map(activeRegions.map((region) => [region.name, region]));
+  const allRegionsByName = new Map(regions.value.map((region) => [region.name, region]));
   const regionIssues: PersonnelImportIssue[] = [];
   const resolvedEntries = result.entries.map((entry, index) => {
     if (!entry.regionId && !entry.regionName) {
@@ -936,11 +983,20 @@ const refreshPersonnelImportPreview = () => {
       ? configuredRegionsByName.get(entry.regionName)
       : undefined;
 
-    if ((entry.regionId && !matchedById) || (entry.regionName && !matchedByName)) {
+    if (entry.regionId && !matchedById) {
       regionIssues.push({
         row: index + 2,
         field: "区域",
-        message: `未找到已配置区域“${entry.regionName || entry.regionId}”，请先在人员页面新增该区域并设置位置。`
+        message: `区域编号“${entry.regionId}”不存在或已停用；如需导入新地区，请只填写区域名称。`
+      });
+      return entry;
+    }
+
+    if (entry.regionName && allRegionsByName.get(entry.regionName)?.status !== "active" && allRegionsByName.has(entry.regionName)) {
+      regionIssues.push({
+        row: index + 2,
+        field: "区域",
+        message: `地区“${entry.regionName}”已停用，请先在地区管理中启用或修改表格名称。`
       });
       return entry;
     }
@@ -950,6 +1006,15 @@ const refreshPersonnelImportPreview = () => {
         row: index + 2,
         field: "区域",
         message: "区域编号与区域名称指向不同区域，请修正其中一项。"
+      });
+      return entry;
+    }
+
+    if (matchedById && entry.regionName && !matchedByName) {
+      regionIssues.push({
+        row: index + 2,
+        field: "区域",
+        message: "区域编号与区域名称不一致；如需导入新地区，请清空区域编号。"
       });
       return entry;
     }
@@ -1034,7 +1099,10 @@ const submitPersonnelImport = async () => {
     });
     closeDrawer();
     await load();
-    showActionMessage("success", `已导入 ${result.count} 名${roleLabel}。`);
+    showActionMessage(
+      "success",
+      `已导入 ${result.count} 名${roleLabel}${result.createdRegionCount ? `，并建立 ${result.createdRegionCount} 个待补地图位置的地区分类` : ""}。`
+    );
   } catch (error) {
     showActionMessage("error", `人员导入失败：${readErrorMessage(error, "请检查表格后重试")}`);
   } finally {
@@ -1416,6 +1484,56 @@ const clearManualVerificationGrant = async (grant: ManualVerificationGrantSnapsh
   }
 };
 
+const toggleManualGrant = (grantId: string) => {
+  selectedManualGrantIds.value = selectedManualGrantIds.value.includes(grantId)
+    ? selectedManualGrantIds.value.filter((id) => id !== grantId)
+    : [...selectedManualGrantIds.value, grantId];
+};
+const toggleAllTerminalManualGrants = () => {
+  const terminalIds = terminalManualVerificationGrants.value.map((grant) => grant.id);
+  if (allTerminalManualGrantsSelected.value) {
+    selectedManualGrantIds.value = selectedManualGrantIds.value.filter(
+      (id) => !terminalIds.includes(id)
+    );
+    return;
+  }
+  selectedManualGrantIds.value = Array.from(
+    new Set([...selectedManualGrantIds.value, ...terminalIds])
+  );
+};
+const clearSelectedManualVerificationGrants = async () => {
+  const grantIds = selectedManualGrantIds.value.filter((id) =>
+    terminalManualVerificationGrants.value.some((grant) => grant.id === id)
+  );
+  if (!grantIds.length) {
+    showActionMessage("error", "批量清除失败：请先选择已结束的验证码历史记录。");
+    return;
+  }
+  if (!window.confirm(`确认清除所选 ${grantIds.length} 条验证码历史记录吗？操作日志仍会保留。`)) {
+    return;
+  }
+  clearingManualGrantHistory.value = true;
+  actionMessage.value = null;
+  try {
+    const result = await adminApi.clearManualVerificationCodes({
+      grantIds,
+      confirmedCount: grantIds.length
+    });
+    const clearedIds = new Set(result.cleared.map((grant) => grant.id));
+    manualVerificationGrants.value = manualVerificationGrants.value.filter(
+      (grant) => !clearedIds.has(grant.id)
+    );
+    selectedManualGrantIds.value = selectedManualGrantIds.value.filter(
+      (id) => !clearedIds.has(id)
+    );
+    showActionMessage("success", `已清除 ${result.count} 条验证码历史记录。`);
+  } catch (error) {
+    showActionMessage("error", `批量清除验证码记录失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    clearingManualGrantHistory.value = false;
+  }
+};
+
 const createRegionDirect = async () => {
   const name = regionDraftName.value.trim();
 
@@ -1424,33 +1542,84 @@ const createRegionDirect = async () => {
     return;
   }
 
-  if (
-    regionDraftLongitude.value === undefined ||
-    Number.isNaN(regionDraftLongitude.value) ||
-    regionDraftLatitude.value === undefined ||
-    Number.isNaN(regionDraftLatitude.value)
-  ) {
-    showActionMessage("error", "新增地区前请填写有效的经纬度；可先通过地图设置位置。");
-    return;
-  }
-
   creatingRegion.value = true;
   try {
     const region = await adminApi.createRegion({
       name,
       sortOrder: regionDraftSortOrder.value,
-      longitude: regionDraftLongitude.value,
-      latitude: regionDraftLatitude.value
+      ...(regionDraftLongitude.value !== undefined && regionDraftLatitude.value !== undefined
+        ? {
+            longitude: regionDraftLongitude.value,
+            latitude: regionDraftLatitude.value
+          }
+        : {})
     });
     resetRegionDraft();
     await load();
     userForm.value.regionId = region.id;
     userForm.value.regionName = "";
-    showActionMessage("success", `地区“${region.name}”已新增，可用于人员分组和小程序距离排序。`);
+    showActionMessage(
+      "success",
+      `地区“${region.name}”已新增${region.longitude === undefined ? "，可先用于人员分组，地图位置可稍后补充" : "，可用于人员分组和距离排序"}。`
+    );
   } catch (error) {
     showActionMessage("error", `新增地区失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
     creatingRegion.value = false;
+  }
+};
+
+const updateManagedRegion = async (
+  region: RegionRecord,
+  payload: Partial<Pick<RegionRecord, "name" | "status" | "sortOrder">>
+) => {
+  savingRegionId.value = region.id;
+  actionMessage.value = null;
+  try {
+    await adminApi.updateRegion(region.id, payload);
+    await load();
+    showActionMessage("success", `地区“${region.name}”已更新。`);
+  } catch (error) {
+    showActionMessage("error", `地区更新失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    savingRegionId.value = "";
+  }
+};
+const renameManagedRegion = async (region: RegionRecord) => {
+  const name = window.prompt("请输入新的地区名称：", region.name)?.trim();
+  if (!name || name === region.name) {
+    return;
+  }
+  await updateManagedRegion(region, { name });
+};
+const openManagedRegionLocation = (region: RegionRecord) => {
+  managedRegionLocationId.value = region.id;
+  regionMapPickerVisible.value = true;
+};
+const migrateSelectedUsers = async () => {
+  const region = regions.value.find(
+    (item) => item.id === migrationRegionId.value && item.status === "active"
+  );
+  if (!selectedUsers.value.length || !region) {
+    showActionMessage("error", "批量迁移失败：请先选择人员和目标地区。");
+    return;
+  }
+  if (!window.confirm(`确认将所选 ${selectedUsers.value.length} 人迁移到“${region.name}”吗？`)) {
+    return;
+  }
+  migratingUsers.value = true;
+  try {
+    await adminApi.batchUpdateUsers({
+      userIds: selectedUsers.value.map((user) => user.id),
+      patch: { regionId: region.id, regionName: region.name }
+    });
+    selectedUserIds.value = [];
+    await load();
+    showActionMessage("success", `已将所选人员迁移到“${region.name}”。`);
+  } catch (error) {
+    showActionMessage("error", `批量迁移失败：${readErrorMessage(error, "请稍后重试")}`);
+  } finally {
+    migratingUsers.value = false;
   }
 };
 
@@ -1460,11 +1629,39 @@ const saveRegionLocation = (payload: {
   location: string;
   address: string;
 }) => {
+  if (managedRegionLocationId.value) {
+    const regionId = managedRegionLocationId.value;
+    savingRegionId.value = regionId;
+    adminApi
+      .updateRegion(regionId, {
+        longitude: payload.longitude,
+        latitude: payload.latitude
+      })
+      .then(async () => {
+        regionMapPickerVisible.value = false;
+        savingRegionId.value = "";
+        managedRegionLocationId.value = "";
+        await load();
+        showActionMessage("success", "地区地图位置已保存。");
+      })
+      .catch((error) => {
+        savingRegionId.value = "";
+        showActionMessage("error", `地区位置保存失败：${readErrorMessage(error, "请稍后重试")}`);
+      });
+    return;
+  }
   regionDraftLongitude.value = payload.longitude;
   regionDraftLatitude.value = payload.latitude;
   regionDraftLocation.value = payload.location;
   regionDraftAddress.value = payload.address;
   regionMapPickerVisible.value = false;
+};
+const closeRegionMapPicker = () => {
+  regionMapPickerVisible.value = false;
+  managedRegionLocationId.value = "";
+  if (savingRegionId.value) {
+    savingRegionId.value = "";
+  }
 };
 
 const addPolicyGoodsLimit = () => {
@@ -1718,8 +1915,8 @@ onMounted(load);
 
     <div
       v-if="actionMessage"
-      class="admin-alert users-action-message"
-      :class="{ 'admin-alert--danger': actionMessage.type === 'error' }"
+      class="users-action-message"
+      :class="actionMessage.type === 'error' ? 'admin-alert admin-alert--danger' : 'users-action-message--success'"
       :role="actionMessage.type === 'error' ? 'alert' : 'status'"
       :aria-live="actionMessage.type === 'error' ? 'assertive' : 'polite'"
       aria-atomic="true"
@@ -1738,12 +1935,31 @@ onMounted(load);
         </button>
       </div>
       <article class="admin-panel admin-panel-block users-manual-grants">
-        <div class="admin-note">
-          为当前实例已启用账号签发短期登录验证码：6 位、单次使用；有效期可设为 1–10 分钟，连续输错 5 次将锁定。
+        <div class="users-compact-status">
+          <span>6 位、单次使用；连续输错 5 次锁定</span>
+          <div class="admin-inline-links">
+            <button
+              class="admin-text-button"
+              type="button"
+              :disabled="!terminalManualVerificationGrants.length || clearingManualGrantHistory"
+              @click="toggleAllTerminalManualGrants"
+            >
+              {{ allTerminalManualGrantsSelected ? "取消选择历史" : "选择全部历史" }}
+            </button>
+            <button
+              class="admin-button admin-button--danger"
+              type="button"
+              :disabled="!selectedManualGrantIds.length || clearingManualGrantHistory"
+              @click="clearSelectedManualVerificationGrants"
+            >
+              {{ clearingManualGrantHistory ? "清除中" : `批量清除（${selectedManualGrantIds.length}）` }}
+            </button>
+          </div>
         </div>
         <table v-if="visibleManualVerificationGrants.length" class="admin-table">
           <thead>
             <tr>
+              <th>选择</th>
               <th>目标账号</th>
               <th>用途</th>
               <th>状态</th>
@@ -1754,6 +1970,16 @@ onMounted(load);
           </thead>
           <tbody>
             <tr v-for="grant in visibleManualVerificationGrants" :key="grant.id">
+              <td>
+                <input
+                  v-if="grant.status !== 'active'"
+                  type="checkbox"
+                  :checked="selectedManualGrantIds.includes(grant.id)"
+                  :aria-label="`选择验证码历史 ${grant.userName}`"
+                  @change="toggleManualGrant(grant.id)"
+                />
+                <span v-else class="admin-table__subtext">—</span>
+              </td>
               <td>
                 <span class="admin-table__strong">{{ grant.userName }}</span>
                 <span class="admin-table__subtext">{{ grant.userId }}</span>
@@ -1771,7 +1997,7 @@ onMounted(load);
                   v-if="grant.status === 'active'"
                   class="admin-text-button"
                   type="button"
-                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId)"
+                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId || clearingManualGrantHistory)"
                   @click="revokeManualVerificationGrant(grant)"
                 >
                   {{ revokingManualGrantId === grant.id ? "撤销中" : "撤销" }}
@@ -1780,7 +2006,7 @@ onMounted(load);
                   v-else
                   class="admin-text-button"
                   type="button"
-                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId)"
+                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId || clearingManualGrantHistory)"
                   @click="clearManualVerificationGrant(grant)"
                 >
                   {{ clearingManualGrantId === grant.id ? "清除中" : "清除记录" }}
@@ -1888,7 +2114,7 @@ onMounted(load);
           <input v-model="keyword" class="admin-input" placeholder="输入姓名、手机号、标签或区域" />
         </label>
         <div v-if="showExtendedUserConfiguration && canManageUsers" class="admin-field users-region-create-field">
-          <span class="admin-field__label">新增地区</span>
+          <span class="admin-field__label">地区分类</span>
           <div class="users-region-create-card">
             <div class="users-region-form-grid">
               <input v-model="regionDraftName" class="admin-input" placeholder="输入新的地区名称" />
@@ -1901,7 +2127,7 @@ onMounted(load);
               />
             </div>
             <div class="users-region-create">
-              <div class="admin-note users-region-location-summary">
+              <div class="users-compact-status users-region-location-summary">
                 {{ regionDraftPositionSummary }}
               </div>
               <div class="admin-toolbar users-region-create-actions">
@@ -1914,16 +2140,49 @@ onMounted(load);
                 </button>
                 <button
                   class="admin-button"
-                  :disabled="creatingRegion || !regionDraftName.trim() || regionDraftLongitude === undefined || regionDraftLatitude === undefined"
+                  :disabled="creatingRegion || !regionDraftName.trim()"
                   @click="createRegionDirect"
                 >
                   {{ creatingRegion ? "新增中" : "新增地区" }}
                 </button>
               </div>
             </div>
+            <div class="users-compact-status">
+              地图位置可稍后补充；Excel 中只有新地区名称时，系统会自动建立未定位分类。
+              <button class="admin-text-button" type="button" @click="regionManagementExpanded = !regionManagementExpanded">
+                {{ regionManagementExpanded ? "收起地区管理" : "展开地区管理" }}
+              </button>
+            </div>
+            <div v-if="regionManagementExpanded" class="users-region-management">
+              <div v-for="region in regions" :key="region.id" class="users-region-management__row">
+                <div>
+                  <span class="admin-table__strong">{{ region.name }}</span>
+                  <span class="admin-table__subtext">
+                    {{ region.longitude === undefined || region.latitude === undefined ? "未设置地图位置" : `${region.longitude.toFixed(6)}, ${region.latitude.toFixed(6)}` }}
+                  </span>
+                </div>
+                <span class="admin-pill" :class="region.status === 'active' ? 'admin-pill--success' : 'admin-pill--neutral'">
+                  {{ region.status === "active" ? "启用" : "停用" }}
+                </span>
+                <button class="admin-text-button" type="button" :disabled="Boolean(savingRegionId)" @click="openManagedRegionLocation(region)">
+                  {{ region.longitude === undefined ? "补地图位置" : "修改位置" }}
+                </button>
+                <button class="admin-text-button" type="button" :disabled="Boolean(savingRegionId)" @click="renameManagedRegion(region)">
+                  改名
+                </button>
+                <button
+                  class="admin-text-button"
+                  type="button"
+                  :disabled="Boolean(savingRegionId)"
+                  @click="updateManagedRegion(region, { status: region.status === 'active' ? 'inactive' : 'active' })"
+                >
+                  {{ region.status === "active" ? "停用" : "启用" }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="users-filters__summary admin-note">
+        <div class="users-filters__summary users-compact-status">
           当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。人员台账默认按地区分组，特殊群体领取状态单独显示。
         </div>
       </div>
@@ -1941,6 +2200,18 @@ onMounted(load);
           </div>
           <div class="admin-inline-links">
             <button class="admin-button admin-button--ghost" @click="toggleSelectAll">{{ allFilteredSelected ? "取消全选" : "全选当前结果" }}</button>
+            <select v-if="canManageUsers" v-model="migrationRegionId" class="admin-select users-region-migrate-select">
+              <option value="">迁移到地区</option>
+              <option v-for="region in regionOptions" :key="region.id" :value="region.id">{{ region.name }}</option>
+            </select>
+            <button
+              v-if="canManageUsers"
+              class="admin-button admin-button--ghost"
+              :disabled="migratingUsers || !selectedUsers.length || !migrationRegionId"
+              @click="migrateSelectedUsers"
+            >
+              {{ migratingUsers ? "迁移中" : `批量迁移（${selectedUsers.length}）` }}
+            </button>
             <button
               v-if="canManageUsers"
               class="admin-button admin-button--danger"
@@ -2179,8 +2450,8 @@ onMounted(load);
             </span>
           </div>
           <template v-else-if="personnelImportEntries.length">
-            <div class="admin-note users-import-summary" role="status">
-              已读取 {{ personnelImportFileName }}：共 {{ personnelImportSourceRowCount }} 人，校验通过。提交前请核对前 10 行。
+            <div class="users-compact-status users-import-summary" role="status">
+              已读取 {{ personnelImportFileName }}：共 {{ personnelImportSourceRowCount }} 人，校验通过。<template v-if="personnelImportNewRegionNames.length"> 将建立 {{ personnelImportNewRegionNames.length }} 个未定位地区：{{ personnelImportNewRegionNames.join("、") }}。</template>
             </div>
             <div class="users-import-preview">
               <table class="admin-table">
@@ -2566,14 +2837,14 @@ onMounted(load);
     <div v-if="regionMapPickerVisible" class="users-map-backdrop">
       <section class="users-map-panel admin-panel">
         <AmapLocationPicker
-          :initial-longitude="regionDraftLongitude"
-          :initial-latitude="regionDraftLatitude"
-          :initial-location="regionDraftLocation"
-          :initial-address="regionDraftAddress"
+          :initial-longitude="regionMapInitialLongitude"
+          :initial-latitude="regionMapInitialLatitude"
+          :initial-location="managedRegionLocationId ? '' : regionDraftLocation"
+          :initial-address="managedRegionLocationId ? '' : regionDraftAddress"
           subject-label="地区"
           description="地区选点"
           location-placeholder="例如 扬名街道中心位置"
-          @close="regionMapPickerVisible = false"
+          @close="closeRegionMapPicker"
           @confirm="saveRegionLocation"
         />
       </section>
@@ -2699,7 +2970,24 @@ onMounted(load);
 }
 
 .users-manual-grants {
-  overflow-x: auto;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.users-compact-status,
+.users-action-message--success {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  color: var(--admin-text-muted);
+  font-size: 13px;
+}
+
+.users-action-message--success {
+  padding: 4px 0;
+  color: #25673b;
 }
 
 .users-manual-code-success {
@@ -2796,6 +3084,27 @@ onMounted(load);
   border: 1px solid var(--admin-line);
   border-radius: 10px;
   background: var(--admin-panel-muted);
+}
+
+.users-region-management {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  padding-top: 4px;
+  border-top: 1px solid var(--admin-line);
+}
+
+.users-region-management__row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(4, auto);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.users-region-migrate-select {
+  width: 180px;
 }
 
 .users-region-create {

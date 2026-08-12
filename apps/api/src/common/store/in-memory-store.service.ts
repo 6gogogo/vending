@@ -792,6 +792,47 @@ export class InMemoryStoreService {
     } as const;
   }
 
+  clearTerminalManualVerificationGrants(grantIds: string[], tenantId: string) {
+    const records = grantIds.map((grantId) =>
+      this.manualVerificationGrants.find(
+        (entry) => entry.manualGrantId === grantId && entry.tenantId === tenantId
+      )
+    );
+
+    if (records.some((record) => !record)) {
+      return { state: "missing" } as const;
+    }
+
+    for (const record of records) {
+      this.expireManualVerificationGrant(record!);
+    }
+    if (records.some((record) => !this.isManualVerificationGrantTerminal(record!))) {
+      return { state: "active" } as const;
+    }
+
+    const selectedIds = new Set(grantIds);
+    for (const record of records) {
+      if (
+        this.activeManualVerificationGrantIds.get(record!.challengeKey) ===
+        record!.manualGrantId
+      ) {
+        this.activeManualVerificationGrantIds.delete(record!.challengeKey);
+      }
+    }
+    this.manualVerificationGrants.splice(
+      0,
+      this.manualVerificationGrants.length,
+      ...this.manualVerificationGrants.filter(
+        (record) => !selectedIds.has(record.manualGrantId ?? "")
+      )
+    );
+
+    return {
+      state: "cleared",
+      records: records.map((record) => structuredClone(record!))
+    } as const;
+  }
+
   getVerificationRecord(phone: string, purpose: VerificationPurpose = "general") {
     return this.verificationCodes.get(this.getVerificationCodeKey(phone, purpose));
   }

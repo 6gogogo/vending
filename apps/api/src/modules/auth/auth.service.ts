@@ -1012,6 +1012,55 @@ export class AuthService {
     return snapshot;
   }
 
+  clearManualVerificationCodes(
+    token: string | undefined,
+    payload: { grantIds: string[]; confirmedCount: number }
+  ) {
+    const actor = this.getBackofficeSession(token);
+    this.assertCanManageManualVerificationCodes(actor.user);
+    if (!Array.isArray(payload?.grantIds) || payload.grantIds.length < 1 || payload.grantIds.length > 200) {
+      throw new BadRequestException("批量清除记录必须选择 1 至 200 项。");
+    }
+    const grantIds = payload.grantIds.map((grantId) => String(grantId ?? "").trim());
+    if (grantIds.some((grantId) => !grantId) || new Set(grantIds).size !== grantIds.length) {
+      throw new BadRequestException("批量清除记录中存在空编号或重复编号。");
+    }
+    if (!Number.isInteger(payload.confirmedCount) || payload.confirmedCount !== grantIds.length) {
+      throw new BadRequestException("批量清除确认数量必须与所选记录数一致。");
+    }
+
+    const tenantId = actor.user.tenantId ?? this.store.getDefaultTenantId();
+    const result = this.store.clearTerminalManualVerificationGrants(grantIds, tenantId);
+    if (result.state === "missing") {
+      throw new NotFoundException("部分人工验证码记录不存在或不属于当前实例。");
+    }
+    if (result.state === "active") {
+      throw new ConflictException("所选记录中包含仍可使用的验证码，请先撤销后再批量清除。");
+    }
+
+    const cleared = result.records.map((record) => this.createManualVerificationGrantSnapshot(record));
+    this.store.logOperation({
+      category: "admin",
+      type: "batch-clear-manual-verification-code-records",
+      status: "success",
+      actor: {
+        type: actor.user.role,
+        id: actor.user.id,
+        name: actor.user.name,
+        role: actor.user.role
+      },
+      metadata: {
+        tenantId,
+        count: cleared.length,
+        manualGrantIds: cleared.map((entry) => entry.id),
+        terminalStatuses: cleared.map((entry) => entry.status),
+        undoState: "not_undoable"
+      }
+    });
+    this.store.persist();
+    return { count: cleared.length, cleared };
+  }
+
   async resetOwnBackofficePassword(payload: {
     username: string;
     phone: string;

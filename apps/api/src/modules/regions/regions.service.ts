@@ -29,7 +29,7 @@ export class RegionsService {
       throw new BadRequestException("该区域名称已存在。");
     }
 
-    const coordinates = this.normalizeCoordinates(payload, true);
+    const coordinates = this.normalizeCoordinates(payload, false);
 
     const region: RegionRecord = {
       id: this.store.createId("region"),
@@ -130,6 +130,19 @@ export class RegionsService {
     }
 
     if (payload.status) {
+      if (payload.status === "inactive") {
+        const assignedUserCount = this.store.users.filter(
+          (user) => user.regionId === region.id
+        ).length;
+        const assignedApplicationCount = this.store.registrationApplications.filter(
+          (application) => application.profile.regionId === region.id
+        ).length;
+        if (assignedUserCount || assignedApplicationCount) {
+          throw new BadRequestException(
+            `该地区仍关联 ${assignedUserCount} 名人员和 ${assignedApplicationCount} 条注册申请，请先批量迁移后再停用。`
+          );
+        }
+      }
       region.status = payload.status;
     }
 

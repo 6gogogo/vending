@@ -5,6 +5,7 @@ import type {
   BackofficeRole,
   BatchConsumptionLine,
   InventoryMovement,
+  RegionRecord,
   SpecialAccessPolicyGoodsLimit,
   UserAccessPolicy,
   UserLedgerStatus,
@@ -756,14 +757,17 @@ export class UsersService {
       }
     }
 
+    const plannedRegions = new Map<string, RegionRecord>();
     const entriesWithRegions = normalizedEntries.map((entry) => ({
       ...entry,
       resolvedRegion: this.resolveImportRegion(
         entry.regionId,
         entry.regionName ?? entry.neighborhood,
-        tenantId
+        plannedRegions
       )
     }));
+
+    this.store.regions.push(...plannedRegions.values());
 
     const imported = entriesWithRegions.map((entry) => {
       const resolvedRegion = entry.resolvedRegion;
@@ -822,12 +826,15 @@ export class UsersService {
       actor: this.getAdminActor(),
       metadata: {
         role: importRole,
-        count: imported.length
+        count: imported.length,
+        createdRegionCount: plannedRegions.size,
+        createdRegionIds: Array.from(plannedRegions.values(), (region) => region.id)
       }
     });
 
     return {
       count: imported.length,
+      createdRegionCount: plannedRegions.size,
       imported
     };
   }
@@ -1870,6 +1877,9 @@ export class UsersService {
     const matched = this.store.getRegion(regionId);
 
     if (matched) {
+      if (matched.status !== "active") {
+        throw new BadRequestException("请选择启用中的地区。");
+      }
       return {
         regionId: matched.id,
         regionName: matched.name
@@ -1885,7 +1895,9 @@ export class UsersService {
       };
     }
 
-    const namedRegion = this.store.regions.find((entry) => entry.name === normalizedName);
+    const namedRegion = this.store.regions.find(
+      (entry) => entry.status === "active" && entry.name === normalizedName
+    );
 
     if (namedRegion) {
       return {
@@ -1897,7 +1909,11 @@ export class UsersService {
     throw new BadRequestException("请选择已配置区域。");
   }
 
-  private resolveImportRegion(regionId?: string, regionName?: string, tenantId?: string) {
+  private resolveImportRegion(
+    regionId?: string,
+    regionName?: string,
+    plannedRegions = new Map<string, RegionRecord>()
+  ) {
     const normalizedRegionId = regionId?.trim();
     const normalizedRegionName = regionName?.trim();
     if (!normalizedRegionId && !normalizedRegionName) {
@@ -1905,21 +1921,22 @@ export class UsersService {
     }
 
     const matchedById = this.store.getRegion(normalizedRegionId);
+    if (normalizedRegionId && matchedById?.status !== "active") {
+      throw new BadRequestException("区域编号未配置或已停用，请修正区域编号后重试。");
+    }
     const matchedByName = normalizedRegionName
       ? this.store.regions.find(
           (entry) => entry.status === "active" && entry.name === normalizedRegionName
         )
       : undefined;
 
-    if (
-      (normalizedRegionId && matchedById?.status !== "active") ||
-      (normalizedRegionName && !matchedByName)
-    ) {
-      throw new BadRequestException(
-        tenantId
-          ? "导入区域未配置，请先在当前实例新增区域并设置位置。"
-          : "导入区域未配置，请先新增区域并设置位置。"
-      );
+    const inactiveNamedRegion = normalizedRegionName
+      ? this.store.regions.find(
+          (entry) => entry.status !== "active" && entry.name === normalizedRegionName
+        )
+      : undefined;
+    if (inactiveNamedRegion) {
+      throw new BadRequestException("导入区域已停用，请先启用该地区或修改表格中的地区名称。");
     }
 
     if (matchedById && matchedByName && matchedById.id !== matchedByName.id) {
@@ -1929,7 +1946,29 @@ export class UsersService {
     const matched =
       matchedById?.status === "active" ? matchedById : matchedByName;
     if (matched) {
+      if (normalizedRegionName && matched.name !== normalizedRegionName) {
+        throw new BadRequestException("区域编号与区域名称不一致。");
+      }
       return { regionId: matched.id, regionName: matched.name };
+    }
+
+    if (normalizedRegionName && !normalizedRegionId) {
+      const planned = plannedRegions.get(normalizedRegionName);
+      if (planned) {
+        return { regionId: planned.id, regionName: planned.name };
+      }
+
+      const now = new Date().toISOString();
+      const region: RegionRecord = {
+        id: this.store.createId("region"),
+        name: normalizedRegionName,
+        status: "active",
+        sortOrder: this.store.regions.length + plannedRegions.size + 1,
+        createdAt: now,
+        updatedAt: now
+      };
+      plannedRegions.set(region.name, region);
+      return { regionId: region.id, regionName: region.name };
     }
 
     throw new BadRequestException("请选择已配置区域。");
