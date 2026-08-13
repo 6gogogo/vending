@@ -144,8 +144,17 @@ export const appCopy = {
     goods: {
       title: "选择领取数量",
       hint: "库存与今日可领取数量会在开柜前再次校验",
+      entitlement: {
+        rootFallback: "任意物资",
+        sharedHint: "全局任意额度",
+        selected: "已选",
+        parentQuota: "本类",
+        dedicated: "专属",
+        shared: "任意"
+      },
       meta: (category: string, stock: number, remaining: number) =>
         `${category} · 库存 ${stock} · 可领取 ${remaining}`,
+      unreserved: (quantity: number) => `未预约 ${quantity} 件`,
       decreaseAriaLabel: (goodsName: string) => `为${goodsName}减少一件`,
       increaseAriaLabel: (goodsName: string) => `为${goodsName}增加一件`,
       loadingTitle: "正在加载商品",

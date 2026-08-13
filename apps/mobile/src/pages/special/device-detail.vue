@@ -8,6 +8,7 @@ import type {
   CabinetReservationRecord,
   DeviceRecord,
   GoodsCategory,
+  GoodsTaxonomyNode,
   ReservationSettings
 } from "@vm/shared-types";
 
@@ -28,6 +29,10 @@ import {
 import { formatBeijingShortDateTime } from "../../utils/datetime";
 import { getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { getErrorMessage } from "../../utils/error-message";
+import {
+  buildGoodsSelectionPresentation,
+  canIncrementGoodsSelection
+} from "../../utils/goods-entitlement-selection";
 import { isOpenOutcomeUncertain } from "../../utils/open-outcome";
 import { resolveHomePath } from "../../utils/role-routing";
 
@@ -38,6 +43,8 @@ type GoodsEntry = {
   price: number;
   imageUrl: string;
   category: GoodsCategory;
+  taxonomyNodeId?: string;
+  taxonomyPath?: Array<Pick<GoodsTaxonomyNode, "id" | "name" | "sortOrder">>;
   stock?: number;
   expiresAt?: string;
 };
@@ -79,6 +86,23 @@ const selectedItems = computed<IntentItem[]>(() =>
 const selectedTotal = computed(() =>
   selectedItems.value.reduce((total, item) => total + item.quantity, 0)
 );
+
+const goodsSelectionPresentation = computed(() =>
+  buildGoodsSelectionPresentation({
+    goods: goodsList.value,
+    pools: sessionStore.quota?.remainingPools ?? [],
+    selectedByGoods: selectedMap
+  })
+);
+
+const hasHierarchicalEntitlements = computed(
+  () =>
+    goodsList.value.some((goods) => Boolean(goods.taxonomyPath?.length)) &&
+    sessionStore.quota?.taxonomyRevision !== undefined
+);
+
+const formatProgress = (progress: { selected: number; available: number }) =>
+  `${progress.selected}/${progress.available}`;
 
 const activeReservations = computed(() =>
   reservations.value
@@ -209,8 +233,22 @@ const getRemaining = (goods: Pick<GoodsEntry, "goodsId" | "category">) => {
   return Math.max(0, sessionStore.quota?.remainingToday?.[goods.category] ?? 0);
 };
 
-const getSelectableMaximum = (goods: GoodsEntry) =>
-  Math.min(Math.max(0, goods.stock ?? 0), getRemaining(goods));
+const getSelectableMaximum = (goods: GoodsEntry) => {
+  const stock = Math.max(0, goods.stock ?? 0);
+  if (hasHierarchicalEntitlements.value) {
+    return canIncrementGoodsSelection(
+      {
+        goods: goodsList.value,
+        pools: sessionStore.quota?.remainingPools ?? [],
+        selectedByGoods: selectedMap
+      },
+      goods.goodsId
+    )
+      ? stock
+      : selectedMap[goods.goodsId] ?? 0;
+  }
+  return Math.min(stock, getRemaining(goods));
+};
 
 const updateSelected = (goods: GoodsEntry, delta: number) => {
   if (actionBusy.value) {
@@ -724,6 +762,7 @@ onLoad((query) => {
 
 <template>
   <MobileShell
+    class="pickup-shell"
     :eyebrow="scanMode ? appCopy.cabinetPickup.entry.pickupEyebrow : appCopy.cabinetPickup.entry.reservationEyebrow"
     :title="deviceName"
     :subtitle="deviceCode ? appCopy.cabinetPickup.entry.code(deviceCode) : appCopy.cabinetPickup.entry.identifying"
@@ -819,7 +858,105 @@ onLoad((query) => {
               <text class="goods-section__hint">{{ appCopy.cabinetPickup.goods.hint }}</text>
             </view>
 
-            <view v-if="goodsList.length" class="goods-list">
+            <view v-if="goodsList.length && hasHierarchicalEntitlements" class="entitlement-tree">
+              <view class="entitlement-root">
+                <text class="entitlement-root__mark">爱</text>
+                <view class="entitlement-root__copy">
+                  <text class="entitlement-root__title">
+                    {{ goodsSelectionPresentation.root?.name ?? appCopy.cabinetPickup.goods.entitlement.rootFallback }}
+                  </text>
+                  <text class="entitlement-root__hint">{{ appCopy.cabinetPickup.goods.entitlement.sharedHint }}</text>
+                </view>
+                <view class="entitlement-root__progress">
+                  <text>{{ appCopy.cabinetPickup.goods.entitlement.selected }}</text>
+                  <text>{{ formatProgress(goodsSelectionPresentation.sharedProgress) }}</text>
+                </view>
+              </view>
+
+              <view class="entitlement-groups">
+                <template v-for="row in goodsSelectionPresentation.rows" :key="row.id">
+                  <view
+                    v-if="!row.goods.length"
+                    class="entitlement-parent"
+                    :style="{ paddingLeft: `${row.depth * 18}rpx` }"
+                  >
+                    <text class="entitlement-parent__title">{{ row.name }}</text>
+                    <view v-if="row.directProgress.available > 0" class="entitlement-parent__quota">
+                      <text>{{ appCopy.cabinetPickup.goods.entitlement.parentQuota }}</text>
+                      <text>{{ formatProgress(row.directProgress) }}</text>
+                    </view>
+                  </view>
+                  <view v-else class="entitlement-group">
+                    <view class="entitlement-group__heading">
+                      <text class="entitlement-group__dot" aria-hidden="true" />
+                      <text class="entitlement-group__title">{{ row.name }}</text>
+                      <view class="entitlement-group__quota">
+                        <text>
+                          {{ appCopy.cabinetPickup.goods.entitlement.dedicated }}
+                          <text class="entitlement-group__dedicated">{{ formatProgress(row.directProgress) }}</text>
+                        </text>
+                        <text>
+                          · {{ appCopy.cabinetPickup.goods.entitlement.shared }}
+                          <text class="entitlement-group__shared">{{ formatProgress(goodsSelectionPresentation.sharedProgress) }}</text>
+                        </text>
+                      </view>
+                    </view>
+
+                    <view class="goods-grid">
+                      <view
+                        v-for="goods in row.goods"
+                        :key="goods.goodsId"
+                        class="goods-card"
+                        :class="{ 'goods-card--selected': (selectedMap[goods.goodsId] ?? 0) > 0 }"
+                      >
+                        <view class="goods-card__art">
+                          <image
+                            v-if="goods.imageUrl"
+                            class="goods-card__image"
+                            :src="goods.imageUrl"
+                            mode="aspectFill"
+                            :alt="goods.name"
+                          />
+                          <MenuIcon
+                            v-else
+                            :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'"
+                            size="lg"
+                            tone="accent"
+                          />
+                        </view>
+                        <view class="goods-card__copy">
+                          <text class="goods-card__name">{{ goods.name }}</text>
+                          <text class="goods-card__available">{{ appCopy.cabinetPickup.goods.unreserved(goods.stock ?? 0) }}</text>
+                        </view>
+                        <view class="goods-card__stepper">
+                          <button
+                            class="goods-card__stepper-button"
+                            :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) <= 0"
+                            :aria-label="appCopy.cabinetPickup.goods.decreaseAriaLabel(goods.name)"
+                            @tap="updateSelected(goods, -1)"
+                          >
+                            −
+                          </button>
+                          <text class="goods-card__stepper-value" aria-live="polite" aria-atomic="true">
+                            {{ selectedMap[goods.goodsId] ?? 0 }}
+                          </text>
+                          <button
+                            class="goods-card__stepper-button goods-card__stepper-button--plus"
+                            :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) >= getSelectableMaximum(goods)"
+                            :aria-label="appCopy.cabinetPickup.goods.increaseAriaLabel(goods.name)"
+                            @tap="updateSelected(goods, 1)"
+                          >
+                            +
+                          </button>
+                        </view>
+                      </view>
+                    </view>
+                  </view>
+                </template>
+              </view>
+            </view>
+
+            <view v-else-if="goodsList.length" class="goods-list">
               <view v-for="goods in goodsList" :key="goods.goodsId" class="goods-item">
                 <MenuIcon
                   :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'"
@@ -890,7 +1027,11 @@ onLoad((query) => {
 
 <style scoped>
 .pickup-card {
-  overflow: hidden;
+  overflow: visible !important;
+}
+
+.pickup-shell {
+  overflow: visible !important;
 }
 
 .pickup-stack,
@@ -934,6 +1075,276 @@ onLoad((query) => {
 .goods-section,
 .goods-list {
   gap: 20rpx;
+}
+
+.entitlement-tree,
+.entitlement-groups,
+.entitlement-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.entitlement-tree {
+  gap: 22rpx;
+}
+
+.entitlement-root {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16rpx;
+  padding: 18rpx;
+  border: 1rpx solid rgba(46, 125, 70, 0.16);
+  border-radius: 24rpx;
+  background: rgba(246, 252, 244, 0.92);
+}
+
+.entitlement-root__mark {
+  display: grid;
+  width: 58rpx;
+  height: 58rpx;
+  place-items: center;
+  border-radius: 18rpx;
+  color: #ffffff;
+  background: var(--vm-accent);
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.entitlement-root__copy,
+.entitlement-root__progress {
+  display: flex;
+  flex-direction: column;
+}
+
+.entitlement-root__copy {
+  gap: 3rpx;
+}
+
+.entitlement-root__title {
+  color: var(--vm-ink);
+  font-size: 32rpx;
+  font-weight: 850;
+}
+
+.entitlement-root__hint {
+  color: var(--vm-muted);
+  font-size: 23rpx;
+}
+
+.entitlement-root__progress {
+  align-items: flex-end;
+  color: var(--vm-muted);
+  font-size: 22rpx;
+}
+
+.entitlement-root__progress text:last-child {
+  color: var(--vm-accent-strong);
+  font-size: 36rpx;
+  font-weight: 900;
+}
+
+.entitlement-groups {
+  position: relative;
+  gap: 24rpx;
+  padding-left: 28rpx;
+}
+
+.entitlement-groups::before {
+  content: "";
+  position: absolute;
+  left: 10rpx;
+  top: 24rpx;
+  bottom: 22rpx;
+  width: 4rpx;
+  border-radius: 999rpx;
+  background: rgba(46, 125, 70, 0.16);
+}
+
+.entitlement-group {
+  gap: 16rpx;
+}
+
+.entitlement-parent {
+  display: flex;
+  min-height: 58rpx;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.entitlement-parent__title {
+  color: var(--vm-ink);
+  font-size: 28rpx;
+  font-weight: 850;
+}
+
+.entitlement-parent__quota {
+  display: flex;
+  margin-left: auto;
+  align-items: center;
+  gap: 7rpx;
+  color: var(--vm-muted);
+  font-size: 22rpx;
+}
+
+.entitlement-parent__quota text:last-child {
+  color: var(--vm-accent-strong);
+  font-size: 26rpx;
+  font-weight: 850;
+}
+
+.entitlement-group__heading {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  display: flex;
+  min-height: 78rpx;
+  align-items: center;
+  gap: 12rpx;
+  margin-left: -28rpx;
+  padding: 12rpx 4rpx 12rpx 28rpx;
+  border-bottom: 1rpx solid rgba(46, 125, 70, 0.12);
+  background: rgba(255, 253, 249, 0.98);
+}
+
+.entitlement-group__dot {
+  position: absolute;
+  left: 0;
+  width: 18rpx;
+  height: 18rpx;
+  border: 7rpx solid #ffffff;
+  border-radius: 50%;
+  background: var(--vm-accent);
+  box-shadow: 0 0 0 2rpx rgba(46, 125, 70, 0.22);
+}
+
+.entitlement-group__title {
+  color: var(--vm-ink);
+  font-size: 36rpx;
+  font-weight: 850;
+}
+
+.entitlement-group__quota {
+  display: flex;
+  min-width: 0;
+  margin-left: auto;
+  align-items: center;
+  gap: 8rpx;
+  color: var(--vm-muted);
+  font-size: 24rpx;
+  white-space: nowrap;
+}
+
+.entitlement-group__dedicated {
+  color: var(--vm-accent-strong);
+  font-size: 29rpx;
+  font-weight: 850;
+}
+
+.entitlement-group__shared {
+  color: var(--vm-warning);
+  font-size: 29rpx;
+  font-weight: 850;
+}
+
+.goods-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.goods-card {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border: 2rpx solid rgba(46, 125, 70, 0.16);
+  border-radius: 26rpx;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.goods-card--selected {
+  border-color: var(--vm-accent);
+  box-shadow: 0 12rpx 28rpx rgba(46, 125, 70, 0.12);
+}
+
+.goods-card__art {
+  display: grid;
+  height: 230rpx;
+  place-items: center;
+  overflow: hidden;
+  background: var(--vm-bg-soft);
+}
+
+.goods-card__image {
+  width: 100%;
+  height: 100%;
+}
+
+.goods-card__copy {
+  display: flex;
+  min-height: 142rpx;
+  flex-direction: column;
+  gap: 12rpx;
+  padding: 20rpx 18rpx 8rpx;
+}
+
+.goods-card__name {
+  min-height: 68rpx;
+  color: var(--vm-ink);
+  font-size: 36rpx;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.goods-card__available {
+  color: var(--vm-warning);
+  font-size: 33rpx;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.goods-card__stepper {
+  display: grid;
+  grid-template-columns: minmax(76rpx, 1fr) 48rpx minmax(76rpx, 1fr);
+  align-items: center;
+  gap: 6rpx;
+  padding: 10rpx 14rpx 18rpx;
+}
+
+.goods-card__stepper-button {
+  width: 100%;
+  min-height: 88rpx;
+  margin: 0;
+  padding: 0;
+  border: 1rpx solid rgba(46, 125, 70, 0.18);
+  border-radius: 20rpx;
+  color: var(--vm-accent-strong);
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 40rpx;
+  line-height: 88rpx;
+}
+
+.goods-card__stepper-button::after {
+  display: none;
+}
+
+.goods-card__stepper-button--plus {
+  color: #ffffff;
+  background: var(--vm-accent);
+}
+
+.goods-card__stepper-button[disabled] {
+  color: rgba(108, 98, 87, 0.42);
+  border-color: rgba(108, 98, 87, 0.1);
+  background: rgba(108, 98, 87, 0.06);
+}
+
+.goods-card__stepper-value {
+  color: var(--vm-ink);
+  text-align: center;
+  font-size: 40rpx;
+  font-weight: 900;
 }
 
 .goods-section__heading {

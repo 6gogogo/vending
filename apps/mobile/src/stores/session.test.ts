@@ -183,3 +183,57 @@ test("服务端明确拒绝失效凭证时清除本地登录态", async () => {
     runtimeGlobals.uni = originalUni;
   }
 });
+
+test("分层额度池会随移动会话持久化，重新打开后仍能展示同一份任意额度", () => {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    uni?: Record<string, unknown>;
+  };
+  const originalUni = runtimeGlobals.uni;
+  const storage = new Map<string, unknown>();
+
+  runtimeGlobals.uni = {
+    getStorageSync: (key: string) => storage.get(key),
+    setStorageSync: (key: string, value: unknown) => storage.set(key, value),
+    removeStorageSync: (key: string) => storage.delete(key)
+  };
+
+  try {
+    setActivePinia(createPinia());
+    const store = useSessionStore();
+    store.setSession({
+      token: "taxonomy-token",
+      user: {
+        id: "taxonomy-user",
+        role: "special",
+        name: "分类额度用户",
+        phone: "13000000002",
+        tags: []
+      },
+      quota: {
+        remainingToday: { food: 2 },
+        remainingPools: [
+          {
+            id: "any-limit",
+            poolId: "any-pool",
+            limitId: "any-limit",
+            policyId: "policy",
+            policyName: "今日额度",
+            targetType: "taxonomy_node",
+            targetId: "taxonomy:any",
+            quantity: 2,
+            remaining: 2
+          }
+        ],
+        taxonomyRevision: 1
+      }
+    });
+
+    const persisted = storage.get(MOBILE_SESSION_STORAGE_KEY) as {
+      quota?: MobileSessionSnapshot["quota"];
+    };
+    assert.equal(persisted.quota?.remainingPools?.[0]?.poolId, "any-pool");
+    assert.equal(persisted.quota?.taxonomyRevision, 1);
+  } finally {
+    runtimeGlobals.uni = originalUni;
+  }
+});

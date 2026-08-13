@@ -424,13 +424,13 @@ export class GoodsTaxonomyService {
   }
 
   private buildPath(nodeId: string) {
-    const path: Array<Pick<GoodsTaxonomyNode, "id" | "name">> = [];
+    const path: Array<Pick<GoodsTaxonomyNode, "id" | "name" | "sortOrder">> = [];
     let current: GoodsTaxonomyNode | undefined = this.findNode(nodeId);
     const visited = new Set<string>();
     while (current) {
       if (visited.has(current.id)) throw new BadRequestException("分类树存在循环引用。");
       visited.add(current.id);
-      path.unshift({ id: current.id, name: current.name });
+      path.unshift({ id: current.id, name: current.name, sortOrder: current.sortOrder });
       current = current.parentId ? this.findNode(current.parentId) : undefined;
     }
     return path;

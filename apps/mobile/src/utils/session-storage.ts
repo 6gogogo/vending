@@ -1,4 +1,4 @@
-import type { UserRole } from "@vm/shared-types";
+import type { EntitlementPoolSnapshot, UserRole } from "@vm/shared-types";
 
 export const MOBILE_SESSION_STORAGE_KEY = "vm-mobile-session";
 
@@ -16,6 +16,7 @@ export interface StoredMobileSessionState {
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
     receivableByGoods?: Record<string, number>;
+    remainingPools?: EntitlementPoolSnapshot[];
     taxonomyRevision?: number;
     usedCount?: number;
     remainingDaily?: number;

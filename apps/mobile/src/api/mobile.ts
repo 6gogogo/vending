@@ -111,6 +111,8 @@ export const mobileApi = {
       price: number;
       imageUrl: string;
       category: GoodsCategory;
+      taxonomyNodeId?: string;
+      taxonomyPath?: Array<{ id: string; name: string; sortOrder: number }>;
       stock?: number;
       expiresAt?: string;
     }>>(`/devices/${deviceCode}/goods/query`, undefined, {

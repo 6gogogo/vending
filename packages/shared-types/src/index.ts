@@ -819,7 +819,7 @@ export interface GoodsCatalogItem {
   /** 新版领取分类树中的唯一直接归属节点。 */
   taxonomyNodeId?: string;
   /** 服务端派生的只读完整路径。 */
-  taxonomyPath?: Array<Pick<GoodsTaxonomyNode, "id" | "name">>;
+  taxonomyPath?: Array<Pick<GoodsTaxonomyNode, "id" | "name" | "sortOrder">>;
   price: number;
   imageUrl: string;
   packageForm?: string;
