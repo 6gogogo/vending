@@ -1762,6 +1762,11 @@ onLoad((query) => {
     flex-direction: column;
   }
 
+  .receipt-row__label {
+    width: auto;
+    white-space: nowrap;
+  }
+
   .receipt-row__value,
   .receipt-row__items {
     align-items: flex-start;
