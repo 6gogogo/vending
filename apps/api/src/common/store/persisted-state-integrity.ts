@@ -350,6 +350,59 @@ const validatePersistedSessions = (
   }
 };
 
+const validatePersistedOnboardingSessions = (
+  state: Record<string, unknown>,
+  result: PersistedStateValidationResult
+) => {
+  const sessions = state.onboardingSessions;
+
+  // 兼容上线前快照；规范化读取后会补成空数组。
+  if (sessions === undefined) {
+    return;
+  }
+  if (!Array.isArray(sessions)) {
+    result.errors.push("onboardingSessions 必须是数组。");
+    return;
+  }
+
+  const applicationIds = recordIdentifierSet(state, "registrationApplications", "id");
+  const tenantIds = recordIdentifierSet(state, "platformTenants", "id");
+  for (const [index, item] of sessions.entries()) {
+    if (
+      !Array.isArray(item) ||
+      item.length !== 2 ||
+      typeof item[0] !== "string" ||
+      !isRecord(item[1])
+    ) {
+      result.errors.push(`onboardingSessions[${index}] 必须是 [string, object] 形式。`);
+      continue;
+    }
+
+    const [tokenDigest, session] = item;
+    if (!SESSION_TOKEN_DIGEST_PATTERN.test(tokenDigest)) {
+      result.errors.push(`onboardingSessions[${index}] 的凭证键必须是 SHA-256 摘要。`);
+    }
+    if (session.token !== tokenDigest || session.persistent !== true) {
+      result.errors.push(`onboardingSessions[${index}] 必须保存同键的长期摘要凭证。`);
+    }
+    if (
+      typeof session.applicationId !== "string" ||
+      !applicationIds.has(session.applicationId)
+    ) {
+      result.errors.push(`onboardingSessions[${index}].applicationId 引用了不存在的注册申请。`);
+    }
+    if (typeof session.tenantId !== "string" || !tenantIds.has(session.tenantId)) {
+      result.errors.push(`onboardingSessions[${index}].tenantId 引用了不存在的客户实例。`);
+    }
+    if (
+      typeof session.createdAt !== "string" ||
+      !Number.isFinite(Date.parse(session.createdAt))
+    ) {
+      result.errors.push(`onboardingSessions[${index}].createdAt 不是有效时间。`);
+    }
+  }
+};
+
 const validateNumericField = (
   state: Record<string, unknown>,
   key: string,
@@ -992,6 +1045,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
     validatePairArray(parsed, key, result);
   }
   validatePersistedSessions(parsed, result);
+  validatePersistedOnboardingSessions(parsed, result);
 
   if (!isRecord(parsed.reservationSettings)) {
     result.errors.push("reservationSettings 必须是对象。");

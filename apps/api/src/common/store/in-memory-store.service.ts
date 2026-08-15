@@ -68,6 +68,7 @@ import {
   type ExternalVerificationProvider,
   isControlledLiveBootstrapProcess,
   type ManualVerificationGrantRecord,
+  type OnboardingSessionRecord,
   type PersistedStoreState,
   PersistedStateWriteError,
   type SessionRecord,
@@ -203,6 +204,7 @@ export class InMemoryStoreService {
   private readonly activeManualVerificationGrantIds = new Map<string, string>();
   readonly sessions = new Map<string, SessionRecord>();
   readonly draftSessions = new Map<string, DraftSessionRecord>();
+  readonly onboardingSessions = new Map<string, OnboardingSessionRecord>();
   readonly adminCredentials: AdminCredentialRecord[] = [];
   readonly backofficeCredentials: BackofficeCredentialRecord[] = [];
   readonly callbackLog: CallbackLogRecord[] = [];
@@ -1022,6 +1024,24 @@ export class InMemoryStoreService {
 
   createSession(user: UserRecord) {
     const token = this.createSecureToken("session");
+    this.setMobileSession(token, user);
+    return token;
+  }
+
+  promoteOnboardingSession(token: string, user: UserRecord) {
+    const directSession = this.onboardingSessions.get(token);
+    const tokenDigest = this.createSessionTokenDigest(token);
+    const restoredSession = this.onboardingSessions.get(tokenDigest);
+    if (!directSession && !restoredSession) {
+      return false;
+    }
+
+    this.onboardingSessions.delete(directSession ? token : tokenDigest);
+    this.setMobileSession(token, user);
+    return true;
+  }
+
+  private setMobileSession(token: string, user: UserRecord) {
     const now = Date.now();
     const mobileAdminCredential =
       user.role === "admin" ? this.findAdminCredentialByUserId(user.id) : undefined;
@@ -1038,7 +1058,6 @@ export class InMemoryStoreService {
       mobileAdminTenantCredentialUpdatedAt: mobileAdminTenantCredential?.passwordUpdatedAt,
       createdAt: new Date(now).toISOString()
     });
-    return token;
   }
 
   createBackofficeSession(user: UserRecord, backofficeRole: BackofficeRole, tenantId?: string) {
@@ -1119,6 +1138,65 @@ export class InMemoryStoreService {
       expiresAt: new Date(now + DRAFT_SESSION_TTL_MS).toISOString()
     });
     return token;
+  }
+
+  createOnboardingSession(payload: { tenantId: string; applicationId: string }) {
+    for (const [key, session] of this.onboardingSessions.entries()) {
+      if (
+        session.tenantId === payload.tenantId &&
+        session.applicationId === payload.applicationId
+      ) {
+        this.onboardingSessions.delete(key);
+      }
+    }
+
+    const token = this.createSecureToken("onboarding");
+    this.onboardingSessions.set(token, {
+      token,
+      persistent: true,
+      tenantId: payload.tenantId,
+      applicationId: payload.applicationId,
+      createdAt: new Date().toISOString()
+    });
+    return token;
+  }
+
+  getOnboardingSession(token?: string) {
+    if (!token) {
+      return undefined;
+    }
+
+    const direct = this.onboardingSessions.get(token);
+    const digest = this.createSessionTokenDigest(token);
+    const restored = this.onboardingSessions.get(digest);
+    const session = direct ?? restored;
+    const key = direct ? token : digest;
+    const application = session
+      ? this.registrationApplications.find((entry) => entry.id === session.applicationId)
+      : undefined;
+
+    if (
+      !session ||
+      session.persistent !== true ||
+      !application ||
+      (application.tenantId ?? this.getDefaultTenantId()) !== session.tenantId ||
+      !this.isPlatformTenantOperationalInCurrentDataPlane(session.tenantId)
+    ) {
+      this.onboardingSessions.delete(key);
+      return undefined;
+    }
+
+    return { session, application };
+  }
+
+  revokeOnboardingSession(token?: string) {
+    if (!token) {
+      return false;
+    }
+    return (
+      this.onboardingSessions.delete(token) ||
+      this.onboardingSessions.delete(this.createSessionTokenDigest(token))
+    );
   }
 
   getSession(token?: string) {
@@ -1877,7 +1955,7 @@ export class InMemoryStoreService {
   }
 
   private createSecureToken(
-    prefix: "session" | "draft" | "challenge" | "manual-code"
+    prefix: "session" | "draft" | "onboarding" | "challenge" | "manual-code"
   ) {
     return `${prefix}_${randomBytes(32).toString("base64url")}`;
   }
@@ -3005,6 +3083,20 @@ export class InMemoryStoreService {
         }
       ),
       draftSessions: [],
+      onboardingSessions: Array.from(this.onboardingSessions.entries()).flatMap(
+        ([token, session]) => {
+          if (session.persistent !== true || session.token !== token) {
+            return [];
+          }
+          const tokenDigest = SESSION_TOKEN_DIGEST_PATTERN.test(token)
+            ? token
+            : this.createSessionTokenDigest(token);
+          return [[
+            tokenDigest,
+            { ...structuredClone(session), token: tokenDigest }
+          ] as [string, OnboardingSessionRecord]];
+        }
+      ),
       adminCredentials: structuredClone(this.adminCredentials),
       backofficeCredentials: structuredClone(this.backofficeCredentials),
       callbackLog: structuredClone(this.callbackLog),
@@ -3047,6 +3139,10 @@ export class InMemoryStoreService {
         ([token, session]) =>
           [token, structuredClone(session)] as [string, DraftSessionRecord]
       ),
+      onboardingSessions: Array.from(this.onboardingSessions.entries()).map(
+        ([token, session]) =>
+          [token, structuredClone(session)] as [string, OnboardingSessionRecord]
+      ),
       persistedStateIntegrityStatus: this.persistedStateIntegrityStatus
     };
 
@@ -3075,6 +3171,10 @@ export class InMemoryStoreService {
       this.draftSessions.clear();
       for (const [token, session] of checkpoint.draftSessions) {
         this.draftSessions.set(token, session);
+      }
+      this.onboardingSessions.clear();
+      for (const [token, session] of checkpoint.onboardingSessions) {
+        this.onboardingSessions.set(token, session);
       }
       this.persistedStateIntegrityStatus =
         checkpoint.persistedStateIntegrityStatus;
@@ -3179,6 +3279,17 @@ export class InMemoryStoreService {
       }
     }
     this.draftSessions.clear();
+    this.onboardingSessions.clear();
+    for (const [tokenDigest, session] of state.onboardingSessions ?? []) {
+      if (
+        SESSION_TOKEN_DIGEST_PATTERN.test(tokenDigest) &&
+        session.token === tokenDigest &&
+        session.persistent === true &&
+        Number.isFinite(Date.parse(session.createdAt))
+      ) {
+        this.onboardingSessions.set(tokenDigest, structuredClone(session));
+      }
+    }
 
     this.replaceArray(this.adminCredentials, state.adminCredentials);
     this.replaceArray(this.backofficeCredentials, state.backofficeCredentials);

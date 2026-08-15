@@ -91,7 +91,7 @@ test("旧模拟快照会在 App 登录前修复默认实例的公网 Host 绑定
     const payload = (await response.json()) as { data?: { state?: string } };
 
     assert.equal(response.status, 201);
-    assert.equal(payload.data?.state, "not_registered");
+    assert.equal(payload.data?.state, "needs_profile");
     assert.equal(
       store.platformTenants[0]?.instanceUrl,
       "https://vending.5gogogo.top"
@@ -3304,7 +3304,7 @@ test("公开注册按已登记实例域名归属且完整审核登录不串实�
         data?: { state?: string; token?: string };
       };
     assert.equal(crossTenantAppLoginResponse.status, 201);
-    assert.equal(crossTenantAppLoginPayload.data?.state, "not_registered");
+    assert.equal(crossTenantAppLoginPayload.data?.state, "needs_profile");
     assert.equal(crossTenantAppLoginPayload.data?.token, undefined);
 
     const loginCode = store.issueVerificationCode(phone, "app-login");

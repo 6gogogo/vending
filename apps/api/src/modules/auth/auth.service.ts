@@ -12,6 +12,7 @@ import { ConfigService } from "@nestjs/config";
 
 import type {
   AppLoginResult,
+  AppSessionResult,
   BackofficeCredentialSnapshot,
   BackofficePermission,
   BackofficeRole,
@@ -151,6 +152,29 @@ export class AuthService {
       };
     }
 
+    if (existingUser) {
+      const draftToken = this.store.createDraftSession({
+        tenantId,
+        phone: normalizedPhone,
+        linkedUserId: existingUser.id,
+        requestedRole: existingUser.role
+      });
+
+      return {
+        state: "needs_profile",
+        draft: {
+          token: draftToken,
+          phone: normalizedPhone,
+          linkedUserId: existingUser.id,
+          requestedRole: existingUser.role
+        },
+        phone: normalizedPhone,
+        role: existingUser.role,
+        profile: this.mapUserProfile(existingUser),
+        isExistingUser: true
+      };
+    }
+
     const existingApplication = verification.targetUserId
       ? undefined
       : this.registrationApplicationsService.findLatestByPhone(
@@ -159,27 +183,51 @@ export class AuthService {
         );
 
     if (existingApplication?.status === "pending") {
+      const onboardingToken = this.store.createOnboardingSession({
+        tenantId,
+        applicationId: existingApplication.id
+      });
       return {
         state: "pending_review",
-        phone,
-        application: existingApplication,
-        message: "当前手机号资料正在审核中，审核通过前暂不能登录。"
+        draft: {
+          token: onboardingToken,
+          phone: normalizedPhone,
+          requestedRole: existingApplication.requestedRole,
+          applicationId: existingApplication.id
+        },
+        application: existingApplication
       };
     }
 
     if (existingApplication?.status === "rejected") {
+      const onboardingToken = this.store.createOnboardingSession({
+        tenantId,
+        applicationId: existingApplication.id
+      });
       return {
         state: "rejected",
-        phone,
-        application: existingApplication,
-        message: existingApplication.reviewReason || "当前手机号审核未通过，请修改资料后重新提交。"
+        draft: {
+          token: onboardingToken,
+          phone: normalizedPhone,
+          requestedRole: existingApplication.requestedRole,
+          applicationId: existingApplication.id
+        },
+        application: existingApplication
       };
     }
 
+    const draftToken = this.store.createDraftSession({
+      tenantId,
+      phone: normalizedPhone
+    });
     return {
-      state: "not_registered",
-      phone,
-      message: "当前手机号尚未登记或尚未通过审核，请先注册。"
+      state: "needs_profile",
+      draft: {
+        token: draftToken,
+        phone: normalizedPhone
+      },
+      phone: normalizedPhone,
+      isExistingUser: false
     };
   }
 
@@ -295,7 +343,32 @@ export class AuthService {
     const draft = this.store.getDraftSession(payload.draftToken);
 
     if (!draft) {
-      throw new UnauthorizedException("当前资料草稿已失效，请重新获取验证码。");
+      const onboarding = this.store.getOnboardingSession(payload.draftToken);
+      if (!onboarding || onboarding.session.tenantId !== tenantId) {
+        throw new UnauthorizedException("当前资料草稿已失效，请重新获取验证码。");
+      }
+
+      const application = this.registrationApplicationsService.resubmitFromOnboarding(
+        payload.draftToken,
+        {
+          requestedRole: payload.requestedRole,
+          profile: payload.profile
+        }
+      );
+      const onboardingToken = this.store.createOnboardingSession({
+        tenantId,
+        applicationId: application.id
+      });
+      return {
+        state: "pending_review",
+        draft: {
+          token: onboardingToken,
+          phone: application.phone,
+          requestedRole: application.requestedRole,
+          applicationId: application.id
+        },
+        application
+      };
     }
 
     if (draft.tenantId !== tenantId) {
@@ -312,7 +385,13 @@ export class AuthService {
       }
 
       // 对已在库的人群，补齐资料后直接开通，减少再次等待人工审核带来的使用门槛。
-      this.applyProfileToUser(user, payload.profile, user.role);
+      const confirmedProfile: RegistrationApplicationProfile = {
+        ...payload.profile,
+        neighborhood: user.neighborhood,
+        regionId: user.regionId,
+        regionName: user.regionName ?? user.neighborhood
+      };
+      this.applyProfileToUser(user, confirmedProfile, user.role);
       user.mobileProfileCompleted = true;
       const snapshot = this.createSessionSnapshot(user);
       this.store.clearDraftSession(payload.draftToken);
@@ -326,19 +405,19 @@ export class AuthService {
       requestedRole: payload.requestedRole,
       profile: payload.profile
     });
-    const updatedDraft = this.store.getDraftSession(payload.draftToken);
-
-    if (!updatedDraft) {
-      throw new BadRequestException("资料草稿写入失败。");
-    }
+    const onboardingToken = this.store.createOnboardingSession({
+      tenantId,
+      applicationId: application.id
+    });
+    this.store.clearDraftSession(payload.draftToken);
 
     return {
       state: "pending_review",
       draft: {
-        token: updatedDraft.token,
-        phone: updatedDraft.phone,
-        requestedRole: updatedDraft.requestedRole,
-        applicationId: updatedDraft.applicationId
+        token: onboardingToken,
+        phone: application.phone,
+        requestedRole: application.requestedRole,
+        applicationId: application.id
       },
       application
     };
@@ -526,13 +605,58 @@ export class AuthService {
     return this.createSessionSnapshot(user, token);
   }
 
-  getAppSession(token?: string): MobileSessionSnapshot {
-    return this.getMobileSession(token);
+  getAppSession(token?: string): AppSessionResult {
+    const user = this.store.getSessionUser(token);
+    if (user) {
+      return {
+        state: "approved",
+        ...this.createSessionSnapshot(user, token)
+      };
+    }
+
+    const onboarding = this.store.getOnboardingSession(token);
+    if (!onboarding) {
+      throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+    }
+
+    const { application } = onboarding;
+    if (application.status === "approved") {
+      const approvedUser = application.linkedUserId
+        ? this.store.users.find(
+            (entry) => entry.id === application.linkedUserId && entry.status === "active"
+          )
+        : undefined;
+      if (!approvedUser?.mobileProfileCompleted) {
+        throw new UnauthorizedException("审核结果缺少可用账号，请联系工作人员处理。");
+      }
+      const snapshot = this.store.runAtomicMutation(() => {
+        if (!this.store.promoteOnboardingSession(token!, approvedUser)) {
+          throw new UnauthorizedException("当前登录态已失效，请重新登录。");
+        }
+        return this.createSessionSnapshot(approvedUser, token);
+      });
+      return {
+        state: "approved",
+        ...snapshot
+      };
+    }
+
+    const draft = {
+      token: token!,
+      phone: application.phone,
+      requestedRole: application.requestedRole,
+      applicationId: application.id
+    };
+    return application.status === "rejected"
+      ? { state: "rejected", draft, application }
+      : { state: "pending_review", draft, application };
   }
 
   logout(token?: string) {
     return {
-      revoked: this.store.revokeSession(token)
+      revoked:
+        this.store.revokeSession(token) ||
+        this.store.revokeOnboardingSession(token)
     };
   }
 
@@ -1850,6 +1974,8 @@ export class AuthService {
     return {
       name: user.role === "merchant" ? (user.profile?.contactName || user.name) : user.name,
       neighborhood: user.neighborhood,
+      regionId: user.regionId,
+      regionName: user.regionName ?? user.neighborhood,
       note: user.profile?.note,
       merchantName: user.role === "merchant" ? user.name : undefined,
       contactName: user.profile?.contactName,

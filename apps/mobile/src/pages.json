@@ -10,25 +10,25 @@
     {
       "path": "pages/common/app-login",
       "style": {
-        "navigationBarTitleText": "登录"
+        "navigationStyle": "custom"
       }
     },
     {
       "path": "pages/common/register",
       "style": {
-        "navigationBarTitleText": "注册"
+        "navigationStyle": "custom"
       }
     },
     {
       "path": "pages/common/profile",
       "style": {
-        "navigationBarTitleText": "资料补全"
+        "navigationStyle": "custom"
       }
     },
     {
       "path": "pages/common/review-status",
       "style": {
-        "navigationBarTitleText": "审核状态"
+        "navigationStyle": "custom"
       }
     },
     {

@@ -1,187 +1,289 @@
 <script setup lang="ts">
-import { computed, reactive } from "vue";
+import { computed, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
-import type { RegistrationApplicationProfile, UserRole } from "@vm/shared-types";
+import type {
+  RegistrationApplicationProfile,
+  RegionRecord,
+  UserRole
+} from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
-import GlassCard from "../../components/ui/GlassCard.vue";
-import MobileShell from "../../layouts/MobileShell.vue";
+import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
+import { createAppLoginContinuation } from "../../utils/app-login-continuation";
 import { getErrorMessage } from "../../utils/error-message";
-import { resolveHomePath } from "../../utils/role-routing";
+import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
-const saving = reactive({
-  value: false
-});
+const profileCopy = appCopy.unifiedAuth.profile;
+const saving = ref(false);
+const initialized = ref(false);
+const regions = ref<RegionRecord[]>([]);
+const selectedRegionIndex = ref(-1);
+const selectedRole = ref<UserRole>();
 const form = reactive<RegistrationApplicationProfile>({
   name: "",
   neighborhood: "",
+  regionId: "",
+  regionName: "",
   note: "",
   merchantName: "",
   contactName: "",
-  address: "",
-  organization: "",
-  title: ""
+  address: ""
 });
 
-const role = computed<UserRole>(() => sessionStore.draft?.requestedRole ?? "special");
-const titleMap: Record<UserRole, string> = {
-  special: "完善用户资料",
-  merchant: "完善商家资料",
-  restocker: "完善补货员资料",
-  admin: "完善管理员资料"
-};
-const subtitleMap: Record<UserRole, string> = {
-  special: "提交后如手机号已预录入可直接通过，否则进入人工审核。",
-  merchant: "请补充商家联系人和经营地址，便于补货与追踪去向。",
-  restocker: "补货员账号由实例管理员建立并分配柜机。",
-  admin: "管理员申请需要由现有管理员审核后才能启用高权限。"
-};
+const isImported = computed(() => Boolean(sessionStore.draft?.linkedUserId));
+const role = computed<UserRole | undefined>(() =>
+  isImported.value ? sessionStore.draft?.requestedRole : selectedRole.value
+);
+const roleLabel = computed(() =>
+  role.value === "merchant" ? profileCopy.merchantRole : profileCopy.specialRole
+);
+const activeRegions = computed(() => regions.value.filter((entry) => entry.status === "active"));
+const regionLabel = computed(() =>
+  isImported.value
+    ? form.regionName || form.neighborhood || profileCopy.unset
+    : activeRegions.value[selectedRegionIndex.value]?.name || profileCopy.regionPlaceholder
+);
+
+const { continueApprovedLogin } = createAppLoginContinuation({
+  getPickupTarget: () => sessionStore.pickupTarget,
+  consumePickupTarget: () => sessionStore.consumePickupTarget(),
+  bootstrapSession: () => sessionStore.bootstrap().then(() => undefined),
+  getSessionRole: () => sessionStore.user?.role,
+  setSession: (session) => sessionStore.setSession(session),
+  redirectTo: (url) => uni.redirectTo({ url }),
+  routeRoleHome: (userRole) => {
+    syncRoleTabBar(userRole);
+    uni.switchTab({ url: resolveHomePath(userRole) });
+  }
+});
 
 const syncForm = () => {
   const source = sessionStore.profileDraft;
-
   form.name = source?.name ?? "";
   form.neighborhood = source?.neighborhood ?? "";
+  form.regionId = source?.regionId ?? "";
+  form.regionName = source?.regionName ?? source?.neighborhood ?? "";
   form.note = source?.note ?? "";
   form.merchantName = source?.merchantName ?? "";
   form.contactName = source?.contactName ?? "";
   form.address = source?.address ?? "";
-  form.organization = source?.organization ?? "";
-  form.title = source?.title ?? "";
+
+  const matchIndex = activeRegions.value.findIndex(
+    (entry) => entry.id === form.regionId || entry.name === form.regionName
+  );
+  selectedRegionIndex.value = matchIndex;
+  selectedRole.value = isImported.value ? undefined : sessionStore.draft?.requestedRole;
+};
+
+const syncSelectedRegion = () => {
+  const selected = activeRegions.value[selectedRegionIndex.value];
+  form.regionId = selected?.id ?? "";
+  form.regionName = selected?.name ?? "";
+  form.neighborhood = selected?.name ?? "";
+};
+
+const changeRegion = (event: { detail?: { value?: string | number } }) => {
+  selectedRegionIndex.value = Number(event.detail?.value ?? 0);
+  syncSelectedRegion();
+};
+
+const selectRole = (nextRole: UserRole) => {
+  selectedRole.value = nextRole;
 };
 
 const ensureDraft = async () => {
   await sessionStore.bootstrap();
-
   if (sessionStore.user) {
-    uni.reLaunch({
-      url: resolveHomePath(sessionStore.user.role)
+    continueApprovedLogin({
+      state: "approved",
+      token: sessionStore.token!,
+      user: sessionStore.user,
+      quota: sessionStore.quota
     });
     return;
   }
-
+  if (sessionStore.application?.status === "pending") {
+    uni.reLaunch({ url: "/pages/common/review-status" });
+    return;
+  }
   if (!sessionStore.draft) {
-    uni.reLaunch({
-      url: "/pages/common/login"
-    });
+    uni.reLaunch({ url: "/pages/common/app-login" });
     return;
   }
 
-  syncForm();
+  if (!initialized.value) {
+    try {
+      regions.value = await mobileApi.regions();
+    } catch (error) {
+      uni.showToast({ title: getErrorMessage(error), icon: "none" });
+    }
+    syncForm();
+    initialized.value = true;
+  }
+};
+
+const validate = () => {
+  if (!form.name.trim()) throw new Error(profileCopy.validation.name);
+  if (!role.value) throw new Error(profileCopy.validation.role);
+  if (!form.regionId || !form.regionName) throw new Error(profileCopy.validation.region);
+  if (role.value === "merchant") {
+    if (!form.merchantName?.trim()) throw new Error(profileCopy.validation.merchantName);
+    if (!form.contactName?.trim()) throw new Error(profileCopy.validation.contactName);
+    if (!form.address?.trim()) throw new Error(profileCopy.validation.address);
+  }
 };
 
 const submit = async () => {
-  if (!sessionStore.draft) {
+  if (!sessionStore.draft || saving.value) return;
+  try {
+    validate();
+  } catch (error) {
+    uni.showToast({ title: getErrorMessage(error), icon: "none" });
     return;
   }
 
   saving.value = true;
   sessionStore.setProfileDraft({ ...form });
-
   try {
     const response = await mobileApi.submitMobileProfile({
       draftToken: sessionStore.draft.token,
-      requestedRole: role.value,
-      profile: {
-        ...form
-      }
+      requestedRole: role.value!,
+      profile: { ...form }
     });
-
     if (response.state === "approved") {
-      sessionStore.setSession(response);
-      uni.reLaunch({
-        url: resolveHomePath(response.user.role)
-      });
+      continueApprovedLogin(response);
       return;
     }
-
     sessionStore.setDraft({
       draft: response.draft,
       application: response.application,
       profileDraft: response.application.profile
     });
-    uni.reLaunch({
-      url: "/pages/common/review-status"
-    });
+    uni.reLaunch({ url: "/pages/common/review-status" });
   } catch (error) {
-    uni.showToast({
-      title: getErrorMessage(error),
-      icon: "none"
-    });
+    uni.showToast({ title: getErrorMessage(error), icon: "none" });
   } finally {
     saving.value = false;
   }
 };
 
 onShow(() => {
-  ensureDraft();
+  void ensureDraft();
 });
 </script>
 
 <template>
-  <MobileShell eyebrow="资料补全" :title="titleMap[role]" :subtitle="subtitleMap[role]">
-    <GlassCard tone="accent">
-      <view class="vm-stack">
-        <view class="vm-field">
-          <text class="vm-field__label">姓名</text>
-          <input v-model="form.name" class="vm-field__input" placeholder="请输入姓名" />
-        </view>
+  <view class="profile-page">
+    <view class="page-header">
+      <text>{{ isImported ? profileCopy.importedPageTitle : profileCopy.newPageTitle }}</text>
+    </view>
 
-        <view v-if="role === 'special'" class="vm-field">
-          <text class="vm-field__label">所在片区</text>
-          <input v-model="form.neighborhood" class="vm-field__input" placeholder="例如：扬名街道" />
-        </view>
-
-        <template v-if="role === 'merchant'">
-          <view class="vm-field">
-            <text class="vm-field__label">商家名称</text>
-            <input v-model="form.merchantName" class="vm-field__input" placeholder="请输入商家名称" />
-          </view>
-          <view class="vm-field">
-            <text class="vm-field__label">联系人姓名</text>
-            <input v-model="form.contactName" class="vm-field__input" placeholder="请输入联系人姓名" />
-          </view>
-          <view class="vm-field">
-            <text class="vm-field__label">经营地址</text>
-            <input v-model="form.address" class="vm-field__input" placeholder="请输入经营地址" />
-          </view>
-        </template>
-
-        <template v-if="role === 'admin'">
-          <view class="vm-field">
-            <text class="vm-field__label">所属单位</text>
-            <input v-model="form.organization" class="vm-field__input" placeholder="请输入所属单位" />
-          </view>
-          <view class="vm-field">
-            <text class="vm-field__label">职务</text>
-            <input v-model="form.title" class="vm-field__input" placeholder="请输入职务" />
-          </view>
-        </template>
-
-        <view class="vm-field">
-          <text class="vm-field__label">备注（选填）</text>
-          <textarea v-model="form.note" class="vm-textarea" maxlength="120" placeholder="补充说明当前身份信息" />
-        </view>
-
-        <button class="vm-button" :loading="saving.value" @tap="submit">提交资料</button>
+    <view class="compact-hero">
+      <image class="compact-hero__image" src="/static/auth/vm-auth-hero.png" mode="aspectFill" />
+      <view class="compact-hero__copy">
+        <text class="compact-hero__eyebrow">
+          {{ isImported ? profileCopy.importedEyebrow : profileCopy.newEyebrow }}
+        </text>
+        <text class="compact-hero__title">
+          {{ isImported ? profileCopy.importedHeroTitle : profileCopy.newHeroTitle }}
+        </text>
       </view>
-    </GlassCard>
-  </MobileShell>
+    </view>
+
+    <view class="profile-card">
+      <view class="verified-phone">
+        <view>
+          <text class="verified-phone__label">{{ profileCopy.verifiedPhone }}</text>
+          <text class="verified-phone__value">{{ sessionStore.draft?.phone }}</text>
+        </view>
+        <text class="verified-phone__mark">{{ profileCopy.verified }}</text>
+      </view>
+
+      <view class="field-group">
+        <text class="field-label">{{ profileCopy.nameLabel }}</text>
+        <input v-model="form.name" class="text-input" maxlength="100" :placeholder="profileCopy.namePlaceholder" />
+      </view>
+
+      <view class="field-group">
+        <text class="field-label">{{ profileCopy.roleLabel }}</text>
+        <view v-if="isImported" class="readonly-value">
+          <text>{{ roleLabel }}</text><text class="readonly-value__mark">{{ profileCopy.confirmed }}</text>
+        </view>
+        <view v-else class="segment-control">
+          <button :class="{ active: role === 'special' }" @tap="selectRole('special')">{{ profileCopy.specialRole }}</button>
+          <button :class="{ active: role === 'merchant' }" @tap="selectRole('merchant')">{{ profileCopy.merchantRole }}</button>
+        </view>
+      </view>
+
+      <view class="field-group">
+        <text class="field-label">{{ profileCopy.regionLabel }}</text>
+        <view v-if="isImported" class="readonly-value">
+          <text>{{ regionLabel }}</text><text class="readonly-value__mark">{{ profileCopy.confirmed }}</text>
+        </view>
+        <picker v-else :range="activeRegions" range-key="name" :value="Math.max(selectedRegionIndex, 0)" @change="changeRegion">
+          <view class="picker-value">{{ regionLabel }}</view>
+        </picker>
+      </view>
+
+      <template v-if="role === 'merchant'">
+        <view class="field-group">
+          <text class="field-label">{{ profileCopy.merchantNameLabel }}</text>
+          <input v-model="form.merchantName" class="text-input" :placeholder="profileCopy.merchantNamePlaceholder" />
+        </view>
+        <view class="field-group">
+          <text class="field-label">{{ profileCopy.contactNameLabel }}</text>
+          <input v-model="form.contactName" class="text-input" :placeholder="profileCopy.contactNamePlaceholder" />
+        </view>
+        <view class="field-group">
+          <text class="field-label">{{ profileCopy.addressLabel }}</text>
+          <input v-model="form.address" class="text-input" :placeholder="profileCopy.addressPlaceholder" />
+        </view>
+      </template>
+
+      <view v-if="!isImported" class="field-group">
+        <text class="field-label">{{ profileCopy.noteLabel }}</text>
+        <textarea v-model="form.note" class="text-area" maxlength="1000" :placeholder="profileCopy.notePlaceholder" />
+      </view>
+
+      <button class="primary-button" :loading="saving" :disabled="saving" @tap="submit">
+        {{ isImported ? profileCopy.confirm : profileCopy.submitReview }}
+      </button>
+    </view>
+  </view>
 </template>
 
 <style scoped>
-.vm-textarea {
-  width: 100%;
-  min-height: 200rpx;
-  padding: 24rpx;
-  border-radius: 24rpx;
-  border: 1rpx solid var(--vm-line-strong);
-  background: var(--vm-surface-strong);
-  font-size: 28rpx;
-  color: var(--vm-text);
+.profile-page {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: calc(env(safe-area-inset-top) + 28rpx) 24rpx calc(env(safe-area-inset-bottom) + 52rpx);
+  background: #fffaf3;
+  color: #191914;
 }
+.page-header { display: flex; align-items: center; justify-content: center; height: 92rpx; font-size: 46rpx; font-weight: 900; }
+.compact-hero { position: relative; height: 290rpx; overflow: hidden; border: 2rpx solid #c4dcc6; border-radius: 42rpx; }
+.compact-hero__image { width: 100%; height: 100%; }
+.compact-hero__copy { position: absolute; left: 42rpx; top: 62rpx; display: flex; flex-direction: column; gap: 10rpx; }
+.compact-hero__eyebrow { color: #24854a; font-size: 29rpx; font-weight: 800; }
+.compact-hero__title { font-size: 44rpx; font-weight: 900; }
+.profile-card { position: relative; display: flex; flex-direction: column; gap: 32rpx; margin-top: 22rpx; padding: 38rpx; border: 2rpx solid #d6e2d2; border-radius: 42rpx; background: rgba(255,255,255,.97); box-shadow: 0 24rpx 54rpx rgba(82,65,42,.1); }
+.verified-phone { display: flex; align-items: center; justify-content: space-between; min-height: 106rpx; padding: 18rpx 24rpx; border: 2rpx solid #c5ddc7; border-radius: 28rpx; background: #eff8ed; }
+.verified-phone > view { display: flex; flex-direction: column; gap: 7rpx; }
+.verified-phone__label { color: #756d64; font-size: 24rpx; font-weight: 700; }
+.verified-phone__value { font-size: 32rpx; font-weight: 800; }
+.verified-phone__mark { color: #176638; font-size: 25rpx; font-weight: 800; }
+.field-group { display: flex; flex-direction: column; gap: 15rpx; }
+.field-label { font-size: 32rpx; font-weight: 800; }
+.text-input, .picker-value, .readonly-value { box-sizing: border-box; width: 100%; min-height: 102rpx; padding: 0 26rpx; border: 3rpx solid #e5ddd1; border-radius: 28rpx; background: #ffffff; color: #191914; font-size: 31rpx; font-weight: 600; }
+.picker-value, .readonly-value { display: flex; align-items: center; }
+.readonly-value { justify-content: space-between; border-color: #c8ddc9; background: #eff7ed; font-weight: 800; }
+.readonly-value__mark { color: #176638; font-size: 25rpx; font-weight: 800; }
+.segment-control { display: grid; grid-template-columns: 1fr 1fr; gap: 16rpx; }
+.segment-control button { min-height: 94rpx; margin: 0; border: 2rpx solid #e5ddd1; border-radius: 26rpx; background: #ffffff; color: #756d64; font-size: 30rpx; font-weight: 800; }
+.segment-control button.active { border-color: #acd0b1; background: #e8f4e8; color: #176638; }
+.text-area { box-sizing: border-box; width: 100%; min-height: 180rpx; padding: 24rpx 26rpx; border: 3rpx solid #e5ddd1; border-radius: 28rpx; background: #fff; font-size: 30rpx; line-height: 1.55; }
+.primary-button { width: 100%; min-height: 106rpx; margin: 10rpx 0 0; border: 0; border-radius: 28rpx; background: #24854a; color: #fff; font-size: 36rpx; line-height: 106rpx; font-weight: 900; box-shadow: 0 18rpx 36rpx rgba(28,113,59,.18); }
 </style>
-

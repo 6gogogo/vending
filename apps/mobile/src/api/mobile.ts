@@ -4,6 +4,7 @@ import type {
   AiSupportAssistantReply,
   AlertTask,
   AppLoginResult,
+  AppSessionResult,
   CabinetEventRecord,
   CabinetOpenRequest,
   CabinetOpenPreviewResult,
@@ -88,7 +89,7 @@ export const mobileApi = {
     return mobileClient.get<MobileSessionSnapshot>("/auth/mobile-session");
   },
   appSession() {
-    return mobileClient.get<MobileSessionSnapshot>("/auth/app-session");
+    return mobileClient.get<AppSessionResult>("/auth/app-session");
   },
   getQuotaSummary(phone: string) {
     return mobileClient.get<MobileSessionSnapshot["quota"]>("/access-rules/summary", {

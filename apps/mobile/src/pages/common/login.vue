@@ -1,267 +1,51 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
-import type { VerificationProvider } from "@vm/shared-types";
-
-import { loadMobileRuntimeConfig } from "../../api/runtime-config";
-import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue";
-import CabinetHeroArt from "../../components/ui/CabinetHeroArt.vue";
-import GlassCard from "../../components/ui/GlassCard.vue";
-import MenuIcon from "../../components/ui/MenuIcon.vue";
-import { appCopy } from "../../constants/copy";
-import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
-import { useUiPreferencesStore } from "../../stores/ui-preferences";
+import { createAppLoginContinuation } from "../../utils/app-login-continuation";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
 
 const sessionStore = useSessionStore();
-const uiPreferencesStore = useUiPreferencesStore();
-const verificationProvider = ref<VerificationProvider>();
+const { continueApprovedLogin } = createAppLoginContinuation({
+  getPickupTarget: () => sessionStore.pickupTarget,
+  consumePickupTarget: () => sessionStore.consumePickupTarget(),
+  bootstrapSession: () => sessionStore.bootstrap().then(() => undefined),
+  getSessionRole: () => sessionStore.user?.role,
+  setSession: (session) => sessionStore.setSession(session),
+  redirectTo: (url) => uni.redirectTo({ url }),
+  routeRoleHome: (role) => {
+    syncRoleTabBar(role);
+    uni.switchTab({ url: resolveHomePath(role) });
+  }
+});
 
-uiPreferencesStore.hydrate();
-
-const bootstrap = async () => {
+const route = async () => {
   await sessionStore.bootstrap();
-
-  if (!sessionStore.user) {
+  if (sessionStore.user) {
+    continueApprovedLogin({
+      state: "approved",
+      token: sessionStore.token!,
+      user: sessionStore.user,
+      quota: sessionStore.quota
+    });
     return;
   }
-
-  syncRoleTabBar(sessionStore.user.role);
-  uni.switchTab({
-    url: resolveHomePath(sessionStore.user.role)
-  });
-};
-
-const isManualVerification = computed(() => verificationProvider.value === "manual");
-const entrySubtitle = computed(() =>
-  isManualVerification.value
-    ? "已登记用户可使用实例管理员签发的一次性验证码登录；首次使用请联系实例管理员建档。"
-    : "已认证可直接登录，首次使用请提交注册申请。"
-);
-const firstUseSteps = computed(() =>
-  isManualVerification.value
-    ? [
-        "联系当前实例管理员完成账号建档和审核",
-        "获取管理员签发的 6 位一次性验证码",
-        "登录后查看今日额度和开放时段",
-        "选择柜机与物资，提交预约后到柜取货"
-      ]
-    : appCopy.firstUseSteps
-);
-const registrationActionLabel = computed(() =>
-  isManualVerification.value ? "查看管理员建档指引" : "提交注册申请"
-);
-
-const loadVerificationProvider = async () => {
-  try {
-    const runtimeConfig = await loadMobileRuntimeConfig({ forceRefresh: true });
-    verificationProvider.value = runtimeConfig.verificationProvider;
-  } catch {
-    verificationProvider.value = undefined;
+  if (sessionStore.application && sessionStore.draft) {
+    uni.reLaunch({ url: "/pages/common/review-status" });
+    return;
   }
+  if (sessionStore.draft) {
+    uni.reLaunch({ url: "/pages/common/profile" });
+    return;
+  }
+  uni.reLaunch({ url: "/pages/common/app-login" });
 };
 
-const navigate = (url: string) => {
-  uni.navigateTo({ url });
-};
-
-onShow(() => {
-  void bootstrap();
-  void loadVerificationProvider();
-});
+onShow(() => { void route(); });
 </script>
 
-<template>
-  <MobileShell
-    eyebrow="公益智助柜"
-    title="小柜大爱"
-    subtitle="让公益更近一点。请先完成手机号身份识别。"
-  >
-    <template #header-right>
-      <AccessibilityModeMenu
-        :checked="uiPreferencesStore.specialAccessibilityMode"
-        @update:checked="uiPreferencesStore.setSpecialAccessibilityMode"
-      />
-    </template>
-
-    <GlassCard tone="neutral" class="entry-card">
-      <view class="vm-stack">
-        <view class="entry-card__visual">
-          <CabinetHeroArt />
-          <view class="entry-card__brand">
-            <text class="entry-card__title">小柜大爱</text>
-            <text class="entry-card__subtitle">让公益更近一点</text>
-          </view>
-        </view>
-
-        <view class="section-heading">
-          <text class="section-heading__title">选择下一步</text>
-          <text class="vm-subtitle">{{ entrySubtitle }}</text>
-        </view>
-
-        <view class="first-use-card">
-          <text class="first-use-card__title">第一次使用怎么走</text>
-          <view class="first-use-steps">
-            <view v-for="(step, index) in firstUseSteps" :key="step" class="first-use-step">
-              <text class="first-use-step__index">{{ index + 1 }}</text>
-              <text class="first-use-step__body">{{ step }}</text>
-            </view>
-          </view>
-        </view>
-
-        <view class="entry-actions">
-          <button class="vm-button action-button" @tap="navigate('/pages/common/app-login')">
-            <view class="action-button__content">
-              <MenuIcon name="scan" size="sm" tone="contrast" />
-              <text>登录 / 身份识别</text>
-            </view>
-          </button>
-          <button class="vm-button vm-button--ghost action-button" @tap="navigate('/pages/common/register')">
-            <view class="action-button__content">
-              <MenuIcon name="users" size="sm" tone="neutral" />
-              <text>{{ registrationActionLabel }}</text>
-            </view>
-          </button>
-          <button class="vm-button vm-button--soft action-button" @tap="navigate('/pages/common/feedback')">
-            <view class="action-button__content">
-              <MenuIcon name="feedback" size="sm" tone="accent" />
-              <text>联系工作人员</text>
-            </view>
-          </button>
-          <button class="vm-button vm-button--soft action-button" @tap="navigate('/pages/common/help-center')">
-            <view class="action-button__content">
-              <MenuIcon name="guide" size="sm" tone="accent" />
-              <text>查看使用指引</text>
-            </view>
-          </button>
-        </view>
-      </view>
-    </GlassCard>
-
-    <GlassCard tone="quiet">
-      <view class="vm-stack">
-        <view class="section-heading">
-          <text class="section-heading__title">温馨提示</text>
-          <text class="vm-subtitle">审核通过后，首页会显示今日是否可领取和开放时段。</text>
-        </view>
-        <view class="tips-list">
-          <text class="tips-list__item">1. 已认证手机号可直接进入。</text>
-          <text class="tips-list__item">2. 审核中可随时查看状态。</text>
-          <text class="tips-list__item">3. 遇到柜机或资格问题，可联系工作人员。</text>
-        </view>
-      </view>
-    </GlassCard>
-  </MobileShell>
-</template>
+<template><view class="entry-blank" /></template>
 
 <style scoped>
-.section-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-}
-
-.entry-card {
-  padding-top: 18rpx;
-}
-
-.entry-card__visual {
-  position: relative;
-  min-height: 280rpx;
-  overflow: hidden;
-  border-radius: 26rpx;
-}
-
-.entry-card__visual :deep(.cabinet-art) {
-  min-height: 280rpx;
-  border-radius: 26rpx;
-}
-
-.entry-card__brand {
-  position: absolute;
-  left: 30rpx;
-  top: 34rpx;
-  display: grid;
-  gap: 10rpx;
-}
-
-.entry-card__title {
-  font-size: 48rpx;
-  line-height: 1.1;
-  font-weight: 900;
-  color: #1f1f1f;
-}
-
-.entry-card__subtitle {
-  font-size: 26rpx;
-  color: #4e453d;
-}
-
-.section-heading__title {
-  font-size: 30rpx;
-  font-weight: 700;
-  color: var(--vm-text);
-}
-
-.entry-actions,
-.tips-list,
-.first-use-card,
-.first-use-steps {
-  display: grid;
-  gap: 16rpx;
-}
-
-.first-use-card {
-  padding: 22rpx 24rpx;
-  border-radius: 24rpx;
-  border: 1rpx solid var(--vm-line);
-  background: var(--vm-surface-soft);
-}
-
-.first-use-card__title {
-  font-size: 28rpx;
-  font-weight: 800;
-  color: var(--vm-text);
-}
-
-.first-use-step {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 14rpx;
-}
-
-.first-use-step__index {
-  display: grid;
-  place-items: center;
-  width: 42rpx;
-  height: 42rpx;
-  border-radius: 50%;
-  background: var(--vm-accent);
-  color: #ffffff;
-  font-size: 22rpx;
-  font-weight: 900;
-}
-
-.first-use-step__body {
-  font-size: 24rpx;
-  line-height: 1.55;
-  color: var(--vm-text);
-}
-
-.action-button__content {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14rpx;
-  width: 100%;
-}
-
-.tips-list__item {
-  font-size: 26rpx;
-  color: var(--vm-text);
-  line-height: 1.6;
-}
+.entry-blank { min-height: 100vh; background: #fffaf3; }
 </style>

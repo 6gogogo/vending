@@ -129,6 +129,15 @@ export interface DraftSessionRecord {
   expiresAt: string;
 }
 
+export interface OnboardingSessionRecord {
+  token: string;
+  /** 审核凭证仅保存摘要，且永不被正常业务鉴权识别为登录会话。 */
+  persistent: true;
+  tenantId: string;
+  applicationId: string;
+  createdAt: string;
+}
+
 export interface AdminCredentialRecord {
   userId: string;
   username: string;
@@ -191,6 +200,8 @@ export interface PersistedStoreState {
   manualVerificationGrants: ManualVerificationGrantRecord[];
   sessions: Array<[string, SessionRecord]>;
   draftSessions: Array<[string, DraftSessionRecord]>;
+  /** 兼容旧快照缺少该字段；规范化后始终回填为空数组。 */
+  onboardingSessions?: Array<[string, OnboardingSessionRecord]>;
   adminCredentials: AdminCredentialRecord[];
   backofficeCredentials: BackofficeCredentialRecord[];
   callbackLog: CallbackLogRecord[];
@@ -511,6 +522,7 @@ export const createSeededPersistedState = (
     manualVerificationGrants: [],
     sessions: [],
     draftSessions: [],
+    onboardingSessions: [],
     adminCredentials: [],
     backofficeCredentials: [],
     paymentOrders: [],
@@ -604,6 +616,7 @@ export const createEmptyPersistedState = (
     manualVerificationGrants: [],
     sessions: [],
     draftSessions: [],
+    onboardingSessions: [],
     adminCredentials: [],
     backofficeCredentials: [],
     callbackLog: [],
@@ -784,6 +797,7 @@ const normalizePersistedState = (
       raw.manualVerificationGrants ?? fallbackState.manualVerificationGrants,
     sessions: raw.sessions ?? fallbackState.sessions,
     draftSessions: raw.draftSessions ?? fallbackState.draftSessions,
+    onboardingSessions: raw.onboardingSessions ?? fallbackState.onboardingSessions ?? [],
     adminCredentials: raw.adminCredentials ?? fallbackState.adminCredentials,
     backofficeCredentials: raw.backofficeCredentials ?? fallbackState.backofficeCredentials,
     callbackLog: (raw.callbackLog ?? fallbackState.callbackLog)

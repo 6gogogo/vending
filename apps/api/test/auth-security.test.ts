@@ -2375,7 +2375,7 @@ test("真实 PNVS 挑战在 API 重启后仍可校验，并在未登记时进入
   const authService = createAuthService(restartedStore, checkingService);
 
   const result = await authService.appLogin(phone, code);
-  assert.equal(result.state, "not_registered");
+  assert.equal(result.state, "needs_profile");
   assert.equal(checkCalls, 1);
   await assert.rejects(
     () => authService.appLogin(phone, code),
@@ -2481,7 +2481,7 @@ test("应用登录发码不公开手机号注册状态，并将用途传给发�
   assert.deepEqual(requestedPurposes, ["app-login"]);
 
   const loginResult = await authService.appLogin(unknownPhone, "123456");
-  assert.equal(loginResult.state, "not_registered");
+  assert.equal(loginResult.state, "needs_profile");
   assert.deepEqual(verifiedPurposes, ["app-login"]);
 });
 

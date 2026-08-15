@@ -360,6 +360,35 @@ export class RegistrationApplicationsService {
     });
   }
 
+  resubmitFromOnboarding(
+    token: string,
+    payload: {
+      requestedRole?: UserRole;
+      profile: RegistrationApplicationProfile;
+    }
+  ) {
+    const onboarding = this.store.getOnboardingSession(token);
+
+    if (!onboarding) {
+      throw new UnauthorizedException("当前审核凭证已失效，请重新获取验证码。");
+    }
+
+    const { application, session } = onboarding;
+    if (application.status !== "rejected") {
+      throw new ConflictException("当前申请不处于可修改状态。");
+    }
+
+    this.assertNoForeignPhoneOwnership(application.phone, session.tenantId);
+    return this.upsertPendingApplication(application, {
+      phone: application.phone,
+      requestedRole: this.resolvePublicRequestedRole(
+        payload.requestedRole ?? application.requestedRole
+      ),
+      profile: this.normalizeProfile(payload.profile),
+      tenantId: session.tenantId
+    });
+  }
+
   review(
     id: string,
     payload: {
