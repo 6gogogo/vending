@@ -24,7 +24,10 @@ import {
   resolveCabinetEntry,
   shouldPreparePickupHomeStack
 } from "../../utils/cabinet-entry";
-import { formatBeijingShortDateTime } from "../../utils/datetime";
+import {
+  formatBeijingAvailabilityWindow,
+  formatBeijingShortDateTime
+} from "../../utils/datetime";
 import { getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { getErrorMessage } from "../../utils/error-message";
 import { isOpenOutcomeUncertain } from "../../utils/open-outcome";
@@ -788,6 +791,17 @@ onLoad((query) => {
                 {{ item.goodsName }} x{{ item.quantity }}
               </text>
             </view>
+          </view>
+          <view class="receipt-row">
+            <text class="receipt-row__label">{{ appCopy.cabinetPickup.receipt.availableWindow }}</text>
+            <text class="receipt-row__value">
+              {{
+                formatBeijingAvailabilityWindow(
+                  nearestReservation.reservedAt,
+                  nearestReservation.expiresAt
+                )
+              }}
+            </text>
           </view>
           <view class="receipt-row">
             <text class="receipt-row__label">{{ appCopy.cabinetPickup.receipt.expiry }}</text>
