@@ -13,6 +13,8 @@ import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { formatBeijingDateTime, formatBeijingMonthDay } from "../../utils/datetime";
 import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { getErrorMessage } from "../../utils/error-message";
+import { buildNearbyGoodsPresentation } from "../../utils/nearby-goods-presentation";
+import { classifyPhoneLocationFailure } from "../../utils/phone-location";
 import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils/receivable-goods";
 import {
   isStockOperatorRole,
@@ -40,8 +42,11 @@ const mapExpanded = ref(false);
 const viewMode = ref<"map" | "list">("map");
 const selectedGoodsId = ref("");
 const highlightedDeviceCode = ref("");
+const goodsSheetDeviceCode = ref("");
 const currentLocation = ref<{ longitude: number; latitude: number }>();
-const locationMessage = ref("正在读取当前位置");
+const phoneLocationStatus = ref<"loading" | "ready" | "permission-denied" | "unavailable">("loading");
+const locationActionLoading = ref(false);
+const locationMessage = ref("正在读取手机位置");
 const isStockOperator = computed(() =>
   isStockOperatorRole(sessionStore.user?.role)
 );
@@ -56,7 +61,7 @@ const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
     return isAccessibleSpecial.value
       ? "显示柜机名称、地点、距离、柜内数量和今日免费数量。"
-      : "地图和列表都能查看；选择柜机后先预约，到柜扫码后才能开柜。";
+      : "可提前预约保留物资，也可到柜扫码直接领取。";
   }
 
   if (isStockOperator.value) {
@@ -68,19 +73,27 @@ const subtitle = computed(() => {
 
 const deviceEntries = computed(() =>
   devices.value
-    .map((device) => ({
-      device,
-      visibleGoods:
+    .map((device) => {
+      const visibleGoods =
         sessionStore.user?.role === "special"
           ? getReceivableDeviceGoods(device, sessionStore.quota)
-          : device.doors.flatMap((door) => door.goods)
-    }))
+          : device.doors.flatMap((door) => door.goods);
+
+      return {
+        device,
+        visibleGoods,
+        ...buildNearbyGoodsPresentation(visibleGoods)
+      };
+    })
 );
 const visibleDeviceEntries = computed(() =>
   isAccessibleSpecial.value ? deviceEntries.value.filter((entry) => entry.visibleGoods.length) : deviceEntries.value
 );
 
 const visibleDevices = computed(() => visibleDeviceEntries.value.map((entry) => entry.device));
+const goodsSheetEntry = computed(() =>
+  visibleDeviceEntries.value.find((entry) => entry.device.deviceCode === goodsSheetDeviceCode.value)
+);
 
 const mappableDevices = computed(() =>
   visibleDevices.value.filter(
@@ -121,18 +134,34 @@ const goodsSearchPlaceholder = computed(() =>
 const nearestDeviceButtonText = computed(() =>
   distanceEnabled.value ? "定位最近柜机" : "选中推荐柜机"
 );
-const heroSupport = computed(() => {
-  if (sessionStore.user?.role === "special") {
-    return {
-      title: "找柜机提示",
-      lines: [
-        distanceEnabled.value ? "已按距离排序，越靠前的柜机通常离你越近。" : "未开启定位时也能查看柜机，页面会先展示推荐顺序。",
-        selectedGoodsName.value ? `正在查找：${selectedGoodsName.value}` : "可先选择想领取的物资，再查找附近柜机。",
-        highlightedDevice.value ? `当前查看：${highlightedDevice.value.name}` : "点击地图大头钉或下方列表，可切换要查看的柜机。"
-      ]
-    };
+const phoneLocationTitle = computed(() => {
+  switch (phoneLocationStatus.value) {
+    case "ready":
+      return "已获取你的位置";
+    case "permission-denied":
+      return "手机定位未授权";
+    case "unavailable":
+      return "暂未获取手机位置";
+    default:
+      return "正在读取手机位置";
   }
-
+});
+const phoneLocationHint = computed(() => {
+  switch (phoneLocationStatus.value) {
+    case "ready":
+      return "已按距离由近到远排列附近柜机";
+    case "permission-denied":
+      return "允许手机定位后可按距离排列，未开启也可正常预约";
+    case "unavailable":
+      return "请确认手机系统定位已开启；暂时仍按推荐顺序展示";
+    default:
+      return "定位完成后将按距离排列附近柜机";
+  }
+});
+const phoneLocationButtonLabel = computed(() =>
+  phoneLocationStatus.value === "ready" ? "重新定位" : "使用手机定位"
+);
+const heroSupport = computed(() => {
   if (isStockOperator.value) {
     return {
       title: "开门提示",
@@ -243,6 +272,31 @@ const mapMarkers = computed(() =>
   })
 );
 
+const getPhoneLocation = () =>
+  new Promise<UniApp.GetLocationSuccess>((resolve, reject) => {
+    uni.getLocation({
+      type: "gcj02",
+      success: resolve,
+      fail: reject
+    });
+  });
+
+const getLocationSettings = () =>
+  new Promise<{ authSetting?: Record<string, boolean> }>((resolve, reject) => {
+    uni.getSetting({
+      success: resolve,
+      fail: reject
+    });
+  });
+
+const openLocationSettings = () =>
+  new Promise<{ authSetting?: Record<string, boolean> }>((resolve, reject) => {
+    uni.openSetting({
+      success: resolve,
+      fail: reject
+    });
+  });
+
 const load = async () => {
   await sessionStore.bootstrap();
 
@@ -257,32 +311,34 @@ const load = async () => {
 
   try {
     let query: { longitude?: number; latitude?: number } | undefined;
+    phoneLocationStatus.value = "loading";
+    locationMessage.value = "正在读取手机位置";
 
     try {
-      // 能拿到定位就按距离推荐，让用户先看到最省路程、最容易到达的柜机。
-      const location = await new Promise<UniApp.GetLocationSuccess>((resolve, reject) => {
-        uni.getLocation({
-          type: "gcj02",
-          success: resolve,
-          fail: reject
-        });
-      });
+      // 微信小程序定位读取的是当前手机位置；拿到坐标后再由服务端计算柜机距离。
+      const location = await getPhoneLocation();
 
       currentLocation.value = {
         longitude: location.longitude,
         latitude: location.latitude
       };
-      locationMessage.value = `当前位置 ${location.longitude.toFixed(5)}, ${location.latitude.toFixed(5)}`;
+      locationMessage.value = "已获取手机位置，柜机按距离排列";
       query = {
         longitude: location.longitude,
         latitude: location.latitude
       };
       distanceEnabled.value = true;
-    } catch {
-      // 没有定位权限也不能阻断服务，至少要保证列表还能按推荐顺序继续使用。
+      phoneLocationStatus.value = "ready";
+    } catch (error) {
+      // 手机定位失败不能阻断预约和扫码服务，列表继续按推荐顺序展示。
       currentLocation.value = undefined;
       distanceEnabled.value = false;
-      locationMessage.value = "未获得定位权限，已按推荐顺序展示柜机";
+      const failureKind = classifyPhoneLocationFailure(error);
+      phoneLocationStatus.value = failureKind;
+      locationMessage.value =
+        failureKind === "permission-denied"
+          ? "未获得手机定位权限，已按推荐顺序展示柜机"
+          : "暂未获取手机位置，已按推荐顺序展示柜机";
     }
 
     const [deviceResponse, quotaResponse] = await Promise.all([
@@ -441,6 +497,61 @@ const goFeedback = (deviceCode: string) => {
   });
 };
 
+const handlePhoneLocationAction = async () => {
+  if (loading.value || locationActionLoading.value) {
+    return;
+  }
+
+  locationActionLoading.value = true;
+
+  try {
+    const settings = await getLocationSettings();
+    if (settings.authSetting?.["scope.userLocation"] === false) {
+      const updatedSettings = await openLocationSettings();
+      if (updatedSettings.authSetting?.["scope.userLocation"] !== true) {
+        phoneLocationStatus.value = "permission-denied";
+        locationMessage.value = "手机定位仍未授权，已按推荐顺序展示柜机";
+        return;
+      }
+    }
+
+    await load();
+  } catch (error) {
+    phoneLocationStatus.value = classifyPhoneLocationFailure(error);
+    uni.showToast({
+      title:
+        phoneLocationStatus.value === "permission-denied"
+          ? "请在小程序设置中允许手机定位"
+          : "暂未获取手机位置，请确认系统定位已开启",
+      icon: "none"
+    });
+  } finally {
+    locationActionLoading.value = false;
+  }
+};
+
+const openGoodsSheet = (deviceCode: string) => {
+  const entry = visibleDeviceEntries.value.find((item) => item.device.deviceCode === deviceCode);
+  goodsSheetDeviceCode.value = entry?.visibleGoods.length ? deviceCode : "";
+};
+
+const closeGoodsSheet = () => {
+  goodsSheetDeviceCode.value = "";
+};
+
+const formatGoodsMeta = (goods: {
+  goodsId: string;
+  category: keyof typeof categoryLabelMap;
+  stock: number;
+}) => {
+  if (sessionStore.user?.role === "special") {
+    const available = sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0;
+    return `柜内 ${goods.stock} 件 · 可领取 ${available} 件`;
+  }
+
+  return `${categoryLabelMap[goods.category]} · 当前 ${goods.stock} 件`;
+};
+
 const scanAndOpen = async () => {
   try {
     const deviceCode = await scanDeviceCode();
@@ -479,7 +590,7 @@ const scanAndOpen = async () => {
 
 const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters === undefined) {
-    return "未开启定位";
+    return "距离暂不可用";
   }
 
   if (distanceMeters < 1000) {
@@ -487,6 +598,26 @@ const formatDistance = (distanceMeters?: number) => {
   }
 
   return `${(distanceMeters / 1000).toFixed(1)} 公里`;
+};
+
+const formatDeviceDistance = (
+  device: Pick<DeviceRecord, "distanceMeters" | "longitude" | "latitude">
+) => {
+  if (phoneLocationStatus.value === "loading") {
+    return "正在读取手机定位";
+  }
+
+  if (!distanceEnabled.value) {
+    return "按推荐顺序展示";
+  }
+
+  if (device.longitude === undefined || device.latitude === undefined) {
+    return "柜机位置待设置";
+  }
+
+  return typeof device.distanceMeters === "number"
+    ? `距你 ${formatDistance(device.distanceMeters)}`
+    : "距离暂不可用";
 };
 
 const isLowStockGoods = (goods: { stock?: number; lowStockThreshold?: number }) =>
@@ -506,6 +637,26 @@ onShow(() => {
   >
     <GlassCard tone="quiet">
       <view class="vm-stack">
+        <view v-if="sessionStore.user?.role === 'special'" class="nearby-choice-summary">
+          <text>提前预约 · 保留物资</text>
+          <text>到柜扫码 · 直接领取</text>
+        </view>
+
+        <view v-if="sessionStore.user?.role === 'special'" class="nearby-location-control">
+          <view class="nearby-location-control__copy">
+            <text class="nearby-location-control__title">{{ phoneLocationTitle }}</text>
+            <text class="nearby-location-control__hint">{{ phoneLocationHint }}</text>
+          </view>
+          <button
+            class="nearby-location-control__button"
+            :disabled="loading || locationActionLoading || phoneLocationStatus === 'loading'"
+            :loading="locationActionLoading"
+            @tap="handlePhoneLocationAction"
+          >
+            {{ phoneLocationStatus === "loading" ? "定位中" : phoneLocationButtonLabel }}
+          </button>
+        </view>
+
         <view v-if="loadError" class="vm-stack">
           <EmptyState title="柜机数据加载失败" :description="loadError" />
           <button class="vm-button vm-button--ghost" :disabled="loading" :loading="loading" @tap="load">
@@ -576,7 +727,7 @@ onShow(() => {
             <!-- #endif -->
 
             <view class="nearby-map-card__summary">
-              <view class="nearby-location-banner">
+              <view v-if="sessionStore.user?.role !== 'special'" class="nearby-location-banner">
                 <text class="nearby-map-card__title">当前位置与地图提示</text>
                 <text class="nearby-location-banner__value">{{ locationMessage }}</text>
                 <text class="nearby-map-card__hint">
@@ -643,7 +794,7 @@ onShow(() => {
                   柜机编号 {{ entry.device.deviceCode }} · 最近在线 {{ formatBeijingDateTime(entry.device.lastSeenAt) }}
                 </text>
                 <text class="device-card__meta">
-                  {{ distanceEnabled ? `距离 ${formatDistance(entry.device.distanceMeters)}` : "未开启定位，按推荐顺序显示" }}
+                  {{ formatDeviceDistance(entry.device) }}
                 </text>
                 <text v-if="sessionStore.user?.role === 'special' && !isAccessibleSpecial" class="device-card__highlight">
                   展示柜内有货且在当前领取额度内的物资
@@ -658,27 +809,40 @@ onShow(() => {
               {{ getDeviceStatusPresentation(entry.device).actionHint }}
             </text>
 
-            <view v-if="entry.visibleGoods.length" class="goods-list">
-              <view v-for="goods in entry.visibleGoods" :key="goods.goodsId" class="goods-item">
-                <view class="goods-item__main">
-                  <view class="goods-item__title-row">
-                    <text>{{ goods.name }}</text>
-                    <text v-if="isLowStockGoods(goods)" class="vm-status vm-status--low-stock">低库存</text>
+            <view v-if="entry.visibleGoods.length" class="device-card__goods">
+              <view class="device-card__goods-heading">
+                <text class="device-card__goods-title">
+                  {{ sessionStore.user?.role === "special" ? "可预约物资" : "柜内物资" }}
+                </text>
+                <text class="device-card__goods-count">共 {{ entry.visibleGoods.length }} 种</text>
+              </view>
+
+              <view class="goods-list">
+                <view
+                  v-for="goods in sessionStore.user?.role === 'special' ? entry.previewGoods : entry.visibleGoods"
+                  :key="goods.goodsId"
+                  class="goods-item"
+                >
+                  <view class="goods-item__main">
+                    <view class="goods-item__title-row">
+                      <text>{{ goods.name }}</text>
+                      <text v-if="isLowStockGoods(goods)" class="vm-status vm-status--low-stock">低库存</text>
+                    </view>
+                    <text class="goods-item__meta">{{ formatGoodsMeta(goods) }}</text>
                   </view>
-                  <text class="goods-item__meta">
-                    {{
-                      sessionStore.user?.role === "special"
-                        ? isAccessibleSpecial
-                          ? `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 今日免费 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
-                          : `${categoryLabelMap[goods.category]} · 柜内 ${goods.stock} 件 · 免费 ${(sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0)} 件`
-                        : `${categoryLabelMap[goods.category]} · 当前 ${goods.stock} 件`
-                    }}
+                  <text v-if="goods.expiresAt" class="goods-item__meta">
+                    至 {{ formatBeijingMonthDay(goods.expiresAt) }}
                   </text>
                 </view>
-                <text v-if="goods.expiresAt" class="goods-item__meta">
-                  至 {{ formatBeijingMonthDay(goods.expiresAt) }}
-                </text>
               </view>
+
+              <button
+                v-if="sessionStore.user?.role === 'special' && entry.hiddenGoodsCount"
+                class="device-card__more"
+                @tap.stop="openGoodsSheet(entry.device.deviceCode)"
+              >
+                查看全部 {{ entry.visibleGoods.length }} 种物资
+              </button>
             </view>
             <view v-else-if="sessionStore.user?.role === 'special'" class="device-card__empty">
               <text class="device-card__empty-title">当前这台柜机没有可选货品</text>
@@ -714,12 +878,51 @@ onShow(() => {
       </view>
     </GlassCard>
 
-    <GlassCard v-if="!isAccessibleSpecial" tone="quiet">
+    <GlassCard v-if="sessionStore.user?.role !== 'special'" tone="quiet">
       <view class="vm-stack nearby-advice">
         <text class="nearby-advice__title">{{ heroSupport.title }}</text>
         <text v-for="line in heroSupport.lines" :key="line" class="nearby-advice__body">{{ line }}</text>
       </view>
     </GlassCard>
+
+    <view
+      v-if="goodsSheetEntry"
+      class="nearby-goods-overlay"
+      role="dialog"
+      aria-label="全部可预约物资"
+      @tap.self="closeGoodsSheet"
+    >
+      <view class="nearby-goods-sheet">
+        <view class="nearby-goods-sheet__head">
+          <view class="nearby-goods-sheet__heading">
+            <text class="nearby-goods-sheet__title">全部可预约物资</text>
+            <text class="nearby-goods-sheet__subtitle">
+              {{ goodsSheetEntry.device.name }} · 共 {{ goodsSheetEntry.visibleGoods.length }} 种
+            </text>
+          </view>
+          <button class="nearby-goods-sheet__close" @tap="closeGoodsSheet">关闭</button>
+        </view>
+
+        <scroll-view class="nearby-goods-sheet__list" scroll-y>
+          <view
+            v-for="goods in goodsSheetEntry.visibleGoods"
+            :key="goods.goodsId"
+            class="goods-item nearby-goods-sheet__item"
+          >
+            <view class="goods-item__main">
+              <view class="goods-item__title-row">
+                <text>{{ goods.name }}</text>
+                <text v-if="isLowStockGoods(goods)" class="vm-status vm-status--low-stock">低库存</text>
+              </view>
+              <text class="goods-item__meta">{{ formatGoodsMeta(goods) }}</text>
+            </view>
+            <text v-if="goods.expiresAt" class="goods-item__meta">
+              至 {{ formatBeijingMonthDay(goods.expiresAt) }}
+            </text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
 
     <view v-if="!loadError && mapExpanded && !isAccessibleSpecial" class="nearby-map-overlay" @tap.self="mapExpanded = false">
       <view class="nearby-map-overlay__panel">
@@ -785,6 +988,7 @@ onShow(() => {
 .nearby-map-card,
 .device-list,
 .goods-list,
+.device-card__goods,
 .action-grid,
 .nearby-map-card__search,
 .nearby-location-banner,
@@ -793,6 +997,74 @@ onShow(() => {
 .map-focus-card__copy {
   display: grid;
   gap: 16rpx;
+}
+
+.nearby-choice-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.nearby-choice-summary text {
+  display: flex;
+  min-height: 66rpx;
+  align-items: center;
+  justify-content: center;
+  padding: 10rpx 14rpx;
+  border: 1rpx solid var(--vm-line);
+  border-radius: 18rpx;
+  background: var(--vm-surface-soft);
+  color: var(--vm-accent-strong);
+  font-size: 22rpx;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.nearby-location-control {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 18rpx 20rpx;
+  border: 1rpx solid var(--vm-line);
+  border-radius: 22rpx;
+  background: var(--vm-surface-strong);
+}
+
+.nearby-location-control__copy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4rpx;
+}
+
+.nearby-location-control__title {
+  color: var(--vm-text);
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.nearby-location-control__hint {
+  color: var(--vm-text-soft);
+  font-size: 21rpx;
+  line-height: 1.45;
+}
+
+.nearby-location-control__button {
+  flex: none;
+  min-width: 142rpx;
+  min-height: 66rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border: 1rpx solid var(--vm-success-line);
+  border-radius: 999rpx;
+  background: var(--vm-success-bg);
+  color: var(--vm-accent-strong);
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
+.nearby-location-control__button::after {
+  border: 0;
 }
 
 .nearby-map-card__tools,
@@ -885,6 +1157,56 @@ onShow(() => {
 .device-card__highlight {
   font-size: 22rpx;
   color: var(--vm-accent-strong);
+}
+
+.device-card__goods-heading,
+.nearby-goods-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.device-card__goods-title,
+.nearby-goods-sheet__title {
+  color: var(--vm-text);
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.device-card__goods-count,
+.nearby-goods-sheet__subtitle {
+  color: var(--vm-text-soft);
+  font-size: 22rpx;
+}
+
+.device-card__goods .goods-list {
+  gap: 0;
+  border-top: 1rpx solid var(--vm-line);
+}
+
+.device-card__goods .goods-item,
+.nearby-goods-sheet__item {
+  align-items: center;
+  min-height: 92rpx;
+  padding: 14rpx 0;
+  border-bottom: 1rpx solid var(--vm-line);
+}
+
+.device-card__more {
+  width: 100%;
+  min-height: 70rpx;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vm-accent-strong);
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.device-card__more::after,
+.nearby-goods-sheet__close::after {
+  border: 0;
 }
 
 .device-card__open-hint,
@@ -1221,6 +1543,81 @@ onShow(() => {
 
 .vm-page--accessible .goods-item {
   align-items: flex-start;
+}
+
+.vm-page--accessible .nearby-choice-summary {
+  grid-template-columns: 1fr;
+}
+
+.vm-page--accessible .nearby-choice-summary text,
+.vm-page--accessible .device-card__goods-title,
+.vm-page--accessible .device-card__more {
+  font-size: 30rpx;
+}
+
+.vm-page--accessible .nearby-location-control {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.vm-page--accessible .nearby-location-control__title,
+.vm-page--accessible .nearby-location-control__button {
+  font-size: 30rpx;
+}
+
+.vm-page--accessible .nearby-location-control__hint {
+  font-size: 28rpx;
+}
+
+.nearby-goods-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(23, 31, 43, 0.32);
+}
+
+.nearby-goods-sheet {
+  width: 100%;
+  max-height: 74vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12rpx;
+  padding: 24rpx 28rpx calc(24rpx + env(safe-area-inset-bottom));
+  border-radius: 32rpx 32rpx 0 0;
+  background: var(--vm-surface-strong);
+  box-shadow: 0 -20rpx 50rpx rgba(36, 52, 39, 0.18);
+}
+
+.nearby-goods-sheet__heading {
+  min-width: 0;
+  display: grid;
+  gap: 6rpx;
+}
+
+.nearby-goods-sheet__close {
+  flex: none;
+  min-width: 108rpx;
+  min-height: 66rpx;
+  margin: 0;
+  padding: 0 20rpx;
+  border: 1rpx solid var(--vm-line-strong);
+  border-radius: 999rpx;
+  background: var(--vm-surface-soft);
+  color: var(--vm-accent-strong);
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.nearby-goods-sheet__list {
+  min-height: 0;
+  height: 850rpx;
+  max-height: calc(74vh - 150rpx);
+}
+
+.nearby-goods-sheet__item {
+  margin-right: 4rpx;
 }
 
 .nearby-map-overlay {

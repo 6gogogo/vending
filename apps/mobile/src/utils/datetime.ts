@@ -66,3 +66,27 @@ export const formatBeijingTime = (value?: string | Date, fallback = "-") => {
   const parts = getBeijingParts(value);
   return parts ? `${parts.hour}:${parts.minute}` : fallback;
 };
+
+export const formatBeijingAvailabilityWindow = (
+  startsAt?: string | Date,
+  expiresAt?: string | Date,
+  fallback = "-"
+) => {
+  if (!startsAt || !expiresAt) {
+    return fallback;
+  }
+
+  const start = getBeijingParts(startsAt);
+  const end = getBeijingParts(expiresAt);
+  if (!start || !end) {
+    return fallback;
+  }
+
+  const startText = `${start.month}-${start.day} ${start.hour}:${start.minute}`;
+  const sameDate =
+    start.year === end.year && start.month === end.month && start.day === end.day;
+
+  return sameDate
+    ? `${startText}–${end.hour}:${end.minute}`
+    : `${startText}–${end.month}-${end.day} ${end.hour}:${end.minute}`;
+};
