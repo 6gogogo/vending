@@ -5,8 +5,10 @@ import type { GoodsCategory, UserRecord } from "@vm/shared-types";
 import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import {
+  allocateActiveEntitlements,
   getActiveWindowCategoryQuota,
   getActiveWindowEntitlementQuota,
+  subtractLockedEntitlements,
   sumNetQuotaQuantity
 } from "../../common/policies/special-access-policy.utils";
 
@@ -116,13 +118,16 @@ export class AccessRulesService {
 
     const quota = user.quota ?? this.store.rules.find((rule) => rule.role === "special");
     const currentBusinessDayKey = getBusinessDayKey(new Date());
-    const entitlementQuota = getActiveWindowEntitlementQuota(
+    const entitlementQuota = this.subtractActiveReservationLocks(
       user,
-      this.store.specialAccessPolicies,
-      this.store.inventory,
-      this.store.goodsCatalog,
-      this.store.goodsTaxonomyNodes,
-      new Date()
+      getActiveWindowEntitlementQuota(
+        user,
+        this.store.specialAccessPolicies,
+        this.store.inventory,
+        this.store.goodsCatalog,
+        this.store.goodsTaxonomyNodes,
+        new Date()
+      )
     );
     if (entitlementQuota.remainingPools.length > 0) {
       const remainingToday = this.store.goodsCatalog.reduce<Record<string, number>>(
@@ -258,5 +263,85 @@ export class AccessRulesService {
       result[key] = Math.min(value, remaining);
       return result;
     }, {});
+  }
+
+  private subtractActiveReservationLocks(
+    user: UserRecord,
+    quota: ReturnType<typeof getActiveWindowEntitlementQuota>
+  ) {
+    const now = new Date();
+    const currentBusinessDayKey = getBusinessDayKey(now);
+    const activeReservations = this.store.reservations.filter(
+      (reservation) =>
+        reservation.userId === user.id &&
+        reservation.status === "active" &&
+        new Date(reservation.expiresAt).getTime() > now.getTime()
+    );
+    if (!activeReservations.length || !quota.remainingPools.length) {
+      return quota;
+    }
+
+    let quotaAfterLocks = quota;
+    const currentPoolIds = new Set(quotaAfterLocks.remainingPools.map((pool) => pool.poolId));
+    const savedLocks = activeReservations
+      .flatMap((reservation) => reservation.entitlementAllocations ?? [])
+      .filter((line) => currentPoolIds.has(line.poolId));
+    try {
+      quotaAfterLocks = subtractLockedEntitlements(quotaAfterLocks, savedLocks);
+    } catch {
+      // 已有预约与后来变更的额度树不一致时必须保守关闭额度展示，避免再次承诺同一额度。
+      quotaAfterLocks = {
+        ...quotaAfterLocks,
+        remainingPools: quotaAfterLocks.remainingPools.map((pool) => ({ ...pool, remaining: 0 })),
+        remainingTotal: 0
+      };
+    }
+
+    const legacyRequests = activeReservations
+      .filter(
+        (reservation) =>
+          !reservation.entitlementAllocations?.length &&
+          getBusinessDayKey(reservation.reservedAt) === currentBusinessDayKey
+      )
+      .flatMap((reservation) => reservation.items)
+      .reduce<Map<string, number>>((result, item) => {
+        result.set(item.goodsId, (result.get(item.goodsId) ?? 0) + item.quantity);
+        return result;
+      }, new Map());
+    if (legacyRequests.size) {
+      const legacyAllocation = allocateActiveEntitlements(
+        quotaAfterLocks,
+        this.store.goodsTaxonomyNodes,
+        this.store.goodsCatalog,
+        [...legacyRequests].map(([goodsId, quantity]) => ({ goodsId, quantity }))
+      );
+      quotaAfterLocks = subtractLockedEntitlements(
+        quotaAfterLocks,
+        legacyAllocation.allocations
+      );
+    }
+
+    const receivableByGoods = this.store.goodsCatalog.reduce<Record<string, number>>(
+      (result, goods) => {
+        if (goods.status === "inactive") return result;
+        result[goods.goodsId] = allocateActiveEntitlements(
+          quotaAfterLocks,
+          this.store.goodsTaxonomyNodes,
+          this.store.goodsCatalog,
+          [{ goodsId: goods.goodsId, quantity: Number.MAX_SAFE_INTEGER }]
+        ).allocations.reduce((sum, line) => sum + line.quantity, 0);
+        return result;
+      },
+      {}
+    );
+
+    return {
+      ...quotaAfterLocks,
+      receivableByGoods,
+      remainingTotal: quotaAfterLocks.remainingPools.reduce(
+        (sum, pool) => sum + pool.remaining,
+        0
+      )
+    };
   }
 }

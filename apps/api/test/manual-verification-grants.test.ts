@@ -1380,6 +1380,18 @@ test("人工码只能由当前实例管理员为本实例有效账号签发和�
     assert.ok(grantId);
     assert.equal(ownTenantIssuePayload.data?.tenantId, tenantId);
 
+    const wrongInstanceLoginResponse = await fetch(`${baseUrl}/auth/app-login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ phone: "18800000903", code: "555555" })
+    });
+    assert.equal(wrongInstanceLoginResponse.status, 401);
+    const grantAfterWrongInstance = store.manualVerificationGrants.find(
+      (entry) => entry.manualGrantId === grantId
+    );
+    assert.ok(grantAfterWrongInstance);
+    assert.equal(grantAfterWrongInstance.consumedAt, undefined);
+
     const defaultListResponse = await fetch(
       `${baseUrl}/auth/manual-verification-codes`,
       {

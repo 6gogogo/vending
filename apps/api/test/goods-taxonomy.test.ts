@@ -22,7 +22,33 @@ const createHarness = () => {
     delete goods.taxonomyNodeId;
     delete goods.taxonomyPath;
   }
-  return { store, service: new GoodsTaxonomyService(store) };
+  const rawService = new GoodsTaxonomyService(store);
+  const tenantId = store.getDefaultTenantId();
+  const service = {
+    getTree: () => rawService.getTree(tenantId),
+    createNode: (
+      payload: Parameters<GoodsTaxonomyService["createNode"]>[0],
+      actorUserId?: string
+    ) => rawService.createNode(payload, actorUserId, tenantId),
+    previewChange: (
+      nodeId: string,
+      patch: Parameters<GoodsTaxonomyService["previewChange"]>[1]
+    ) => rawService.previewChange(nodeId, patch, tenantId),
+    applyChange: (
+      nodeId: string,
+      payload: Parameters<GoodsTaxonomyService["applyChange"]>[1],
+      actorUserId?: string
+    ) => rawService.applyChange(nodeId, payload, actorUserId, tenantId),
+    assignGoods: (
+      payload: Parameters<GoodsTaxonomyService["assignGoods"]>[0],
+      actorUserId?: string
+    ) => rawService.assignGoods(payload, actorUserId, tenantId),
+    previewGoodsAssignment: (
+      payload: Parameters<GoodsTaxonomyService["previewGoodsAssignment"]>[0]
+    ) => rawService.previewGoodsAssignment(payload, tenantId),
+    getTreeRevision: () => rawService.getTreeRevision()
+  };
+  return { store, service, rawService };
 };
 
 after(() => {
@@ -129,6 +155,73 @@ test("分类移动要求匹配预览 revision，并自动取消受影响预约",
   assert.equal(result.node.parentId, daily.id);
   assert.equal(reservation.status, "cancelled");
   assert.equal(reservation.cancellationReason, "货品分类或领取规则调整，系统已自动取消预约。");
+});
+
+test("未实际修改分类时不递增版本也不取消预约", () => {
+  const { store, service } = createHarness();
+  const root = service.createNode({ name: "任意", parentId: null });
+  const food = service.createNode({ name: "食品", parentId: root.id });
+  const goods = store.goodsCatalog[0]!;
+  service.assignGoods({
+    taxonomyNodeId: food.id,
+    goodsIds: [goods.goodsId],
+    expectedRevision: service.getTreeRevision()
+  });
+  const reservation = {
+    id: "reservation-taxonomy-noop",
+    userId: store.users.find((entry) => entry.role === "special")!.id,
+    phone: "",
+    deviceCode: store.devices[0]!.deviceCode,
+    doorNum: "1",
+    status: "active" as const,
+    inventoryReservationMode: "goods_quantity" as const,
+    batchAllocationTiming: "on_open" as const,
+    items: [{ goodsId: goods.goodsId, goodsName: goods.name, category: goods.category, quantity: 1 }],
+    reservedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  store.reservations.push(reservation);
+  const revision = service.getTreeRevision();
+  const preview = service.previewChange(food.id, {
+    name: food.name,
+    parentId: food.parentId,
+    status: food.status,
+    sortOrder: food.sortOrder
+  });
+
+  assert.deepEqual(preview.affectedReservationIds, []);
+  const result = service.applyChange(food.id, {
+    name: food.name,
+    parentId: food.parentId,
+    status: food.status,
+    sortOrder: food.sortOrder,
+    expectedRevision: revision
+  });
+
+  assert.equal(service.getTreeRevision(), revision);
+  assert.deepEqual(result.cancelledReservationIds, []);
+  assert.equal(reservation.status, "active");
+});
+
+test("货品分类服务拒绝缺失或非当前数据平面的实例范围", () => {
+  const { store, rawService } = createHarness();
+  const before = store.goodsTaxonomyNodes.length;
+
+  assert.throws(
+    () => rawService.getTree(""),
+    /无权访问其他实例/
+  );
+  assert.throws(
+    () => rawService.getTree("tenant-other"),
+    /无权访问其他实例/
+  );
+  assert.throws(
+    () => rawService.createNode({ name: "任意", parentId: null }, undefined, "tenant-other"),
+    /无权访问其他实例/
+  );
+  assert.equal(store.goodsTaxonomyNodes.length, before);
 });
 
 test("货品改归属要求匹配 revision，并取消锁定该货品的有效预约", () => {

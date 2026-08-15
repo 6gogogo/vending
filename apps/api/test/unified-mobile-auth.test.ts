@@ -238,6 +238,38 @@ test("审核通过后原审核凭证自动升级为永久移动端会话", async
   );
 });
 
+test("审核凭证不能升级为其他实例的用户会话", async () => {
+  const { authService, registrationApplicationsService, store } = createHarness();
+  const loginResult = await authService.appLogin("13700009994", "123456");
+  assert.equal(loginResult.state, "needs_profile");
+  if (loginResult.state !== "needs_profile") return;
+  const submitted = authService.submitMobileProfile({
+    draftToken: loginResult.draft.token,
+    requestedRole: "special",
+    profile: {
+      name: "跨实例审核测试",
+      regionId: store.regions[0]?.id,
+      regionName: store.regions[0]?.name,
+      neighborhood: store.regions[0]?.name
+    }
+  });
+  assert.equal(submitted.state, "pending_review");
+  if (submitted.state !== "pending_review") return;
+  registrationApplicationsService.review(submitted.application.id, {
+    decision: "approved"
+  });
+  const linkedUser = store.users.find((entry) => entry.id === submitted.application.linkedUserId);
+  assert.ok(linkedUser);
+  linkedUser.tenantId = "tenant-other";
+
+  assert.throws(
+    () => authService.getAppSession(submitted.draft.token),
+    /审核结果缺少可用账号/
+  );
+  assert.ok(store.getOnboardingSession(submitted.draft.token));
+  assert.equal(store.getSessionUser(submitted.draft.token), undefined);
+});
+
 test("审核驳回后凭原审核凭证修改资料并重新提交，不再接收第二次验证码", async () => {
   const { authService, registrationApplicationsService, store } = createHarness();
   const loginResult = await authService.appLogin("13700009993", "123456");

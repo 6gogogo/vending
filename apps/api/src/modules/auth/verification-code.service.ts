@@ -117,12 +117,17 @@ export class VerificationCodeService {
   async verifyCodeWithContext(
     phone: string,
     code: string,
-    purpose: VerificationPurpose = "general"
+    purpose: VerificationPurpose = "general",
+    beforeConsume?: (checked: VerificationCodeCheckResult) => boolean
   ): Promise<VerificationCodeCheckResult> {
     const checked = await this.checkCodeWithContext(phone, code, purpose);
 
     if (!checked.verified) {
       return checked;
+    }
+
+    if (beforeConsume && !beforeConsume(checked)) {
+      return { ...checked, verified: false };
     }
 
     return {

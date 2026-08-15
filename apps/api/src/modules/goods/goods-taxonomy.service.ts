@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException
+} from "@nestjs/common";
 
 import type {
   EntitlementLimit,
@@ -38,7 +44,8 @@ export interface GoodsTaxonomyAssignmentPreview {
 export class GoodsTaxonomyService {
   constructor(@Inject(InMemoryStoreService) private readonly store: InMemoryStoreService) {}
 
-  getTree() {
+  getTree(actorTenantId: string) {
+    this.assertCurrentInstanceTenant(actorTenantId);
     const nodes = this.store.goodsTaxonomyNodes
       .slice()
       .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name));
@@ -55,8 +62,10 @@ export class GoodsTaxonomyService {
 
   createNode(
     payload: { name: string; parentId: string | null; sortOrder?: number },
-    actorUserId?: string
+    actorUserId: string | undefined,
+    actorTenantId: string
   ) {
+    this.assertCurrentInstanceTenant(actorTenantId);
     return this.store.runAtomicMutation(() => {
       const name = this.normalizeName(payload.name);
       const parentId = payload.parentId ?? null;
@@ -95,17 +104,22 @@ export class GoodsTaxonomyService {
     });
   }
 
-  previewChange(nodeId: string, patch: NodePatch): GoodsTaxonomyChangePreview {
+  previewChange(
+    nodeId: string,
+    patch: NodePatch,
+    actorTenantId: string
+  ): GoodsTaxonomyChangePreview {
+    this.assertCurrentInstanceTenant(actorTenantId);
     const node = this.findNode(nodeId);
     const nextParentId = patch.parentId === undefined ? node.parentId : patch.parentId;
-    const affectedNodeIds = this.collectDescendantIds(nodeId);
+    const subtreeNodeIds = this.collectDescendantIds(nodeId);
     let blockReason: string | undefined;
 
     try {
       if (node.parentId === null && nextParentId !== null) {
         throw new BadRequestException("根节点不能移动。");
       }
-      if (nextParentId === nodeId || (nextParentId !== null && affectedNodeIds.includes(nextParentId))) {
+      if (nextParentId === nodeId || (nextParentId !== null && subtreeNodeIds.includes(nextParentId))) {
         throw new BadRequestException("分类移动会形成循环引用。");
       }
       this.assertParentAvailable(nextParentId);
@@ -124,6 +138,8 @@ export class GoodsTaxonomyService {
       blockReason = error instanceof Error ? error.message : "分类变更不可执行。";
     }
 
+    const reservationImpact = !blockReason && this.hasReservationImpact(node, patch, nextParentId);
+    const affectedNodeIds = reservationImpact ? subtreeNodeIds : [];
     const affectedGoodsIds = this.store.goodsCatalog
       .filter((goods) => goods.taxonomyNodeId && affectedNodeIds.includes(goods.taxonomyNodeId))
       .map((goods) => goods.goodsId);
@@ -174,13 +190,15 @@ export class GoodsTaxonomyService {
   applyChange(
     nodeId: string,
     payload: NodePatch & { expectedRevision: number },
-    actorUserId?: string
+    actorUserId: string | undefined,
+    actorTenantId: string
   ) {
+    this.assertCurrentInstanceTenant(actorTenantId);
     if (payload.expectedRevision !== this.getTreeRevision()) {
       throw new BadRequestException("分类树已发生变化，请重新预览后再提交。");
     }
 
-    const preview = this.previewChange(nodeId, payload);
+    const preview = this.previewChange(nodeId, payload, actorTenantId);
     if (!preview.allowed) {
       throw new BadRequestException(preview.blockReason ?? "分类变更不可执行。");
     }
@@ -191,6 +209,9 @@ export class GoodsTaxonomyService {
       }
 
       const node = this.findNode(nodeId);
+      if (!this.hasNodeChange(node, payload)) {
+        return { node, cancelledReservationIds: [], preview };
+      }
       const before = structuredClone(node);
       const now = new Date().toISOString();
       if (payload.name !== undefined) node.name = this.normalizeName(payload.name);
@@ -223,12 +244,14 @@ export class GoodsTaxonomyService {
 
   assignGoods(
     payload: { taxonomyNodeId: string; goodsIds: string[]; expectedRevision: number },
-    actorUserId?: string
+    actorUserId: string | undefined,
+    actorTenantId: string
   ) {
+    this.assertCurrentInstanceTenant(actorTenantId);
     if (payload.expectedRevision !== this.getTreeRevision()) {
       throw new BadRequestException("分类树已发生变化，请重新预览后再提交。");
     }
-    const preview = this.previewGoodsAssignment(payload);
+    const preview = this.previewGoodsAssignment(payload, actorTenantId);
     return this.store.runAtomicMutation(() => {
       if (payload.expectedRevision !== this.getTreeRevision()) {
         throw new BadRequestException("分类树已发生变化，请重新预览后再提交。");
@@ -277,7 +300,11 @@ export class GoodsTaxonomyService {
     });
   }
 
-  previewGoodsAssignment(payload: { taxonomyNodeId: string; goodsIds: string[] }): GoodsTaxonomyAssignmentPreview {
+  previewGoodsAssignment(
+    payload: { taxonomyNodeId: string; goodsIds: string[] },
+    actorTenantId: string
+  ): GoodsTaxonomyAssignmentPreview {
+    this.assertCurrentInstanceTenant(actorTenantId);
     const node = this.findNode(payload.taxonomyNodeId);
     if (node.status !== "active") throw new BadRequestException("不能把货品归入已停用分类。");
     const goodsIds = [...new Set(payload.goodsIds.map((value) => value.trim()).filter(Boolean))];
@@ -351,6 +378,33 @@ export class GoodsTaxonomyService {
 
   getTreeRevision() {
     return this.store.goodsTaxonomyNodes.reduce((maximum, node) => Math.max(maximum, node.revision), 0);
+  }
+
+  private assertCurrentInstanceTenant(actorTenantId?: string) {
+    if (!actorTenantId || actorTenantId !== this.store.getDefaultTenantId()) {
+      throw new ForbiddenException("当前账号无权访问其他实例的货品分类。");
+    }
+  }
+
+  private hasNodeChange(node: GoodsTaxonomyNode, patch: NodePatch) {
+    return (
+      (patch.name !== undefined && this.normalizeName(patch.name) !== node.name) ||
+      (patch.parentId !== undefined && patch.parentId !== node.parentId) ||
+      (patch.status !== undefined && patch.status !== node.status) ||
+      (patch.sortOrder !== undefined && this.normalizeSortOrder(patch.sortOrder) !== node.sortOrder)
+    );
+  }
+
+  private hasReservationImpact(
+    node: GoodsTaxonomyNode,
+    patch: NodePatch,
+    nextParentId: string | null
+  ) {
+    return (
+      (patch.name !== undefined && this.normalizeName(patch.name) !== node.name) ||
+      nextParentId !== node.parentId ||
+      (patch.status === "inactive" && node.status !== "inactive")
+    );
   }
 
   private findNode(nodeId: string) {

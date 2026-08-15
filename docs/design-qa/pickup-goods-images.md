@@ -4,9 +4,7 @@
 
 - 参考实现：`C:\Users\LEGION\.codex\visualizations\2026\08\08\019fe03e-85d0-7a00-ae0d-b3f1e3566ea8\goods-image-variant-b-adjusted.png`
 - 实际页面：`apps/mobile/src/pages/special/device-detail.vue`
-- 实施截图：`docs/test-artifacts/product-image-b-qa/implementation-pickup-430x900.png`
-- 全页对照：`docs/test-artifacts/product-image-b-qa/comparison-full-430x900.png`
-- 固定操作栏对照：`docs/test-artifacts/product-image-b-qa/comparison-fixed-action.png`
+- 验收方式：在隔离数据平面中直接检查正式页面，并记录下面的视口、加载和固定栏测量结果；临时截图不作为仓库构建依赖，也不在文档中引用不存在的路径。
 - 视口与状态：430 x 900 CSS px，设备像素比 1；扫码即时领取模式；无既有预约；怡宝饮用纯净水已选 1 件。
 
 ## 可见结果
@@ -25,4 +23,4 @@
 
 ## 最终结果
 
-passed
+通过

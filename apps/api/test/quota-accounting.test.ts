@@ -252,6 +252,78 @@ test("树状额度按最具体规则优先并向后代货品开放", () => {
   assert.equal(summary.remainingFreeTotal, 4);
 });
 
+test("首页树状额度扣除有效预约已经锁定的额度池", () => {
+  const store = createIsolatedStore();
+  const user = store.users.find((entry) => entry.role === "special");
+  const goods = store.goodsCatalog[0];
+  const device = store.devices[0];
+  assert.ok(user);
+  assert.ok(goods);
+  assert.ok(device);
+  const now = new Date().toISOString();
+  store.goodsTaxonomyNodes.splice(0, store.goodsTaxonomyNodes.length,
+    { id: "any", name: "任意", parentId: null, status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now },
+    { id: "food", name: "食品", parentId: "any", status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now }
+  );
+  goods.taxonomyNodeId = "food";
+  user.accessPolicies = [{
+    id: "reservation-lock-policy",
+    name: "预约锁定额度",
+    weekdays: [0, 1, 2, 3, 4, 5, 6],
+    startHour: 0,
+    endHour: 24,
+    goodsLimits: [],
+    entitlementLimits: [
+      { id: "food-limit", targetType: "taxonomy_node", targetId: "food", quantity: 1 },
+      { id: "any-limit", targetType: "taxonomy_node", targetId: "any", quantity: 3 }
+    ],
+    status: "active"
+  }];
+  store.inventory.splice(0, store.inventory.length);
+  store.reservations.splice(0, store.reservations.length);
+  const before = new AccessRulesService(store).getQuotaSummaryForUser(user);
+  const lockedPool = before.remainingPools?.find((pool) => pool.limitId === "food-limit");
+  assert.ok(lockedPool);
+  store.reservations.push({
+    id: "reservation-lock-summary",
+    userId: user.id,
+    phone: user.phone,
+    userName: user.name,
+    deviceCode: device.deviceCode,
+    doorNum: device.doors[0]?.doorNum ?? "1",
+    status: "active",
+    inventoryReservationMode: "goods_quantity",
+    batchAllocationTiming: "on_open",
+    items: [{ goodsId: goods.goodsId, goodsName: goods.name, category: goods.category, quantity: 1 }],
+    entitlementAllocations: [{
+      poolId: lockedPool.poolId,
+      policyId: lockedPool.policyId,
+      limitId: lockedPool.limitId,
+      targetType: lockedPool.targetType,
+      targetId: lockedPool.targetId,
+      goodsId: goods.goodsId,
+      quantity: 1
+    }],
+    reservedAt: now,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    createdAt: now,
+    updatedAt: now
+  });
+
+  const afterLock = new AccessRulesService(store).getQuotaSummaryForUser(user);
+
+  assert.equal(before.receivableByGoods?.[goods.goodsId], 4);
+  assert.equal(afterLock.receivableByGoods?.[goods.goodsId], 3);
+  assert.equal(afterLock.remainingFreeTotal, 3);
+  assert.equal(afterLock.remainingPools?.find((pool) => pool.limitId === "food-limit")?.remaining, 0);
+
+  store.reservations[0]!.entitlementAllocations![0]!.poolId =
+    "reservation-lock-policy:2000-01-01:food-limit";
+  const afterOldBusinessDayLock = new AccessRulesService(store).getQuotaSummaryForUser(user);
+  assert.equal(afterOldBusinessDayLock.receivableByGoods?.[goods.goodsId], 4);
+  assert.equal(afterOldBusinessDayLock.remainingFreeTotal, 4);
+});
+
 test("结算流水持久化本次实际免费数量", () => {
   const { store, service } = createInventoryOrdersHarness();
   const event = buildEvent(store);

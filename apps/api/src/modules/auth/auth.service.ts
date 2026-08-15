@@ -112,7 +112,8 @@ export class AuthService {
     const verification = await this.verifyCodeWithContext(
       phone,
       code,
-      "app-login"
+      "app-login",
+      (checked) => !checked.tenantId || checked.tenantId === tenantId
     );
 
     if (!verification.verified) {
@@ -623,7 +624,10 @@ export class AuthService {
     if (application.status === "approved") {
       const approvedUser = application.linkedUserId
         ? this.store.users.find(
-            (entry) => entry.id === application.linkedUserId && entry.status === "active"
+            (entry) =>
+              entry.id === application.linkedUserId &&
+              entry.status === "active" &&
+              this.store.getUserTenantId(entry) === onboarding.session.tenantId
           )
         : undefined;
       if (!approvedUser?.mobileProfileCompleted) {
@@ -1682,13 +1686,15 @@ export class AuthService {
   private async verifyCodeWithContext(
     phone: string,
     code: string,
-    purpose: "app-login" | "password-reset"
+    purpose: "app-login" | "password-reset",
+    beforeConsume?: (checked: VerificationCodeCheckResult) => boolean
   ) {
     const contextualService = this.verificationCodeService as unknown as {
       verifyCodeWithContext?: (
         targetPhone: string,
         targetCode: string,
-        targetPurpose: "app-login" | "password-reset"
+        targetPurpose: "app-login" | "password-reset",
+        guard?: (checked: VerificationCodeCheckResult) => boolean
       ) => Promise<{
         verified: boolean;
         tenantId?: string;
@@ -1701,7 +1707,8 @@ export class AuthService {
       return contextualService.verifyCodeWithContext(
         phone,
         code,
-        purpose
+        purpose,
+        beforeConsume
       );
     }
 
