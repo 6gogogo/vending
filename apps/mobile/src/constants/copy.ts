@@ -80,7 +80,8 @@ export const appCopy = {
       openCount: (quantity: number) => `开柜领取（${quantity} 件）`,
       reservationClosed: "预约暂未开放",
       submitCount: (quantity: number) => `提交预约（${quantity} 件）`,
-      selectQuantity: "请选择领取数量"
+      selectQuantity: "请选择领取数量",
+      selectedCount: (quantity: number) => `已选 ${quantity} 件`
     },
     hint: {
       syncing: "正在同步柜机、库存、额度和预约信息。",
@@ -143,9 +144,13 @@ export const appCopy = {
     },
     goods: {
       title: "选择领取数量",
-      hint: "库存与今日可领取数量会在开柜前再次校验",
-      meta: (category: string, stock: number, remaining: number) =>
-        `${category} · 库存 ${stock} · 可领取 ${remaining}`,
+      hint: "部分商品暂不可选，说明该商品正在预约中，请选择其他可领取商品。",
+      stockLabel: "库存",
+      availableLabel: "可领取",
+      imageAlt: (goodsName: string) => `${goodsName}商品图`,
+      imageUnavailable: "图片暂不可用",
+      availabilityAriaLabel: (stock: number, available: number) =>
+        `库存 ${stock} 件，可领取 ${available} 件`,
       decreaseAriaLabel: (goodsName: string) => `为${goodsName}减少一件`,
       increaseAriaLabel: (goodsName: string) => `为${goodsName}增加一件`,
       loadingTitle: "正在加载商品",

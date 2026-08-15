@@ -15,7 +15,6 @@ import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
-import { categoryLabelMap } from "../../constants/labels";
 import { appCopy } from "../../constants/copy";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
@@ -60,6 +59,7 @@ const deviceName = ref(appCopy.cabinetPickup.defaultDeviceName);
 const currentDevice = ref<DeviceRecord>();
 const goodsList = ref<GoodsEntry[]>([]);
 const selectedMap = reactive<Record<string, number>>({});
+const failedImageMap = reactive<Record<string, boolean>>({});
 const reservationSettings = ref<ReservationSettings>();
 const reservations = ref<CabinetReservationRecord[]>([]);
 const actionError = ref("");
@@ -92,6 +92,13 @@ const activeReservations = computed(() =>
 );
 
 const nearestReservation = computed(() => activeReservations.value[0]);
+const actionItemTotal = computed(
+  () =>
+    nearestReservation.value?.items.reduce(
+      (total, item) => total + item.quantity,
+      0
+    ) ?? selectedTotal.value
+);
 
 const deviceStatusPresentation = computed(() =>
   currentDevice.value
@@ -200,6 +207,16 @@ const clearSelection = () => {
   }
 };
 
+const clearImageFailures = () => {
+  for (const key of Object.keys(failedImageMap)) {
+    delete failedImageMap[key];
+  }
+};
+
+const handleGoodsImageError = (goodsId: string) => {
+  failedImageMap[goodsId] = true;
+};
+
 const getRemaining = (goods: Pick<GoodsEntry, "goodsId" | "category">) => {
   const goodsQuota = sessionStore.quota?.remainingByGoods;
   if (goodsQuota && Object.keys(goodsQuota).length > 0) {
@@ -249,6 +266,7 @@ const getCurrentPageCount = () => {
 };
 
 const preparePickupHomeStack = () => {
+  // #ifdef MP-WEIXIN
   if (
     !scanMode.value ||
     pickupHomeStackAttempted.value ||
@@ -270,6 +288,9 @@ const preparePickupHomeStack = () => {
     }
   });
   return true;
+  // #endif
+
+  return false;
 };
 
 const load = async () => {
@@ -315,6 +336,7 @@ const load = async () => {
     sessionStore.setQuota(quota);
     reservationSettings.value = settings;
     reservations.value = reservationList;
+    clearImageFailures();
     goodsList.value = goods.filter((item) => (item.stock ?? 0) > 0);
     clearSelection();
   } catch (error) {
@@ -724,6 +746,7 @@ onLoad((query) => {
 
 <template>
   <MobileShell
+    class="pickup-page"
     :eyebrow="scanMode ? appCopy.cabinetPickup.entry.pickupEyebrow : appCopy.cabinetPickup.entry.reservationEyebrow"
     :title="deviceName"
     :subtitle="deviceCode ? appCopy.cabinetPickup.entry.code(deviceCode) : appCopy.cabinetPickup.entry.identifying"
@@ -787,7 +810,7 @@ onLoad((query) => {
           </button>
           <text
             v-if="actionError"
-            class="primary-action__hint primary-action__hint--error"
+            class="receipt-error"
             role="alert"
             aria-live="assertive"
           >
@@ -820,38 +843,71 @@ onLoad((query) => {
             </view>
 
             <view v-if="goodsList.length" class="goods-list">
-              <view v-for="goods in goodsList" :key="goods.goodsId" class="goods-item">
-                <MenuIcon
-                  :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'"
-                  size="md"
-                  tone="accent"
-                />
-                <view class="goods-item__main">
-                  <text class="goods-item__name">{{ goods.name }}</text>
-                  <text class="goods-item__meta">
-                    {{ appCopy.cabinetPickup.goods.meta(categoryLabelMap[goods.category], goods.stock ?? 0, getRemaining(goods)) }}
-                  </text>
+              <view
+                v-for="goods in goodsList"
+                :key="goods.goodsId"
+                class="goods-item"
+                :class="{ 'goods-item--selected': (selectedMap[goods.goodsId] ?? 0) > 0 }"
+              >
+                <view class="goods-item__image-shell">
+                  <image
+                    v-if="goods.imageUrl && !failedImageMap[goods.goodsId]"
+                    class="goods-item__image"
+                    :src="goods.imageUrl"
+                    mode="aspectFit"
+                    :alt="appCopy.cabinetPickup.goods.imageAlt(goods.name)"
+                    lazy-load
+                    @error="handleGoodsImageError(goods.goodsId)"
+                  />
+                  <view
+                    v-else
+                    class="goods-item__image-fallback"
+                    :aria-label="appCopy.cabinetPickup.goods.imageUnavailable"
+                  >
+                    <MenuIcon
+                      :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'"
+                      size="lg"
+                      tone="accent"
+                    />
+                    <text>{{ appCopy.cabinetPickup.goods.imageUnavailable }}</text>
+                  </view>
                 </view>
-                <view class="stepper">
-                  <button
-                    class="stepper__button"
-                    :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) <= 0"
-                    :aria-label="appCopy.cabinetPickup.goods.decreaseAriaLabel(goods.name)"
-                    @tap="updateSelected(goods, -1)"
+                <view class="goods-item__body">
+                  <text class="goods-item__name">{{ goods.name }}</text>
+                  <view
+                    class="goods-item__stats"
+                    :aria-label="appCopy.cabinetPickup.goods.availabilityAriaLabel(goods.stock ?? 0, getSelectableMaximum(goods))"
                   >
-                    −
-                  </button>
-                  <text class="stepper__value" aria-live="polite" aria-atomic="true">
-                    {{ selectedMap[goods.goodsId] ?? 0 }}
-                  </text>
-                  <button
-                    class="stepper__button"
-                    :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) >= getSelectableMaximum(goods)"
-                    :aria-label="appCopy.cabinetPickup.goods.increaseAriaLabel(goods.name)"
-                    @tap="updateSelected(goods, 1)"
-                  >
-                    +
-                  </button>
+                    <view class="goods-stat">
+                      <text class="goods-stat__label">{{ appCopy.cabinetPickup.goods.stockLabel }}</text>
+                      <text class="goods-stat__value">{{ goods.stock ?? 0 }}</text>
+                    </view>
+                    <view class="goods-stat goods-stat--available">
+                      <text class="goods-stat__label">{{ appCopy.cabinetPickup.goods.availableLabel }}</text>
+                      <text class="goods-stat__value">{{ getSelectableMaximum(goods) }}</text>
+                    </view>
+                  </view>
+                  <view class="stepper">
+                    <button
+                      class="stepper__button"
+                      :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) <= 0"
+                      :aria-label="appCopy.cabinetPickup.goods.decreaseAriaLabel(goods.name)"
+                      @tap="updateSelected(goods, -1)"
+                    >
+                      −
+                    </button>
+                    <text class="stepper__value" aria-live="polite" aria-atomic="true">
+                      {{ selectedMap[goods.goodsId] ?? 0 }}
+                    </text>
+                    <button
+                      class="stepper__button"
+                      :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) >= getSelectableMaximum(goods)"
+                      :aria-label="appCopy.cabinetPickup.goods.increaseAriaLabel(goods.name)"
+                      @tap="updateSelected(goods, 1)"
+                    >
+                      +
+                    </button>
+                  </view>
                 </view>
               </view>
             </view>
@@ -863,39 +919,48 @@ onLoad((query) => {
             />
           </view>
 
-          <view v-if="showPrimaryAction" class="primary-action">
-            <text
-              class="primary-action__hint"
-              :class="{ 'primary-action__hint--error': Boolean(actionError) }"
-              :role="actionError ? 'alert' : 'status'"
-              aria-live="polite"
-            >
-              {{ actionHint }}
-            </text>
-            <button
-              class="vm-button"
-              :class="scanMode ? 'vm-button--warning' : 'vm-button--primary'"
-              :disabled="primaryActionDisabled"
-              :loading="loading || submitting"
-              @tap="handlePrimaryAction"
-            >
-              {{ primaryActionLabel }}
-            </button>
-          </view>
         </template>
       </view>
     </GlassCard>
+
+    <view v-if="showPrimaryAction" class="primary-action">
+      <view class="primary-action__summary">
+        <text
+          class="primary-action__hint"
+          :class="{ 'primary-action__hint--error': Boolean(actionError) }"
+          :role="actionError ? 'alert' : 'status'"
+          aria-live="polite"
+        >
+          {{ actionHint }}
+        </text>
+        <text v-if="actionItemTotal > 0" class="primary-action__count">
+          {{ appCopy.cabinetPickup.action.selectedCount(actionItemTotal) }}
+        </text>
+      </view>
+      <button
+        class="vm-button"
+        :class="scanMode ? 'vm-button--warning' : 'vm-button--primary'"
+        :disabled="primaryActionDisabled"
+        :loading="loading || submitting"
+        @tap="handlePrimaryAction"
+      >
+        {{ primaryActionLabel }}
+      </button>
+    </view>
   </MobileShell>
 </template>
 
 <style scoped>
+.pickup-page {
+  padding-bottom: calc(260rpx + env(safe-area-inset-bottom));
+}
+
 .pickup-card {
   overflow: hidden;
 }
 
 .pickup-stack,
 .goods-section,
-.goods-list,
 .primary-action,
 .reservation-receipt,
 .locked-reservation,
@@ -931,8 +996,13 @@ onLoad((query) => {
   font-weight: 700;
 }
 
-.goods-section,
+.goods-section {
+  gap: 20rpx;
+}
+
 .goods-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20rpx;
 }
 
@@ -946,7 +1016,7 @@ onLoad((query) => {
 .reservation-receipt__title,
 .locked-reservation__title {
   color: var(--vm-ink);
-  font-size: 30rpx;
+  font-size: 34rpx;
   font-weight: 800;
 }
 
@@ -954,44 +1024,121 @@ onLoad((query) => {
 .locked-reservation__hint,
 .primary-action__hint {
   color: var(--vm-muted);
-  font-size: 24rpx;
+  font-size: 23rpx;
   line-height: 1.6;
 }
 
 .goods-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 18rpx;
-  padding: 22rpx;
-  border: 1px solid rgba(46, 125, 70, 0.14);
-  border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.82);
-}
-
-.goods-item__main {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 6rpx;
+  overflow: hidden;
+  border: 2rpx solid rgba(46, 125, 70, 0.28);
+  border-radius: 30rpx;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12rpx 30rpx rgba(39, 70, 46, 0.06);
+}
+
+.goods-item--selected {
+  border-color: rgba(46, 125, 70, 0.68);
+  box-shadow: 0 14rpx 34rpx rgba(46, 125, 70, 0.12);
+}
+
+.goods-item__image-shell {
+  display: flex;
+  width: 100%;
+  height: 260rpx;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-bottom: 1rpx solid rgba(46, 125, 70, 0.1);
+  background: linear-gradient(145deg, #f4f8ef, #fff7eb);
+}
+
+.goods-item__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 14rpx;
+}
+
+.goods-item__image-fallback {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12rpx;
+  color: var(--vm-muted);
+  font-size: 23rpx;
+  font-weight: 700;
+}
+
+.goods-item__body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  flex: 1;
+  gap: 18rpx;
+  padding: 22rpx 20rpx 20rpx;
 }
 
 .goods-item__name {
+  display: block;
+  min-height: 94rpx;
   color: var(--vm-ink);
-  font-size: 28rpx;
+  font-size: 34rpx;
+  font-weight: 800;
+  line-height: 1.38;
+  word-break: break-word;
+}
+
+.goods-item__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10rpx;
+}
+
+.goods-stat {
+  display: flex;
+  min-width: 0;
+  min-height: 68rpx;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7rpx;
+  padding: 10rpx 6rpx;
+  border-radius: 18rpx;
+  color: var(--vm-muted);
+  background: rgba(46, 125, 70, 0.08);
+  white-space: nowrap;
+}
+
+.goods-stat--available {
+  color: #7d4a18;
+  background: rgba(255, 138, 43, 0.12);
+}
+
+.goods-stat__label {
+  font-size: 24rpx;
   font-weight: 750;
 }
 
-.goods-item__meta {
-  color: var(--vm-muted);
-  font-size: 23rpx;
-  line-height: 1.5;
+.goods-stat__value {
+  color: var(--vm-accent-strong);
+  font-family: var(--vm-font-number);
+  font-size: 40rpx;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.goods-stat--available .goods-stat__value {
+  color: var(--vm-warning);
 }
 
 .stepper {
   display: grid;
-  grid-template-columns: 88rpx 60rpx 88rpx;
+  grid-template-columns: 1fr 64rpx 1fr;
   align-items: center;
+  width: 100%;
   overflow: hidden;
   border: 1px solid rgba(46, 125, 70, 0.2);
   border-radius: 18rpx;
@@ -999,8 +1146,8 @@ onLoad((query) => {
 }
 
 .stepper__button {
-  width: 88rpx;
-  min-height: 88rpx;
+  width: 100%;
+  min-height: 82rpx;
   margin: 0;
   padding: 0;
   border: 0;
@@ -1008,7 +1155,7 @@ onLoad((query) => {
   color: var(--vm-accent-strong);
   background: rgba(46, 125, 70, 0.08);
   font-size: 34rpx;
-  line-height: 88rpx;
+  line-height: 82rpx;
 }
 
 .stepper__button::after {
@@ -1023,18 +1170,62 @@ onLoad((query) => {
 .stepper__value {
   color: var(--vm-ink);
   text-align: center;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 800;
 }
 
 .primary-action {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  bottom: 0;
+  width: 100%;
+  max-width: 960rpx;
   gap: 14rpx;
-  padding-top: 4rpx;
+  padding: 16rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  border-top: 1rpx solid rgba(46, 125, 70, 0.14);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 -18rpx 44rpx rgba(26, 51, 33, 0.13);
 }
 
-.primary-action__hint--error {
+.primary-action__summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.primary-action__hint {
+  min-width: 0;
+  flex: 1;
+  line-height: 1.4;
+}
+
+.primary-action__count {
+  flex-shrink: 0;
+  color: var(--vm-accent-strong);
+  font-size: 26rpx;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.primary-action .vm-button {
+  min-height: 96rpx;
+  border-radius: 26rpx;
+  font-size: 32rpx;
+  font-weight: 800;
+}
+
+.primary-action__hint--error,
+.receipt-error {
   color: var(--vm-danger);
   font-weight: 700;
+}
+
+.receipt-error {
+  font-size: 24rpx;
+  line-height: 1.6;
 }
 
 .reservation-receipt,
@@ -1119,7 +1310,6 @@ onLoad((query) => {
 }
 
 @media (max-width: 420px) {
-  .cabinet-identity,
   .reservation-receipt__head,
   .locked-reservation__head,
   .receipt-row {
@@ -1133,18 +1323,50 @@ onLoad((query) => {
     text-align: left;
   }
 
-  .goods-item {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
+}
 
-  .stepper {
-    grid-column: 1 / -1;
-    justify-self: stretch;
-    grid-template-columns: 1fr 64rpx 1fr;
-  }
+.vm-page--accessible.pickup-page {
+  padding-bottom: calc(340rpx + env(safe-area-inset-bottom));
+}
 
-  .stepper__button {
-    width: 100%;
-  }
+.vm-page--accessible .goods-list {
+  grid-template-columns: 1fr;
+}
+
+.vm-page--accessible .goods-item__image-shell {
+  height: 380rpx;
+}
+
+.vm-page--accessible .goods-item__name {
+  min-height: 0;
+  font-size: 42rpx;
+}
+
+.vm-page--accessible .goods-stat__label {
+  font-size: 30rpx;
+}
+
+.vm-page--accessible .goods-stat__value {
+  font-size: 50rpx;
+}
+
+.vm-page--accessible .stepper__button {
+  min-height: 108rpx;
+  font-size: 42rpx;
+  line-height: 108rpx;
+}
+
+.vm-page--accessible .stepper__value,
+.vm-page--accessible .primary-action__count {
+  font-size: 36rpx;
+}
+
+.vm-page--accessible .primary-action__hint {
+  color: var(--vm-text);
+  font-size: 30rpx;
+}
+
+.vm-page--accessible .primary-action__hint--error {
+  color: var(--vm-danger);
 }
 </style>
