@@ -7,7 +7,13 @@
   "transformPx": false,
   "mp-weixin": {
     "appid": "wx4f14e307e19e68c1",
-    "projectname": "公益智助柜移动端"
+    "projectname": "公益智助柜移动端",
+    "permission": {
+      "scope.userLocation": {
+        "desc": "用于按距离展示附近柜机"
+      }
+    },
+    "requiredPrivateInfos": ["getLocation"]
   },
   "app-plus": {
     "usingComponents": true,
