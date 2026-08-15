@@ -1,0 +1,21 @@
+[Unit]
+Description=Vending API candidate on Spark
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fivegogogo/vending/current
+Environment=PATH=/home/fivegogogo/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/fivegogogo/.nvm/versions/node/v22.22.2/bin/npm run start:api:built
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

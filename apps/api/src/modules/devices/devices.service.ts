@@ -330,11 +330,29 @@ export class DevicesService {
     const device = this.getByCodeForTenant(deviceCode, viewerTenantId);
     this.alertsService?.refreshManualSettlementTasks(deviceCode);
     const businessDateKey = getBusinessDayKey(new Date());
-    const recentEvents = this.store.events
+    const orderedDeviceEvents = this.store.events
       .filter((entry) => entry.deviceCode === deviceCode)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .slice(0, 12)
-      .map((event) => this.attachPaymentRecoveryState(event));
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const recentEventIds = new Set(orderedDeviceEvents.slice(0, 12).map((event) => event.eventId));
+    const recentEvents = orderedDeviceEvents
+      .filter(
+        (event) =>
+          recentEventIds.has(event.eventId) ||
+          this.isPendingZeroCostOperationalCompletion(event) ||
+          (
+            event.status === "settled" &&
+            event.amount === 0 &&
+            event.paymentNotifyStatus !== "success" &&
+            Boolean(event.paymentNotifyUrl)
+          )
+      )
+      .map((event) => {
+        const user = this.store.users.find((candidate) => candidate.id === event.userId);
+        return {
+          ...this.attachPaymentRecoveryState(event),
+          userName: user?.name
+        };
+      });
     const recentLogs = this.store.logs
       .filter(
         (entry) =>
@@ -460,6 +478,17 @@ export class DevicesService {
         }
       }))
     };
+  }
+
+  private isPendingZeroCostOperationalCompletion(event: CabinetEventRecord) {
+    return (
+      event.status === "closed" &&
+      event.role !== "special" &&
+      event.hasInboundGoods === true &&
+      event.amount === 0 &&
+      !event.orderNo.startsWith("pending-") &&
+      event.paymentNotifyStatus !== "success"
+    );
   }
 
   private findPendingRefundRecovery(

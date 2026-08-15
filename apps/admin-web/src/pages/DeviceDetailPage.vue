@@ -642,7 +642,7 @@ const logSubjectSummary = (log: NonNullable<typeof recentLogs.value>[number]) =>
   buildLogSubjectSummary(log);
 
 const resolveEventUserLabel = (event: NonNullable<typeof recentEvents.value>[number]) =>
-  servedUserNameMap.value.get(event.userId) ?? event.userId;
+  event.userName ?? servedUserNameMap.value.get(event.userId) ?? event.userId;
 
 const summarizeEventGoods = (event: NonNullable<typeof recentEvents.value>[number]) =>
   event.goods.length

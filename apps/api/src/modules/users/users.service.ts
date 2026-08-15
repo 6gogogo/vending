@@ -5,6 +5,7 @@ import type {
   BackofficeRole,
   BatchConsumptionLine,
   InventoryMovement,
+  RegionRecord,
   SpecialAccessPolicyGoodsLimit,
   UserAccessPolicy,
   UserLedgerStatus,
@@ -756,7 +757,20 @@ export class UsersService {
       }
     }
 
-    const imported = normalizedEntries.map((entry) => {
+    const plannedRegions = new Map<string, RegionRecord>();
+    const entriesWithRegions = normalizedEntries.map((entry) => ({
+      ...entry,
+      resolvedRegion: this.resolveImportRegion(
+        entry.regionId,
+        entry.regionName ?? entry.neighborhood,
+        plannedRegions
+      )
+    }));
+
+    this.store.regions.push(...plannedRegions.values());
+
+    const imported = entriesWithRegions.map((entry) => {
+      const resolvedRegion = entry.resolvedRegion;
       const existing = this.store.users.find(
         (user) => user.phone === entry.phone
       );
@@ -764,14 +778,14 @@ export class UsersService {
       if (existing) {
         Object.assign(existing, {
           name: entry.name,
-          ...(entry.neighborhood !== undefined
-            ? { neighborhood: entry.neighborhood }
+          ...(resolvedRegion.regionName !== undefined
+            ? { neighborhood: resolvedRegion.regionName }
             : {}),
-          ...(entry.regionId !== undefined
-            ? { regionId: entry.regionId }
+          ...(resolvedRegion.regionId !== undefined
+            ? { regionId: resolvedRegion.regionId }
             : {}),
-          ...(entry.regionName !== undefined
-            ? { regionName: entry.regionName }
+          ...(resolvedRegion.regionName !== undefined
+            ? { regionName: resolvedRegion.regionName }
             : {}),
           ...(entry.tags !== undefined ? { tags: [...entry.tags] } : {}),
           ...(importRole === "special" && entry.quota !== undefined
@@ -794,9 +808,9 @@ export class UsersService {
         name: entry.name,
         status: "active",
         tags: entry.tags ?? [],
-        neighborhood: entry.regionName ?? entry.neighborhood,
-        regionId: entry.regionId,
-        regionName: entry.regionName ?? entry.neighborhood,
+        neighborhood: resolvedRegion.regionName,
+        regionId: resolvedRegion.regionId,
+        regionName: resolvedRegion.regionName,
         quota: entry.quota,
         mobileProfileCompleted: importRole !== "special"
       };
@@ -812,12 +826,15 @@ export class UsersService {
       actor: this.getAdminActor(),
       metadata: {
         role: importRole,
-        count: imported.length
+        count: imported.length,
+        createdRegionCount: plannedRegions.size,
+        createdRegionIds: Array.from(plannedRegions.values(), (region) => region.id)
       }
     });
 
     return {
       count: imported.length,
+      createdRegionCount: plannedRegions.size,
       imported
     };
   }
@@ -1860,6 +1877,9 @@ export class UsersService {
     const matched = this.store.getRegion(regionId);
 
     if (matched) {
+      if (matched.status !== "active") {
+        throw new BadRequestException("请选择启用中的地区。");
+      }
       return {
         regionId: matched.id,
         regionName: matched.name
@@ -1875,13 +1895,80 @@ export class UsersService {
       };
     }
 
-    const namedRegion = this.store.regions.find((entry) => entry.name === normalizedName);
+    const namedRegion = this.store.regions.find(
+      (entry) => entry.status === "active" && entry.name === normalizedName
+    );
 
     if (namedRegion) {
       return {
         regionId: namedRegion.id,
         regionName: namedRegion.name
       };
+    }
+
+    throw new BadRequestException("请选择已配置区域。");
+  }
+
+  private resolveImportRegion(
+    regionId?: string,
+    regionName?: string,
+    plannedRegions = new Map<string, RegionRecord>()
+  ) {
+    const normalizedRegionId = regionId?.trim();
+    const normalizedRegionName = regionName?.trim();
+    if (!normalizedRegionId && !normalizedRegionName) {
+      return { regionId: undefined, regionName: undefined };
+    }
+
+    const matchedById = this.store.getRegion(normalizedRegionId);
+    if (normalizedRegionId && matchedById?.status !== "active") {
+      throw new BadRequestException("区域编号未配置或已停用，请修正区域编号后重试。");
+    }
+    const matchedByName = normalizedRegionName
+      ? this.store.regions.find(
+          (entry) => entry.status === "active" && entry.name === normalizedRegionName
+        )
+      : undefined;
+
+    const inactiveNamedRegion = normalizedRegionName
+      ? this.store.regions.find(
+          (entry) => entry.status !== "active" && entry.name === normalizedRegionName
+        )
+      : undefined;
+    if (inactiveNamedRegion) {
+      throw new BadRequestException("导入区域已停用，请先启用该地区或修改表格中的地区名称。");
+    }
+
+    if (matchedById && matchedByName && matchedById.id !== matchedByName.id) {
+      throw new BadRequestException("区域编号与区域名称不一致。");
+    }
+
+    const matched =
+      matchedById?.status === "active" ? matchedById : matchedByName;
+    if (matched) {
+      if (normalizedRegionName && matched.name !== normalizedRegionName) {
+        throw new BadRequestException("区域编号与区域名称不一致。");
+      }
+      return { regionId: matched.id, regionName: matched.name };
+    }
+
+    if (normalizedRegionName && !normalizedRegionId) {
+      const planned = plannedRegions.get(normalizedRegionName);
+      if (planned) {
+        return { regionId: planned.id, regionName: planned.name };
+      }
+
+      const now = new Date().toISOString();
+      const region: RegionRecord = {
+        id: this.store.createId("region"),
+        name: normalizedRegionName,
+        status: "active",
+        sortOrder: this.store.regions.length + plannedRegions.size + 1,
+        createdAt: now,
+        updatedAt: now
+      };
+      plannedRegions.set(region.name, region);
+      return { regionId: region.id, regionName: region.name };
     }
 
     throw new BadRequestException("请选择已配置区域。");

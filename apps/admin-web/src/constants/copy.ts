@@ -10,7 +10,17 @@ export const adminCopy = {
       `已从人员台账中删除 ${count} 人，历史记录仍保留用于追溯。`,
     batchRemoveFailed: (reason: string) => `批量删除人员失败：${reason}`,
     batchRemoveButton: (count: number) => `批量删除（${count}）`,
-    batchRemovingButton: "删除中"
+    batchRemovingButton: "删除中",
+    regionLegacySummary: (count: number) =>
+      `来自现有人员 · ${count} 人 · 未设置地图位置`,
+    regionLocatedSummary: (longitude: number, latitude: number, count: number) =>
+      `${longitude.toFixed(6)}, ${latitude.toFixed(6)} · ${count} 人`,
+    regionUnlocatedSummary: (count: number) => `未设置地图位置 · ${count} 人`,
+    regionLegacyStatus: "未设置位置",
+    regionLocationSaved: (name: string) =>
+      `地区“${name}”的位置已保存，原有人员已自动关联，无需重新迁移。`,
+    regionAllLocated: "所有地区都已设置详细坐标",
+    regionListEmpty: "当前还没有地区"
   },
   map: {
     unsupported: "当前环境不支持地图加载",

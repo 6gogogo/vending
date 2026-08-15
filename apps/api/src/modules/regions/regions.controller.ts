@@ -23,9 +23,16 @@ export class RegionsController {
   @AllowedBackofficePermissions("users:manage")
   create(
     @Body() body: { name: string; sortOrder?: number; longitude?: number; latitude?: number },
-    @Req() request: { authUser?: { id: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } }
   ) {
-    return ok(this.regionsService.create(body, request.authUser?.id), "操作成功");
+    return ok(
+      this.regionsService.create(
+        body,
+        request.authUser?.id,
+        request.authUser?.tenantId
+      ),
+      "操作成功"
+    );
   }
 
   @Patch(":id")

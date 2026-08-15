@@ -501,6 +501,118 @@ test("终态人工验证码记录可由当前实例管理员清除，有效码�
   }
 });
 
+test("人工验证码历史记录可整批清除，混入有效码时整批拒绝且不留下部分删除", async () => {
+  const runningApi = await startApi();
+
+  try {
+    const adminToken = createTenantAdminToken(runningApi.store);
+    const adminHeaders = {
+      authorization: `Bearer ${adminToken}`,
+      "content-type": "application/json"
+    };
+    const credential = runningApi.store.backofficeCredentials.find(
+      (entry) => entry.role === "admin"
+    );
+    const targetUser = runningApi.store.users.find(
+      (entry) => entry.id === credential?.userId
+    );
+    assert.ok(credential?.tenantId);
+    assert.ok(targetUser);
+
+    const consumedGrant = runningApi.store.issueManualVerificationGrant({
+      phone: targetUser.phone,
+      purpose: "password-reset",
+      code: "314159",
+      issuerUserId: targetUser.id,
+      targetUserId: targetUser.id,
+      tenantId: credential.tenantId,
+      expiresInSeconds: 300
+    });
+    assert.equal(
+      runningApi.store.consumeManualVerificationGrant(
+        targetUser.phone,
+        "password-reset",
+        consumedGrant.manualGrantId!
+      ),
+      true
+    );
+    const revokedGrant = runningApi.store.issueManualVerificationGrant({
+      phone: targetUser.phone,
+      purpose: "app-login",
+      code: "271828",
+      issuerUserId: targetUser.id,
+      targetUserId: targetUser.id,
+      tenantId: credential.tenantId,
+      expiresInSeconds: 300
+    });
+    assert.ok(
+      runningApi.store.revokeManualVerificationGrant(
+        revokedGrant.manualGrantId!,
+        credential.tenantId
+      )
+    );
+    const activeGrant = runningApi.store.issueManualVerificationGrant({
+      phone: targetUser.phone,
+      purpose: "app-login",
+      code: "161803",
+      issuerUserId: targetUser.id,
+      targetUserId: targetUser.id,
+      tenantId: credential.tenantId,
+      expiresInSeconds: 300
+    });
+
+    const rejectedResponse = await fetch(
+      `${runningApi.baseUrl}/auth/manual-verification-codes/batch-clear`,
+      {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          grantIds: [consumedGrant.manualGrantId, activeGrant.manualGrantId],
+          confirmedCount: 2
+        })
+      }
+    );
+    assert.equal(rejectedResponse.status, 409);
+    assert.ok(
+      runningApi.store.manualVerificationGrants.some(
+        (entry) => entry.manualGrantId === consumedGrant.manualGrantId
+      )
+    );
+
+    const clearedResponse = await fetch(
+      `${runningApi.baseUrl}/auth/manual-verification-codes/batch-clear`,
+      {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+          grantIds: [consumedGrant.manualGrantId, revokedGrant.manualGrantId],
+          confirmedCount: 2
+        })
+      }
+    );
+    assert.equal(clearedResponse.status, 201);
+    const clearedPayload = (await clearedResponse.json()) as {
+      data?: { count?: number };
+    };
+    assert.equal(clearedPayload.data?.count, 2);
+    assert.equal(
+      runningApi.store.manualVerificationGrants.some(
+        (entry) =>
+          entry.manualGrantId === consumedGrant.manualGrantId ||
+          entry.manualGrantId === revokedGrant.manualGrantId
+      ),
+      false
+    );
+    assert.ok(
+      runningApi.store.manualVerificationGrants.some(
+        (entry) => entry.manualGrantId === activeGrant.manualGrantId
+      )
+    );
+  } finally {
+    await runningApi.app.close();
+  }
+});
+
 test("人工码可以签发最长 30 天，超过上限仍会拒绝", async () => {
   const { app, baseUrl, store } = await startApi();
 

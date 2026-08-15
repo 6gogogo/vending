@@ -200,6 +200,13 @@ export const adminApi = {
       `/auth/manual-verification-codes/${encodeURIComponent(grantId)}`
     );
   },
+  clearManualVerificationCodes(payload: { grantIds: string[]; confirmedCount: number }) {
+    requireBackofficePermission("verification-codes:manage");
+    return adminClient.post<{ count: number; cleared: ManualVerificationGrantSnapshot[] }>(
+      "/auth/manual-verification-codes/batch-clear",
+      payload
+    );
+  },
   dashboard() {
     requireBackofficePermission("dashboard:view");
     return adminClient.get<DashboardSnapshot>("/analytics/dashboard");
@@ -306,7 +313,10 @@ export const adminApi = {
     }>;
   }) {
     requireBackofficePermission("users:manage");
-    return adminClient.post<{ count: number; imported: UserRecord[] }>("/users/import", payload);
+    return adminClient.post<{ count: number; createdRegionCount: number; imported: UserRecord[] }>(
+      "/users/import",
+      payload
+    );
   },
   updateUser(
     userId: string,

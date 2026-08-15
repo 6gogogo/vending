@@ -221,6 +221,20 @@ export class AuthController {
     );
   }
 
+  @Post("manual-verification-codes/batch-clear")
+  clearManualVerificationCodes(
+    @Headers("authorization") authorization: string | undefined,
+    @Body() body: { grantIds: string[]; confirmedCount: number }
+  ) {
+    return ok(
+      this.authService.clearManualVerificationCodes(
+        this.extractBearerToken(authorization),
+        body
+      ),
+      "人工验证码历史记录已批量清除。"
+    );
+  }
+
   @Post("manual-verification-codes/:grantId/revoke")
   revokeManualVerificationCode(
     @Param("grantId") grantId: string,

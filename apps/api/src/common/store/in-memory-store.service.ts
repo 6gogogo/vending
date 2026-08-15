@@ -427,6 +427,47 @@ export class InMemoryStoreService {
       this.regions.splice(0, this.regions.length, ...nextRegions);
     }
 
+    const regionsByName = new Map(
+      this.regions
+        .filter((region) => region.status === "active")
+        .map((region) => [region.name.trim(), region])
+    );
+    for (const user of this.users) {
+      if (user.regionId) {
+        continue;
+      }
+
+      const legacyRegionName = user.regionName?.trim() || user.neighborhood?.trim();
+      const matchedRegion = legacyRegionName
+        ? regionsByName.get(legacyRegionName)
+        : undefined;
+      if (matchedRegion) {
+        user.regionId = matchedRegion.id;
+        user.regionName = matchedRegion.name;
+        user.neighborhood = matchedRegion.name;
+        changed = true;
+      }
+    }
+
+    for (const application of this.registrationApplications) {
+      if (application.profile.regionId) {
+        continue;
+      }
+
+      const legacyRegionName =
+        application.profile.regionName?.trim() ||
+        application.profile.neighborhood?.trim();
+      const matchedRegion = legacyRegionName
+        ? regionsByName.get(legacyRegionName)
+        : undefined;
+      if (matchedRegion) {
+        application.profile.regionId = matchedRegion.id;
+        application.profile.regionName = matchedRegion.name;
+        application.profile.neighborhood = matchedRegion.name;
+        changed = true;
+      }
+    }
+
     return changed;
   }
 
@@ -748,6 +789,47 @@ export class InMemoryStoreService {
     return {
       state: "cleared",
       record: structuredClone(record)
+    } as const;
+  }
+
+  clearTerminalManualVerificationGrants(grantIds: string[], tenantId: string) {
+    const records = grantIds.map((grantId) =>
+      this.manualVerificationGrants.find(
+        (entry) => entry.manualGrantId === grantId && entry.tenantId === tenantId
+      )
+    );
+
+    if (records.some((record) => !record)) {
+      return { state: "missing" } as const;
+    }
+
+    for (const record of records) {
+      this.expireManualVerificationGrant(record!);
+    }
+    if (records.some((record) => !this.isManualVerificationGrantTerminal(record!))) {
+      return { state: "active" } as const;
+    }
+
+    const selectedIds = new Set(grantIds);
+    for (const record of records) {
+      if (
+        this.activeManualVerificationGrantIds.get(record!.challengeKey) ===
+        record!.manualGrantId
+      ) {
+        this.activeManualVerificationGrantIds.delete(record!.challengeKey);
+      }
+    }
+    this.manualVerificationGrants.splice(
+      0,
+      this.manualVerificationGrants.length,
+      ...this.manualVerificationGrants.filter(
+        (record) => !selectedIds.has(record.manualGrantId ?? "")
+      )
+    );
+
+    return {
+      state: "cleared",
+      records: records.map((record) => structuredClone(record!))
     } as const;
   }
 
