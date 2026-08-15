@@ -78,6 +78,13 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
         icon: "M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.5H4.5v-1.5c0-.69.56-1.25 1.25-1.25m-1.25 4.25h15v5.5c0 .69-.56 1.25-1.25 1.25H5.75c-.69 0-1.25-.56-1.25-1.25zm2.75 1.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5z"
       },
       {
+        to: "/goods-taxonomy",
+        label: "领取分类树",
+        permission: "goods:view",
+        roles: ["super_admin", "admin"],
+        icon: "M6 4.75A1.75 1.75 0 1 0 6 8.25a1.75 1.75 0 0 0 0-3.5m0 5.5A1.75 1.75 0 1 0 6 13.75a1.75 1.75 0 0 0 0-3.5m0 5.5A1.75 1.75 0 1 0 6 19.25a1.75 1.75 0 0 0 0-3.5M9.5 6.5h8m-8 5.5h8m-8 5.5h8"
+      },
+      {
         to: "/operations",
         label: "柜机监控",
         permission: "devices:view",
@@ -317,7 +324,11 @@ const isActive = (target: string) => {
   }
 
   if (target === "/goods") {
-    return route.path.startsWith("/goods");
+    return route.path.startsWith("/goods/") || route.path === "/goods";
+  }
+
+  if (target === "/goods-taxonomy") {
+    return route.path.startsWith("/goods-taxonomy");
   }
 
   if (target === "/data-monitor") {

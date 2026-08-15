@@ -978,6 +978,12 @@ export class UsersService {
         goodsId: string;
         quantity: number;
       }>;
+      entitlementLimits?: Array<{
+        id: string;
+        targetType: "taxonomy_node" | "goods";
+        targetId: string;
+        quantity: number;
+      }>;
       status: UserAccessPolicy["status"];
       sourcePolicyId?: string;
     },
@@ -1013,7 +1019,44 @@ export class UsersService {
         };
       });
 
-    if (!normalizedLimits.length) {
+    const entitlementLimitIds = new Set<string>();
+    const entitlementTargets = new Set<string>();
+    const normalizedEntitlementLimits = (payload.entitlementLimits ?? []).map((limit) => {
+      const id = String(limit.id ?? "").trim();
+      const targetId = String(limit.targetId ?? "").trim();
+      const quantity = Number(limit.quantity);
+      if (!id || entitlementLimitIds.has(id) || !targetId || !Number.isSafeInteger(quantity) || quantity <= 0) {
+        throw new BadRequestException("分类额度必须包含有效目标和正整数数量。");
+      }
+      entitlementLimitIds.add(id);
+      if (limit.targetType !== "taxonomy_node" && limit.targetType !== "goods") {
+        throw new BadRequestException("不支持的额度目标类型。");
+      }
+      if (
+        limit.targetType === "taxonomy_node" &&
+        !this.store.goodsTaxonomyNodes.some((entry) => entry.id === targetId && entry.status === "active")
+      ) {
+        throw new BadRequestException("分类额度目标不存在或已停用。");
+      }
+      if (
+        limit.targetType === "goods" &&
+        !this.store.goodsCatalog.some((entry) => entry.goodsId === targetId && entry.status !== "inactive")
+      ) {
+        throw new BadRequestException("货品额度目标不存在或已停用。");
+      }
+      const targetKey = `${limit.targetType}:${targetId}`;
+      if (entitlementTargets.has(targetKey)) {
+        throw new BadRequestException("同一分类或货品只能设置一个额度池。");
+      }
+      entitlementTargets.add(targetKey);
+      return { id, targetType: limit.targetType, targetId, quantity };
+    });
+
+    if (normalizedLimits.length && normalizedEntitlementLimits.length) {
+      throw new BadRequestException("旧货品额度与分类额度不能同时提交，请选择一种规则模型。");
+    }
+
+    if (!normalizedLimits.length && !normalizedEntitlementLimits.length) {
       throw new BadRequestException("请至少设置一种货品。");
     }
 
@@ -1040,6 +1083,7 @@ export class UsersService {
         startHour: payload.startHour,
         endHour: payload.endHour,
         goodsLimits: normalizedLimits,
+        entitlementLimits: normalizedEntitlementLimits,
         status: payload.status,
         sourcePolicyId: payload.sourcePolicyId,
         effectiveFromDateKey: nextBusinessDateKey,
@@ -1075,6 +1119,7 @@ export class UsersService {
       startHour: payload.startHour,
       endHour: payload.endHour,
       goodsLimits: normalizedLimits,
+      entitlementLimits: normalizedEntitlementLimits,
       status: payload.status,
       sourcePolicyId: payload.sourcePolicyId,
       effectiveFromDateKey: businessDateKey,

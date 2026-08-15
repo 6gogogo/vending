@@ -215,6 +215,43 @@ test("两种货品各剩一件时，免费总剩余仍受每日总额度约束",
   assert.equal(summary.remainingFreeTotal, 1);
 });
 
+test("树状额度按最具体规则优先并向后代货品开放", () => {
+  const store = createIsolatedStore();
+  const user = store.users.find((entry) => entry.role === "special");
+  const [sandwich, toothbrush] = store.goodsCatalog;
+  assert.ok(user);
+  assert.ok(sandwich);
+  assert.ok(toothbrush);
+  const now = new Date().toISOString();
+  store.goodsTaxonomyNodes.splice(0, store.goodsTaxonomyNodes.length,
+    { id: "any", name: "任意", parentId: null, status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now },
+    { id: "food", name: "食品", parentId: "any", status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now },
+    { id: "daily", name: "日用品", parentId: "any", status: "active", sortOrder: 2, revision: 1, createdAt: now, updatedAt: now }
+  );
+  sandwich.taxonomyNodeId = "food";
+  toothbrush.taxonomyNodeId = "daily";
+  user.accessPolicies = [{
+    id: "user-taxonomy-policy",
+    name: "树状额度",
+    weekdays: [0, 1, 2, 3, 4, 5, 6],
+    startHour: 0,
+    endHour: 24,
+    goodsLimits: [],
+    entitlementLimits: [
+      { id: "food-limit", targetType: "taxonomy_node", targetId: "food", quantity: 1 },
+      { id: "any-limit", targetType: "taxonomy_node", targetId: "any", quantity: 3 }
+    ],
+    status: "active"
+  }];
+  store.inventory.splice(0, store.inventory.length);
+
+  const summary = new AccessRulesService(store).getQuotaSummaryForUser(user);
+
+  assert.equal(summary.receivableByGoods?.[sandwich.goodsId], 4);
+  assert.equal(summary.receivableByGoods?.[toothbrush.goodsId], 3);
+  assert.equal(summary.remainingFreeTotal, 4);
+});
+
 test("结算流水持久化本次实际免费数量", () => {
   const { store, service } = createInventoryOrdersHarness();
   const event = buildEvent(store);

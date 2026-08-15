@@ -6,6 +6,7 @@ import { getBusinessDayKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import {
   getActiveWindowCategoryQuota,
+  getActiveWindowEntitlementQuota,
   sumNetQuotaQuantity
 } from "../../common/policies/special-access-policy.utils";
 
@@ -115,6 +116,42 @@ export class AccessRulesService {
 
     const quota = user.quota ?? this.store.rules.find((rule) => rule.role === "special");
     const currentBusinessDayKey = getBusinessDayKey(new Date());
+    const entitlementQuota = getActiveWindowEntitlementQuota(
+      user,
+      this.store.specialAccessPolicies,
+      this.store.inventory,
+      this.store.goodsCatalog,
+      this.store.goodsTaxonomyNodes,
+      new Date()
+    );
+    if (entitlementQuota.remainingPools.length > 0) {
+      const remainingToday = this.store.goodsCatalog.reduce<Record<string, number>>(
+        (result, goods) => {
+          result[goods.category] = Math.max(
+            result[goods.category] ?? 0,
+            entitlementQuota.receivableByGoods[goods.goodsId] ?? 0
+          );
+          return result;
+        },
+        {}
+      );
+      return {
+        role: user.role,
+        limit: quota,
+        remainingToday,
+        remainingByGoods: entitlementQuota.receivableByGoods,
+        receivableByGoods: entitlementQuota.receivableByGoods,
+        remainingPools: entitlementQuota.remainingPools,
+        taxonomyRevision: this.store.goodsTaxonomyNodes.reduce(
+          (maximum, node) => Math.max(maximum, node.revision),
+          0
+        ),
+        usedCount: entitlementQuota.remainingPools.reduce((sum, pool) => sum + pool.quantity - pool.remaining, 0),
+        remainingDaily: entitlementQuota.remainingTotal,
+        remainingFreeTotal: entitlementQuota.remainingTotal,
+        activeWindows: entitlementQuota.activeWindows
+      };
+    }
     // 对用户来说，额度不仅是数量控制，也是在有限供给下尽量保证关键时段有人能领到物资。
     const policyQuota = getActiveWindowCategoryQuota(
       user,

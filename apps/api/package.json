@@ -15,6 +15,7 @@
     "data:restore": "tsx src/scripts/runtime-data-maintenance.ts restore",
     "data:repair": "tsx src/scripts/runtime-data-maintenance.ts repair",
     "data:repair:missing-default-warehouse": "tsx src/scripts/repair-missing-default-warehouse.ts",
+    "data:migrate:goods-taxonomy": "tsx src/scripts/migrate-goods-taxonomy.ts",
     "db:generate": "prisma generate --config prisma.config.ts",
     "db:push": "prisma db push --config prisma.config.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",

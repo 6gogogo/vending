@@ -255,6 +255,29 @@ test("人工结算补记一次扣减库存并把事件和额度流水记为已�
     const { event, user, device, closedAt } = appendClosedSpecialEvent(store);
     const goods = device.doors.flatMap((entry) => entry.goods)[0] ?? store.goodsCatalog[0];
     assert.ok(goods);
+    const now = new Date().toISOString();
+    store.goodsTaxonomyNodes.splice(0, store.goodsTaxonomyNodes.length,
+      { id: "taxonomy:any", name: "任意", parentId: null, status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now },
+      { id: "taxonomy:food", name: "食品", parentId: "taxonomy:any", status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now }
+    );
+    const catalogGoods = store.goodsCatalog.find((entry) => entry.goodsId === goods.goodsId);
+    assert.ok(catalogGoods);
+    catalogGoods.taxonomyNodeId = "taxonomy:food";
+    user.accessPolicies = [{
+      id: "manual-settlement-entitlement-policy",
+      name: "人工补记额度测试",
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      startHour: 0,
+      endHour: 24,
+      goodsLimits: [],
+      entitlementLimits: [{
+        id: "manual-food-limit",
+        targetType: "taxonomy_node",
+        targetId: "taxonomy:food",
+        quantity: 3
+      }],
+      status: "active"
+    }];
     store.ensureDeviceGoodsEntry(device.deviceCode, goods);
     store.goodsBatches.splice(
       0,
@@ -309,6 +332,10 @@ test("人工结算补记一次扣减库存并把事件和额度流水记为已�
     );
     assert.equal(movement?.type, "pickup");
     assert.equal(movement?.quotaQuantity, 2);
+    assert.deepEqual(
+      movement?.entitlementAllocations?.map((line) => ({ targetId: line.targetId, quantity: line.quantity })),
+      [{ targetId: "taxonomy:food", quantity: 2 }]
+    );
     assert.equal(movement?.eventId, event.eventId);
     assert.equal(movement?.happenedAt, closedAt);
 
@@ -326,6 +353,113 @@ test("人工结算补记一次扣减库存并把事件和额度流水记为已�
         (entry) => entry.id === restartedEvent?.manualSettlement?.movementIds[0]
       )?.settlementSource,
       "manual_recovery"
+    );
+    assert.equal(
+      restartedStore.inventory.find(
+        (entry) => entry.id === restartedEvent?.manualSettlement?.movementIds[0]
+      )?.entitlementAllocations?.[0]?.targetId,
+      "taxonomy:food"
+    );
+  });
+});
+
+test("人工结算补记在任一商品额度不足时整单拒绝且不扣库存", async () => {
+  await withApi(async ({ baseUrl, store, token }) => {
+    const { event, user, device } = appendClosedSpecialEvent(store);
+    const goods = device.doors.flatMap((entry) => entry.goods)[0] ?? store.goodsCatalog[0];
+    assert.ok(goods);
+    const now = new Date().toISOString();
+    store.goodsTaxonomyNodes.splice(
+      0,
+      store.goodsTaxonomyNodes.length,
+      {
+        id: "taxonomy:any:insufficient",
+        name: "任意",
+        parentId: null,
+        status: "active",
+        sortOrder: 1,
+        revision: 1,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "taxonomy:food:insufficient",
+        name: "食品",
+        parentId: "taxonomy:any:insufficient",
+        status: "active",
+        sortOrder: 1,
+        revision: 1,
+        createdAt: now,
+        updatedAt: now
+      }
+    );
+    const catalogGoods = store.goodsCatalog.find((entry) => entry.goodsId === goods.goodsId);
+    assert.ok(catalogGoods);
+    catalogGoods.taxonomyNodeId = "taxonomy:food:insufficient";
+    user.accessPolicies = [
+      {
+        id: "manual-settlement-insufficient-policy",
+        name: "人工补记额度不足测试",
+        weekdays: [0, 1, 2, 3, 4, 5, 6],
+        startHour: 0,
+        endHour: 24,
+        goodsLimits: [],
+        entitlementLimits: [
+          {
+            id: "manual-food-insufficient-limit",
+            targetType: "taxonomy_node",
+            targetId: "taxonomy:food:insufficient",
+            quantity: 1
+          }
+        ],
+        status: "active"
+      }
+    ];
+    store.ensureDeviceGoodsEntry(device.deviceCode, goods);
+    store.goodsBatches.splice(
+      0,
+      store.goodsBatches.length,
+      ...store.goodsBatches.filter(
+        (entry) => entry.deviceCode !== device.deviceCode || entry.goodsId !== goods.goodsId
+      )
+    );
+    const batch = store.createGoodsBatch({
+      goodsId: goods.goodsId,
+      deviceCode: device.deviceCode,
+      quantity: 3,
+      sourceType: "admin",
+      sourceUserId: user.id,
+      sourceUserName: user.name
+    });
+
+    const response = await fetch(
+      `${baseUrl}/cabinet-events/event/${encodeURIComponent(event.eventId)}/manual-settlement`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          items: [{ goodsId: goods.goodsId, quantity: 2 }],
+          reason: "验证额度不足时不产生部分人工补记。",
+          confirmed: true
+        })
+      }
+    );
+    const payload = (await response.json()) as { message?: string };
+
+    assert.equal(response.status, 400);
+    assert.match(payload.message ?? "", /超出当前可领取范围/);
+    assert.equal(batch.remainingQuantity, 3);
+    assert.equal(event.manualSettlement, undefined);
+    assert.notEqual(event.status, "settled");
+    assert.equal(
+      store.inventory.some(
+        (entry) =>
+          entry.eventId === event.eventId && entry.settlementSource === "manual_recovery"
+      ),
+      false
     );
   });
 });

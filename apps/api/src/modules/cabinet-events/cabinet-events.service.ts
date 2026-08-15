@@ -42,6 +42,12 @@ import { isProductionRuntime } from "../../common/config/production-safety";
 import { isReservationOnlyPickup } from "../../common/config/reservation-only-pickup";
 import { createCallbackReplayFingerprint } from "../../common/logging/callback-log-sanitizer";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
+import {
+  allocateActiveEntitlements,
+  allocateActiveEntitlementsPreservingLocks,
+  getActiveWindowEntitlementQuota,
+  subtractLockedEntitlements
+} from "../../common/policies/special-access-policy.utils";
 import { AccessRulesService } from "../access-rules/access-rules.service";
 import { AlertsService } from "../alerts/alerts.service";
 import { DeviceOperationCoordinator } from "../devices/device-operation-coordinator";
@@ -1209,6 +1215,7 @@ export class CabinetEventsService {
       eventId: payload.eventId,
       deviceCode: payload.deviceCode
     });
+
     if (this.isFreeOnlyPickupEvent(event)) {
       throw new BadRequestException(
         "当前公益领取不能手工回写付款成功；请在差异核对完成后由系统回写领取完成状态。"
@@ -2471,7 +2478,14 @@ export class CabinetEventsService {
 
     const preSettlement =
       user.role === "special" && quotaSummary
-        ? this.buildPreSettlement(payload.deviceCode, doorNum, intentItems, quotaSummary)
+        ? this.buildPreSettlement(
+            payload.deviceCode,
+            doorNum,
+            intentItems,
+            quotaSummary,
+            reservation?.entitlementAllocations,
+            reservation?.taxonomyRevision
+          )
         : undefined;
 
     if (user.role === "special" && preSettlement?.chargeRequired) {
@@ -2802,8 +2816,88 @@ export class CabinetEventsService {
     deviceCode: string,
     doorNum: string,
     intentItems: CabinetIntentItem[],
-    quotaSummary: ReturnType<AccessRulesService["getQuotaSummaryForUser"]>
+    quotaSummary: ReturnType<AccessRulesService["getQuotaSummaryForUser"]>,
+    lockedAllocations?: CabinetPreSettlement["entitlementAllocations"],
+    lockedTaxonomyRevision?: number
   ): CabinetPreSettlement {
+    if (quotaSummary.remainingPools?.length) {
+      const entitlementQuota = {
+        activeWindows: quotaSummary.activeWindows ?? [],
+        remainingPools: quotaSummary.remainingPools,
+        receivableByGoods: quotaSummary.receivableByGoods ?? {},
+        remainingTotal: quotaSummary.remainingFreeTotal ?? 0
+      };
+      const requestedByGoods = new Map(
+        intentItems.map((item) => [item.goodsId, item.quantity])
+      );
+      const lockedByGoods = new Map<string, number>();
+      for (const line of lockedAllocations ?? []) {
+        lockedByGoods.set(line.goodsId, (lockedByGoods.get(line.goodsId) ?? 0) + line.quantity);
+      }
+      const canUseLockedAllocations =
+        Boolean(lockedAllocations?.length) &&
+        requestedByGoods.size === lockedByGoods.size &&
+        [...requestedByGoods].every(
+          ([goodsId, quantity]) => lockedByGoods.get(goodsId) === quantity
+        );
+      const allocation = canUseLockedAllocations
+        ? { fulfilled: true, allocations: lockedAllocations!.map((line) => ({ ...line })) }
+        : allocateActiveEntitlements(
+            entitlementQuota,
+            this.store.goodsTaxonomyNodes,
+            this.store.goodsCatalog,
+            intentItems.map((item) => ({ goodsId: item.goodsId, quantity: item.quantity }))
+          );
+      const allocationsByGoods = new Map<string, typeof allocation.allocations>();
+      for (const line of allocation.allocations) {
+        const current = allocationsByGoods.get(line.goodsId) ?? [];
+        current.push(line);
+        allocationsByGoods.set(line.goodsId, current);
+      }
+      const items = intentItems.map((item) => {
+        const goods = this.getGoodsSnapshot(deviceCode, item.goodsId);
+        const entitlementAllocations = allocationsByGoods.get(item.goodsId) ?? [];
+        const freeQuantity = entitlementAllocations.reduce((sum, line) => sum + line.quantity, 0);
+        const paidQuantity = Math.max(0, item.quantity - freeQuantity);
+        return {
+          goodsId: item.goodsId,
+          goodsName: item.goodsName,
+          category: item.category,
+          quantity: item.quantity,
+          freeQuantity,
+          paidQuantity,
+          unitPrice: goods.unitPrice,
+          originalAmount: goods.unitPrice * item.quantity,
+          freeAmount: goods.unitPrice * freeQuantity,
+          paidAmount: goods.unitPrice * paidQuantity,
+          entitlementAllocations
+        };
+      });
+      const freeQuantity = items.reduce((sum, item) => sum + item.freeQuantity, 0);
+      const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+      const paidQuantity = totalQuantity - freeQuantity;
+      const payableAmount = items.reduce((sum, item) => sum + item.paidAmount, 0);
+      return {
+        deviceCode,
+        doorNum,
+        createdAt: new Date().toISOString(),
+        totalQuantity,
+        freeQuantity,
+        paidQuantity,
+        originalAmount: items.reduce((sum, item) => sum + item.originalAmount, 0),
+        freeAmount: items.reduce((sum, item) => sum + item.freeAmount, 0),
+        payableAmount,
+        chargeRequired: payableAmount > 0,
+        summary: payableAmount > 0
+          ? `本次预计免费 ${freeQuantity} 件，超出范围 ${paidQuantity} 件，需支付 ${this.formatAmount(payableAmount)}。`
+          : `本次选择的 ${totalQuantity} 件均在可领取范围内，预计免费。`,
+        items,
+        entitlementAllocations: allocation.allocations,
+        taxonomyRevision: canUseLockedAllocations
+          ? lockedTaxonomyRevision ?? quotaSummary.taxonomyRevision
+          : quotaSummary.taxonomyRevision
+      };
+    }
     const remainingByGoods = new Map(
       Object.entries((quotaSummary.remainingByGoods as Record<string, number> | undefined) ?? {})
     );
@@ -2928,6 +3022,74 @@ export class CabinetEventsService {
         };
       }) ?? [];
 
+    const user = this.store.users.find((entry) => entry.id === event.userId);
+    if (user && this.store.goodsTaxonomyNodes.length) {
+      let quota = getActiveWindowEntitlementQuota(
+        user,
+        this.store.specialAccessPolicies,
+        this.store.inventory,
+        this.store.goodsCatalog,
+        this.store.goodsTaxonomyNodes,
+        event.reservationId
+          ? this.store.reservations.find((entry) => entry.id === event.reservationId)?.reservedAt ?? event.createdAt
+          : event.createdAt
+      );
+      quota = subtractLockedEntitlements(
+        quota,
+        this.store.reservations
+          .filter(
+            (reservation) =>
+              reservation.userId === event.userId &&
+              reservation.status === "active" &&
+              reservation.id !== event.reservationId
+          )
+          .flatMap((reservation) => reservation.entitlementAllocations ?? [])
+      );
+      if (
+        quota.remainingPools.length ||
+        event.preSettlement?.entitlementAllocations?.length
+      ) {
+        const allocation = allocateActiveEntitlementsPreservingLocks(
+          quota,
+          this.store.goodsTaxonomyNodes,
+          this.store.goodsCatalog,
+          lines.map((item) => ({ goodsId: item.goodsId, quantity: item.quantity })),
+          event.preSettlement?.entitlementAllocations ?? []
+        );
+        const allocationByGoods = new Map<string, typeof allocation.allocations>();
+        for (const line of allocation.allocations) {
+          const current = allocationByGoods.get(line.goodsId) ?? [];
+          current.push(line);
+          allocationByGoods.set(line.goodsId, current);
+        }
+        const freeOnlyPickup = this.isFreeOnlyPickupEvent(event);
+        const items = lines.map((item) => {
+          const entitlementAllocations = allocationByGoods.get(item.goodsId) ?? [];
+          const freeQuantity = entitlementAllocations.reduce((sum, line) => sum + line.quantity, 0);
+          const paidQuantity = item.quantity - freeQuantity;
+          return {
+            ...item,
+            freeQuantity,
+            paidQuantity,
+            originalAmount: item.unitPrice * item.quantity,
+            freeAmount: item.unitPrice * freeQuantity,
+            paidAmount: freeOnlyPickup ? 0 : item.unitPrice * paidQuantity,
+            entitlementAllocations
+          };
+        });
+        return {
+          platformAmount,
+          totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+          freeQuantity: items.reduce((sum, item) => sum + item.freeQuantity, 0),
+          paidQuantity: items.reduce((sum, item) => sum + item.paidQuantity, 0),
+          originalAmount: items.reduce((sum, item) => sum + item.originalAmount, 0),
+          freeAmount: items.reduce((sum, item) => sum + item.freeAmount, 0),
+          payableAmount: freeOnlyPickup ? 0 : items.reduce((sum, item) => sum + item.paidAmount, 0),
+          items
+        };
+      }
+    }
+
     if (this.isFreeOnlyPickupEvent(event)) {
       const totalQuantity = lines.reduce((sum, item) => sum + item.quantity, 0);
       const originalAmount = lines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -3009,7 +3171,6 @@ export class CabinetEventsService {
       };
     }
 
-    const user = this.store.users.find((entry) => entry.id === event.userId);
     const quotaSummary = user ? this.accessRulesService.getQuotaSummaryForUser(user) : undefined;
     const remainingByGoods = new Map(
       Object.entries((quotaSummary?.remainingByGoods as Record<string, number> | undefined) ?? {})

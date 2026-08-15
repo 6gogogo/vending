@@ -10,6 +10,7 @@ import {
 
 import type {
   CabinetEventRecord,
+  EntitlementAllocationLine,
   InventoryMovement,
   ManualSettlementCandidate,
   ManualSettlementConflictResolutionPayload,
@@ -22,6 +23,11 @@ import type {
 } from "@vm/shared-types";
 
 import { InventoryBatchChangesService } from "../../common/inventory/inventory-batch-changes.service";
+import {
+  allocateActiveEntitlementsPreservingLocks,
+  getActiveWindowEntitlementQuota,
+  subtractLockedEntitlements
+} from "../../common/policies/special-access-policy.utils";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AlertsService } from "../alerts/alerts.service";
 
@@ -173,8 +179,15 @@ export class ManualSettlementRecoveryService {
       }
       const movementOrderNo = currentOrderNo ?? event.orderNo;
       const movements: InventoryMovement[] = [];
+      const usesEntitlementPools = this.store.goodsTaxonomyNodes.length > 0;
+      const entitlementAllocationsByGoods = this.resolveEntitlementAllocations(
+        event,
+        items,
+        eligible.closedAt
+      );
 
       for (const item of items) {
+        const entitlementAllocations = entitlementAllocationsByGoods.get(item.goodsId) ?? [];
         const movement: InventoryMovement = {
           id: this.store.createId("movement"),
           orderNo: movementOrderNo,
@@ -185,7 +198,10 @@ export class ManualSettlementRecoveryService {
           goodsName: item.goodsName,
           category: item.category,
           quantity: item.quantity,
-          quotaQuantity: item.quantity,
+          quotaQuantity: usesEntitlementPools
+            ? entitlementAllocations.reduce((sum, line) => sum + line.quantity, 0)
+            : item.quantity,
+          entitlementAllocations: entitlementAllocations.map((line) => ({ ...line })),
           unitPrice: item.unitPrice,
           type: "pickup",
           settlementSource: "manual_recovery",
@@ -554,8 +570,15 @@ export class ManualSettlementRecoveryService {
         );
         const reversals = this.reverseManualMovements(event, record);
         record.reversalMovementIds = reversals.map((entry) => entry.id);
+        const usesEntitlementPools = this.store.goodsTaxonomyNodes.length > 0;
+        const entitlementAllocationsByGoods = this.resolveEntitlementAllocations(
+          event,
+          lateCallback.items,
+          settlementHappenedAt
+        );
         const platformMovements: InventoryMovement[] = [];
         for (const item of lateCallback.items) {
+          const entitlementAllocations = entitlementAllocationsByGoods.get(item.goodsId) ?? [];
           const movement: InventoryMovement = {
             id: this.store.createId("movement"),
             orderNo: record.platformOrderNo ?? event.orderNo,
@@ -566,7 +589,10 @@ export class ManualSettlementRecoveryService {
             goodsName: item.goodsName,
             category: item.category,
             quantity: item.quantity,
-            quotaQuantity: item.quantity,
+            quotaQuantity: usesEntitlementPools
+              ? entitlementAllocations.reduce((sum, line) => sum + line.quantity, 0)
+              : item.quantity,
+            entitlementAllocations: entitlementAllocations.map((line) => ({ ...line })),
             unitPrice: item.unitPrice,
             type: "pickup",
             settlementSource: "platform_callback",
@@ -712,6 +738,7 @@ export class ManualSettlementRecoveryService {
           category: source.category,
           quantity: source.quantity,
           quotaQuantity: source.quotaQuantity ?? source.quantity,
+          entitlementAllocations: source.entitlementAllocations?.map((line) => ({ ...line })),
           unitPrice: source.unitPrice,
           type: "refund",
           happenedAt: source.happenedAt
@@ -801,6 +828,7 @@ export class ManualSettlementRecoveryService {
         category: source.category,
         quantity: source.quantity,
         quotaQuantity: source.quotaQuantity ?? source.quantity,
+        entitlementAllocations: source.entitlementAllocations?.map((line) => ({ ...line })),
         unitPrice: source.unitPrice,
         type: "refund",
         happenedAt: source.happenedAt
@@ -813,6 +841,65 @@ export class ManualSettlementRecoveryService {
       reversalMovements.push(reversal);
     }
     return reversalMovements;
+  }
+
+  private resolveEntitlementAllocations(
+    event: CabinetEventRecord,
+    items: ManualSettlementItem[],
+    happenedAt: string
+  ) {
+    const result = new Map<string, EntitlementAllocationLine[]>();
+    if (!this.store.goodsTaxonomyNodes.length) return result;
+
+    const allocations = (() => {
+          const user = this.store.users.find((entry) => entry.id === event.userId);
+          if (!user) throw new BadRequestException("人工结算补记关联用户不存在。");
+          let quota = getActiveWindowEntitlementQuota(
+            user,
+            this.store.specialAccessPolicies,
+            this.store.inventory,
+            this.store.goodsCatalog,
+            this.store.goodsTaxonomyNodes,
+            happenedAt
+          );
+          quota = subtractLockedEntitlements(
+            quota,
+            this.store.reservations
+              .filter(
+                (reservation) =>
+                  reservation.userId === event.userId &&
+                  reservation.status === "active" &&
+                  reservation.id !== event.reservationId
+              )
+              .flatMap((reservation) => reservation.entitlementAllocations ?? [])
+          );
+          const allocation = allocateActiveEntitlementsPreservingLocks(
+            quota,
+            this.store.goodsTaxonomyNodes,
+            this.store.goodsCatalog,
+            items.map((item) => ({ goodsId: item.goodsId, quantity: item.quantity })),
+            event.preSettlement?.entitlementAllocations ?? []
+          );
+          if (!allocation.fulfilled) {
+            const shortageSummary = allocation.shortages
+              .map((shortage) => {
+                const item = items.find((entry) => entry.goodsId === shortage.goodsId);
+                return `${item?.goodsName ?? shortage.goodsId}缺少 ${shortage.quantity} 件额度`;
+              })
+              .join("；");
+            throw new BadRequestException(
+              `实际取走商品超出当前可领取范围，人工结算补记未执行：${shortageSummary}。`
+            );
+          }
+          return allocation.allocations;
+        })();
+
+    for (const line of allocations) {
+      const current = result.get(line.goodsId) ?? [];
+      current.push({ ...line });
+      result.set(line.goodsId, current);
+    }
+    return result;
   }
 
   private resolveCandidateAlert(eventId: string, actorUserId: string, reason: string) {

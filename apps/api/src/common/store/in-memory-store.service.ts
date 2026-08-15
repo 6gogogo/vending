@@ -33,6 +33,7 @@ import {
   type GoodsCatalogItem,
   type GoodsCategory,
   type GoodsCategoryRecord,
+  type GoodsTaxonomyNode,
   type InventoryTransferRecord,
   type InventoryMovement,
   type MerchantGoodsTemplate,
@@ -172,6 +173,7 @@ export class InMemoryStoreService {
   readonly devices: DeviceRecord[] = this.seed.devices;
   readonly goodsCatalog: GoodsCatalogItem[] = this.seed.goodsCatalog;
   readonly goodsCategories: GoodsCategoryRecord[] = this.seed.goodsCategories;
+  readonly goodsTaxonomyNodes: GoodsTaxonomyNode[] = this.seed.goodsTaxonomyNodes;
   readonly regions: RegionRecord[] = this.seed.regions;
   readonly warehouses: WarehouseRecord[] = this.seed.warehouses;
   readonly specialAccessPolicies: SpecialAccessPolicy[] = this.seed.specialAccessPolicies;
@@ -3020,6 +3022,7 @@ export class InMemoryStoreService {
       devices: structuredClone(this.devices),
       goodsCatalog: structuredClone(this.goodsCatalog),
       goodsCategories: structuredClone(this.goodsCategories),
+      goodsTaxonomyNodes: structuredClone(this.goodsTaxonomyNodes),
       regions: structuredClone(this.regions),
       warehouses: structuredClone(this.warehouses),
       specialAccessPolicies: structuredClone(this.specialAccessPolicies),
@@ -3216,6 +3219,7 @@ export class InMemoryStoreService {
     this.replaceArray(this.devices, state.devices);
     this.replaceArray(this.goodsCatalog, state.goodsCatalog);
     this.replaceArray(this.goodsCategories, state.goodsCategories);
+    this.replaceArray(this.goodsTaxonomyNodes, state.goodsTaxonomyNodes);
     this.replaceArray(this.regions, state.regions);
     this.replaceArray(this.warehouses, state.warehouses);
     this.replaceArray(this.specialAccessPolicies, state.specialAccessPolicies);

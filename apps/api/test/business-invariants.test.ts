@@ -392,6 +392,14 @@ test("预约取货模式要求先预约，且未履约预约会共同占用免�
     dailyLimit: 2,
     categoryLimit: { food: 2, drink: 2, daily: 2 }
   };
+  const now = new Date().toISOString();
+  store.goodsTaxonomyNodes.splice(0, store.goodsTaxonomyNodes.length,
+    { id: "taxonomy:any", name: "任意", parentId: null, status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now },
+    { id: "taxonomy:food", name: "食品", parentId: "taxonomy:any", status: "active", sortOrder: 1, revision: 1, createdAt: now, updatedAt: now }
+  );
+  const catalogGoods = store.goodsCatalog.find((entry) => entry.goodsId === goods.goodsId);
+  assert.ok(catalogGoods);
+  catalogGoods.taxonomyNodeId = "taxonomy:food";
   new InventoryBatchChangesService(store).recordBatchOnly({
     deviceCode: device.deviceCode,
     goodsId: goods.goodsId,
@@ -404,13 +412,9 @@ test("预约取货模式要求先预约，且未履约预约会共同占用免�
     weekdays: [0, 1, 2, 3, 4, 5, 6],
     startHour: 0,
     endHour: 24,
-    goodsLimits: [
-      {
-        goodsId: goods.goodsId,
-        goodsName: goods.name,
-        category: goods.category,
-        quantity: 2
-      }
+    goodsLimits: [],
+    entitlementLimits: [
+      { id: "reservation-food-pool", targetType: "taxonomy_node", targetId: "taxonomy:food", quantity: 2 }
     ],
     applicableUserIds: [user.id],
     status: "active"
@@ -464,6 +468,35 @@ test("预约取货模式要求先预约，且未履约预约会共同占用免�
     },
     { id: user.id, role: "special" }
   );
+  assert.equal(reservation.entitlementAllocations?.length, 1);
+  assert.match(
+    reservation.entitlementAllocations?.[0]?.poolId ?? "",
+    /^policy-reservation-only-pickup:\d{4}-\d{2}-\d{2}:reservation-food-pool$/
+  );
+  store.specialAccessPolicies[0]!.entitlementLimits!.push({
+    id: "aaa-new-goods-pool",
+    targetType: "goods",
+    targetId: goods.goodsId,
+    quantity: 1
+  });
+  const secondReservation = reservations.create(
+    {
+      deviceCode: device.deviceCode,
+      doorNum: door.doorNum,
+      intentItems: [intentItem]
+    },
+    { id: user.id, role: "special" }
+  );
+  assert.equal(reservation.entitlementAllocations?.[0]?.targetType, "taxonomy_node");
+  assert.equal(secondReservation.entitlementAllocations?.[0]?.targetType, "goods");
+  reservations.cancel(
+    secondReservation.id,
+    { id: user.id, role: "special" }
+  );
+  store.specialAccessPolicies[0]!.entitlementLimits =
+    store.specialAccessPolicies[0]!.entitlementLimits!.filter(
+      (limit) => limit.id !== "aaa-new-goods-pool"
+    );
   const preview = cabinetEvents.previewOpenSettlement(
     {
       phone: user.phone,
@@ -476,6 +509,7 @@ test("预约取货模式要求先预约，且未履约预约会共同占用免�
   );
   assert.equal(preview.preSettlement?.payableAmount, 0);
   assert.equal(preview.preSettlement?.chargeRequired, false);
+  assert.deepEqual(preview.preSettlement?.entitlementAllocations, reservation.entitlementAllocations);
 
   assert.throws(
     () =>

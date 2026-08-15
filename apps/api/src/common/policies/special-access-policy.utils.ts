@@ -1,12 +1,21 @@
 import type {
+  EntitlementAllocationLine,
+  EntitlementPoolSnapshot,
   GoodsCatalogItem,
   GoodsCategory,
+  GoodsTaxonomyNode,
   InventoryMovement,
   ServiceCompletionStatus,
   SpecialAccessPolicy,
   SpecialAccessWindowUsage,
   UserRecord
 } from "@vm/shared-types";
+
+import {
+  allocateEntitlements,
+  type EntitlementAllocationGoods,
+  type EntitlementAllocationNode
+} from "./entitlement-allocation";
 
 import {
   addDaysToDateKey,
@@ -25,6 +34,7 @@ interface PolicyWindow {
   startHour: number;
   endHour: number;
   goodsLimits: SpecialAccessPolicy["goodsLimits"];
+  entitlementLimits: NonNullable<SpecialAccessPolicy["entitlementLimits"]>;
 }
 
 type EffectivePolicy = Omit<SpecialAccessPolicy, "applicableUserIds"> & {
@@ -166,7 +176,8 @@ export const getBusinessDayWindowsForPolicy = (
       dateKey: businessDateKey,
       startHour: policy.startHour,
       endHour: policy.endHour,
-      goodsLimits: policy.goodsLimits
+      goodsLimits: policy.goodsLimits,
+      entitlementLimits: policy.entitlementLimits ?? []
     });
   }
 
@@ -180,7 +191,8 @@ export const getBusinessDayWindowsForPolicy = (
       dateKey: nextDateKey,
       startHour: policy.startHour,
       endHour: policy.endHour,
-      goodsLimits: policy.goodsLimits
+      goodsLimits: policy.goodsLimits,
+      entitlementLimits: policy.entitlementLimits ?? []
     });
   }
 
@@ -221,7 +233,8 @@ export const getActiveWindowsForUser = (
         dateKey: currentDateKey,
         startHour: policy.startHour,
         endHour: policy.endHour,
-        goodsLimits: policy.goodsLimits
+        goodsLimits: policy.goodsLimits,
+        entitlementLimits: policy.entitlementLimits ?? []
       }
     ];
   });
@@ -337,6 +350,213 @@ export const getActiveWindowCategoryQuota = (
     activeWindows,
     remainingByCategory,
     remainingByGoods
+  };
+};
+
+const isMovementInsideWindow = (
+  movement: InventoryMovement,
+  window: PolicyWindow,
+  businessDateKey: string
+) => {
+  const parts = getLocalDateParts(movement.happenedAt);
+  return (
+    getBusinessDayKey(movement.happenedAt) === businessDateKey &&
+    toDateKey(movement.happenedAt) === window.dateKey &&
+    parts.hour >= window.startHour &&
+    parts.hour < window.endHour
+  );
+};
+
+const buildEntitlementPoolId = (window: PolicyWindow, limitId: string) =>
+  `${window.policyId}:${window.dateKey}:${limitId}`;
+
+/**
+ * 将树状领取规则、当天流水和退款收敛成一个额度快照。旧流水没有记录额度池时，
+ * 会按实际货品重新分配；新流水则按保存的精确池恢复，避免分类移动改写历史。
+ */
+export const getActiveWindowEntitlementQuota = (
+  user: UserRecord,
+  policies: SpecialAccessPolicy[],
+  inventory: InventoryMovement[],
+  goodsCatalog: GoodsCatalogItem[],
+  taxonomyNodes: GoodsTaxonomyNode[],
+  value: string | Date = new Date()
+) => {
+  const activeWindows = getActiveWindowsForUser(user, policies, value);
+  const businessDateKey = getBusinessDayKey(value);
+  const poolMaximum = new Map<string, number>();
+  const poolById = new Map<string, EntitlementPoolSnapshot>();
+
+  for (const window of activeWindows) {
+    for (const limit of window.entitlementLimits) {
+      const poolId = buildEntitlementPoolId(window, limit.id);
+      const pool: EntitlementPoolSnapshot = {
+        ...limit,
+        poolId,
+        limitId: limit.id,
+        policyId: window.policyId,
+        policyName: window.policyName,
+        remaining: limit.quantity
+      };
+      poolMaximum.set(poolId, limit.quantity);
+      poolById.set(poolId, pool);
+    }
+  }
+
+  const relevantMovements = inventory.filter(
+    (movement) =>
+      movement.userId === user.id &&
+      activeWindows.some((window) => isMovementInsideWindow(movement, window, businessDateKey))
+  );
+  const legacyMovements: InventoryMovement[] = [];
+
+  for (const movement of relevantMovements) {
+    const lines = movement.entitlementAllocations ?? [];
+    if (!lines.length) {
+      legacyMovements.push(movement);
+      continue;
+    }
+
+    const direction = movement.type === "refund" ? 1 : movement.type === "pickup" || movement.type === "adjustment" ? -1 : 0;
+    if (direction === 0) continue;
+    for (const line of lines) {
+      const pool = poolById.get(line.poolId);
+      if (!pool) continue;
+      const maximum = poolMaximum.get(line.poolId) ?? pool.remaining;
+      pool.remaining = Math.min(maximum, Math.max(0, pool.remaining + direction * line.quantity));
+    }
+  }
+
+  const legacyRequests = goodsCatalog.flatMap((goods) => {
+    const quantity = sumNetQuotaQuantity(
+      legacyMovements,
+      (movement) => movement.goodsId === goods.goodsId
+    );
+    return quantity > 0 ? [{ goodsId: goods.goodsId, quantity }] : [];
+  });
+  if (legacyRequests.length && poolById.size) {
+    const legacyAllocation = allocateEntitlements({
+      nodes: taxonomyNodes,
+      goods: goodsCatalog,
+      pools: [...poolById.values()],
+      requests: legacyRequests
+    });
+    for (const line of legacyAllocation.allocations) {
+      const pool = poolById.get(line.poolId)!;
+      pool.remaining = Math.max(0, pool.remaining - line.quantity);
+    }
+  }
+
+  const remainingPools = [...poolById.values()].sort((left, right) =>
+    left.poolId.localeCompare(right.poolId)
+  );
+  const receivableByGoods: Record<string, number> = {};
+  for (const goods of goodsCatalog.filter((entry) => entry.status !== "inactive")) {
+    const result = allocateEntitlements({
+      nodes: taxonomyNodes,
+      goods: goodsCatalog,
+      pools: remainingPools,
+      requests: [{ goodsId: goods.goodsId, quantity: Number.MAX_SAFE_INTEGER }]
+    });
+    receivableByGoods[goods.goodsId] = result.allocations.reduce(
+      (sum, line) => sum + line.quantity,
+      0
+    );
+  }
+
+  return {
+    activeWindows,
+    remainingPools,
+    receivableByGoods,
+    remainingTotal: remainingPools.reduce((sum, pool) => sum + pool.remaining, 0)
+  };
+};
+
+export const allocateActiveEntitlements = (
+  quota: ReturnType<typeof getActiveWindowEntitlementQuota>,
+  taxonomyNodes: GoodsTaxonomyNode[],
+  goodsCatalog: GoodsCatalogItem[],
+  requests: Array<{ goodsId: string; quantity: number }>
+): { fulfilled: boolean; allocations: EntitlementAllocationLine[]; shortages: Array<{ goodsId: string; quantity: number }> } =>
+  allocateEntitlements({
+    nodes: taxonomyNodes,
+    goods: goodsCatalog,
+    pools: quota.remainingPools,
+    requests
+  });
+
+export const allocateActiveEntitlementsPreservingLocks = (
+  quota: ReturnType<typeof getActiveWindowEntitlementQuota>,
+  taxonomyNodes: EntitlementAllocationNode[],
+  goodsCatalog: EntitlementAllocationGoods[],
+  requests: Array<{ goodsId: string; quantity: number }>,
+  lockedAllocations: readonly EntitlementAllocationLine[]
+) => {
+  const requestedByGoods = new Map<string, number>();
+  for (const request of requests) {
+    requestedByGoods.set(
+      request.goodsId,
+      (requestedByGoods.get(request.goodsId) ?? 0) + request.quantity
+    );
+  }
+
+  const preserved: EntitlementAllocationLine[] = [];
+  const preservedByGoods = new Map<string, number>();
+  for (const line of lockedAllocations) {
+    const requested = requestedByGoods.get(line.goodsId) ?? 0;
+    const alreadyPreserved = preservedByGoods.get(line.goodsId) ?? 0;
+    const quantity = Math.min(line.quantity, Math.max(0, requested - alreadyPreserved));
+    if (quantity <= 0) continue;
+    preserved.push({ ...line, quantity });
+    preservedByGoods.set(line.goodsId, alreadyPreserved + quantity);
+  }
+
+  const remainingPools = quota.remainingPools.map((pool) => ({ ...pool }));
+  const poolById = new Map(remainingPools.map((pool) => [pool.poolId, pool]));
+  for (const line of preserved) {
+    const pool = poolById.get(line.poolId);
+    if (pool) pool.remaining = Math.max(0, pool.remaining - line.quantity);
+  }
+  const remainingQuota = {
+    ...quota,
+    remainingPools,
+    remainingTotal: remainingPools.reduce((sum, pool) => sum + pool.remaining, 0)
+  };
+  const remainingRequests = [...requestedByGoods].flatMap(([goodsId, quantity]) => {
+    const remaining = quantity - (preservedByGoods.get(goodsId) ?? 0);
+    return remaining > 0 ? [{ goodsId, quantity: remaining }] : [];
+  });
+  const additional = allocateEntitlements({
+    nodes: taxonomyNodes,
+    goods: goodsCatalog,
+    pools: remainingQuota.remainingPools,
+    requests: remainingRequests
+  });
+
+  return {
+    fulfilled: additional.fulfilled,
+    allocations: [...preserved, ...additional.allocations],
+    shortages: additional.shortages
+  };
+};
+
+export const subtractLockedEntitlements = (
+  quota: ReturnType<typeof getActiveWindowEntitlementQuota>,
+  allocations: readonly EntitlementAllocationLine[]
+) => {
+  const remainingPools = quota.remainingPools.map((pool) => ({ ...pool }));
+  const poolById = new Map(remainingPools.map((pool) => [pool.poolId, pool]));
+  for (const line of allocations) {
+    const pool = poolById.get(line.poolId);
+    if (!pool || pool.remaining < line.quantity) {
+      throw new Error("已有预约锁定的领取额度已失效。");
+    }
+    pool.remaining -= line.quantity;
+  }
+  return {
+    ...quota,
+    remainingPools,
+    remainingTotal: remainingPools.reduce((sum, pool) => sum + pool.remaining, 0)
   };
 };
 

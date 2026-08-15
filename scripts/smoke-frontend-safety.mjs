@@ -28,15 +28,31 @@ assert.match(
 );
 assert.match(
   appLoginPageSource,
-  /onShow\(\(\) => \{[\s\S]+restoreExistingSession\(\)/,
-  "已有会话必须直接恢复扫码柜机目标"
+  /onShow\(\(\) => \{[\s\S]+restoreEntry\(\)/,
+  "登录页重新显示时必须恢复已有会话和扫码柜机目标"
+);
+const restoreEntrySource = appLoginPageSource.slice(
+  appLoginPageSource.indexOf("const restoreEntry = async"),
+  appLoginPageSource.indexOf("const goFeedback")
+);
+assert.match(restoreEntrySource, /await sessionStore\.bootstrap\(\)/, "恢复入口必须先向服务端确认已有会话");
+assert.ok(
+  restoreEntrySource.indexOf("sessionStore.setPickupTarget(pendingPickupTarget.value)") >= 0 &&
+    restoreEntrySource.indexOf("sessionStore.setPickupTarget(pendingPickupTarget.value)") <
+      restoreEntrySource.indexOf("continueApprovedLogin"),
+  "恢复入口必须在续接已有会话前保存扫码柜机目标"
 );
 const loginSubmitSource = appLoginPageSource.slice(
   appLoginPageSource.indexOf("const submit = async"),
-  appLoginPageSource.indexOf("const openDisclaimer")
+  appLoginPageSource.indexOf("const restoreEntry = async")
+);
+assert.match(loginSubmitSource, /mobileApi\.appLogin[\s\S]+handleAuthResult\(response\)/, "验证码登录结果必须进入统一续接处理");
+const authResultSource = appLoginPageSource.slice(
+  appLoginPageSource.indexOf("const handleAuthResult"),
+  appLoginPageSource.indexOf("const submit = async")
 );
 assert.match(
-  loginSubmitSource,
+  authResultSource,
   /response\.state === "approved"[\s\S]+continueApprovedLogin\(response\)/,
   "验证码登录成功必须直接恢复扫码柜机目标"
 );
@@ -920,7 +936,6 @@ assert.equal(
 );
 for (const [name, source] of [
   ["应用登录", appLoginSource],
-  ["注册", mobileRegisterSource],
   ["通用认证流程", mobileAuthFlowSource]
 ]) {
   assert.match(
@@ -929,6 +944,12 @@ for (const [name, source] of [
     `${name}的验证码预览必须同时受开发模式门禁`
   );
 }
+assert.match(
+  mobileRegisterSource,
+  /uni\.redirectTo\(\{ url: `\/pages\/common\/app-login\$\{suffix\}` \}\)/,
+  "旧注册入口必须无副作用地转入统一登录注册页"
+);
+assert.doesNotMatch(mobileRegisterSource, /previewCode|requestCode/, "旧注册入口不得保留独立发码或验证码预览逻辑");
 assert.doesNotMatch(
   mobileProductionEnvSource,
   /^VITE_SHOW_VERIFICATION_PREVIEW\s*=\s*true\s*$/m,
@@ -1105,21 +1126,22 @@ assert.equal(
 const dashboardSource = readSource("apps/admin-web/src/pages/DashboardPage.vue");
 const adminGlobalStyleSource = readSource("apps/admin-web/src/styles/global.css");
 assert.doesNotMatch(dashboardSource, /待办 TOPS/, "后台待办标题不得使用不自然的 TOPS 文案");
-assert.match(appLoginSource, />\s*获取验证码\s*<\/button>/, "登录验证码按钮必须说明具体动作");
+assert.match(cabinetCopySource, /requestCode: "获取验证码"/, "登录验证码按钮文案必须说明具体动作");
+assert.match(appLoginSource, /\{\{ authCopy\.login\.requestCode \}\}/, "登录页必须使用集中维护的获取验证码文案");
 assert.match(
   appLoginSource,
-  /class="vm-field-shell app-login-code-shell"[\s\S]+id="app-login-code"[\s\S]+class="vm-field-shell__button"/,
+  /class="input-shell code-shell"[\s\S]+id="app-login-code"[\s\S]+class="code-button"/,
   "登录验证码输入框与获取按钮必须位于同一个横向字段容器"
 );
 assert.doesNotMatch(
   appLoginSource,
-  /vm-field-shell--stacked-action/,
+  /stacked-action/,
   "登录页不得把获取验证码按钮堆叠到输入框下方"
 );
 assert.match(
   appLoginSource,
-  /\.app-login-code-shell\s*\{[\s\S]{0,180}grid-template-columns:\s*auto minmax\(0, 1fr\) auto/,
-  "验证码字段必须显式保留图标、输入框、右侧操作三列布局"
+  /\.input-shell\s*\{[\s\S]{0,120}display:\s*flex[\s\S]{0,180}align-items:\s*center/,
+  "验证码字段必须保留可收缩输入框与右侧操作的横向布局"
 );
 assert.match(adminGlobalStyleSource, /"brand nav" auto[\s\S]{0,120}"status nav" auto/, "后台窄屏布局必须并排压缩导航，避免主内容被整页导航推离首屏");
 
