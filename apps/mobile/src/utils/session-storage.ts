@@ -1,4 +1,8 @@
-import type { RegistrationApplicationProfile, UserRole } from "@vm/shared-types";
+import type {
+  EntitlementPoolSnapshot,
+  RegistrationApplicationProfile,
+  UserRole
+} from "@vm/shared-types";
 
 import type { PickupLoginTarget } from "./cabinet-entry";
 
@@ -17,6 +21,9 @@ export interface StoredMobileSessionState {
     role?: UserRole;
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
+    receivableByGoods?: Record<string, number>;
+    remainingPools?: EntitlementPoolSnapshot[];
+    taxonomyRevision?: number;
     usedCount?: number;
     remainingDaily?: number;
     remainingFreeTotal?: number;

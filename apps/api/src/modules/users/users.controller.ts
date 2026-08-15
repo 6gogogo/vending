@@ -330,6 +330,12 @@ export class UsersController {
         goodsId: string;
         quantity: number;
       }>;
+      entitlementLimits?: Array<{
+        id: string;
+        targetType: "taxonomy_node" | "goods";
+        targetId: string;
+        quantity: number;
+      }>;
       status: "active" | "inactive";
       sourcePolicyId?: string;
     },

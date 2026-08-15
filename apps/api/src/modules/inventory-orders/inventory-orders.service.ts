@@ -10,6 +10,7 @@ import { ConfigService } from "@nestjs/config";
 import type {
   CabinetAdjustmentRecord,
   CabinetEventRecord,
+  EntitlementAllocationLine,
   GoodsCategory,
   InventoryMovement,
   SmartVmAdjustmentPayload,
@@ -26,6 +27,7 @@ import { DevicesService } from "../devices/devices.service";
 export interface InventoryQuotaAllocationItem {
   goodsId: string;
   freeQuantity: number;
+  entitlementAllocations?: readonly EntitlementAllocationLine[];
 }
 
 export interface InventoryQuotaAccountingOptions {
@@ -167,6 +169,9 @@ export class InventoryOrdersService {
       payload.detail ?? [],
       quotaOptions
     );
+    const entitlementAllocationsByGoods = new Map(
+      (quotaOptions?.quotaItems ?? []).map((item) => [item.goodsId, item.entitlementAllocations ?? []])
+    );
     const movements =
       payload.detail?.map((item) =>
         this.createMovementFromLineItem(event, item.goodsId, item.goodsName, item.quantity, item.unitPrice, {
@@ -175,7 +180,10 @@ export class InventoryOrdersService {
           quotaQuantity:
             event.role === "special"
               ? this.takeQuotaQuantity(quotaQuantityByGoods, item.goodsId, item.quantity)
-              : 0
+              : 0,
+          entitlementAllocations: entitlementAllocationsByGoods
+            .get(item.goodsId)
+            ?.map((line) => ({ ...line }))
         })
       ) ?? [];
 
@@ -1183,12 +1191,16 @@ export class InventoryOrdersService {
         entry.type === (payload.adjustment ? "adjustment" : "pickup")
     );
     const quotaQuantityByGoods = new Map<string, number>();
+    const entitlementAllocationsByGoods = new Map<string, EntitlementAllocationLine[]>();
     for (const movement of sourceMovements) {
       quotaQuantityByGoods.set(
         movement.goodsId,
         (quotaQuantityByGoods.get(movement.goodsId) ?? 0) +
           this.resolveStoredQuotaQuantity(movement)
       );
+      const allocations = entitlementAllocationsByGoods.get(movement.goodsId) ?? [];
+      allocations.push(...(movement.entitlementAllocations ?? []).map((line) => ({ ...line })));
+      entitlementAllocationsByGoods.set(movement.goodsId, allocations);
     }
 
     const adjustmentGoods =
@@ -1232,6 +1244,9 @@ export class InventoryOrdersService {
       quantity: item.quantity,
       quotaQuantity: sourceMovements.length
         ? this.takeQuotaQuantity(quotaQuantityByGoods, item.goodsId, item.quantity)
+        : undefined,
+      entitlementAllocations: sourceMovements.length
+        ? entitlementAllocationsByGoods.get(item.goodsId)?.map((line) => ({ ...line }))
         : undefined,
       unitPrice: item.unitPrice,
       type: "refund",
@@ -1309,6 +1324,7 @@ export class InventoryOrdersService {
       sourceOrderNo?: string;
       happenedAt?: string;
       quotaQuantity?: number;
+      entitlementAllocations?: EntitlementAllocationLine[];
     }
   ): InventoryMovement {
     const localGoods = this.devicesService.findGoods(event.deviceCode, goodsId);
@@ -1335,6 +1351,7 @@ export class InventoryOrdersService {
       category,
       quantity,
       quotaQuantity: options?.quotaQuantity,
+      entitlementAllocations: options?.entitlementAllocations,
       unitPrice,
       type: movementType,
       happenedAt: options?.happenedAt ?? new Date().toISOString(),

@@ -595,6 +595,9 @@ export class DevicesService {
           const localMatch = localDevice.doors
             .flatMap((door) => door.goods)
             .find((goods) => goods.goodsId === remoteItem.goodsId);
+          const catalogMatch = this.store.goodsCatalog.find(
+            (goods) => goods.goodsId === remoteItem.goodsId && goods.status !== "inactive"
+          );
           const availableExpiryAt =
             viewerRole === "special"
               ? this.store.getNearestAvailableExpiryAt(deviceCode, remoteItem.goodsId)
@@ -603,6 +606,8 @@ export class DevicesService {
           return {
             ...remoteItem,
             category: localMatch?.category ?? "daily",
+            taxonomyNodeId: catalogMatch?.taxonomyNodeId,
+            taxonomyPath: this.buildGoodsTaxonomyPath(catalogMatch?.taxonomyNodeId),
             stock: this.getStockForViewer(deviceCode, remoteItem.goodsId, viewerRole),
             expiresAt: availableExpiryAt
           };
@@ -615,27 +620,52 @@ export class DevicesService {
     return localDevice.doors
       .filter((door) => !doorNum || door.doorNum === doorNum)
       .flatMap((door) =>
-        door.goods.map((goods) => ({
-          ...goods,
-          stock: this.getStockForViewer(deviceCode, goods.goodsId, viewerRole),
-          expiresAt:
-            viewerRole === "special"
-              ? this.store.getNearestAvailableExpiryAt(deviceCode, goods.goodsId)
-              : goods.expiresAt
-        }))
+        door.goods.map((goods) => {
+          const catalogMatch = this.store.goodsCatalog.find(
+            (entry) => entry.goodsId === goods.goodsId && entry.status !== "inactive"
+          );
+          return {
+            ...goods,
+            taxonomyNodeId: catalogMatch?.taxonomyNodeId,
+            taxonomyPath: this.buildGoodsTaxonomyPath(catalogMatch?.taxonomyNodeId),
+            stock: this.getStockForViewer(deviceCode, goods.goodsId, viewerRole),
+            expiresAt:
+              viewerRole === "special"
+                ? this.store.getNearestAvailableExpiryAt(deviceCode, goods.goodsId)
+                : goods.expiresAt
+          };
+        })
       );
   }
 
+  private buildGoodsTaxonomyPath(nodeId?: string) {
+    if (!nodeId) return undefined;
+    const path: Array<{ id: string; name: string; sortOrder: number }> = [];
+    const visited = new Set<string>();
+    let currentId: string | null = nodeId;
+
+    while (currentId !== null) {
+      if (visited.has(currentId)) return undefined;
+      visited.add(currentId);
+      const node = this.store.goodsTaxonomyNodes.find(
+        (entry) => entry.id === currentId && entry.status === "active"
+      );
+      if (!node) return undefined;
+      path.unshift({ id: node.id, name: node.name, sortOrder: node.sortOrder });
+      currentId = node.parentId;
+    }
+
+    return path;
+  }
+
   private getStockForViewer(deviceCode: string, goodsId: string, viewerRole?: UserRole) {
-    // 受控人工码验收必须展示预约真正能锁定的库存。否则运行器可能先选到
-    // 已过期或已被其他预约占用的“物理余量”，随后在创建预约时才失败。
-    if (this.store.isManualAppAcceptanceFixtureMode()) {
+    // 特殊用户看到的数量必须和创建预约使用同一份可预约库存，避免把已被
+    // 其他有效预约锁定的物资继续显示为“未预约”。
+    if (viewerRole === "special" || this.store.isManualAppAcceptanceFixtureMode()) {
       return this.store.getReservableStock(deviceCode, goodsId);
     }
 
-    return viewerRole === "special"
-      ? this.store.getAvailableStock(deviceCode, goodsId)
-      : this.store.getCurrentStock(deviceCode, goodsId);
+    return this.store.getCurrentStock(deviceCode, goodsId);
   }
 
   private canViewerAccessDevice(

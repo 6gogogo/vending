@@ -89,6 +89,48 @@ test("持久化状态完整性校验接受默认业务快照", () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("持久化状态完整性校验兼容尚未迁移分类树的历史快照", () => {
+  const state = createRawState();
+  delete state.goodsTaxonomyNodes;
+
+  const result = validatePersistedState(state);
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.warnings.includes("历史快照缺少 goodsTaxonomyNodes，将按未迁移状态加载。"));
+});
+
+test("持久化状态完整性校验拒绝分类循环和悬空货品归属", () => {
+  const state = createRawState();
+  state.goodsTaxonomyNodes = [
+    { id: "root", name: "任意", parentId: null, status: "active", sortOrder: 1, revision: 1, createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:00:00.000Z" },
+    { id: "left", name: "食品", parentId: "right", status: "active", sortOrder: 1, revision: 1, createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:00:00.000Z" },
+    { id: "right", name: "饮料", parentId: "left", status: "active", sortOrder: 2, revision: 1, createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:00:00.000Z" }
+  ];
+  (state.goodsCatalog as Array<Record<string, unknown>>)[0]!.taxonomyNodeId = "missing";
+
+  const result = validatePersistedState(state);
+  assert.ok(result.errors.includes("goodsTaxonomyNodes 存在循环引用。"));
+  assert.ok(result.errors.includes("goodsCatalog[0].taxonomyNodeId 指向不存在的分类节点。"));
+});
+
+test("持久化状态完整性校验拒绝名称不是任意的分类根节点", () => {
+  const state = createRawState();
+  state.goodsTaxonomyNodes = [
+    {
+      id: "root",
+      name: "全部物资",
+      parentId: null,
+      status: "active",
+      sortOrder: 1,
+      revision: 1,
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z"
+    }
+  ];
+
+  const result = validatePersistedState(state);
+  assert.ok(result.errors.includes("goodsTaxonomyNodes 根节点名称必须为“任意”。"));
+});
+
 test("持久化状态完整性校验接受结构完整的人工结算补记", () => {
   const { state } = createStateWithManualSettlement();
 

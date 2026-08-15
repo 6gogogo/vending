@@ -23,6 +23,7 @@
     "verify:api-data": "npm run data:verify --workspace @vm/api --",
     "repair:api-data": "npm run data:repair --workspace @vm/api --",
     "repair:missing-default-warehouse": "npm run data:repair:missing-default-warehouse --workspace @vm/api --",
+    "migrate:goods-taxonomy": "npm run data:migrate:goods-taxonomy --workspace @vm/api --",
     "restore:api-data": "npm run data:restore --workspace @vm/api --",
     "db:api:generate": "npm run db:generate --workspace @vm/api",
     "db:api:push": "npm run db:push --workspace @vm/api",

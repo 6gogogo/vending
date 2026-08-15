@@ -217,13 +217,24 @@ export const appCopy = {
     },
     goods: {
       title: "选择领取数量",
-      hint: "部分商品暂不可选，说明该商品正在预约中，请选择其他可领取商品。",
+      hint: "可预约数量和今日可领取额度会在开柜前再次校验。",
       stockLabel: "库存",
       availableLabel: "可领取",
       imageAlt: (goodsName: string) => `${goodsName}商品图`,
       imageUnavailable: "图片暂不可用",
       availabilityAriaLabel: (stock: number, available: number) =>
         `库存 ${stock} 件，可领取 ${available} 件`,
+      entitlement: {
+        rootFallback: "任意物资",
+        sharedHint: "全局任意额度",
+        selected: "已选",
+        parentQuota: "本类",
+        dedicated: "专属",
+        shared: "任意"
+      },
+      meta: (category: string, stock: number, remaining: number) =>
+        `${category} · 库存 ${stock} · 可领取 ${remaining}`,
+      unreserved: (quantity: number) => `未预约 ${quantity} 件`,
       decreaseAriaLabel: (goodsName: string) => `为${goodsName}减少一件`,
       increaseAriaLabel: (goodsName: string) => `为${goodsName}增加一件`,
       loadingTitle: "正在加载商品",

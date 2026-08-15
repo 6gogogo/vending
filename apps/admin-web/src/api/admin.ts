@@ -29,6 +29,7 @@ import type {
   GoodsCategoryRecord,
   GoodsDetailSnapshot,
   GoodsOverviewSnapshot,
+  GoodsTaxonomyNode,
   InventoryMovement,
   InstanceRuntimeControlStatus,
   InstanceRuntimeRestartPayload,
@@ -459,6 +460,12 @@ export const adminApi = {
         goodsId: string;
         quantity: number;
       }>;
+      entitlementLimits?: Array<{
+        id: string;
+        targetType: "taxonomy_node" | "goods";
+        targetId: string;
+        quantity: number;
+      }>;
       status: UserAccessPolicy["status"];
       sourcePolicyId?: string;
     }
@@ -696,6 +703,50 @@ export const adminApi = {
   goodsCatalog() {
     requireAnyBackofficePermission(["goods:view", "devices:view", "users:view"]);
     return adminClient.get<GoodsCatalogItem[]>("/goods-catalog");
+  },
+  goodsTaxonomy() {
+    requireBackofficePermission("goods:view");
+    return adminClient.get<{
+      revision: number;
+      nodes: GoodsTaxonomyNode[];
+      goods: GoodsCatalogItem[];
+      unassignedGoodsIds: string[];
+    }>("/goods-taxonomy/tree");
+  },
+  createGoodsTaxonomyNode(payload: { name: string; parentId: string | null; sortOrder?: number }) {
+    requireBackofficePermission("goods:manage");
+    return adminClient.post<GoodsTaxonomyNode>("/goods-taxonomy/nodes", payload);
+  },
+  previewGoodsTaxonomyChange(id: string, payload: Partial<Pick<GoodsTaxonomyNode, "name" | "parentId" | "status" | "sortOrder">>) {
+    requireBackofficePermission("goods:manage");
+    return adminClient.post<{
+      allowed: boolean;
+      blockReason?: string;
+      expectedRevision: number;
+      affectedNodeIds: string[];
+      affectedGoodsIds: string[];
+      affectedPolicyIds: string[];
+      affectedUserIds: string[];
+      affectedReservationIds: string[];
+    }>(`/goods-taxonomy/nodes/${encodeURIComponent(id)}/change-preview`, payload);
+  },
+  applyGoodsTaxonomyChange(id: string, payload: Partial<Pick<GoodsTaxonomyNode, "name" | "parentId" | "status" | "sortOrder">> & { expectedRevision: number }) {
+    requireBackofficePermission("goods:manage");
+    return adminClient.post(`/goods-taxonomy/nodes/${encodeURIComponent(id)}/change`, payload);
+  },
+  previewGoodsTaxonomyAssignment(payload: { taxonomyNodeId: string; goodsIds: string[] }) {
+    requireBackofficePermission("goods:manage");
+    return adminClient.post<{
+      expectedRevision: number;
+      affectedGoodsIds: string[];
+      affectedPolicyIds: string[];
+      affectedUserIds: string[];
+      affectedReservationIds: string[];
+    }>("/goods-taxonomy/goods-assignments/change-preview", payload);
+  },
+  assignGoodsTaxonomy(payload: { taxonomyNodeId: string; goodsIds: string[]; expectedRevision: number }) {
+    requireBackofficePermission("goods:manage");
+    return adminClient.post("/goods-taxonomy/goods-assignments", payload);
   },
   goodsCategories() {
     requireAnyBackofficePermission(["goods:view", "merchant-workbench:view"]);

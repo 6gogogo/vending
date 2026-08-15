@@ -32,6 +32,9 @@ const sendingCode = ref(false);
 const submitting = ref(false);
 const hasAcceptedDisclaimer = ref(false);
 const showDisclaimer = ref(false);
+const disclaimerValidationMessage = ref("");
+const disclaimerDialog = ref<HTMLElement | { $el?: HTMLElement }>();
+let disclaimerPreviousFocus: HTMLElement | undefined;
 const verificationProvider = ref<VerificationProvider>();
 const pendingPickupTarget = ref<PickupLoginTarget>();
 const showVerificationPreview =
@@ -80,9 +83,54 @@ const validateCode = () => {
 };
 
 const ensureDisclaimerAccepted = () => {
-  if (hasAcceptedDisclaimer.value) return true;
+  if (hasAcceptedDisclaimer.value) {
+    disclaimerValidationMessage.value = "";
+    return true;
+  }
+  disclaimerValidationMessage.value = appCopy.disclaimer.validationMessage;
   uni.showToast({ title: appCopy.disclaimer.validationToast, icon: "none" });
   return false;
+};
+
+const handleDisclaimerAgreementChange = (event: { detail?: { value?: string[] } }) => {
+  hasAcceptedDisclaimer.value = event.detail?.value?.includes("accepted") ?? false;
+  if (hasAcceptedDisclaimer.value) {
+    disclaimerValidationMessage.value = "";
+  }
+};
+
+const resolveDisclaimerElement = () => {
+  const target = disclaimerDialog.value;
+  if (typeof HTMLElement !== "undefined" && target instanceof HTMLElement) {
+    return target;
+  }
+  return target?.$el;
+};
+
+const restoreDisclaimerFocus = async () => {
+  const target = disclaimerPreviousFocus;
+  disclaimerPreviousFocus = undefined;
+  await nextTick();
+  if (target?.isConnected) {
+    target.focus();
+  }
+};
+
+const openDisclaimer = async () => {
+  disclaimerPreviousFocus =
+    typeof document !== "undefined" &&
+    typeof HTMLElement !== "undefined" &&
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : undefined;
+  showDisclaimer.value = true;
+  await nextTick();
+  resolveDisclaimerElement()?.focus();
+};
+
+const closeDisclaimer = async () => {
+  showDisclaimer.value = false;
+  await restoreDisclaimerFocus();
 };
 
 const syncLoginInputAccessibility = async () => {
@@ -283,15 +331,29 @@ onMounted(() => {
         </view>
       </view>
 
-      <checkbox-group @change="hasAcceptedDisclaimer = $event.detail.value.includes('accepted')">
-        <label class="agreement-row">
-          <checkbox value="accepted" :checked="hasAcceptedDisclaimer" color="#24854a" />
-          <text>{{ authCopy.login.agreementPrefix }}</text>
-          <text class="agreement-link" @tap.stop="showDisclaimer = true">
-            《{{ appCopy.disclaimer.title }}》
-          </text>
-        </label>
-      </checkbox-group>
+      <view
+        class="disclaimer-agreement"
+        :class="{ 'disclaimer-agreement--invalid': Boolean(disclaimerValidationMessage) }"
+        :aria-invalid="String(Boolean(disclaimerValidationMessage))"
+      >
+        <checkbox-group @change="handleDisclaimerAgreementChange">
+          <label class="agreement-row">
+            <checkbox value="accepted" :checked="hasAcceptedDisclaimer" color="#24854a" />
+            <text>{{ authCopy.login.agreementPrefix }}</text>
+            <text class="agreement-link" @tap.stop="openDisclaimer">
+              《{{ appCopy.disclaimer.title }}》
+            </text>
+          </label>
+        </checkbox-group>
+        <text
+          v-if="disclaimerValidationMessage"
+          class="disclaimer-agreement__error"
+          role="alert"
+          aria-live="assertive"
+        >
+          {{ disclaimerValidationMessage }}
+        </text>
+      </view>
 
       <view v-if="showVerificationPreview && previewCode" class="preview-code">
         <text>{{ authCopy.login.preview(previewCode) }}</text>
@@ -303,10 +365,20 @@ onMounted(() => {
       <button class="support-button" @tap="goFeedback">{{ authCopy.login.support }}</button>
     </view>
 
-    <view v-if="showDisclaimer" class="disclaimer-mask" @tap.self="showDisclaimer = false">
-      <view class="disclaimer-dialog">
-        <text class="disclaimer-dialog__title">{{ appCopy.disclaimer.title }}</text>
-        <scroll-view class="disclaimer-dialog__body" scroll-y>
+    <view v-if="showDisclaimer" class="disclaimer-mask">
+      <view
+        ref="disclaimerDialog"
+        class="disclaimer-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="disclaimer-dialog-title"
+        aria-describedby="disclaimer-dialog-hint"
+        tabindex="-1"
+        @keydown.esc.stop.prevent="closeDisclaimer"
+      >
+        <text id="disclaimer-dialog-title" class="disclaimer-dialog__title">{{ appCopy.disclaimer.title }}</text>
+        <text id="disclaimer-dialog-hint" class="disclaimer-dialog__hint">{{ appCopy.disclaimer.dialogHint }}</text>
+        <scroll-view class="disclaimer-dialog__body" scroll-y :aria-label="appCopy.disclaimer.bodyAriaLabel">
           <text
             v-for="(line, index) in disclaimerLines"
             :key="`${index}-${line}`"
@@ -315,7 +387,7 @@ onMounted(() => {
             {{ line.replace(/^#{1,2}\s*/, "") }}
           </text>
         </scroll-view>
-        <button class="primary-button" @tap="showDisclaimer = false">
+        <button class="primary-button" @tap="closeDisclaimer">
           {{ authCopy.login.closeDisclaimer }}
         </button>
       </view>
@@ -462,6 +534,29 @@ onMounted(() => {
   font-weight: 600;
 }
 
+.disclaimer-agreement {
+  display: grid;
+  gap: 10rpx;
+  padding: 18rpx 20rpx;
+  border: 2rpx solid #e5ddd1;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.disclaimer-agreement--invalid {
+  border-color: #a95500;
+  background: rgba(169, 85, 0, 0.08);
+  box-shadow: 0 0 0 5rpx rgba(169, 85, 0, 0.1);
+}
+
+.disclaimer-agreement__error {
+  display: block;
+  color: #8f4700;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
 .agreement-link { color: #24854a; font-weight: 800; }
 .preview-code { color: #176638; font-size: 28rpx; text-align: center; }
 
@@ -514,6 +609,7 @@ onMounted(() => {
 }
 
 .disclaimer-dialog__title { font-size: 38rpx; font-weight: 900; }
+.disclaimer-dialog__hint { color: #69645e; font-size: 25rpx; line-height: 1.5; }
 .disclaimer-dialog__body { height: 56vh; }
 .disclaimer-dialog__line {
   display: block;

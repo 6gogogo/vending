@@ -11,7 +11,9 @@ import {
   type BackofficePermission,
   type BackofficeRole,
   type DeviceRecord,
+  type EntitlementLimit,
   type GoodsCatalogItem,
+  type GoodsTaxonomyNode,
   type ManualVerificationGrantSnapshot,
   type ManualVerificationPurpose,
   type RegionRecord,
@@ -88,7 +90,9 @@ interface PolicyFormState {
   startHour: number;
   endHour: number;
   status: SpecialAccessPolicy["status"];
+  mode: "taxonomy" | "goods";
   goodsLimits: Array<{ goodsId: string; quantity: number }>;
+  entitlementLimits: EntitlementLimit[];
 }
 
 interface BackofficeFormState {
@@ -282,6 +286,7 @@ const manualVerificationGrants = ref<ManualVerificationGrantSnapshot[]>([]);
 const registrationApplications = ref<RegistrationApplication[]>([]);
 const policies = ref<SpecialAccessPolicy[]>([]);
 const goodsCatalog = ref<GoodsCatalogItem[]>([]);
+const goodsTaxonomyNodes = ref<GoodsTaxonomyNode[]>([]);
 const regions = ref<RegionRecord[]>([]);
 const backofficeCredentials = ref<BackofficeCredentialSnapshot[]>([]);
 const reservationSettings = ref<ReservationSettings | null>(null);
@@ -327,7 +332,7 @@ const regionDraftAddress = ref("");
 const regionMapPickerVisible = ref(false);
 const rejectReasons = ref<Record<string, string>>({});
 const userForm = ref<UserFormState>({ role: "special", phone: "", name: "", status: "active", regionId: "", regionName: "", tagsText: "" });
-const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: "", quantity: 1 }] });
+const policyForm = ref<PolicyFormState>({ name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", mode: "taxonomy", goodsLimits: [{ goodsId: "", quantity: 1 }], entitlementLimits: [] });
 const backofficeForm = ref<BackofficeFormState>(createEmptyBackofficeForm());
 const deviceAssignmentForm = ref<DeviceAssignmentFormState>(createEmptyDeviceAssignmentForm());
 const supervisorPasswordResetForm = ref<SupervisorPasswordResetFormState>(
@@ -354,6 +359,35 @@ const showActionMessage = (type: "success" | "error", text: string) => {
 
 const regionOptions = computed(() => regions.value.filter((item) => item.status === "active"));
 const goodsCatalogMap = computed(() => new Map(goodsCatalog.value.map((item) => [item.goodsId, item])));
+const taxonomyNodeMap = computed(() => new Map(goodsTaxonomyNodes.value.map((node) => [node.id, node])));
+const taxonomyNodeOptions = computed(() => {
+  const pathFor = (node: GoodsTaxonomyNode) => {
+    const names = [node.name];
+    const visited = new Set([node.id]);
+    let parentId = node.parentId;
+    while (parentId) {
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      const parent = taxonomyNodeMap.value.get(parentId);
+      if (!parent) break;
+      names.unshift(parent.name);
+      parentId = parent.parentId;
+    }
+    return names.join(" / ");
+  };
+  return goodsTaxonomyNodes.value
+    .filter((node) => node.status === "active")
+    .map((node) => ({ id: node.id, label: pathFor(node) }))
+    .sort((left, right) => left.label.localeCompare(right.label, "zh-Hans-CN"));
+});
+const entitlementTargetLabel = (limit: EntitlementLimit) =>
+  limit.targetType === "taxonomy_node"
+    ? taxonomyNodeOptions.value.find((entry) => entry.id === limit.targetId)?.label ?? limit.targetId
+    : goodsCatalogMap.value.get(limit.targetId)?.name ?? limit.targetId;
+const formatPolicyLimits = (policy: SpecialAccessPolicy) =>
+  policy.entitlementLimits?.length
+    ? policy.entitlementLimits.map((limit) => `${entitlementTargetLabel(limit)} x${limit.quantity}`).join("，")
+    : policy.goodsLimits.map((limit) => `${limit.goodsName} x${limit.quantity}`).join("，");
 const pendingRegistrationCount = computed(() => registrationApplications.value.filter((item) => item.status === "pending").length);
 const specialUserCount = computed(() => users.value.filter((user) => user.role === "special").length);
 const filteredUsers = computed(() => {
@@ -761,7 +795,18 @@ const fillUserForm = (user: UserRecord) => {
   };
 };
 const resetPolicyForm = () => {
-  policyForm.value = { name: "", weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }] };
+  policyForm.value = {
+    name: "",
+    weekdays: [1, 2, 3, 4, 5],
+    startHour: 8,
+    endHour: 12,
+    status: "active",
+    mode: taxonomyNodeOptions.value.length ? "taxonomy" : "goods",
+    goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }],
+    entitlementLimits: taxonomyNodeOptions.value[0]
+      ? [{ id: globalThis.crypto.randomUUID(), targetType: "taxonomy_node", targetId: taxonomyNodeOptions.value[0].id, quantity: 1 }]
+      : []
+  };
 };
 const resetRegionDraft = () => {
   regionDraftName.value = "";
@@ -838,7 +883,8 @@ const load = async () => {
       backofficeCredentialsResponse,
       reservationSettingsResponse,
       devicesResponse,
-      manualVerificationGrantsResponse
+      manualVerificationGrantsResponse,
+      taxonomyResponse
     ] = await Promise.all([
       adminApi.users(),
       canReviewRegistrations.value
@@ -866,7 +912,10 @@ const load = async () => {
       adminApi.devices(),
       canManageManualVerificationCodes.value
         ? adminApi.manualVerificationCodes()
-        : Promise.resolve([] as ManualVerificationGrantSnapshot[])
+        : Promise.resolve([] as ManualVerificationGrantSnapshot[]),
+      canManageUserRules.value
+        ? adminApi.goodsTaxonomy()
+        : Promise.resolve({ revision: 0, nodes: [], goods: [], unassignedGoodsIds: [] })
     ]);
     users.value = usersResponse;
     if (applicationResponse) {
@@ -874,6 +923,7 @@ const load = async () => {
     }
     policies.value = policiesResponse;
     goodsCatalog.value = goodsCatalogResponse;
+    goodsTaxonomyNodes.value = taxonomyResponse.nodes;
     regions.value = regionsResponse;
     backofficeCredentials.value = backofficeCredentialsResponse;
     devices.value = devicesResponse;
@@ -884,6 +934,9 @@ const load = async () => {
     );
     if (reservationSettingsResponse) applyReservationSettings(reservationSettingsResponse);
     if (!policyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) policyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
+    if (!policyForm.value.entitlementLimits.length && taxonomyNodeOptions.value[0]) {
+      policyForm.value.entitlementLimits = [{ id: globalThis.crypto.randomUUID(), targetType: "taxonomy_node", targetId: taxonomyNodeOptions.value[0].id, quantity: 1 }];
+    }
   } catch (error) {
     showActionMessage("error", `人员与规则数据加载失败：${readErrorMessage(error, "请稍后重试")}`);
   } finally {
@@ -972,7 +1025,22 @@ const openCreatePolicy = () => {
 };
 const openEditPolicy = (policy: SpecialAccessPolicy) => {
   editingPolicyId.value = policy.id;
-  policyForm.value = { name: policy.name, weekdays: [...policy.weekdays], startHour: policy.startHour, endHour: policy.endHour, status: policy.status, goodsLimits: policy.goodsLimits.map((limit) => ({ goodsId: limit.goodsId, quantity: limit.quantity })) };
+  policyForm.value = {
+    name: policy.name,
+    weekdays: [...policy.weekdays],
+    startHour: policy.startHour,
+    endHour: policy.endHour,
+    status: policy.status,
+    mode: policy.entitlementLimits?.length ? "taxonomy" : "goods",
+    goodsLimits: policy.goodsLimits.length
+      ? policy.goodsLimits.map((limit) => ({ goodsId: limit.goodsId, quantity: limit.quantity }))
+      : [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }],
+    entitlementLimits: policy.entitlementLimits?.length
+      ? structuredClone(policy.entitlementLimits)
+      : taxonomyNodeOptions.value[0]
+        ? [{ id: globalThis.crypto.randomUUID(), targetType: "taxonomy_node", targetId: taxonomyNodeOptions.value[0].id, quantity: 1 }]
+        : []
+  };
   drawerMode.value = "edit-policy";
 };
 const openBackofficeAccount = (user: UserRecord) => {
@@ -1755,32 +1823,79 @@ const removePolicyGoodsLimit = (index: number) => {
   policyForm.value.goodsLimits.splice(index, 1);
   if (!policyForm.value.goodsLimits.length) addPolicyGoodsLimit();
 };
+const createPolicyEntitlementLimit = (): EntitlementLimit => ({
+  id: globalThis.crypto.randomUUID(),
+  targetType: "taxonomy_node",
+  targetId: taxonomyNodeOptions.value[0]?.id ?? "",
+  quantity: 1
+});
+const addPolicyEntitlementLimit = () => {
+  policyForm.value.entitlementLimits.push(createPolicyEntitlementLimit());
+};
+const removePolicyEntitlementLimit = (index: number) => {
+  policyForm.value.entitlementLimits.splice(index, 1);
+  if (!policyForm.value.entitlementLimits.length) addPolicyEntitlementLimit();
+};
+const changePolicyEntitlementTargetType = (limit: EntitlementLimit) => {
+  limit.targetId =
+    limit.targetType === "taxonomy_node"
+      ? taxonomyNodeOptions.value[0]?.id ?? ""
+      : goodsCatalog.value[0]?.goodsId ?? "";
+};
 const submitPolicyForm = async () => {
   actionMessage.value = null;
   let normalizedWeekdays: number[] = [];
   let goodsLimits: Array<{ goodsId: string; goodsName: string; category: GoodsCatalogItem["category"]; quantity: number }> = [];
+  let entitlementLimits: EntitlementLimit[] = [];
 
   try {
     normalizedWeekdays = Array.from(new Set(policyForm.value.weekdays)).sort((left, right) => left - right);
-    goodsLimits = policyForm.value.goodsLimits.filter((item) => item.goodsId && item.quantity > 0).map((item) => {
-      const catalogItem = goodsCatalogMap.value.get(item.goodsId);
-      if (!catalogItem) throw new Error(`未找到货品 ${item.goodsId}。`);
-      return { goodsId: catalogItem.goodsId, goodsName: catalogItem.name, category: catalogItem.category, quantity: item.quantity };
-    });
+    if (policyForm.value.mode === "goods") {
+      goodsLimits = policyForm.value.goodsLimits.filter((item) => item.goodsId && item.quantity > 0).map((item) => {
+        const catalogItem = goodsCatalogMap.value.get(item.goodsId);
+        if (!catalogItem) throw new Error(`未找到货品 ${item.goodsId}。`);
+        if (!Number.isSafeInteger(item.quantity)) throw new Error(`${catalogItem.name} 的数量必须为正整数。`);
+        return { goodsId: catalogItem.goodsId, goodsName: catalogItem.name, category: catalogItem.category, quantity: item.quantity };
+      });
+    } else {
+      entitlementLimits = policyForm.value.entitlementLimits
+        .filter((item) => item.targetId && item.quantity > 0)
+        .map((item) => {
+          if (!Number.isSafeInteger(item.quantity)) throw new Error(`${entitlementTargetLabel(item)} 的数量必须为正整数。`);
+          if (item.targetType === "taxonomy_node" && !taxonomyNodeMap.value.has(item.targetId)) {
+            throw new Error(`未找到分类 ${item.targetId}。`);
+          }
+          if (item.targetType === "goods" && !goodsCatalogMap.value.has(item.targetId)) {
+            throw new Error(`未找到货品 ${item.targetId}。`);
+          }
+          return { ...item, id: item.id || globalThis.crypto.randomUUID() };
+        });
+      const targetKeys = entitlementLimits.map((item) => `${item.targetType}:${item.targetId}`);
+      if (new Set(targetKeys).size !== targetKeys.length) throw new Error("同一分类或货品只能设置一个额度池。");
+    }
   } catch (error) {
     showActionMessage("error", `规则模板保存失败：${readErrorMessage(error, "请检查货品配置")}`);
     return;
   }
 
-  if (!normalizedWeekdays.length || !goodsLimits.length || policyForm.value.endHour <= policyForm.value.startHour) {
-    showActionMessage("error", "规则模板保存失败：请选择开放星期、至少一个货品额度，并确保结束时间晚于开始时间。");
+  const hasLimits = policyForm.value.mode === "taxonomy" ? entitlementLimits.length > 0 : goodsLimits.length > 0;
+  if (!normalizedWeekdays.length || !hasLimits || policyForm.value.endHour <= policyForm.value.startHour) {
+    showActionMessage("error", "规则模板保存失败：请选择开放星期、至少一个额度池，并确保结束时间晚于开始时间。");
     return;
   }
 
   const isCreate = drawerMode.value === "create-policy";
   saving.value = true;
   try {
-    const basePayload = { name: policyForm.value.name.trim(), weekdays: normalizedWeekdays, startHour: policyForm.value.startHour, endHour: policyForm.value.endHour, status: policyForm.value.status, goodsLimits };
+    const basePayload = {
+      name: policyForm.value.name.trim(),
+      weekdays: normalizedWeekdays,
+      startHour: policyForm.value.startHour,
+      endHour: policyForm.value.endHour,
+      status: policyForm.value.status,
+      goodsLimits,
+      entitlementLimits
+    };
     if (drawerMode.value === "create-policy") {
       await adminApi.createPolicy({ ...basePayload, applicableUserIds: [] });
     } else if (drawerMode.value === "edit-policy" && editingPolicyId.value) {
@@ -2512,7 +2627,7 @@ onMounted(load);
               <div class="admin-list__main">
                 <span class="admin-list__title">{{ policy.name }}</span>
                 <span class="admin-list__meta">{{ formatWeekdays(policy.weekdays) }} · {{ String(policy.startHour).padStart(2, "0") }}:00-{{ String(policy.endHour).padStart(2, "0") }}:00 · {{ policy.applicableUserIds.length }} 人</span>
-                <span class="admin-table__subtext">{{ policy.goodsLimits.map((limit) => `${limit.goodsName} x${limit.quantity}`).join("，") }}</span>
+                <span class="admin-table__subtext">{{ formatPolicyLimits(policy) }}</span>
               </div>
               <div class="admin-inline-links">
                 <span class="admin-pill" :class="policy.status === 'active' ? 'admin-pill--success' : 'admin-pill--warning'">{{ policy.status === "active" ? "启用中" : "已停用" }}</span>
@@ -2886,7 +3001,35 @@ onMounted(load);
               <option value="inactive">停用</option>
             </select>
           </label>
-          <div class="admin-field">
+          <label class="admin-field">
+            <span class="admin-field__label">额度口径</span>
+            <select v-model="policyForm.mode" class="admin-select">
+              <option value="taxonomy" :disabled="!taxonomyNodeOptions.length">分类额度</option>
+              <option value="goods">指定货品（兼容旧规则）</option>
+            </select>
+          </label>
+          <div v-if="policyForm.mode === 'taxonomy'" class="admin-field">
+            <span class="admin-field__label">分类额度池</span>
+            <div class="users-policy-limits">
+              <div v-for="(limit, index) in policyForm.entitlementLimits" :key="limit.id" class="users-policy-entitlement-row">
+                <select v-model="limit.targetType" class="admin-select" @change="changePolicyEntitlementTargetType(limit)">
+                  <option value="taxonomy_node">分类</option>
+                  <option value="goods">指定货品</option>
+                </select>
+                <select v-if="limit.targetType === 'taxonomy_node'" v-model="limit.targetId" class="admin-select">
+                  <option v-for="node in taxonomyNodeOptions" :key="node.id" :value="node.id">{{ node.label }}</option>
+                </select>
+                <select v-else v-model="limit.targetId" class="admin-select">
+                  <option v-for="goods in goodsCatalog" :key="goods.goodsId" :value="goods.goodsId">{{ goods.name }} / {{ goods.goodsId }}</option>
+                </select>
+                <input v-model.number="limit.quantity" class="admin-input" type="number" min="1" step="1" />
+                <button class="admin-button admin-button--ghost" type="button" @click="removePolicyEntitlementLimit(index)">删除</button>
+              </div>
+            </div>
+            <button class="admin-text-button" type="button" @click="addPolicyEntitlementLimit">继续添加额度池</button>
+            <div class="admin-note">额度池独立累加，领取时优先使用最具体的分类，并自动保留较窄额度的可用空间。</div>
+          </div>
+          <div v-else class="admin-field">
             <span class="admin-field__label">货品数量</span>
             <div class="users-policy-limits">
               <div v-for="(limit, index) in policyForm.goodsLimits" :key="`${index}-${limit.goodsId}`" class="users-policy-limit-row">
@@ -3187,6 +3330,7 @@ onMounted(load);
 }
 
 .users-policy-limit-row,
+.users-policy-entitlement-row,
 .users-hours,
 .users-region-form-grid,
 .users-region-create,
@@ -3202,6 +3346,10 @@ onMounted(load);
 
 .users-policy-limit-row {
   grid-template-columns: minmax(0, 1fr) 120px auto;
+}
+
+.users-policy-entitlement-row {
+  grid-template-columns: 110px minmax(0, 1fr) 100px auto;
 }
 
 .users-hours,
@@ -3356,6 +3504,7 @@ onMounted(load);
   .users-setup-grid,
   .users-filters,
   .users-policy-limit-row,
+  .users-policy-entitlement-row,
   .users-hours,
   .users-region-form-grid {
     grid-template-columns: 1fr;

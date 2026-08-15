@@ -229,6 +229,59 @@ test("特殊用户货品查询回退时同步隐藏过期批次的到期时间",
   assert.equal(resultGoods?.expiresAt, availableExpiryAt);
 });
 
+test("特殊用户货品查询只读返回当前目录中的分类路径", async () => {
+  const store = createIsolatedStore();
+  const service = new InventoryBatchChangesService(store);
+  const device = store.devices[0];
+  const door = device?.doors[0];
+  const goods = door?.goods[0];
+  assert.ok(device);
+  assert.ok(door);
+  assert.ok(goods);
+
+  const root = {
+    id: "taxonomy-any",
+    name: "任意物资",
+    parentId: null,
+    status: "active" as const,
+    sortOrder: 0,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  const food = {
+    ...root,
+    id: "taxonomy-food",
+    name: "食品",
+    parentId: root.id,
+    sortOrder: 1
+  };
+  store.goodsTaxonomyNodes.splice(0, store.goodsTaxonomyNodes.length, root, food);
+  const catalogGoods = store.goodsCatalog.find((entry) => entry.goodsId === goods.goodsId);
+  assert.ok(catalogGoods);
+  catalogGoods.taxonomyNodeId = food.id;
+  delete catalogGoods.taxonomyPath;
+
+  const devices = new DevicesService(
+    store,
+    service,
+    {
+      async getGoodsInfo() {
+        throw new Error("强制使用本地回退");
+      }
+    } as never
+  );
+  const result = await devices.getGoods(device.deviceCode, door.doorNum, "special");
+  const resultGoods = result.find((entry) => entry.goodsId === goods.goodsId);
+
+  assert.equal(resultGoods?.taxonomyNodeId, food.id);
+  assert.deepEqual(resultGoods?.taxonomyPath, [
+    { id: root.id, name: root.name, sortOrder: root.sortOrder },
+    { id: food.id, name: food.name, sortOrder: food.sortOrder }
+  ]);
+  assert.equal(catalogGoods.taxonomyPath, undefined);
+});
+
 test("只读货品查询不把远端返回写入全局目录或柜机本地配置", async () => {
   const store = createIsolatedStore();
   const batches = new InventoryBatchChangesService(store);

@@ -32,6 +32,13 @@ interface SessionState {
     role?: UserRole;
     remainingToday: Record<string, number>;
     remainingByGoods?: Record<string, number>;
+    receivableByGoods?: Record<string, number>;
+    remainingPools?: MobileSessionSnapshot["quota"] extends infer Quota
+      ? Quota extends { remainingPools?: infer Pools }
+        ? Pools
+        : never
+      : never;
+    taxonomyRevision?: number;
     usedCount?: number;
     remainingDaily?: number;
     remainingFreeTotal?: number;

@@ -248,6 +248,82 @@ const validateRequiredStringFields = (
   }
 };
 
+const validateGoodsTaxonomy = (
+  state: Record<string, unknown>,
+  result: PersistedStateValidationResult
+) => {
+  const rawNodes = state.goodsTaxonomyNodes;
+  if (rawNodes === undefined) {
+    result.warnings.push("历史快照缺少 goodsTaxonomyNodes，将按未迁移状态加载。");
+    return;
+  }
+  if (!Array.isArray(rawNodes)) {
+    result.errors.push("goodsTaxonomyNodes 必须是数组。");
+    return;
+  }
+
+  const nodes = rawNodes.filter(isRecord);
+  const ids = new Set(
+    nodes.flatMap((node) => (isNonEmptyString(node.id) ? [node.id] : []))
+  );
+  const roots = nodes.filter((node) => node.parentId === null);
+  if (nodes.length > 0 && roots.length !== 1) {
+    result.errors.push("goodsTaxonomyNodes 必须且只能包含一个根节点。");
+  } else if (roots.length === 1 && roots[0]?.name !== "任意") {
+    result.errors.push("goodsTaxonomyNodes 根节点名称必须为“任意”。");
+  }
+
+  for (const [index, node] of nodes.entries()) {
+    if (node.parentId !== null && !isNonEmptyString(node.parentId)) {
+      result.errors.push(`goodsTaxonomyNodes[${index}].parentId 必须是字符串或 null。`);
+      continue;
+    }
+    if (isNonEmptyString(node.parentId) && !ids.has(node.parentId)) {
+      result.errors.push(`goodsTaxonomyNodes[${index}].parentId 指向不存在的节点。`);
+    }
+    if (!Number.isSafeInteger(node.sortOrder) || Number(node.sortOrder) < 0) {
+      result.errors.push(`goodsTaxonomyNodes[${index}].sortOrder 必须是非负整数。`);
+    }
+    if (!Number.isSafeInteger(node.revision) || Number(node.revision) < 1) {
+      result.errors.push(`goodsTaxonomyNodes[${index}].revision 必须是正整数。`);
+    }
+  }
+
+  const parentById = new Map(
+    nodes.flatMap((node) =>
+      isNonEmptyString(node.id)
+        ? [[node.id, isNonEmptyString(node.parentId) ? node.parentId : null] as const]
+        : []
+    )
+  );
+  for (const nodeId of parentById.keys()) {
+    let currentId: string | null = nodeId;
+    const visited = new Set<string>();
+    let depth = 0;
+    while (currentId) {
+      if (visited.has(currentId)) {
+        result.errors.push("goodsTaxonomyNodes 存在循环引用。");
+        break;
+      }
+      visited.add(currentId);
+      depth += 1;
+      if (depth > 8) {
+        result.errors.push("goodsTaxonomyNodes 超过 8 层深度限制。");
+        break;
+      }
+      currentId = parentById.get(currentId) ?? null;
+    }
+  }
+
+  const goodsCatalog = Array.isArray(state.goodsCatalog) ? state.goodsCatalog : [];
+  for (const [index, goods] of goodsCatalog.entries()) {
+    if (!isRecord(goods) || goods.taxonomyNodeId === undefined) continue;
+    if (!isNonEmptyString(goods.taxonomyNodeId) || !ids.has(goods.taxonomyNodeId)) {
+      result.errors.push(`goodsCatalog[${index}].taxonomyNodeId 指向不存在的分类节点。`);
+    }
+  }
+};
+
 const validatePairArray = (
   state: Record<string, unknown>,
   key: string,
@@ -1080,6 +1156,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateUniqueField(parsed, "devices", "deviceCode", result);
   validateUniqueField(parsed, "goodsCatalog", "goodsId", result);
   validateUniqueField(parsed, "goodsCategories", "id", result);
+  validateUniqueField(parsed, "goodsTaxonomyNodes", "id", result);
   validateUniqueField(parsed, "warehouses", "code", result);
   validateUniqueField(parsed, "goodsBatches", "batchId", result);
   validateUniqueField(parsed, "registrationApplications", "id", result);
@@ -1126,6 +1203,8 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   );
   validateRequiredStringFields(parsed, "devices", ["deviceCode", "name", "status"], result);
   validateRequiredStringFields(parsed, "goodsCatalog", ["goodsId", "goodsCode", "name", "category"], result);
+  validateRequiredStringFields(parsed, "goodsTaxonomyNodes", ["id", "name", "status", "createdAt", "updatedAt"], result);
+  validateGoodsTaxonomy(parsed, result);
   validateRequiredStringFields(parsed, "goodsBatches", ["batchId", "goodsId", "deviceCode", "sourceType"], result);
   validateRequiredStringFields(parsed, "events", ["eventId", "orderNo", "userId", "deviceCode", "status"], result);
   validateRequiredStringFields(parsed, "inventory", ["id", "userId", "deviceCode", "goodsId", "type"], result);
@@ -1300,6 +1379,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
     users: countArray(parsed, "users"),
     devices: countArray(parsed, "devices"),
     goodsCatalog: countArray(parsed, "goodsCatalog"),
+    goodsTaxonomyNodes: countArray(parsed, "goodsTaxonomyNodes"),
     goodsBatches: countArray(parsed, "goodsBatches"),
     inventory: countArray(parsed, "inventory"),
     events: countArray(parsed, "events"),
