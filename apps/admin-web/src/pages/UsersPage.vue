@@ -44,6 +44,10 @@ import {
   type PersonnelImportIssue,
   type PersonnelImportRole
 } from "../utils/personnel-import";
+import {
+  buildRegionManagementRows,
+  type RegionManagementRow
+} from "../utils/region-management";
 
 type DrawerMode =
   | ""
@@ -298,8 +302,10 @@ const removingUserId = ref("");
 const removingSelectedUsers = ref(false);
 const creatingRegion = ref(false);
 const regionManagementExpanded = ref(false);
+const regionManagementView = ref<"unlocated" | "all">("unlocated");
 const savingRegionId = ref("");
 const managedRegionLocationId = ref("");
+const managedLegacyRegionName = ref("");
 const migratingUsers = ref(false);
 const migrationRegionId = ref("");
 const drawerMode = ref<DrawerMode>("");
@@ -469,6 +475,31 @@ const visibleRegionNames = computed(() => {
   users.value.forEach((user) => names.add(user.regionName || "未分配区域"));
   return Array.from(names).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
 });
+const regionManagementRows = computed(() =>
+  buildRegionManagementRows(regions.value, users.value)
+);
+const visibleRegionManagementRows = computed(() =>
+  regionManagementView.value === "unlocated"
+    ? regionManagementRows.value.unlocated
+    : regionManagementRows.value.all
+);
+const regionManagementRowSummary = (row: RegionManagementRow) => {
+  if (row.source === "legacy") {
+    return adminCopy.users.regionLegacySummary(row.userCount);
+  }
+  if (
+    row.isLocated &&
+    row.longitude !== undefined &&
+    row.latitude !== undefined
+  ) {
+    return adminCopy.users.regionLocatedSummary(
+      row.longitude,
+      row.latitude,
+      row.userCount
+    );
+  }
+  return adminCopy.users.regionUnlocatedSummary(row.userCount);
+};
 const backofficeTargetUser = computed(() =>
   users.value.find((user) => user.id === backofficeForm.value.userId)
 );
@@ -523,13 +554,17 @@ const regionMapInitialLongitude = computed(
   () =>
     managedRegionLocationId.value
       ? managedRegionLocationTarget.value?.longitude
-      : regionDraftLongitude.value
+      : managedLegacyRegionName.value
+        ? undefined
+        : regionDraftLongitude.value
 );
 const regionMapInitialLatitude = computed(
   () =>
     managedRegionLocationId.value
       ? managedRegionLocationTarget.value?.latitude
-      : regionDraftLatitude.value
+      : managedLegacyRegionName.value
+        ? undefined
+        : regionDraftLatitude.value
 );
 const allTerminalManualGrantsSelected = computed(
   () =>
@@ -1594,7 +1629,34 @@ const renameManagedRegion = async (region: RegionRecord) => {
 };
 const openManagedRegionLocation = (region: RegionRecord) => {
   managedRegionLocationId.value = region.id;
+  managedLegacyRegionName.value = "";
   regionMapPickerVisible.value = true;
+};
+const configuredRegionForManagementRow = (row: RegionManagementRow) =>
+  row.id ? regions.value.find((region) => region.id === row.id) : undefined;
+const openRegionManagementLocation = (row: RegionManagementRow) => {
+  const region = configuredRegionForManagementRow(row);
+  if (region) {
+    openManagedRegionLocation(region);
+    return;
+  }
+  managedRegionLocationId.value = "";
+  managedLegacyRegionName.value = row.name;
+  regionMapPickerVisible.value = true;
+};
+const renameRegionManagementRow = async (row: RegionManagementRow) => {
+  const region = configuredRegionForManagementRow(row);
+  if (region) {
+    await renameManagedRegion(region);
+  }
+};
+const toggleRegionManagementRow = async (row: RegionManagementRow) => {
+  const region = configuredRegionForManagementRow(row);
+  if (region) {
+    await updateManagedRegion(region, {
+      status: region.status === "active" ? "inactive" : "active"
+    });
+  }
 };
 const migrateSelectedUsers = async () => {
   const region = regions.value.find(
@@ -1623,7 +1685,7 @@ const migrateSelectedUsers = async () => {
   }
 };
 
-const saveRegionLocation = (payload: {
+const saveRegionLocation = async (payload: {
   longitude: number;
   latitude: number;
   location: string;
@@ -1632,22 +1694,43 @@ const saveRegionLocation = (payload: {
   if (managedRegionLocationId.value) {
     const regionId = managedRegionLocationId.value;
     savingRegionId.value = regionId;
-    adminApi
-      .updateRegion(regionId, {
+    try {
+      await adminApi.updateRegion(regionId, {
         longitude: payload.longitude,
         latitude: payload.latitude
-      })
-      .then(async () => {
-        regionMapPickerVisible.value = false;
-        savingRegionId.value = "";
-        managedRegionLocationId.value = "";
-        await load();
-        showActionMessage("success", "地区地图位置已保存。");
-      })
-      .catch((error) => {
-        savingRegionId.value = "";
-        showActionMessage("error", `地区位置保存失败：${readErrorMessage(error, "请稍后重试")}`);
       });
+      regionMapPickerVisible.value = false;
+      managedRegionLocationId.value = "";
+      await load();
+      showActionMessage("success", "地区地图位置已保存。");
+    } catch (error) {
+      showActionMessage("error", `地区位置保存失败：${readErrorMessage(error, "请稍后重试")}`);
+    } finally {
+      savingRegionId.value = "";
+    }
+    return;
+  }
+  if (managedLegacyRegionName.value) {
+    const name = managedLegacyRegionName.value;
+    savingRegionId.value = `legacy:${name}`;
+    try {
+      await adminApi.createRegion({
+        name,
+        longitude: payload.longitude,
+        latitude: payload.latitude
+      });
+      regionMapPickerVisible.value = false;
+      managedLegacyRegionName.value = "";
+      await load();
+      showActionMessage(
+        "success",
+        adminCopy.users.regionLocationSaved(name)
+      );
+    } catch (error) {
+      showActionMessage("error", `地区位置保存失败：${readErrorMessage(error, "请稍后重试")}`);
+    } finally {
+      savingRegionId.value = "";
+    }
     return;
   }
   regionDraftLongitude.value = payload.longitude;
@@ -1659,6 +1742,7 @@ const saveRegionLocation = (payload: {
 const closeRegionMapPicker = () => {
   regionMapPickerVisible.value = false;
   managedRegionLocationId.value = "";
+  managedLegacyRegionName.value = "";
   if (savingRegionId.value) {
     savingRegionId.value = "";
   }
@@ -2154,30 +2238,78 @@ onMounted(load);
               </button>
             </div>
             <div v-if="regionManagementExpanded" class="users-region-management">
-              <div v-for="region in regions" :key="region.id" class="users-region-management__row">
-                <div>
-                  <span class="admin-table__strong">{{ region.name }}</span>
-                  <span class="admin-table__subtext">
-                    {{ region.longitude === undefined || region.latitude === undefined ? "未设置地图位置" : `${region.longitude.toFixed(6)}, ${region.latitude.toFixed(6)}` }}
-                  </span>
-                </div>
-                <span class="admin-pill" :class="region.status === 'active' ? 'admin-pill--success' : 'admin-pill--neutral'">
-                  {{ region.status === "active" ? "启用" : "停用" }}
-                </span>
-                <button class="admin-text-button" type="button" :disabled="Boolean(savingRegionId)" @click="openManagedRegionLocation(region)">
-                  {{ region.longitude === undefined ? "补地图位置" : "修改位置" }}
-                </button>
-                <button class="admin-text-button" type="button" :disabled="Boolean(savingRegionId)" @click="renameManagedRegion(region)">
-                  改名
+              <div class="users-region-management__tabs" role="tablist" aria-label="地区管理分栏">
+                <button
+                  class="admin-button admin-button--ghost users-region-management__tab"
+                  :class="{ 'users-region-management__tab--active': regionManagementView === 'unlocated' }"
+                  type="button"
+                  role="tab"
+                  :aria-selected="regionManagementView === 'unlocated'"
+                  @click="regionManagementView = 'unlocated'"
+                >
+                  待补详细坐标（{{ regionManagementRows.unlocated.length }}）
                 </button>
                 <button
-                  class="admin-text-button"
+                  class="admin-button admin-button--ghost users-region-management__tab"
+                  :class="{ 'users-region-management__tab--active': regionManagementView === 'all' }"
                   type="button"
-                  :disabled="Boolean(savingRegionId)"
-                  @click="updateManagedRegion(region, { status: region.status === 'active' ? 'inactive' : 'active' })"
+                  role="tab"
+                  :aria-selected="regionManagementView === 'all'"
+                  @click="regionManagementView = 'all'"
                 >
-                  {{ region.status === "active" ? "停用" : "启用" }}
+                  全部地区（{{ regionManagementRows.all.length }}）
                 </button>
+              </div>
+              <div v-if="visibleRegionManagementRows.length" class="users-region-management__list">
+                <div
+                  v-for="row in visibleRegionManagementRows"
+                  :key="row.id ?? `legacy:${row.name}`"
+                  class="users-region-management__row"
+                >
+                  <div>
+                    <span class="admin-table__strong">{{ row.name }}</span>
+                    <span class="admin-table__subtext">
+                      {{ regionManagementRowSummary(row) }}
+                    </span>
+                  </div>
+                  <span
+                    class="admin-pill"
+                    :class="row.source === 'legacy' ? 'admin-pill--warning' : row.status === 'active' ? 'admin-pill--success' : 'admin-pill--neutral'"
+                  >
+                    {{ row.source === "legacy" ? adminCopy.users.regionLegacyStatus : row.status === "active" ? "启用" : "停用" }}
+                  </span>
+                  <button
+                    class="admin-text-button"
+                    type="button"
+                    :disabled="Boolean(savingRegionId)"
+                    @click="openRegionManagementLocation(row)"
+                  >
+                    {{ row.isLocated ? "修改位置" : "补地图位置" }}
+                  </button>
+                  <button
+                    v-if="row.source === 'configured'"
+                    class="admin-text-button"
+                    type="button"
+                    :disabled="Boolean(savingRegionId)"
+                    @click="renameRegionManagementRow(row)"
+                  >
+                    改名
+                  </button>
+                  <button
+                    v-if="row.source === 'configured'"
+                    class="admin-text-button"
+                    type="button"
+                    :disabled="Boolean(savingRegionId)"
+                    @click="toggleRegionManagementRow(row)"
+                  >
+                    {{ row.status === "active" ? "停用" : "启用" }}
+                  </button>
+                </div>
+              </div>
+              <div v-else class="admin-empty users-region-management__empty">
+                <div class="admin-empty__title">
+                  {{ regionManagementView === "unlocated" ? adminCopy.users.regionAllLocated : adminCopy.users.regionListEmpty }}
+                </div>
               </div>
             </div>
           </div>
@@ -2839,8 +2971,8 @@ onMounted(load);
         <AmapLocationPicker
           :initial-longitude="regionMapInitialLongitude"
           :initial-latitude="regionMapInitialLatitude"
-          :initial-location="managedRegionLocationId ? '' : regionDraftLocation"
-          :initial-address="managedRegionLocationId ? '' : regionDraftAddress"
+          :initial-location="managedRegionLocationId || managedLegacyRegionName ? '' : regionDraftLocation"
+          :initial-address="managedRegionLocationId || managedLegacyRegionName ? '' : regionDraftAddress"
           subject-label="地区"
           description="地区选点"
           location-placeholder="例如 扬名街道中心位置"
@@ -3088,11 +3220,33 @@ onMounted(load);
 
 .users-region-management {
   display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--admin-line);
+}
+
+.users-region-management__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.users-region-management__tab {
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+.users-region-management__tab--active {
+  border-color: var(--admin-accent);
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent-strong);
+}
+
+.users-region-management__list {
+  display: grid;
   gap: 6px;
   max-height: 240px;
   overflow: auto;
-  padding-top: 4px;
-  border-top: 1px solid var(--admin-line);
 }
 
 .users-region-management__row {
@@ -3101,6 +3255,10 @@ onMounted(load);
   align-items: center;
   gap: 8px;
   padding: 6px 0;
+}
+
+.users-region-management__empty {
+  min-height: 72px;
 }
 
 .users-region-migrate-select {
@@ -3214,6 +3372,10 @@ onMounted(load);
 
   .users-region-create {
     grid-template-columns: 1fr;
+  }
+
+  .users-region-management__row {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .users-danger-zone {
