@@ -1,0 +1,28 @@
+# 商品图片版领取页设计验收
+
+## 验收基线
+
+- 参考实现：`C:\Users\LEGION\.codex\visualizations\2026\08\08\019fe03e-85d0-7a00-ae0d-b3f1e3566ea8\goods-image-variant-b-adjusted.png`
+- 实际页面：`apps/mobile/src/pages/special/device-detail.vue`
+- 实施截图：`docs/test-artifacts/product-image-b-qa/implementation-pickup-430x900.png`
+- 全页对照：`docs/test-artifacts/product-image-b-qa/comparison-full-430x900.png`
+- 固定操作栏对照：`docs/test-artifacts/product-image-b-qa/comparison-fixed-action.png`
+- 视口与状态：430 x 900 CSS px，设备像素比 1；扫码即时领取模式；无既有预约；怡宝饮用纯净水已选 1 件。
+
+## 可见结果
+
+- 两列商品卡片、真实商品图、大号“库存 / 可领取”数值、数量步进器均与已确认的 B 方案一致。
+- 商品类别文字未出现在卡片中；四张柜机平台图片均完成加载，`naturalWidth` 均大于 0。
+- 底部操作栏使用 `position: fixed`。滚动前后边界均为 `top=778.421875`、`bottom=900`、`width=430`，商品内容滚动不会带走按钮。
+- 普通柜机入口仍显示“提交预约（1 件）”；只有 `scan=1` 显示“开柜领取（1 件）”。
+- 参考稿中的 HTML 标记条和展示型柜机头图不属于生产精简页；参考稿首件“可领取 2”与实测“可领取 1”来自测试账号实时额度差异，不属于样式偏差。
+- 控制台无页面运行错误；仅有现有 `vue-router` 导入弃用警告，与本次页面改动无关。
+
+## 对照历史
+
+1. 首次截图使用了浏览器默认 1280 x 720 视口，未作为验收证据。
+2. 重新应用 430 x 900 视口并刷新相同页面状态后，完成全页与固定操作栏并排对照。
+
+## 最终结果
+
+passed
