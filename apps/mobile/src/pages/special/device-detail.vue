@@ -787,7 +787,7 @@ onLoad((query) => {
 
 <template>
   <MobileShell
-    class="pickup-page pickup-shell"
+    class="pickup-shell"
     :eyebrow="scanMode ? appCopy.cabinetPickup.entry.pickupEyebrow : appCopy.cabinetPickup.entry.reservationEyebrow"
     :title="deviceName"
     :subtitle="deviceCode ? appCopy.cabinetPickup.entry.code(deviceCode) : appCopy.cabinetPickup.entry.identifying"
@@ -1081,6 +1081,7 @@ onLoad((query) => {
       </view>
     </GlassCard>
 
+    <view v-if="showPrimaryAction" class="primary-action-spacer" aria-hidden="true" />
     <view v-if="showPrimaryAction" class="primary-action">
       <view class="primary-action__summary">
         <text
@@ -1109,10 +1110,6 @@ onLoad((query) => {
 </template>
 
 <style scoped>
-.pickup-page {
-  padding-bottom: calc(260rpx + env(safe-area-inset-bottom));
-}
-
 .pickup-card {
   overflow: visible !important;
 }
@@ -1619,6 +1616,12 @@ onLoad((query) => {
   font-weight: 800;
 }
 
+.primary-action-spacer {
+  height: 260rpx;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .primary-action {
   position: fixed;
   z-index: 40;
@@ -1775,8 +1778,8 @@ onLoad((query) => {
 
 }
 
-.vm-page--accessible.pickup-page {
-  padding-bottom: calc(340rpx + env(safe-area-inset-bottom));
+.vm-page--accessible .primary-action-spacer {
+  height: 340rpx;
 }
 
 .vm-page--accessible .goods-list {
