@@ -131,6 +131,49 @@ export const appCopy = {
     completionContent: (settledItems: string, comparisonText: string) =>
       `平台核对：${settledItems}${comparisonText}\n本次预约取货已完成，不涉及支付。确认后将返回首页。`
   },
+  nearbyCabinets: {
+    specialSubtitle: "可提前预约保留物资，也可到柜扫码直接领取。",
+    choice: {
+      reserve: "提前预约 · 保留物资",
+      scan: "到柜扫码 · 直接领取"
+    },
+    location: {
+      loadingTitle: "正在读取手机位置",
+      readyTitle: "已获取你的位置",
+      deniedTitle: "手机定位未授权",
+      unavailableTitle: "暂未获取手机位置",
+      loadingHint: "定位完成后将按距离排列附近柜机",
+      readyHint: "已按距离由近到远排列附近柜机",
+      deniedHint: "允许手机定位后可按距离排列，未开启也可正常预约",
+      unavailableHint: "请确认手机系统定位已开启；暂时仍按推荐顺序展示",
+      useAction: "使用手机定位",
+      retryAction: "重新定位",
+      loadingAction: "定位中",
+      readyMessage: "已获取手机位置，柜机按距离排列",
+      deniedMessage: "未获得手机定位权限，已按推荐顺序展示柜机",
+      stillDeniedMessage: "手机定位仍未授权，已按推荐顺序展示柜机",
+      unavailableMessage: "暂未获取手机位置，已按推荐顺序展示柜机",
+      deniedToast: "请在小程序设置中允许手机定位",
+      unavailableToast: "暂未获取手机位置，请确认系统定位已开启",
+      loadingDistance: "正在读取手机定位",
+      recommendedDistance: "按推荐顺序展示",
+      pendingCabinetLocation: "柜机位置待设置",
+      unavailableDistance: "距离暂不可用",
+      distance: (value: string) => `距你 ${value}`
+    },
+    goods: {
+      specialTitle: "可预约物资",
+      cabinetTitle: "柜内物资",
+      count: (quantity: number) => `共 ${quantity} 种`,
+      viewAll: (quantity: number) => `查看全部 ${quantity} 种物资`,
+      dialogTitle: "全部可预约物资",
+      close: "关闭",
+      hierarchicalMeta: (stock: number) => `柜内 ${stock} 件 · 额度请进入详情查看`,
+      specialMeta: (stock: number, available: number) =>
+        `柜内 ${stock} 件 · 可领取 ${available} 件`,
+      cabinetMeta: (category: string, stock: number) => `${category} · 当前 ${stock} 件`
+    }
+  },
   cabinetPickup: {
     defaultDeviceName: "柜机",
     loadingStatus: {

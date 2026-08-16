@@ -7,14 +7,21 @@ import { mobileApi } from "../../api/mobile";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
+import { appCopy } from "../../constants/copy";
 import { categoryLabelMap, roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { formatBeijingDateTime, formatBeijingMonthDay } from "../../utils/datetime";
 import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { getErrorMessage } from "../../utils/error-message";
-import { buildNearbyGoodsPresentation } from "../../utils/nearby-goods-presentation";
-import { classifyPhoneLocationFailure } from "../../utils/phone-location";
+import {
+  buildNearbyGoodsPresentation,
+  getNearbyGoodsAvailability
+} from "../../utils/nearby-goods-presentation";
+import {
+  classifyPhoneLocationFailure,
+  requestPhoneLocationWithTimeout
+} from "../../utils/phone-location";
 import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils/receivable-goods";
 import {
   isStockOperatorRole,
@@ -31,6 +38,7 @@ const ACTIVE_MARKER_ICON = resolveTabIconPath(
   "static/tabs/device-active.png",
   import.meta.env.BASE_URL || "/"
 );
+const nearbyCopy = appCopy.nearbyCabinets;
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
@@ -46,7 +54,7 @@ const goodsSheetDeviceCode = ref("");
 const currentLocation = ref<{ longitude: number; latitude: number }>();
 const phoneLocationStatus = ref<"loading" | "ready" | "permission-denied" | "unavailable">("loading");
 const locationActionLoading = ref(false);
-const locationMessage = ref("正在读取手机位置");
+const locationMessage = ref(nearbyCopy.location.loadingTitle);
 const isStockOperator = computed(() =>
   isStockOperatorRole(sessionStore.user?.role)
 );
@@ -61,7 +69,7 @@ const subtitle = computed(() => {
   if (sessionStore.user?.role === "special") {
     return isAccessibleSpecial.value
       ? "显示柜机名称、地点、距离、柜内数量和今日免费数量。"
-      : "可提前预约保留物资，也可到柜扫码直接领取。";
+      : nearbyCopy.specialSubtitle;
   }
 
   if (isStockOperator.value) {
@@ -137,29 +145,31 @@ const nearestDeviceButtonText = computed(() =>
 const phoneLocationTitle = computed(() => {
   switch (phoneLocationStatus.value) {
     case "ready":
-      return "已获取你的位置";
+      return nearbyCopy.location.readyTitle;
     case "permission-denied":
-      return "手机定位未授权";
+      return nearbyCopy.location.deniedTitle;
     case "unavailable":
-      return "暂未获取手机位置";
+      return nearbyCopy.location.unavailableTitle;
     default:
-      return "正在读取手机位置";
+      return nearbyCopy.location.loadingTitle;
   }
 });
 const phoneLocationHint = computed(() => {
   switch (phoneLocationStatus.value) {
     case "ready":
-      return "已按距离由近到远排列附近柜机";
+      return nearbyCopy.location.readyHint;
     case "permission-denied":
-      return "允许手机定位后可按距离排列，未开启也可正常预约";
+      return nearbyCopy.location.deniedHint;
     case "unavailable":
-      return "请确认手机系统定位已开启；暂时仍按推荐顺序展示";
+      return nearbyCopy.location.unavailableHint;
     default:
-      return "定位完成后将按距离排列附近柜机";
+      return nearbyCopy.location.loadingHint;
   }
 });
 const phoneLocationButtonLabel = computed(() =>
-  phoneLocationStatus.value === "ready" ? "重新定位" : "使用手机定位"
+  phoneLocationStatus.value === "ready"
+    ? nearbyCopy.location.retryAction
+    : nearbyCopy.location.useAction
 );
 const heroSupport = computed(() => {
   if (isStockOperator.value) {
@@ -273,11 +283,11 @@ const mapMarkers = computed(() =>
 );
 
 const getPhoneLocation = () =>
-  new Promise<UniApp.GetLocationSuccess>((resolve, reject) => {
+  requestPhoneLocationWithTimeout<UniApp.GetLocationSuccess>(({ success, fail }) => {
     uni.getLocation({
       type: "gcj02",
-      success: resolve,
-      fail: reject
+      success,
+      fail
     });
   });
 
@@ -312,7 +322,7 @@ const load = async () => {
   try {
     let query: { longitude?: number; latitude?: number } | undefined;
     phoneLocationStatus.value = "loading";
-    locationMessage.value = "正在读取手机位置";
+    locationMessage.value = nearbyCopy.location.loadingTitle;
 
     try {
       // 微信小程序定位读取的是当前手机位置；拿到坐标后再由服务端计算柜机距离。
@@ -322,7 +332,7 @@ const load = async () => {
         longitude: location.longitude,
         latitude: location.latitude
       };
-      locationMessage.value = "已获取手机位置，柜机按距离排列";
+      locationMessage.value = nearbyCopy.location.readyMessage;
       query = {
         longitude: location.longitude,
         latitude: location.latitude
@@ -337,8 +347,8 @@ const load = async () => {
       phoneLocationStatus.value = failureKind;
       locationMessage.value =
         failureKind === "permission-denied"
-          ? "未获得手机定位权限，已按推荐顺序展示柜机"
-          : "暂未获取手机位置，已按推荐顺序展示柜机";
+          ? nearbyCopy.location.deniedMessage
+          : nearbyCopy.location.unavailableMessage;
     }
 
     const [deviceResponse, quotaResponse] = await Promise.all([
@@ -510,7 +520,7 @@ const handlePhoneLocationAction = async () => {
       const updatedSettings = await openLocationSettings();
       if (updatedSettings.authSetting?.["scope.userLocation"] !== true) {
         phoneLocationStatus.value = "permission-denied";
-        locationMessage.value = "手机定位仍未授权，已按推荐顺序展示柜机";
+        locationMessage.value = nearbyCopy.location.stillDeniedMessage;
         return;
       }
     }
@@ -521,8 +531,8 @@ const handlePhoneLocationAction = async () => {
     uni.showToast({
       title:
         phoneLocationStatus.value === "permission-denied"
-          ? "请在小程序设置中允许手机定位"
-          : "暂未获取手机位置，请确认系统定位已开启",
+          ? nearbyCopy.location.deniedToast
+          : nearbyCopy.location.unavailableToast,
       icon: "none"
     });
   } finally {
@@ -545,11 +555,13 @@ const formatGoodsMeta = (goods: {
   stock: number;
 }) => {
   if (sessionStore.user?.role === "special") {
-    const available = sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0;
-    return `柜内 ${goods.stock} 件 · 可领取 ${available} 件`;
+    const availability = getNearbyGoodsAvailability(goods, sessionStore.quota);
+    return availability.available === undefined
+      ? nearbyCopy.goods.hierarchicalMeta(availability.stock)
+      : nearbyCopy.goods.specialMeta(availability.stock, availability.available);
   }
 
-  return `${categoryLabelMap[goods.category]} · 当前 ${goods.stock} 件`;
+  return nearbyCopy.goods.cabinetMeta(categoryLabelMap[goods.category], goods.stock);
 };
 
 const scanAndOpen = async () => {
@@ -590,7 +602,7 @@ const scanAndOpen = async () => {
 
 const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters === undefined) {
-    return "距离暂不可用";
+    return nearbyCopy.location.unavailableDistance;
   }
 
   if (distanceMeters < 1000) {
@@ -604,20 +616,20 @@ const formatDeviceDistance = (
   device: Pick<DeviceRecord, "distanceMeters" | "longitude" | "latitude">
 ) => {
   if (phoneLocationStatus.value === "loading") {
-    return "正在读取手机定位";
+    return nearbyCopy.location.loadingDistance;
   }
 
   if (!distanceEnabled.value) {
-    return "按推荐顺序展示";
+    return nearbyCopy.location.recommendedDistance;
   }
 
   if (device.longitude === undefined || device.latitude === undefined) {
-    return "柜机位置待设置";
+    return nearbyCopy.location.pendingCabinetLocation;
   }
 
   return typeof device.distanceMeters === "number"
-    ? `距你 ${formatDistance(device.distanceMeters)}`
-    : "距离暂不可用";
+    ? nearbyCopy.location.distance(formatDistance(device.distanceMeters))
+    : nearbyCopy.location.unavailableDistance;
 };
 
 const isLowStockGoods = (goods: { stock?: number; lowStockThreshold?: number }) =>
@@ -638,8 +650,8 @@ onShow(() => {
     <GlassCard tone="quiet">
       <view class="vm-stack">
         <view v-if="sessionStore.user?.role === 'special'" class="nearby-choice-summary">
-          <text>提前预约 · 保留物资</text>
-          <text>到柜扫码 · 直接领取</text>
+          <text>{{ nearbyCopy.choice.reserve }}</text>
+          <text>{{ nearbyCopy.choice.scan }}</text>
         </view>
 
         <view v-if="sessionStore.user?.role === 'special'" class="nearby-location-control">
@@ -653,7 +665,7 @@ onShow(() => {
             :loading="locationActionLoading"
             @tap="handlePhoneLocationAction"
           >
-            {{ phoneLocationStatus === "loading" ? "定位中" : phoneLocationButtonLabel }}
+            {{ phoneLocationStatus === "loading" ? nearbyCopy.location.loadingAction : phoneLocationButtonLabel }}
           </button>
         </view>
 
@@ -812,9 +824,9 @@ onShow(() => {
             <view v-if="entry.visibleGoods.length" class="device-card__goods">
               <view class="device-card__goods-heading">
                 <text class="device-card__goods-title">
-                  {{ sessionStore.user?.role === "special" ? "可预约物资" : "柜内物资" }}
+                  {{ sessionStore.user?.role === "special" ? nearbyCopy.goods.specialTitle : nearbyCopy.goods.cabinetTitle }}
                 </text>
-                <text class="device-card__goods-count">共 {{ entry.visibleGoods.length }} 种</text>
+                <text class="device-card__goods-count">{{ nearbyCopy.goods.count(entry.visibleGoods.length) }}</text>
               </view>
 
               <view class="goods-list">
@@ -841,7 +853,7 @@ onShow(() => {
                 class="device-card__more"
                 @tap.stop="openGoodsSheet(entry.device.deviceCode)"
               >
-                查看全部 {{ entry.visibleGoods.length }} 种物资
+                {{ nearbyCopy.goods.viewAll(entry.visibleGoods.length) }}
               </button>
             </view>
             <view v-else-if="sessionStore.user?.role === 'special'" class="device-card__empty">
@@ -889,18 +901,18 @@ onShow(() => {
       v-if="goodsSheetEntry"
       class="nearby-goods-overlay"
       role="dialog"
-      aria-label="全部可预约物资"
+      :aria-label="nearbyCopy.goods.dialogTitle"
       @tap.self="closeGoodsSheet"
     >
       <view class="nearby-goods-sheet">
         <view class="nearby-goods-sheet__head">
           <view class="nearby-goods-sheet__heading">
-            <text class="nearby-goods-sheet__title">全部可预约物资</text>
+            <text class="nearby-goods-sheet__title">{{ nearbyCopy.goods.dialogTitle }}</text>
             <text class="nearby-goods-sheet__subtitle">
-              {{ goodsSheetEntry.device.name }} · 共 {{ goodsSheetEntry.visibleGoods.length }} 种
+              {{ goodsSheetEntry.device.name }} · {{ nearbyCopy.goods.count(goodsSheetEntry.visibleGoods.length) }}
             </text>
           </view>
-          <button class="nearby-goods-sheet__close" @tap="closeGoodsSheet">关闭</button>
+          <button class="nearby-goods-sheet__close" @tap="closeGoodsSheet">{{ nearbyCopy.goods.close }}</button>
         </view>
 
         <scroll-view class="nearby-goods-sheet__list" scroll-y>
