@@ -21,17 +21,27 @@ test("人员详情的生效策略保留分类额度池", () => {
     const users = new UsersService(store, {} as never, {} as never);
     const user = store.users.find((entry) => entry.role === "special" && entry.status === "active");
     const now = new Date().toISOString();
+    const root = {
+      id: "taxonomy-user-detail-root",
+      name: "任意",
+      parentId: null,
+      status: "active" as const,
+      sortOrder: 0,
+      revision: 1,
+      createdAt: now,
+      updatedAt: now
+    };
     const target = {
       id: "taxonomy-user-detail",
       name: "食品",
-      parentId: null,
+      parentId: root.id,
       status: "active" as const,
       sortOrder: 1,
       revision: 1,
       createdAt: now,
       updatedAt: now
     };
-    store.goodsTaxonomyNodes.push(target);
+    store.goodsTaxonomyNodes.push(root, target);
     assert.ok(user);
 
     const created = users.saveAccessPolicy(user.id, {
