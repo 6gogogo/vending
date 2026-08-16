@@ -1019,6 +1019,7 @@ onShow(() => {
 
 .nearby-choice-summary text {
   display: flex;
+  min-width: 0;
   min-height: 66rpx;
   align-items: center;
   justify-content: center;
@@ -1030,6 +1031,7 @@ onShow(() => {
   font-size: 22rpx;
   line-height: 1.4;
   text-align: center;
+  white-space: nowrap;
 }
 
 .nearby-location-control {

@@ -14,6 +14,11 @@ test("特殊用户附近柜机保持预约与扫码并列且不再展示找柜�
   assert.equal(appCopy.nearbyCabinets.specialSubtitle, "可提前预约保留物资，也可到柜扫码直接领取。");
   assert.equal(appCopy.nearbyCabinets.choice.reserve, "提前预约 · 保留物资");
   assert.equal(appCopy.nearbyCabinets.choice.scan, "到柜扫码 · 直接领取");
+  assert.match(
+    source,
+    /\.nearby-choice-summary text\s*\{[\s\S]*?white-space:\s*nowrap;/,
+    "预约与扫码两个并列入口在手机宽度下必须保持单行"
+  );
   assert.doesNotMatch(source, /找柜机提示/);
 });
 
