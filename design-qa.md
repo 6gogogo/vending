@@ -84,9 +84,9 @@
 
 ### 对照基准
 
-- 设计真值：`docs/test-artifacts/nearby-cabinet-a-20260816/source-option-a.png`。
+- 设计真值：用户确认的附近柜机方案 A。
 - 正式实现：`apps/mobile/src/pages/tabs/nearby.vue` 与预约凭条 `apps/mobile/src/pages/special/device-detail.vue`。
-- 真实页面证据：`implementation-list-top.png`、`implementation-preview-boundary.png`、`implementation-all-goods-sheet.png`、`implementation-reservation-receipt.png`。
+- 真实页面证据在隔离验收目录中逐页检查；临时截图不作为仓库构建依赖，也不在文档中引用不存在的路径。
 - 视口：390 × 844 CSS px；API 使用隔离的本地模拟数据平面，未连接真实柜机、生产账号或支付链路。
 
 ### 验收结果
@@ -117,4 +117,4 @@
 - 修正：仅在 420px 以下取消凭条标签固定宽度并禁止标签内换行；提交 `393033f`。
 - 复验：五个凭条标签高度均为单行，12 条商品弹层可滚动且关闭按钮持续可见；无遗留 P0、P1、P2。
 
-final result: passed
+最终结果：通过
