@@ -19,6 +19,10 @@ import { canRecoverManualSettlement, useAdminSessionStore } from "../stores/sess
 import { resolveActorLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
+import {
+  cloneEntitlementLimits,
+  createUserEntitlementLimit
+} from "../utils/user-entitlement-policy";
 
 const route = useRoute();
 const sessionStore = useAdminSessionStore();
@@ -111,7 +115,7 @@ const entitlementPolicyForm = ref({
   startHour: 8,
   endHour: 12,
   status: "active" as UserAccessPolicy["status"],
-  limits: [{ id: "", targetType: "taxonomy_node" as const, targetId: "", quantity: 1 }]
+  limits: [createUserEntitlementLimit()]
 });
 const editingEntitlementPolicyId = ref("");
 
@@ -362,7 +366,7 @@ const personalEntitlementRows = computed<PersonalEntitlementRow[]>(() =>
     .map((policy) => ({
       policyId: policy.id,
       policyName: policy.name,
-      limits: structuredClone(policy.entitlementLimits ?? []),
+      limits: cloneEntitlementLimits(policy.entitlementLimits),
       weekdays: [...policy.weekdays],
       startHour: policy.startHour,
       endHour: policy.endHour,
@@ -384,12 +388,8 @@ const resetAccessPolicyForm = () => {
   accessPolicyForm.value = { weekdays: [1, 2, 3, 4, 5], startHour: 8, endHour: 12, status: "active", goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }] };
 };
 
-const createEntitlementLimit = (): EntitlementLimit => ({
-  id: globalThis.crypto.randomUUID(),
-  targetType: "taxonomy_node",
-  targetId: taxonomyNodeOptions.value[0]?.id ?? "",
-  quantity: 1
-});
+const createEntitlementLimit = (): EntitlementLimit =>
+  createUserEntitlementLimit(taxonomyNodeOptions.value[0]?.id ?? "");
 
 const resetEntitlementPolicyForm = () => {
   editingEntitlementPolicyId.value = "";
@@ -409,7 +409,7 @@ const fillEntitlementPolicyForm = (row: PersonalEntitlementRow) => {
     startHour: row.startHour,
     endHour: row.endHour,
     status: row.status,
-    limits: structuredClone(row.limits)
+    limits: cloneEntitlementLimits(row.limits)
   };
 };
 

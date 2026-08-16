@@ -158,6 +158,7 @@ export class UsersService {
             startHour: policy.startHour,
             endHour: policy.endHour,
             goodsLimits: policy.goodsLimits.map((limit) => ({ ...limit })),
+            entitlementLimits: (policy.entitlementLimits ?? []).map((limit) => ({ ...limit })),
             status: policy.status,
             sourcePolicyId:
               "sourcePolicyId" in policy && typeof policy.sourcePolicyId === "string"

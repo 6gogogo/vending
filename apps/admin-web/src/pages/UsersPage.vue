@@ -39,6 +39,7 @@ import {
 } from "../utils/backoffice-provisioning";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
+import { cloneEntitlementLimits } from "../utils/user-entitlement-policy";
 import {
   parsePersonnelImportRows,
   type PersonnelImportCell,
@@ -1036,7 +1037,7 @@ const openEditPolicy = (policy: SpecialAccessPolicy) => {
       ? policy.goodsLimits.map((limit) => ({ goodsId: limit.goodsId, quantity: limit.quantity }))
       : [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }],
     entitlementLimits: policy.entitlementLimits?.length
-      ? structuredClone(policy.entitlementLimits)
+      ? cloneEntitlementLimits(policy.entitlementLimits)
       : taxonomyNodeOptions.value[0]
         ? [{ id: globalThis.crypto.randomUUID(), targetType: "taxonomy_node", targetId: taxonomyNodeOptions.value[0].id, quantity: 1 }]
         : []
