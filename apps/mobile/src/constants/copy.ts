@@ -88,6 +88,7 @@ export const appCopy = {
     }
   },
   freeOnly: {
+    hierarchicalQuotaLabel: "额度",
     quotaExhausted:
       "今天免费领取额度已用完，请等待额度刷新或联系工作人员；当前公益物资不会转为付费领取。",
     quotaEmptyDescription:

@@ -21,6 +21,7 @@ import { roleLabelMap } from "../../constants/labels";
 import { useSessionStore } from "../../stores/session";
 import { formatBeijingDateTime } from "../../utils/datetime";
 import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
+import { buildHomeQuotaRows } from "../../utils/home-quota-presentation";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import {
   isStockOperatorRole,
@@ -99,6 +100,14 @@ const remainingTotal = computed(() => {
     Math.min(sessionStore.quota?.remainingDaily ?? visibleGoodsTotal, visibleGoodsTotal)
   );
 });
+const quotaRows = computed(() =>
+  buildHomeQuotaRows({
+    taxonomyRevision: sessionStore.quota?.taxonomyRevision,
+    remainingTotal: remainingTotal.value,
+    aggregateLabel: appCopy.freeOnly.hierarchicalQuotaLabel,
+    legacyRows: permissions.value
+  })
+);
 const usedCount = computed(() => sessionStore.quota?.usedCount ?? 0);
 const loadErrorTitle = computed(() =>
   sessionStore.user?.role === "special" ? "资格与领取数据未更新" : "数据同步失败"
@@ -765,8 +774,8 @@ onShow(() => {
             <text class="info-item__value">{{ activeWindows.length ? activeWindows.join("、") : "当前暂无可领取时段" }}</text>
           </view>
         </view>
-        <view v-if="permissions.length" class="simple-list">
-          <view v-for="item in permissions" :key="item.goodsId" class="simple-list__row">
+        <view v-if="quotaRows.length" class="simple-list">
+          <view v-for="item in quotaRows" :key="item.goodsId" class="simple-list__row">
             <text>{{ item.goodsName }}</text>
             <text class="vm-status vm-status--success">剩余 {{ item.quantity }} 件</text>
           </view>
