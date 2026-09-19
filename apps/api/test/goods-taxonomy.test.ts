@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -7,6 +7,7 @@ import test, { after } from "node:test";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { allocateEntitlements } from "../src/common/policies/entitlement-allocation";
 import { GoodsTaxonomyService } from "../src/modules/goods/goods-taxonomy.service";
+import { GoodsService } from "../src/modules/goods/goods.service";
 import { SpecialAccessPoliciesService } from "../src/modules/special-access-policies/special-access-policies.service";
 
 const temporaryDirectories: string[] = [];
@@ -55,6 +56,106 @@ after(() => {
   if (originalDataFile === undefined) delete process.env.API_DATA_FILE;
   else process.env.API_DATA_FILE = originalDataFile;
   for (const directory of temporaryDirectories) rmSync(directory, { recursive: true, force: true });
+});
+
+test("手工新增和平台同步默认归入任意，重复同步保留细分类及库存", async () => {
+  const { store, service } = createHarness();
+  const root = service.createNode({ name: "任意", parentId: null });
+  const child = service.createNode({ name: "其他", parentId: root.id });
+  const existing = store.goodsCatalog[0]!;
+  existing.taxonomyNodeId = child.id;
+  const remote = {
+    goodsId: "platform-new-goods",
+    goodsCode: "new-barcode",
+    name: "平台新增货品",
+    price: 100,
+    imageUrl: ""
+  };
+  const goodsService = new GoodsService(store, {} as never, {
+    getGoodsInfo: async () => [remote, existing]
+  } as never);
+  const batchesBefore = structuredClone(store.goodsBatches);
+  const manual = goodsService.createCatalogItem({
+    goodsCode: "manual-new-barcode", name: "手工新增货品",
+    category: "food", price: 100, imageUrl: ""
+  });
+  assert.equal(manual.taxonomyNodeId, root.id);
+
+  await goodsService.syncDeviceGoods(store.devices[0]!.deviceCode);
+  const synced = store.goodsCatalog.find((goods) => goods.goodsId === remote.goodsId)!;
+  assert.equal(synced.taxonomyNodeId, root.id);
+  assert.equal(existing.taxonomyNodeId, child.id);
+  const revision = service.getTreeRevision();
+  await goodsService.syncDeviceGoods(store.devices[0]!.deviceCode);
+  assert.equal(service.getTreeRevision(), revision);
+  assert.equal(existing.taxonomyNodeId, child.id);
+  assert.deepEqual(store.goodsBatches, batchesBefore);
+
+  const allocation = allocateEntitlements({
+    nodes: store.goodsTaxonomyNodes,
+    goods: store.goodsCatalog,
+    pools: [{ poolId: "any-one", policyId: "policy", limitId: "limit",
+      targetType: "taxonomy_node", targetId: root.id, remaining: 1 }],
+    requests: [{ goodsId: synced.goodsId, quantity: 1 }]
+  });
+  assert.equal(allocation.fulfilled, true, "同步货品应立即匹配任意一件额度");
+});
+
+test("旧未归类货品启动补齐，取得写入时机前不落盘且重复启动不重复迁移", () => {
+  const { store, service } = createHarness();
+  const root = service.createNode({ name: "任意", parentId: null });
+  const child = service.createNode({ name: "食品", parentId: root.id });
+  const classified = store.goodsCatalog[0]!;
+  classified.taxonomyNodeId = child.id;
+  const missing = store.goodsCatalog[1]!;
+  store.persist();
+  const file = process.env.API_DATA_FILE!;
+  const beforeBytes = readFileSync(file, "utf8");
+  const before = store.snapshot();
+
+  const loaded = new InMemoryStoreService();
+  assert.equal(readFileSync(file, "utf8"), beforeBytes, "构造依赖图时不得写入运行数据");
+  assert.equal(loaded.goodsCatalog.find((goods) => goods.goodsId === missing.goodsId)?.taxonomyNodeId, root.id);
+  assert.equal(loaded.goodsCatalog.find((goods) => goods.goodsId === classified.goodsId)?.taxonomyNodeId, child.id);
+  assert.deepEqual(loaded.goodsBatches, before.goodsBatches);
+  assert.deepEqual(loaded.inventory, before.inventory);
+  assert.deepEqual(loaded.users.map((user) => user.accessPolicies), before.users.map((user) => user.accessPolicies));
+  assert.equal(loaded.logs.filter((log) => log.type === "assign-default-goods-taxonomy").length, 1);
+  assert.equal(loaded.flushBootstrapPersistence(), true);
+
+  const savedBytes = readFileSync(file, "utf8");
+  const reloaded = new InMemoryStoreService();
+  assert.equal(reloaded.logs.filter((log) => log.type === "assign-default-goods-taxonomy").length, 1);
+  assert.deepEqual(reloaded.goodsTaxonomyNodes, loaded.goodsTaxonomyNodes);
+  assert.equal(reloaded.flushBootstrapPersistence(), false);
+  assert.equal(readFileSync(file, "utf8"), savedBytes);
+});
+
+test("默认归类只取消涉及该货品的有效预约", () => {
+  const { store, service } = createHarness();
+  service.createNode({ name: "任意", parentId: null });
+  const goods = store.goodsCatalog[0]!;
+  const unrelated = store.goodsCatalog[1]!;
+  const template = store.reservations[0];
+  const now = new Date().toISOString();
+  const reservation = {
+    ...template, id: "default-taxonomy-reservation", userId: store.users.find((user) => user.role === "special")!.id,
+    phone: "13800000001", userName: "测试用户", deviceCode: store.devices[0]!.deviceCode,
+    doorNum: "1", status: "active" as const, items: [{ goodsId: goods.goodsId, goodsName: goods.name, quantity: 1, category: goods.category }],
+    reservedAt: now, expiresAt: new Date(Date.now() + 600_000).toISOString(), createdAt: now, updatedAt: now, timeoutCountAtCreation: 0
+  };
+  store.reservations.push(reservation, { ...reservation, id: "unrelated-reservation",
+    items: [{ goodsId: unrelated.goodsId, goodsName: unrelated.name, quantity: 1, category: unrelated.category }] });
+  store.ensureGoodsCatalogItem({ ...goods });
+  assert.equal(reservation.status, "cancelled");
+  assert.equal(store.reservations.find((item) => item.id === "unrelated-reservation")?.status, "active");
+});
+
+test("没有启用分类树的旧实例保持兼容，不自动建立分类树", () => {
+  const { store } = createHarness();
+  const goods = store.ensureGoodsCatalogItem({ ...store.goodsCatalog[0]!, goodsId: "legacy-new-goods" });
+  assert.equal(goods.taxonomyNodeId, undefined);
+  assert.equal(store.goodsTaxonomyNodes.length, 0);
 });
 
 test("分类树拒绝循环、同级重名和超过八层", () => {

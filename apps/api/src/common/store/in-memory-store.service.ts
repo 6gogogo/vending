@@ -288,6 +288,7 @@ export class InMemoryStoreService {
       this.ensureCompetitionTestDevice();
     }
     shouldPersist = this.ensureManualAppAcceptanceFixture() || shouldPersist;
+    shouldPersist = this.assignDefaultGoodsTaxonomy(this.goodsCatalog) || shouldPersist;
     this.syncDeviceStocksFromBatches();
     this.refreshAlertPresentation();
     this.refreshPersistedStateIntegrityStatus();
@@ -2283,6 +2284,7 @@ export class InMemoryStoreService {
     if (existing) {
       Object.assign(existing, {
         ...item,
+        taxonomyNodeId: item.taxonomyNodeId ?? existing.taxonomyNodeId,
         fullName: item.fullName ?? existing.fullName ?? item.name,
         categoryName: item.categoryName ?? existing.categoryName,
         packageForm: item.packageForm ?? existing.packageForm,
@@ -2290,6 +2292,7 @@ export class InMemoryStoreService {
         manufacturer: item.manufacturer ?? existing.manufacturer,
         updatedAt: new Date().toISOString()
       });
+      this.assignDefaultGoodsTaxonomy([existing]);
       return existing;
     }
 
@@ -2301,7 +2304,54 @@ export class InMemoryStoreService {
       updatedAt: item.updatedAt ?? new Date().toISOString()
     };
     this.goodsCatalog.unshift(created);
+    this.assignDefaultGoodsTaxonomy([created]);
     return created;
+  }
+
+  /** 已启用分类树的实例中，未指定分类的货品默认归入“任意”，保留已有细分类。 */
+  private assignDefaultGoodsTaxonomy(items: GoodsCatalogItem[]) {
+    const roots = this.goodsTaxonomyNodes.filter(
+      (node) => node.parentId === null && node.status === "active"
+    );
+    if (roots.length !== 1) return false;
+    const root = roots[0]!;
+    const unclassified = items.filter((goods) => !goods.taxonomyNodeId);
+    if (!unclassified.length) return false;
+
+    const now = new Date().toISOString();
+    const goodsIds = unclassified.map((goods) => goods.goodsId);
+    for (const goods of unclassified) {
+      goods.taxonomyNodeId = root.id;
+      delete goods.taxonomyPath;
+      goods.updatedAt = now;
+    }
+    root.revision = Math.max(...this.goodsTaxonomyNodes.map((node) => node.revision)) + 1;
+    root.updatedAt = now;
+
+    // 与人工归类保持一致：旧分类下的有效预约需重新确认，历史流水和额度规则不变。
+    const cancelledReservationIds: string[] = [];
+    for (const reservation of this.reservations) {
+      if (
+        reservation.status !== "active" ||
+        !reservation.items.some((item) => goodsIds.includes(item.goodsId))
+      ) continue;
+      reservation.status = "cancelled";
+      reservation.cancelledAt = now;
+      reservation.cancelledByUserId = "system";
+      reservation.cancellationReason = "货品分类或领取规则调整，系统已自动取消预约。";
+      reservation.updatedAt = now;
+      cancelledReservationIds.push(reservation.id);
+    }
+    // 启动期间只更新内存，仍由取得单写租约后的 flushBootstrapPersistence 统一落盘。
+    this.logOperation({
+      category: "goods",
+      type: "assign-default-goods-taxonomy",
+      status: "success",
+      actor: { type: "system", name: "系统" },
+      description: `未归类货品已默认归入“${root.name}”。`,
+      metadata: { taxonomyNodeId: root.id, goodsIds, cancelledReservationIds }
+    });
+    return true;
   }
 
   upsertGoodsCategory(
