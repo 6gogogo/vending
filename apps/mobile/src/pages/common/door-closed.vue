@@ -59,7 +59,7 @@ const isNoInboundOperation = computed(
 );
 const isReservationOnlyPickupResult = computed(
   () =>
-    event.value?.reservationOnlyPickup === true &&
+    (event.value?.reservationOnlyPickup === true || event.value?.pickupMode === "actual") &&
     (event.value?.amount ?? 0) <= 0 &&
     (event.value?.billingStatus === "free" || event.value?.billingStatus === "mismatch")
 );
@@ -79,7 +79,7 @@ const settledSummary = computed(() =>
       : "等待手动登记入柜商品"
     : event.value?.goods?.length
       ? event.value.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
-      : "等待平台结算"
+      : event.value?.status === "settled" ? "本次未取走商品" : "等待平台结算"
 );
 const preSettlementItems = computed(() =>
   isReservationOnlyPickupResult.value ? [] : event.value?.preSettlement?.items ?? []
@@ -337,7 +337,7 @@ const confirmSettlementIfNeeded = (nextEvent: CabinetEventRecord) => {
     ? nextEvent.goods.map((item) => `${item.goodsName} x${item.quantity}`).join("、")
     : "无商品扣减";
   const isReservationPickup =
-    nextEvent.reservationOnlyPickup === true &&
+    (nextEvent.reservationOnlyPickup === true || nextEvent.pickupMode === "actual") &&
     nextEvent.amount <= 0 &&
     nextEvent.billingStatus === "free";
   const amountText =
@@ -596,7 +596,7 @@ onUnload(() => {
       <view class="vm-stack">
         <FlowSteps :steps="flowSteps" />
 
-        <view class="status-box">
+        <view v-if="event?.pickupMode !== 'actual'" class="status-box">
           <text class="status-box__label">{{ isOperationalEvent ? "本次开门类型" : "本次计划领取" }}</text>
           <text class="status-box__value">{{ intendedSummary }}</text>
         </view>

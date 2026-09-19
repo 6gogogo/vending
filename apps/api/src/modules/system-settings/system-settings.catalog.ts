@@ -142,8 +142,8 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   },
   VM_RESERVATION_ONLY_PICKUP: {
     group: "实例设置",
-    label: "预约取货",
-    description: "开启后，用户先预约再取货；当前领取流程不需要支付配置。关闭后按即时领取方式处理。",
+    label: "旧版领取兼容",
+    description: "仅用于旧客户端的预约流程兼容。新版小程序使用物资查询与扫码直接开门，按实际领取结算。",
     inputType: "boolean",
     restartRequired: true
   },
@@ -391,7 +391,7 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
   SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE: {
     group: "实例设置",
     label: "领取差异的额度归属",
-    description: "当柜机实际数量与预约不一致时，选择差异计入哪一天的可领取额度。建议保留“自动”。",
+    description: "平台补充识别结果时，选择变化计入哪一天的领取额度。建议保留“自动”。",
     inputType: "select",
     options: [
       { label: "自动：有预约按预约日，无预约按领取日", value: "auto" },

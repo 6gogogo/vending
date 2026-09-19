@@ -113,29 +113,20 @@ export const appCopy = {
     actionText: "返回首页"
   },
   reservationPickup: {
-    planTitle: "预约取货计划",
-    planSubtitle: "请先选择物资并提交预约，到柜后使用预约开柜。",
-    selectionHint: "预约仅保留物资种类和数量；到柜后请按预约内容取货并及时关门。",
-    itemListTitle: "预约物资清单",
-    submitAction: "提交预约取货",
-    openConfirmTitle: "确认预约取货",
-    openConfirmHint: "请逐项核对现场柜机、距离和预约物资，再决定是否开门。",
-    openConfirmSummary: "本次预约物资",
-    openConfirmNotice: "柜门关闭后系统会记录实际领取结果；若与预约不一致，将转入管理员核对，不会发起支付。",
-    resultTitle: "预约取货结果",
-    completedStatus: "预约取货完成",
+    resultTitle: "实际领取结果",
+    completedStatus: "领取已完成",
     mismatchStatus: "领取待核对",
-    completedHint: "平台已完成本次预约取货核对，不涉及支付。",
-    mismatchHint: "实际领取结果与预约不一致，已转交管理员核对；本次不会产生支付。",
-    completionTitle: "预约取货完成",
-    completionAction: "确认取货",
+    completedHint: "已按实际领取记录，零元订单自动完成。",
+    mismatchHint: "这笔历史订单的领取结果待工作人员核对，本次不会产生支付。",
+    completionTitle: "领取已完成",
+    completionAction: "返回首页",
     completionContent: (settledItems: string, comparisonText: string) =>
-      `平台核对：${settledItems}${comparisonText}\n本次预约取货已完成，不涉及支付。确认后将返回首页。`
+      `实际领取：${settledItems}${comparisonText}\n本次领取已完成，不涉及支付。`
   },
   nearbyCabinets: {
-    specialSubtitle: "可提前预约保留物资，也可到柜扫码直接领取。",
+    specialSubtitle: "先查询柜内物资，到柜扫码后直接开门领取。",
     choice: {
-      reserve: "提前预约 · 保留物资",
+      reserve: "物资查询 · 查看库存",
       scan: "到柜扫码 · 直接领取"
     },
     location: {
@@ -145,7 +136,7 @@ export const appCopy = {
       unavailableTitle: "暂未获取手机位置",
       loadingHint: "定位完成后将按距离排列附近柜机",
       readyHint: "已按距离由近到远排列附近柜机",
-      deniedHint: "允许手机定位后可按距离排列，未开启也可正常预约",
+      deniedHint: "允许手机定位后可按距离排列，未开启也可正常查询",
       unavailableHint: "请确认手机系统定位已开启；暂时仍按推荐顺序展示",
       useAction: "使用手机定位",
       retryAction: "重新定位",
@@ -163,11 +154,11 @@ export const appCopy = {
       distance: (value: string) => `距你 ${value}`
     },
     goods: {
-      specialTitle: "可预约物资",
+      specialTitle: "柜内物资",
       cabinetTitle: "柜内物资",
       count: (quantity: number) => `共 ${quantity} 种`,
       viewAll: (quantity: number) => `查看全部 ${quantity} 种物资`,
-      dialogTitle: "全部可预约物资",
+      dialogTitle: "全部物资",
       close: "关闭",
       hierarchicalMeta: (stock: number) => `柜内 ${stock} 件 · 额度请进入详情查看`,
       specialMeta: (stock: number, available: number) =>
@@ -176,115 +167,30 @@ export const appCopy = {
     }
   },
   cabinetPickup: {
-    defaultDeviceName: "柜机",
-    loadingStatus: {
-      label: "状态加载中",
-      hint: "请等待柜机状态加载完成。"
-    },
-    entry: {
-      pickupEyebrow: "扫码领取",
-      reservationEyebrow: "预约领取",
-      identifying: "正在识别柜机",
-      identityAriaLabel: "当前柜机",
-      code: (deviceCode: string) => `柜机编号 ${deviceCode}`,
-      compactCode: (deviceCode: string) => `编号 ${deviceCode}`
-    },
-    action: {
-      reload: "重新加载",
-      unavailable: "柜机暂不可开",
-      open: "开柜领取",
-      openCount: (quantity: number) => `开柜领取（${quantity} 件）`,
-      reservationClosed: "预约暂未开放",
-      submitCount: (quantity: number) => `提交预约（${quantity} 件）`,
-      selectQuantity: "请选择领取数量",
-      selectedCount: (quantity: number) => `已选 ${quantity} 件`
-    },
-    hint: {
-      syncing: "正在同步柜机、库存、额度和预约信息。",
-      reservationClosed: "当前暂未开放预约取货，系统不会发送开门指令。",
-      existingReservation: "将使用当前有效预约开柜，不会重复创建预约或占用额度。",
-      selectQuantity: "请选择每种商品的领取数量。",
-      pickupReady: "确认后将创建临时预约并立即开柜；取货后请及时关门并核对领取结果。",
-      reservationReady: "提交后会在本页显示预约凭条；到柜扫码时可直接使用该预约。"
-    },
-    quota: {
-      maximum: (quantity: number) => `最多可领取 ${quantity} 件`,
-      empty: "当前没有可领取额度"
-    },
-    confirmation: {
-      title: "确认开柜领取",
-      defaultGoods: "商品",
-      noGoods: "未选择商品",
-      content: (deviceName: string, deviceCode: string, goodsSummary: string) =>
-        `${deviceName}\n柜机编号：${deviceCode}\n领取：${goodsSummary}`,
-      confirm: "确认开柜",
-      cancel: "返回修改"
-    },
-    errors: {
-      selectPickup: "请先选择要领取的商品数量。",
-      invalidOpenRequest: "未能生成有效的开柜请求。",
-      selectReservation: "请先选择要预约的商品数量。",
-      temporaryCancelled: (message: string) => `${message} 本次临时预约已自动取消。`,
-      temporaryCancelUnknown: (message: string, forbidRepeat = false) =>
-        `${message} 临时预约取消结果未确认，请到预约记录核对${forbidRepeat ? "，且不要重复开柜" : ""}。`
-    },
-    cancellation: {
-      title: "确认取消预约",
-      content: (goodsSummary: string) => `将取消 ${goodsSummary}。`,
-      confirm: "取消预约",
-      keep: "保留预约",
-      success: "预约已取消"
-    },
+    defaultDeviceName: "柜机详情",
+    entry: { pickup: "扫码领取", query: "物资查询", code: (code: string) => `柜机编号 ${code}`, compactCode: (code: string) => `编号 ${code}` },
+    action: { reload: "重新加载", open: "开门", unavailable: "暂不可开门", scan: "扫码开门", refresh: "刷新库存" },
+    loadingState: "正在读取柜机状态。",
+    syncingState: "正在读取柜机状态…",
+    loadingGoods: "正在加载物资…",
+    goodsUnavailable: "暂时无法读取库存，请稍后刷新。",
+    emptyGoods: "当前尚未录入商品。",
+    emptyStock: "暂无库存",
+    imageUnavailable: "暂无图片",
+    quotaLabel: "当前可领取额度",
+    quotaCount: (count: number) => `合计 ${count} 件`,
+    stockCount: (count: number) => `库存 ${count} 件`,
+    expiryLabel: "有效期至",
+    pickupTitle: "开门后按需领取",
+    queryTitle: "柜内物资",
+    pickupDescription: "无需预约或选择商品，点击下方开门即可。未取走商品会自动按零件完成。",
+    queryDescription: "查看商品和库存，现场扫码后开门领取。库存以现场实际情况为准。",
+    pickupHint: "取走商品后请关好柜门，系统按实际取走的商品记录。",
+    queryHint: "查询不占用库存。到柜机前扫码即可开门领取。",
     invalidEntry: {
       title: "未识别到有效柜机",
       content: "请重新扫描柜机上的二维码。系统不会读取库存或发送开门指令。",
       confirm: "我知道了"
-    },
-    receipt: {
-      ariaLabel: "预约凭条",
-      eyebrow: "预约凭条",
-      title: "等待到柜领取",
-      pending: "待领取",
-      machine: "柜机",
-      goods: "商品",
-      availableWindow: "可用时段",
-      expiry: "过期时间",
-      state: "状态",
-      stateText: "预约有效，扫码对应柜机后可开柜",
-      expiresBefore: (expiresAt: string) => `${expiresAt} 前`,
-      cancel: "取消预约"
-    },
-    existingReservation: {
-      title: "已找到当前预约",
-      status: "直接领取",
-      expiresAt: (expiresAt: string) => `有效至 ${expiresAt}`
-    },
-    goods: {
-      title: "选择领取数量",
-      hint: "可预约数量和今日可领取额度会在开柜前再次校验。",
-      stockLabel: "库存",
-      availableLabel: "可领取",
-      imageAlt: (goodsName: string) => `${goodsName}商品图`,
-      imageUnavailable: "图片暂不可用",
-      availabilityAriaLabel: (stock: number, available: number) =>
-        `库存 ${stock} 件，可领取 ${available} 件`,
-      entitlement: {
-        rootFallback: "任意物资",
-        sharedHint: "全局任意额度",
-        selected: "已选",
-        parentQuota: "本类",
-        dedicated: "专属",
-        shared: "任意"
-      },
-      meta: (category: string, stock: number, remaining: number) =>
-        `${category} · 库存 ${stock} · 可领取 ${remaining}`,
-      unreserved: (quantity: number) => `未预约 ${quantity} 件`,
-      decreaseAriaLabel: (goodsName: string) => `为${goodsName}减少一件`,
-      increaseAriaLabel: (goodsName: string) => `为${goodsName}增加一件`,
-      loadingTitle: "正在加载商品",
-      emptyTitle: "当前暂无可领取商品",
-      loadingDescription: "请稍候。",
-      emptyDescription: "库存或领取额度恢复后可再试。"
     }
   },
   serviceHighlights: ["手机号验证码注册登录", "审核状态实时同步", "取货、补货、反馈全程留痕"],
@@ -292,6 +198,6 @@ export const appCopy = {
     "首次使用先提交注册申请",
     "工作人员审核通过后登录",
     "首页查看今日额度和开放时段",
-    "选择柜机与物资，提交预约后到柜取货"
+    "查询柜内物资，到柜扫码开门，按实际取走的商品记录"
   ]
 };

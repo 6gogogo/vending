@@ -116,6 +116,7 @@ export class CabinetEventsService {
           deviceCode: payload.deviceCode,
           doorNum,
           reservationId: reservation?.id,
+          pickupMode: payload.pickupMode,
           intentItems,
           preSettlement
         })
@@ -187,6 +188,7 @@ export class CabinetEventsService {
             deviceCode: payload.deviceCode,
             doorNum,
             reservationId: reservation?.id,
+            pickupMode: payload.pickupMode,
             intentItems,
             preSettlement
           },
@@ -221,11 +223,20 @@ export class CabinetEventsService {
           reservationId: reservation?.id,
           reservationOnlyPickup:
             this.isReservationOnlyPickup() && user.role === "special" && Boolean(reservation),
+          pickupMode: user.role === "special" ? payload.pickupMode : undefined,
           intentItems,
           preSettlement,
           goods: []
         };
         this.store.events.unshift(commandEvent);
+        if (commandEvent.pickupMode === "actual") {
+          // 用户改为现场领取，释放其他预约；当前柜机预约由可信开门或结算回调履约。
+          for (const other of this.store.reservations.filter((entry) =>
+            entry.userId === user.id && entry.status === "active" && entry.id !== reservation?.id)) {
+            this.reservationsService.cancel(other.id, { id: user.id, role: user.role });
+            other.cancellationReason = "已扫码开柜，改按实际领取结算并释放其他预约。";
+          }
+        }
         this.store.updateDeviceRuntime(payload.deviceCode, {
           lastCommandAt: createdAt,
           openedAfterLastCommand: false
@@ -860,6 +871,9 @@ export class CabinetEventsService {
 
     const settlementComparison = this.compareSettlement(event, payload);
     event.settlementComparison = settlementComparison;
+    if (event.pickupMode === "actual") {
+      this.reservationsService.markFulfilled(event.reservationId, event.eventId);
+    }
     const emptyPickup = this.isEmptyPickupSettlement(event);
 
     if (!settlementAlreadyRecorded.duplicated && callbackBilling) {
@@ -986,13 +1000,9 @@ export class CabinetEventsService {
         : shouldAutoForwardFreeSettlement
         ? "本次预结算金额为 0，系统将自动回写平台付款成功。"
         : "已收到结算回调，系统将自动回写平台付款成功。";
-      const transactionId = emptyPickup
-        ? event.paymentTransactionId ?? this.store.createReference("empty-pickup-completion")
-        : this.store.createReference("txn");
-      if (emptyPickup) {
-        event.paymentTransactionId = transactionId;
-        this.store.persist();
-      }
+      const transactionId = event.paymentTransactionId ?? this.store.createReference("zero-cost-completion");
+      event.paymentTransactionId = transactionId;
+      this.store.persist();
       const autoForwardCompletion = this.tryAutoForwardPaymentSuccess(
         event,
         {
@@ -1411,9 +1421,10 @@ export class CabinetEventsService {
   /** 仅处理平台已经确认的空取货，不推断柜门状态，也不补造结算明细。 */
   async completeEmptyPickup(eventId: string) {
     const event = this.store.events.find((entry) => entry.eventId === eventId);
-    if (!event || !this.isEmptyPickupSettlement(event) || !this.hasSettlementRecord(event) ||
+    if (!event || !this.isEmptyPickupSettlement(event) ||
         event.physicalDoorState !== "closed" || event.adjustments?.length ||
-        this.store.paymentOrders.some((order) => order.eventId === eventId)) {
+        this.store.paymentOrders.some((order) => order.eventId === eventId) ||
+        this.findSettlementMovements(event).some((movement) => movement.quantity > 0)) {
       throw new BadRequestException("仅允许完成平台已结算、已关门且没有商品或费用的空取货订单。");
     }
     if (event.paymentNotifyStatus === "success" && event.billingStatus === "free") return event;
@@ -1449,9 +1460,38 @@ export class CabinetEventsService {
   }
 
   private isEmptyPickupSettlement(event: CabinetEventRecord) {
-    return this.isFreeOnlyPickupEvent(event) && event.status === "settled" &&
+    return event.status === "settled" &&
       event.platformAmount === 0 && event.amount === 0 && event.goods.length === 0 &&
       !event.adjustments?.length;
+  }
+
+  /** 自动补完已知的零元结算；缺少结算事实的关门事件绝不按空取货猜测。 */
+  async completePendingZeroCostOrders(assertRuntimeSafety: () => void = () => {}) {
+    const lastAttempt = (event: CabinetEventRecord) => Date.parse(event.zeroCostCompletionAttemptedAt ?? "") || 0;
+    const candidates = this.store.events.filter((event) => {
+      const emptyPickup = this.isEmptyPickupSettlement(event);
+      return event.status === "settled" && event.physicalDoorState === "closed" && event.amount === 0 &&
+        event.paymentNotifyStatus !== "success" && Boolean(event.paymentNotifyUrl) &&
+        !event.adjustments?.length && !this.store.paymentOrders.some((order) => order.eventId === event.eventId) &&
+        (!emptyPickup || !this.findSettlementMovements(event).some((movement) => movement.quantity > 0)) &&
+        (emptyPickup || (this.isFreeOnlyPickupEvent(event) && ["free", "admin_confirmed"].includes(event.billingStatus ?? ""))) &&
+        Date.now() - lastAttempt(event) >= 60_000;
+    }).sort((left, right) => lastAttempt(left) - lastAttempt(right)).slice(0, 10);
+    for (const event of candidates) {
+      assertRuntimeSafety();
+      event.zeroCostCompletionAttemptedAt = new Date().toISOString();
+      this.store.persist();
+      if (this.isEmptyPickupSettlement(event)) {
+        await this.completeEmptyPickup(event.eventId);
+      } else {
+        event.paymentTransactionId ??= this.store.createReference("zero-cost-completion");
+        this.store.persist();
+        await this.tryAutoForwardPaymentSuccess(event, { eventId: event.eventId, orderNo: event.orderNo,
+          deviceCode: event.deviceCode, transactionId: event.paymentTransactionId, amount: 0 }, event.paymentNotifyUrl);
+        this.store.persist();
+      }
+    }
+    return { attempted: candidates.length, completed: candidates.filter((event) => event.paymentNotifyStatus === "success").length };
   }
 
   async confirmBillingResolution(
@@ -2509,7 +2549,8 @@ export class CabinetEventsService {
     this.reservationsService.assertUserCanUseRelatedFeatures(user.id);
     this.reservationsService.expireOverdueReservations();
 
-    if (this.isReservationOnlyPickup() && user.role === "special" && !payload.reservationId?.trim()) {
+    const actualPickup = user.role === "special" && payload.pickupMode === "actual";
+    if (!actualPickup && this.isReservationOnlyPickup() && user.role === "special" && !payload.reservationId?.trim()) {
       throw new BadRequestException("当前仅支持预约取货，请先预约后再开柜。");
     }
 
@@ -2520,22 +2561,28 @@ export class CabinetEventsService {
           payload.deviceCode,
           doorNum
         )
-      : undefined;
+      : actualPickup ? this.store.reservations.find((entry) => entry.userId === user.id &&
+          entry.deviceCode === payload.deviceCode && entry.doorNum === doorNum && entry.status === "active" &&
+          Date.parse(entry.expiresAt) > Date.now()) : undefined;
     const operationContext = this.resolveOpenOperation(payload, user.role);
     const intentItems = this.resolveIntentItems(
       payload.deviceCode,
       doorNum,
-      user.role === "special" ? reservation?.items ?? payload.intentItems ?? [] : [],
+      user.role === "special" && !actualPickup ? reservation?.items ?? payload.intentItems ?? [] : [],
       payload.category ?? "daily",
       reservation?.id
     );
     const quotaSummary =
       user.role === "special"
-        ? this.accessRulesService.assertCanOpenSpecialCabinet(user)
+        ? this.accessRulesService.assertCanOpenSpecialCabinet(user, { ignoreReservationLocks: actualPickup })
         : undefined;
 
-    if (user.role === "special" && !intentItems.length) {
+    if (user.role === "special" && !actualPickup && !intentItems.length) {
       throw new BadRequestException("正式开柜前请先选择本次计划领取的商品。");
+    }
+
+    if (actualPickup && (quotaSummary?.remainingFreeTotal ?? quotaSummary?.remainingDaily ?? 0) <= 0) {
+      throw new BadRequestException("今日可领取额度已用完，请下个领取时段再来。");
     }
 
     const preSettlement =
@@ -2545,8 +2592,8 @@ export class CabinetEventsService {
             doorNum,
             intentItems,
             quotaSummary,
-            reservation?.entitlementAllocations,
-            reservation?.taxonomyRevision
+            actualPickup ? undefined : reservation?.entitlementAllocations,
+            actualPickup ? undefined : reservation?.taxonomyRevision
           )
         : undefined;
 
@@ -2773,13 +2820,13 @@ export class CabinetEventsService {
   private isFreeOnlyPickupEvent(
     event: Pick<
       CabinetEventRecord,
-      "role" | "reservationOnlyPickup" | "preSettlement" | "manualSettlement"
+      "role" | "reservationOnlyPickup" | "preSettlement" | "manualSettlement" | "pickupMode"
     >
   ) {
     return (
       event.role === "special" &&
       (
-        this.isReservationOnlyPickupEvent(event) ||
+        event.pickupMode === "actual" || this.isReservationOnlyPickupEvent(event) ||
         event.preSettlement?.chargeRequired === false ||
         (event.manualSettlement !== undefined && event.manualSettlement.status !== "reverted")
       )
@@ -3095,7 +3142,7 @@ export class CabinetEventsService {
         this.store.inventory,
         this.store.goodsCatalog,
         this.store.goodsTaxonomyNodes,
-        event.reservationId
+        event.reservationId && event.pickupMode !== "actual"
           ? this.store.reservations.find((entry) => entry.id === event.reservationId)?.reservedAt ?? event.createdAt
           : event.createdAt
       );
@@ -3376,6 +3423,13 @@ export class CabinetEventsService {
         unitPrice: item.unitPrice,
         amount: item.unitPrice * item.quantity
       })) ?? [];
+
+    if (event.pickupMode === "actual") {
+      return { matched: true, comparedAt: new Date().toISOString(),
+        summary: settledItems.length ? "已按柜机回传的实际商品和数量完成领取。" : "本次未取走商品，按零元空取货完成。",
+        intendedItems: [], settledItems, missingItems: [], extraItems: [], priceMismatches: []
+      } satisfies CabinetSettlementComparison;
+    }
 
     if (this.isNoChargeOperationalOpen(event)) {
       return {

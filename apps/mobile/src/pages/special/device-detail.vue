@@ -1,298 +1,54 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
-
-import type {
-  CabinetEventRecord,
-  CabinetOpenRequest,
-  CabinetReservationRecord,
-  DeviceRecord,
-  GoodsCategory,
-  GoodsTaxonomyNode,
-  ReservationSettings
-} from "@vm/shared-types";
-
+import type { CabinetOpenRequest, DeviceRecord } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
-import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import { appCopy } from "../../constants/copy";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
-import {
-  buildPickupDeviceUrl,
-  buildPickupLoginUrl,
-  resolveCabinetEntry,
-  shouldPreparePickupHomeStack
-} from "../../utils/cabinet-entry";
-import {
-  formatBeijingAvailabilityWindow,
-  formatBeijingShortDateTime
-} from "../../utils/datetime";
+import { buildPickupDeviceUrl, buildPickupLoginUrl, resolveCabinetEntry,
+  shouldPreparePickupHomeStack } from "../../utils/cabinet-entry";
+import { buildActualPickupRequest, matchesActualPickupEvent } from "../../utils/actual-pickup";
 import { getDeviceStatusPresentation } from "../../utils/device-readiness";
+import { formatBeijingShortDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
-import {
-  buildGoodsSelectionPresentation,
-  canIncrementGoodsSelection
-} from "../../utils/goods-entitlement-selection";
 import { isOpenOutcomeUncertain } from "../../utils/open-outcome";
 import { resolveHomePath } from "../../utils/role-routing";
+import { scanDeviceCode } from "../../utils/scan-device";
 
-type GoodsEntry = {
-  goodsCode: string;
-  goodsId: string;
-  name: string;
-  price: number;
-  imageUrl: string;
-  category: GoodsCategory;
-  taxonomyNodeId?: string;
-  taxonomyPath?: Array<Pick<GoodsTaxonomyNode, "id" | "name" | "sortOrder">>;
-  stock?: number;
-  expiresAt?: string;
-};
-
-type IntentItem = NonNullable<CabinetOpenRequest["intentItems"]>[number];
-type OpenAttemptResult =
-  | { state: "navigated" }
-  | { state: "rejected"; message: string };
-
+type OpenAttemptResult = { state: "navigated" } | { state: "rejected"; message: string };
 const sessionStore = useSessionStore();
+const pickupCopy = appCopy.cabinetPickup;
 const loading = ref(false);
 const loadFailed = ref(false);
 const submitting = ref(false);
-const confirmingOpen = ref(false);
-const confirmingCancellation = ref(false);
 const openFlowLocked = ref(false);
 const deviceCode = ref("");
 const scanMode = ref(false);
-const deviceName = ref(appCopy.cabinetPickup.defaultDeviceName);
+const deviceName = ref(pickupCopy.defaultDeviceName);
 const currentDevice = ref<DeviceRecord>();
-const goodsList = ref<GoodsEntry[]>([]);
-const selectedMap = reactive<Record<string, number>>({});
+const goodsList = ref<Awaited<ReturnType<typeof mobileApi.queryGoods>>>([]);
 const failedImageMap = reactive<Record<string, boolean>>({});
-const reservationSettings = ref<ReservationSettings>();
-const reservations = ref<CabinetReservationRecord[]>([]);
 const actionError = ref("");
+const goodsError = ref("");
 const pickupHomeStackAttempted = ref(false);
-
-const selectedItems = computed<IntentItem[]>(() =>
-  goodsList.value
-    .map((item) => ({
-      goodsId: item.goodsId,
-      goodsName: item.name,
-      quantity: selectedMap[item.goodsId] ?? 0,
-      category: item.category
-    }))
-    .filter((item) => item.quantity > 0)
-);
-
-const selectedTotal = computed(() =>
-  selectedItems.value.reduce((total, item) => total + item.quantity, 0)
-);
-
-const goodsSelectionPresentation = computed(() =>
-  buildGoodsSelectionPresentation({
-    goods: goodsList.value,
-    pools: sessionStore.quota?.remainingPools ?? [],
-    selectedByGoods: selectedMap
-  })
-);
-
-const hasHierarchicalEntitlements = computed(
-  () =>
-    goodsList.value.some((goods) => Boolean(goods.taxonomyPath?.length)) &&
-    sessionStore.quota?.taxonomyRevision !== undefined
-);
-
-const formatProgress = (progress: { selected: number; available: number }) =>
-  `${progress.selected}/${progress.available}`;
-
-const activeReservations = computed(() =>
-  reservations.value
-    .filter(
-      (item) =>
-        item.status === "active" &&
-        item.deviceCode === deviceCode.value &&
-        Date.parse(item.expiresAt) > Date.now()
-    )
-    .sort((left, right) => Date.parse(left.expiresAt) - Date.parse(right.expiresAt))
-);
-
-const nearestReservation = computed(() => activeReservations.value[0]);
-const actionItemTotal = computed(
-  () =>
-    nearestReservation.value?.items.reduce(
-      (total, item) => total + item.quantity,
-      0
-    ) ?? selectedTotal.value
-);
-
-const deviceStatusPresentation = computed(() =>
-  currentDevice.value
-    ? getDeviceStatusPresentation(currentDevice.value)
-    : {
-        canOpen: false,
-        label: appCopy.cabinetPickup.loadingStatus.label,
-        tone: "warning" as const,
-        actionHint: appCopy.cabinetPickup.loadingStatus.hint
-      }
-);
-
+const deviceStatusPresentation = computed(() => currentDevice.value
+  ? getDeviceStatusPresentation(currentDevice.value)
+  : { canOpen: false, actionHint: pickupCopy.loadingState });
 const deviceCanOpen = computed(() => deviceStatusPresentation.value.canOpen);
-const actionBusy = computed(
-  () =>
-    loading.value ||
-    submitting.value ||
-    confirmingOpen.value ||
-    confirmingCancellation.value ||
-    openFlowLocked.value
-);
-const showGoodsSelector = computed(() => !nearestReservation.value);
-const showPrimaryAction = computed(
-  () => scanMode.value || !nearestReservation.value
-);
-
-const primaryActionLabel = computed(() => {
-  if (loadFailed.value) {
-    return appCopy.cabinetPickup.action.reload;
-  }
-
-  if (scanMode.value) {
-    if (!deviceCanOpen.value) {
-      return appCopy.cabinetPickup.action.unavailable;
-    }
-    if (nearestReservation.value) {
-      return appCopy.cabinetPickup.action.open;
-    }
-    return selectedTotal.value > 0
-      ? appCopy.cabinetPickup.action.openCount(selectedTotal.value)
-      : appCopy.cabinetPickup.action.selectQuantity;
-  }
-
-  if (!reservationSettings.value?.enabled) {
-    return appCopy.cabinetPickup.action.reservationClosed;
-  }
-
-  return selectedTotal.value > 0
-    ? appCopy.cabinetPickup.action.submitCount(selectedTotal.value)
-    : appCopy.cabinetPickup.action.selectQuantity;
-});
-
-const primaryActionDisabled = computed(() => {
-  if (loadFailed.value) {
-    return loading.value;
-  }
-
-  if (actionBusy.value) {
-    return true;
-  }
-
-  if (scanMode.value) {
-    return (
-      !deviceCanOpen.value ||
-      (!nearestReservation.value &&
-        (!reservationSettings.value?.enabled || !selectedItems.value.length))
-    );
-  }
-
-  return !reservationSettings.value?.enabled || !selectedItems.value.length;
-});
-
-const actionHint = computed(() => {
-  if (actionError.value) {
-    return actionError.value;
-  }
-
-  if (loading.value) {
-    return appCopy.cabinetPickup.hint.syncing;
-  }
-
-  if (scanMode.value && !deviceCanOpen.value) {
-    return deviceStatusPresentation.value.actionHint;
-  }
-
-  if (!nearestReservation.value && !reservationSettings.value?.enabled) {
-    return appCopy.cabinetPickup.hint.reservationClosed;
-  }
-
-  if (scanMode.value && nearestReservation.value) {
-    return appCopy.cabinetPickup.hint.existingReservation;
-  }
-
-  if (!selectedItems.value.length) {
-    return appCopy.cabinetPickup.hint.selectQuantity;
-  }
-
-  return scanMode.value
-    ? appCopy.cabinetPickup.hint.pickupReady
-    : appCopy.cabinetPickup.hint.reservationReady;
-});
-
-const clearSelection = () => {
-  for (const key of Object.keys(selectedMap)) {
-    delete selectedMap[key];
-  }
-};
-
-const clearImageFailures = () => {
-  for (const key of Object.keys(failedImageMap)) {
-    delete failedImageMap[key];
-  }
-};
-
-const handleGoodsImageError = (goodsId: string) => {
-  failedImageMap[goodsId] = true;
-};
-
-const getRemaining = (goods: Pick<GoodsEntry, "goodsId" | "category">) => {
-  const goodsQuota = sessionStore.quota?.remainingByGoods;
-  if (goodsQuota && Object.keys(goodsQuota).length > 0) {
-    return Math.max(0, goodsQuota[goods.goodsId] ?? 0);
-  }
-
-  return Math.max(0, sessionStore.quota?.remainingToday?.[goods.category] ?? 0);
-};
-
-const getSelectableMaximum = (goods: GoodsEntry) => {
-  const stock = Math.max(0, goods.stock ?? 0);
-  if (hasHierarchicalEntitlements.value) {
-    return canIncrementGoodsSelection(
-      {
-        goods: goodsList.value,
-        pools: sessionStore.quota?.remainingPools ?? [],
-        selectedByGoods: selectedMap
-      },
-      goods.goodsId
-    )
-      ? stock
-      : selectedMap[goods.goodsId] ?? 0;
-  }
-  return Math.min(stock, getRemaining(goods));
-};
-
-const updateSelected = (goods: GoodsEntry, delta: number) => {
-  if (actionBusy.value) {
-    return;
-  }
-
-  actionError.value = "";
-  const current = selectedMap[goods.goodsId] ?? 0;
-  const maximum = getSelectableMaximum(goods);
-  const next = Math.min(maximum, Math.max(0, current + delta));
-
-  if (delta > 0 && current >= maximum) {
-    uni.showToast({
-      title:
-        maximum > 0
-          ? appCopy.cabinetPickup.quota.maximum(maximum)
-          : appCopy.cabinetPickup.quota.empty,
-      icon: "none"
-    });
-    return;
-  }
-
-  selectedMap[goods.goodsId] = next;
-};
+const actionBusy = computed(() => loading.value || submitting.value || openFlowLocked.value);
+const showPrimaryAction = true;
+const primaryActionLabel = computed(() => loadFailed.value ? pickupCopy.action.reload
+  : scanMode.value ? (deviceCanOpen.value ? pickupCopy.action.open : pickupCopy.action.unavailable) : pickupCopy.action.scan);
+const primaryActionDisabled = computed(() => actionBusy.value ||
+  (!loadFailed.value && scanMode.value && !deviceCanOpen.value));
+const remainingTotal = computed(() => Math.max(0,
+  sessionStore.quota?.remainingFreeTotal ?? sessionStore.quota?.remainingDaily ?? 0));
+const actionHint = computed(() => actionError.value || (loading.value ? pickupCopy.syncingState
+  : scanMode.value && !deviceCanOpen.value ? deviceStatusPresentation.value.actionHint
+  : scanMode.value ? pickupCopy.pickupHint : pickupCopy.queryHint));
 
 const redirectUnsupportedRole = () => {
   const role = sessionStore.user?.role;
@@ -335,115 +91,43 @@ const preparePickupHomeStack = () => {
 };
 
 const load = async () => {
-  if (!deviceCode.value) {
-    return;
-  }
-
+  if (!deviceCode.value) return;
   await sessionStore.bootstrap();
-
   if (!sessionStore.user) {
-    uni.redirectTo({
-      url: scanMode.value
-        ? buildPickupLoginUrl(deviceCode.value)
-        : "/pages/common/app-login"
-    });
+    uni.redirectTo({ url: scanMode.value ? buildPickupLoginUrl(deviceCode.value) : "/pages/common/app-login" });
     return;
   }
-
-  if (sessionStore.user.role !== "special") {
-    redirectUnsupportedRole();
-    return;
-  }
-
-  if (preparePickupHomeStack()) {
-    return;
-  }
-
+  if (sessionStore.user.role !== "special") { redirectUnsupportedRole(); return; }
+  if (preparePickupHomeStack()) return;
   loading.value = true;
   loadFailed.value = false;
   actionError.value = "";
-
+  goodsError.value = "";
   try {
-    const [device, goods, quota, settings, reservationList] = await Promise.all([
-      mobileApi.getDevice(deviceCode.value),
-      mobileApi.queryGoods(deviceCode.value),
-      mobileApi.getQuotaSummary(sessionStore.user.phone),
-      mobileApi.reservationSettings(),
-      mobileApi.myReservations()
+    const [deviceResult, goodsResult, quotaResult] = await Promise.allSettled([
+      mobileApi.getDevice(deviceCode.value), mobileApi.queryGoods(deviceCode.value),
+      mobileApi.getQuotaSummary(sessionStore.user.phone)
     ]);
-
+    if (deviceResult.status === "rejected") throw deviceResult.reason;
+    if (quotaResult.status === "rejected") throw quotaResult.reason;
+    const device = deviceResult.value;
     deviceName.value = device.name;
     currentDevice.value = device;
-    sessionStore.setQuota(quota);
-    reservationSettings.value = settings;
-    reservations.value = reservationList;
-    clearImageFailures();
-    goodsList.value = goods.filter((item) => (item.stock ?? 0) > 0);
-    clearSelection();
+    sessionStore.setQuota(quotaResult.value);
+    goodsList.value = goodsResult.status === "fulfilled" ? goodsResult.value : [];
+    if (goodsResult.status === "rejected") goodsError.value = pickupCopy.goodsUnavailable;
+    for (const key of Object.keys(failedImageMap)) delete failedImageMap[key];
   } catch (error) {
     loadFailed.value = true;
     actionError.value = getErrorMessage(error);
-  } finally {
-    loading.value = false;
-  }
-};
-
-const buildOpenPayload = (
-  reservation?: CabinetReservationRecord,
-  fallbackItems: IntentItem[] = selectedItems.value
-): CabinetOpenRequest | undefined => {
-  const items = reservation?.items ?? fallbackItems;
-
-  if (!sessionStore.user || !items.length) {
-    return undefined;
-  }
-
-  return {
-    phone: sessionStore.user.phone,
-    deviceCode: deviceCode.value,
-    doorNum: "1",
-    reservationId: reservation?.id,
-    category: items[0]?.category,
-    openMode: "scan",
-    intentItems: items.map((item) => ({
-      goodsId: item.goodsId,
-      goodsName: item.goodsName,
-      quantity: item.quantity,
-      category: item.category
-    }))
-  };
-};
-
-const sameIntentItems = (
-  expected: CabinetOpenRequest["intentItems"],
-  actual: CabinetEventRecord["intentItems"]
-) => {
-  if (!expected?.length || !actual?.length || expected.length !== actual.length) {
-    return false;
-  }
-
-  const expectedQuantities = new Map(
-    expected.map((item) => [item.goodsId, item.quantity])
-  );
-  return actual.every(
-    (item) => expectedQuantities.get(item.goodsId) === item.quantity
-  );
+  } finally { loading.value = false; }
 };
 
 const listMatchingOpenEvents = async (payload: CabinetOpenRequest) => {
-  if (!sessionStore.user) {
-    return [];
-  }
-
-  const events = await mobileApi.listCabinetEvents(sessionStore.user.id);
-  return events.filter(
-    (entry) =>
-      entry.userId === sessionStore.user?.id &&
-      entry.deviceCode === payload.deviceCode &&
-      entry.doorNum === (payload.doorNum || "1") &&
-      (!payload.reservationId || entry.reservationId === payload.reservationId) &&
-      sameIntentItems(payload.intentItems, entry.intentItems)
-  );
+  if (!sessionStore.user) return [];
+  const userId = sessionStore.user.id;
+  const events = await mobileApi.listCabinetEvents(userId);
+  return events.filter((entry) => matchesActualPickupEvent(entry, userId, payload));
 };
 
 const captureMatchingOpenEventIds = async (payload: CabinetOpenRequest) => {
@@ -543,213 +227,34 @@ const performOpen = async (
   }
 };
 
-const createReservationFromItems = async (items: IntentItem[]) => {
-  const reservation = await mobileApi.createReservation({
-    deviceCode: deviceCode.value,
-    doorNum: "1",
-    intentItems: items.map((item) => ({
-      goodsId: item.goodsId,
-      goodsName: item.goodsName,
-      quantity: item.quantity,
-      category: item.category
-    }))
-  });
-
-  reservations.value = [
-    reservation,
-    ...reservations.value.filter((item) => item.id !== reservation.id)
-  ];
-  return reservation;
-};
-
-const cancelTemporaryReservation = async (
-  reservation: CabinetReservationRecord
-) => {
-  try {
-    const updated = await mobileApi.cancelReservation(reservation.id);
-    reservations.value = reservations.value.map((item) =>
-      item.id === updated.id ? updated : item
-    );
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const requestOpenConfirmation = (payload: CabinetOpenRequest) =>
-  new Promise<boolean>((resolve) => {
-    const goodsSummary =
-      payload.intentItems
-        ?.map(
-          (item) =>
-            `${item.goodsName ?? appCopy.cabinetPickup.confirmation.defaultGoods} x${item.quantity}`
-        )
-        .join("、") || appCopy.cabinetPickup.confirmation.noGoods;
-
-    uni.showModal({
-      title: appCopy.cabinetPickup.confirmation.title,
-      content: appCopy.cabinetPickup.confirmation.content(
-        deviceName.value,
-        payload.deviceCode,
-        goodsSummary
-      ),
-      confirmText: appCopy.cabinetPickup.confirmation.confirm,
-      cancelText: appCopy.cabinetPickup.confirmation.cancel,
-      success: ({ confirm }) => resolve(confirm),
-      fail: () => resolve(false)
-    });
-  });
-
 const handlePickup = async () => {
-  if (actionBusy.value) {
-    return;
-  }
-
+  if (actionBusy.value || !sessionStore.user) return;
   actionError.value = "";
-  if (!deviceCanOpen.value) {
-    actionError.value = deviceStatusPresentation.value.actionHint;
-    return;
-  }
-
-  const existingReservation = nearestReservation.value;
-  const selectedSnapshot = selectedItems.value.map((item) => ({ ...item }));
-  const previewPayload = buildOpenPayload(existingReservation, selectedSnapshot);
-
-  if (!previewPayload) {
-    actionError.value = appCopy.cabinetPickup.errors.selectPickup;
-    return;
-  }
-
-  confirmingOpen.value = true;
-  let temporaryReservation: CabinetReservationRecord | undefined;
-
+  if (!deviceCanOpen.value) { actionError.value = deviceStatusPresentation.value.actionHint; return; }
+  submitting.value = true;
   try {
-    if (!(await requestOpenConfirmation(previewPayload))) {
-      return;
-    }
-
-    submitting.value = true;
-    const reservation =
-      existingReservation ??
-      (temporaryReservation = await createReservationFromItems(selectedSnapshot));
-    const openPayload = buildOpenPayload(reservation, selectedSnapshot);
-
-    if (!openPayload) {
-      throw new Error(appCopy.cabinetPickup.errors.invalidOpenRequest);
-    }
-
-    const knownMatchingEventIds = await readKnownEventIdsWithoutDelayingOpen(
-      captureMatchingOpenEventIds(openPayload)
-    );
-    const result = await performOpen(openPayload, knownMatchingEventIds);
-
-    if (result.state === "rejected") {
-      if (temporaryReservation) {
-        const cancelled = await cancelTemporaryReservation(temporaryReservation);
-        actionError.value = cancelled
-          ? appCopy.cabinetPickup.errors.temporaryCancelled(result.message)
-          : appCopy.cabinetPickup.errors.temporaryCancelUnknown(result.message, true);
-      } else {
-        actionError.value = result.message;
-      }
-    }
-  } catch (error) {
-    let message = getErrorMessage(error);
-    if (temporaryReservation) {
-      const cancelled = await cancelTemporaryReservation(temporaryReservation);
-      message = cancelled
-        ? appCopy.cabinetPickup.errors.temporaryCancelled(message)
-        : appCopy.cabinetPickup.errors.temporaryCancelUnknown(message);
-    }
-    actionError.value = message;
-  } finally {
-    submitting.value = false;
-    confirmingOpen.value = false;
-  }
+    const payload = buildActualPickupRequest(sessionStore.user.phone, deviceCode.value);
+    // 报价令牌用于避免重复下发开门；实际商品留给关门后的识别回调。
+    const preview = await mobileApi.previewOpenSettlement(payload);
+    payload.quoteId = preview.quoteId;
+    const knownIds = await readKnownEventIdsWithoutDelayingOpen(captureMatchingOpenEventIds(payload));
+    const result = await performOpen(payload, knownIds);
+    if (result.state === "rejected") actionError.value = result.message;
+  } catch (error) { actionError.value = getErrorMessage(error); }
+  finally { submitting.value = false; }
 };
 
-const createReservation = async () => {
-  if (actionBusy.value || nearestReservation.value) {
-    return;
-  }
-
-  if (!reservationSettings.value?.enabled || !selectedItems.value.length) {
-    actionError.value = appCopy.cabinetPickup.errors.selectReservation;
-    return;
-  }
-
+const handlePrimaryAction = async () => {
+  if (actionBusy.value) return;
+  if (loadFailed.value) { await load(); return; }
+  if (scanMode.value) { await handlePickup(); return; }
   submitting.value = true;
   actionError.value = "";
-
   try {
-    await createReservationFromItems(
-      selectedItems.value.map((item) => ({ ...item }))
-    );
-    clearSelection();
-  } catch (error) {
-    actionError.value = getErrorMessage(error);
-  } finally {
-    submitting.value = false;
-  }
-};
-
-const cancelReservation = async (reservation: CabinetReservationRecord) => {
-  if (actionBusy.value) {
-    return;
-  }
-
-  confirmingCancellation.value = true;
-  const confirmed = await new Promise<boolean>((resolve) => {
-    uni.showModal({
-      title: appCopy.cabinetPickup.cancellation.title,
-      content: appCopy.cabinetPickup.cancellation.content(
-        reservation.items
-          .map((item) => `${item.goodsName} x${item.quantity}`)
-          .join("、")
-      ),
-      confirmText: appCopy.cabinetPickup.cancellation.confirm,
-      cancelText: appCopy.cabinetPickup.cancellation.keep,
-      success: ({ confirm }) => resolve(confirm),
-      fail: () => resolve(false)
-    });
-  });
-  confirmingCancellation.value = false;
-
-  if (!confirmed) {
-    return;
-  }
-
-  submitting.value = true;
-  actionError.value = "";
-
-  try {
-    const updated = await mobileApi.cancelReservation(reservation.id);
-    reservations.value = reservations.value.map((item) =>
-      item.id === updated.id ? updated : item
-    );
-    uni.showToast({
-      title: appCopy.cabinetPickup.cancellation.success,
-      icon: "success"
-    });
-  } catch (error) {
-    actionError.value = getErrorMessage(error);
-  } finally {
-    submitting.value = false;
-  }
-};
-
-const handlePrimaryAction = () => {
-  if (loadFailed.value) {
-    void load();
-    return;
-  }
-
-  if (scanMode.value) {
-    void handlePickup();
-    return;
-  }
-
-  void createReservation();
+    const code = await scanDeviceCode();
+    if (code) uni.navigateTo({ url: buildPickupDeviceUrl(code) });
+  } catch (error) { actionError.value = getErrorMessage(error); }
+  finally { submitting.value = false; }
 };
 
 const rejectInvalidEntry = () => {
@@ -786,323 +291,49 @@ onLoad((query) => {
 </script>
 
 <template>
-  <MobileShell
-    class="pickup-shell"
-    :eyebrow="scanMode ? appCopy.cabinetPickup.entry.pickupEyebrow : appCopy.cabinetPickup.entry.reservationEyebrow"
-    :title="deviceName"
-    :subtitle="deviceCode ? appCopy.cabinetPickup.entry.code(deviceCode) : appCopy.cabinetPickup.entry.identifying"
-  >
+  <MobileShell class="pickup-shell" :eyebrow="scanMode ? pickupCopy.entry.pickup : pickupCopy.entry.query"
+    :title="deviceName" :subtitle="pickupCopy.entry.code(deviceCode)">
     <GlassCard tone="accent" class="pickup-card">
       <view class="pickup-stack">
-        <view class="cabinet-identity" :aria-label="appCopy.cabinetPickup.entry.identityAriaLabel">
-          <text class="cabinet-identity__name">{{ deviceName }}</text>
-          <text class="cabinet-identity__code">
-            {{ appCopy.cabinetPickup.entry.compactCode(deviceCode) }}
-          </text>
+        <view class="cabinet-identity">
+          <text class="cabinet-identity__name">{{ scanMode ? pickupCopy.pickupTitle : pickupCopy.queryTitle }}</text>
+          <text class="cabinet-identity__code">{{ pickupCopy.entry.compactCode(deviceCode) }}</text>
         </view>
-
-        <view
-          v-if="!scanMode && nearestReservation"
-          class="reservation-receipt"
-          :aria-label="appCopy.cabinetPickup.receipt.ariaLabel"
-        >
-          <view class="reservation-receipt__head">
-            <view class="reservation-receipt__heading">
-              <text class="reservation-receipt__eyebrow">{{ appCopy.cabinetPickup.receipt.eyebrow }}</text>
-              <text class="reservation-receipt__title">{{ appCopy.cabinetPickup.receipt.title }}</text>
+        <text class="flow-hint">{{ scanMode ? pickupCopy.pickupDescription : pickupCopy.queryDescription }}</text>
+        <view v-if="!loading && !loadFailed" class="quota-summary">
+          <text>{{ pickupCopy.quotaLabel }}</text><text class="quota-summary__value">{{ pickupCopy.quotaCount(remainingTotal) }}</text>
+        </view>
+        <text v-if="loading" class="flow-hint" role="status">{{ pickupCopy.loadingGoods }}</text>
+        <view v-else-if="goodsList.length" class="goods-list">
+          <view v-for="goods in goodsList" :key="goods.goodsId" class="goods-item">
+            <view class="goods-item__image-shell">
+              <image v-if="goods.imageUrl && !failedImageMap[goods.goodsId]" class="goods-item__image"
+                :src="goods.imageUrl" mode="aspectFit" :alt="goods.name" lazy-load
+                @error="failedImageMap[goods.goodsId] = true" />
+              <view v-else class="goods-item__fallback">
+                <MenuIcon :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'" size="lg" tone="accent" />
+                <text>{{ pickupCopy.imageUnavailable }}</text>
+              </view>
             </view>
-            <text class="reservation-receipt__status">{{ appCopy.cabinetPickup.receipt.pending }}</text>
-          </view>
-
-          <view class="receipt-row">
-            <text class="receipt-row__label">{{ appCopy.cabinetPickup.receipt.machine }}</text>
-            <text class="receipt-row__value">{{ deviceName }}（{{ deviceCode }}）</text>
-          </view>
-          <view class="receipt-row">
-            <text class="receipt-row__label">{{ appCopy.cabinetPickup.receipt.goods }}</text>
-            <view class="receipt-row__items">
-              <text
-                v-for="item in nearestReservation.items"
-                :key="item.goodsId"
-                class="receipt-row__value"
-              >
-                {{ item.goodsName }} x{{ item.quantity }}
+            <view class="goods-item__body">
+              <text class="goods-item__name">{{ goods.name }}</text>
+              <text class="goods-item__stock" :class="{ 'goods-item__stock--empty': (goods.stock ?? 0) <= 0 }">
+                {{ (goods.stock ?? 0) > 0 ? pickupCopy.stockCount(goods.stock ?? 0) : pickupCopy.emptyStock }}
               </text>
+              <text v-if="goods.expiresAt" class="goods-item__expiry">{{ pickupCopy.expiryLabel }} {{ formatBeijingShortDateTime(goods.expiresAt) }}</text>
             </view>
           </view>
-          <view class="receipt-row">
-            <text class="receipt-row__label">{{ appCopy.cabinetPickup.receipt.availableWindow }}</text>
-            <text class="receipt-row__value">
-              {{
-                formatBeijingAvailabilityWindow(
-                  nearestReservation.reservedAt,
-                  nearestReservation.expiresAt
-                )
-              }}
-            </text>
-          </view>
-          <view class="receipt-row">
-            <text class="receipt-row__label">{{ appCopy.cabinetPickup.receipt.expiry }}</text>
-            <text class="receipt-row__value">
-              {{ appCopy.cabinetPickup.receipt.expiresBefore(formatBeijingShortDateTime(nearestReservation.expiresAt)) }}
-            </text>
-          </view>
-          <view class="receipt-row">
-            <text class="receipt-row__label">{{ appCopy.cabinetPickup.receipt.state }}</text>
-            <text class="receipt-row__value">{{ appCopy.cabinetPickup.receipt.stateText }}</text>
-          </view>
-
-          <button
-            class="vm-button vm-button--ghost receipt-cancel"
-            :disabled="actionBusy"
-            :loading="submitting"
-            @tap="cancelReservation(nearestReservation)"
-          >
-            {{ appCopy.cabinetPickup.receipt.cancel }}
-          </button>
-          <text
-            v-if="actionError"
-            class="receipt-error"
-            role="alert"
-            aria-live="assertive"
-          >
-            {{ actionError }}
-          </text>
         </view>
-
-        <template v-else>
-          <view v-if="scanMode && nearestReservation" class="locked-reservation">
-            <view class="locked-reservation__head">
-              <text class="locked-reservation__title">{{ appCopy.cabinetPickup.existingReservation.title }}</text>
-              <text class="locked-reservation__status">{{ appCopy.cabinetPickup.existingReservation.status }}</text>
-            </view>
-            <text
-              v-for="item in nearestReservation.items"
-              :key="item.goodsId"
-              class="locked-reservation__item"
-            >
-              {{ item.goodsName }} x{{ item.quantity }}
-            </text>
-            <text class="locked-reservation__hint">
-              {{ appCopy.cabinetPickup.existingReservation.expiresAt(formatBeijingShortDateTime(nearestReservation.expiresAt)) }}
-            </text>
-          </view>
-
-          <view v-if="showGoodsSelector" class="goods-section">
-            <view class="goods-section__heading">
-              <text class="goods-section__title">{{ appCopy.cabinetPickup.goods.title }}</text>
-              <text class="goods-section__hint">{{ appCopy.cabinetPickup.goods.hint }}</text>
-            </view>
-
-            <view v-if="goodsList.length && hasHierarchicalEntitlements" class="entitlement-tree">
-              <view class="entitlement-root">
-                <text class="entitlement-root__mark">爱</text>
-                <view class="entitlement-root__copy">
-                  <text class="entitlement-root__title">
-                    {{ goodsSelectionPresentation.root?.name ?? appCopy.cabinetPickup.goods.entitlement.rootFallback }}
-                  </text>
-                  <text class="entitlement-root__hint">{{ appCopy.cabinetPickup.goods.entitlement.sharedHint }}</text>
-                </view>
-                <view class="entitlement-root__progress">
-                  <text>{{ appCopy.cabinetPickup.goods.entitlement.selected }}</text>
-                  <text>{{ formatProgress(goodsSelectionPresentation.sharedProgress) }}</text>
-                </view>
-              </view>
-
-              <view class="entitlement-groups">
-                <template v-for="row in goodsSelectionPresentation.rows" :key="row.id">
-                  <view
-                    v-if="!row.goods.length"
-                    class="entitlement-parent"
-                    :style="{ paddingLeft: `${row.depth * 18}rpx` }"
-                  >
-                    <text class="entitlement-parent__title">{{ row.name }}</text>
-                    <view v-if="row.directProgress.available > 0" class="entitlement-parent__quota">
-                      <text>{{ appCopy.cabinetPickup.goods.entitlement.parentQuota }}</text>
-                      <text>{{ formatProgress(row.directProgress) }}</text>
-                    </view>
-                  </view>
-                  <view v-else class="entitlement-group">
-                    <view class="entitlement-group__heading">
-                      <text class="entitlement-group__dot" aria-hidden="true" />
-                      <text class="entitlement-group__title">{{ row.name }}</text>
-                      <view class="entitlement-group__quota">
-                        <text>
-                          {{ appCopy.cabinetPickup.goods.entitlement.dedicated }}
-                          <text class="entitlement-group__dedicated">{{ formatProgress(row.directProgress) }}</text>
-                        </text>
-                        <text>
-                          · {{ appCopy.cabinetPickup.goods.entitlement.shared }}
-                          <text class="entitlement-group__shared">{{ formatProgress(goodsSelectionPresentation.sharedProgress) }}</text>
-                        </text>
-                      </view>
-                    </view>
-
-                    <view class="goods-grid">
-                      <view
-                        v-for="goods in row.goods"
-                        :key="goods.goodsId"
-                        class="goods-card"
-                        :class="{ 'goods-card--selected': (selectedMap[goods.goodsId] ?? 0) > 0 }"
-                      >
-                        <view class="goods-card__art">
-                          <image
-                            v-if="goods.imageUrl && !failedImageMap[goods.goodsId]"
-                            class="goods-card__image"
-                            :src="goods.imageUrl"
-                            mode="aspectFill"
-                            :alt="appCopy.cabinetPickup.goods.imageAlt(goods.name)"
-                            lazy-load
-                            @error="handleGoodsImageError(goods.goodsId)"
-                          />
-                          <view
-                            v-else
-                            class="goods-card__image-fallback"
-                            :aria-label="appCopy.cabinetPickup.goods.imageUnavailable"
-                          >
-                            <MenuIcon
-                              :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'"
-                              size="lg"
-                              tone="accent"
-                            />
-                            <text>{{ appCopy.cabinetPickup.goods.imageUnavailable }}</text>
-                          </view>
-                        </view>
-                        <view class="goods-card__copy">
-                          <text class="goods-card__name">{{ goods.name }}</text>
-                          <text class="goods-card__available">{{ appCopy.cabinetPickup.goods.unreserved(goods.stock ?? 0) }}</text>
-                        </view>
-                        <view class="goods-card__stepper">
-                          <button
-                            class="goods-card__stepper-button"
-                            :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) <= 0"
-                            :aria-label="appCopy.cabinetPickup.goods.decreaseAriaLabel(goods.name)"
-                            @tap="updateSelected(goods, -1)"
-                          >
-                            −
-                          </button>
-                          <text class="goods-card__stepper-value" aria-live="polite" aria-atomic="true">
-                            {{ selectedMap[goods.goodsId] ?? 0 }}
-                          </text>
-                          <button
-                            class="goods-card__stepper-button goods-card__stepper-button--plus"
-                            :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) >= getSelectableMaximum(goods)"
-                            :aria-label="appCopy.cabinetPickup.goods.increaseAriaLabel(goods.name)"
-                            @tap="updateSelected(goods, 1)"
-                          >
-                            +
-                          </button>
-                        </view>
-                      </view>
-                    </view>
-                  </view>
-                </template>
-              </view>
-            </view>
-
-            <view v-else-if="goodsList.length" class="goods-list">
-              <view
-                v-for="goods in goodsList"
-                :key="goods.goodsId"
-                class="goods-item"
-                :class="{ 'goods-item--selected': (selectedMap[goods.goodsId] ?? 0) > 0 }"
-              >
-                <view class="goods-item__image-shell">
-                  <image
-                    v-if="goods.imageUrl && !failedImageMap[goods.goodsId]"
-                    class="goods-item__image"
-                    :src="goods.imageUrl"
-                    mode="aspectFit"
-                    :alt="appCopy.cabinetPickup.goods.imageAlt(goods.name)"
-                    lazy-load
-                    @error="handleGoodsImageError(goods.goodsId)"
-                  />
-                  <view
-                    v-else
-                    class="goods-item__image-fallback"
-                    :aria-label="appCopy.cabinetPickup.goods.imageUnavailable"
-                  >
-                    <MenuIcon
-                      :name="goods.category === 'food' ? 'food' : goods.category === 'daily' ? 'daily' : 'drink'"
-                      size="lg"
-                      tone="accent"
-                    />
-                    <text>{{ appCopy.cabinetPickup.goods.imageUnavailable }}</text>
-                  </view>
-                </view>
-                <view class="goods-item__body">
-                  <text class="goods-item__name">{{ goods.name }}</text>
-                  <view
-                    class="goods-item__stats"
-                    :aria-label="appCopy.cabinetPickup.goods.availabilityAriaLabel(goods.stock ?? 0, getSelectableMaximum(goods))"
-                  >
-                    <view class="goods-stat">
-                      <text class="goods-stat__label">{{ appCopy.cabinetPickup.goods.stockLabel }}</text>
-                      <text class="goods-stat__value">{{ goods.stock ?? 0 }}</text>
-                    </view>
-                    <view class="goods-stat goods-stat--available">
-                      <text class="goods-stat__label">{{ appCopy.cabinetPickup.goods.availableLabel }}</text>
-                      <text class="goods-stat__value">{{ getSelectableMaximum(goods) }}</text>
-                    </view>
-                  </view>
-                  <view class="stepper">
-                    <button
-                      class="stepper__button"
-                      :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) <= 0"
-                      :aria-label="appCopy.cabinetPickup.goods.decreaseAriaLabel(goods.name)"
-                      @tap="updateSelected(goods, -1)"
-                    >
-                      −
-                    </button>
-                    <text class="stepper__value" aria-live="polite" aria-atomic="true">
-                      {{ selectedMap[goods.goodsId] ?? 0 }}
-                    </text>
-                    <button
-                      class="stepper__button"
-                      :disabled="actionBusy || (selectedMap[goods.goodsId] ?? 0) >= getSelectableMaximum(goods)"
-                      :aria-label="appCopy.cabinetPickup.goods.increaseAriaLabel(goods.name)"
-                      @tap="updateSelected(goods, 1)"
-                    >
-                      +
-                    </button>
-                  </view>
-                </view>
-              </view>
-            </view>
-
-            <EmptyState
-              v-else
-              :title="loading ? appCopy.cabinetPickup.goods.loadingTitle : appCopy.cabinetPickup.goods.emptyTitle"
-              :description="loading ? appCopy.cabinetPickup.goods.loadingDescription : appCopy.cabinetPickup.goods.emptyDescription"
-            />
-          </view>
-
-        </template>
+        <text v-else-if="!loadFailed" class="flow-hint">{{ goodsError || pickupCopy.emptyGoods }}</text>
+        <button v-if="goodsError && !loading" class="vm-button vm-button--ghost" @tap="load">{{ pickupCopy.action.refresh }}</button>
       </view>
     </GlassCard>
-
     <view v-if="showPrimaryAction" class="primary-action-spacer" aria-hidden="true" />
     <view v-if="showPrimaryAction" class="primary-action">
-      <view class="primary-action__summary">
-        <text
-          class="primary-action__hint"
-          :class="{ 'primary-action__hint--error': Boolean(actionError) }"
-          :role="actionError ? 'alert' : 'status'"
-          aria-live="polite"
-        >
-          {{ actionHint }}
-        </text>
-        <text v-if="actionItemTotal > 0" class="primary-action__count">
-          {{ appCopy.cabinetPickup.action.selectedCount(actionItemTotal) }}
-        </text>
-      </view>
-      <button
-        class="vm-button"
-        :class="scanMode ? 'vm-button--warning' : 'vm-button--primary'"
-        :disabled="primaryActionDisabled"
-        :loading="loading || submitting"
-        @tap="handlePrimaryAction"
-      >
+      <text class="primary-action__hint" :class="{ 'primary-action__hint--error': Boolean(actionError) }"
+        :role="actionError ? 'alert' : 'status'" aria-live="polite">{{ actionHint }}</text>
+      <button class="vm-button" :class="scanMode ? 'vm-button--warning' : 'vm-button--primary'"
+        :disabled="primaryActionDisabled" :loading="loading || submitting" @tap="handlePrimaryAction">
         {{ primaryActionLabel }}
       </button>
     </view>
@@ -1110,716 +341,30 @@ onLoad((query) => {
 </template>
 
 <style scoped>
-.pickup-card {
-  overflow: visible !important;
-}
-
-.pickup-shell {
-  overflow: visible !important;
-}
-
-.pickup-stack,
-.goods-section,
-.primary-action,
-.reservation-receipt,
-.locked-reservation,
-.reservation-receipt__heading,
-.receipt-row__items {
-  display: flex;
-  flex-direction: column;
-}
-
-.pickup-stack {
-  gap: 28rpx;
-}
-
-.cabinet-identity {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-  padding-bottom: 24rpx;
-  border-bottom: 1px solid rgba(46, 125, 70, 0.16);
-}
-
-.cabinet-identity__name {
-  color: var(--vm-ink);
-  font-size: 32rpx;
-  font-weight: 800;
-}
-
-.cabinet-identity__code {
-  flex-shrink: 0;
-  color: var(--vm-accent-strong);
-  font-size: 24rpx;
-  font-weight: 700;
-}
-
-.goods-section {
-  gap: 20rpx;
-}
-
-.goods-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20rpx;
-}
-
-.entitlement-tree,
-.entitlement-groups,
-.entitlement-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.entitlement-tree {
-  gap: 22rpx;
-}
-
-.entitlement-root {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16rpx;
-  padding: 18rpx;
-  border: 1rpx solid rgba(46, 125, 70, 0.16);
-  border-radius: 24rpx;
-  background: rgba(246, 252, 244, 0.92);
-}
-
-.entitlement-root__mark {
-  display: grid;
-  width: 58rpx;
-  height: 58rpx;
-  place-items: center;
-  border-radius: 18rpx;
-  color: #ffffff;
-  background: var(--vm-accent);
-  font-size: 26rpx;
-  font-weight: 900;
-}
-
-.entitlement-root__copy,
-.entitlement-root__progress {
-  display: flex;
-  flex-direction: column;
-}
-
-.entitlement-root__copy {
-  gap: 3rpx;
-}
-
-.entitlement-root__title {
-  color: var(--vm-ink);
-  font-size: 32rpx;
-  font-weight: 850;
-}
-
-.entitlement-root__hint {
-  color: var(--vm-muted);
-  font-size: 23rpx;
-}
-
-.entitlement-root__progress {
-  align-items: flex-end;
-  color: var(--vm-muted);
-  font-size: 22rpx;
-}
-
-.entitlement-root__progress text:last-child {
-  color: var(--vm-accent-strong);
-  font-size: 36rpx;
-  font-weight: 900;
-}
-
-.entitlement-groups {
-  position: relative;
-  gap: 24rpx;
-  padding-left: 28rpx;
-}
-
-.entitlement-groups::before {
-  content: "";
-  position: absolute;
-  left: 10rpx;
-  top: 24rpx;
-  bottom: 22rpx;
-  width: 4rpx;
-  border-radius: 999rpx;
-  background: rgba(46, 125, 70, 0.16);
-}
-
-.entitlement-group {
-  gap: 16rpx;
-}
-
-.entitlement-parent {
-  display: flex;
-  min-height: 58rpx;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.entitlement-parent__title {
-  color: var(--vm-ink);
-  font-size: 28rpx;
-  font-weight: 850;
-}
-
-.entitlement-parent__quota {
-  display: flex;
-  margin-left: auto;
-  align-items: center;
-  gap: 7rpx;
-  color: var(--vm-muted);
-  font-size: 22rpx;
-}
-
-.entitlement-parent__quota text:last-child {
-  color: var(--vm-accent-strong);
-  font-size: 26rpx;
-  font-weight: 850;
-}
-
-.entitlement-group__heading {
-  position: sticky;
-  z-index: 3;
-  top: 0;
-  display: flex;
-  min-height: 78rpx;
-  align-items: center;
-  gap: 12rpx;
-  margin-left: -28rpx;
-  padding: 12rpx 4rpx 12rpx 28rpx;
-  border-bottom: 1rpx solid rgba(46, 125, 70, 0.12);
-  background: rgba(255, 253, 249, 0.98);
-}
-
-.entitlement-group__dot {
-  position: absolute;
-  left: 0;
-  width: 18rpx;
-  height: 18rpx;
-  border: 7rpx solid #ffffff;
-  border-radius: 50%;
-  background: var(--vm-accent);
-  box-shadow: 0 0 0 2rpx rgba(46, 125, 70, 0.22);
-}
-
-.entitlement-group__title {
-  color: var(--vm-ink);
-  font-size: 36rpx;
-  font-weight: 850;
-}
-
-.entitlement-group__quota {
-  display: flex;
-  min-width: 0;
-  margin-left: auto;
-  align-items: center;
-  gap: 8rpx;
-  color: var(--vm-muted);
-  font-size: 24rpx;
-  white-space: nowrap;
-}
-
-.entitlement-group__dedicated {
-  color: var(--vm-accent-strong);
-  font-size: 29rpx;
-  font-weight: 850;
-}
-
-.entitlement-group__shared {
-  color: var(--vm-warning);
-  font-size: 29rpx;
-  font-weight: 850;
-}
-
-.goods-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16rpx;
-}
-
-.goods-card {
-  display: flex;
-  min-width: 0;
-  overflow: hidden;
-  flex-direction: column;
-  border: 2rpx solid rgba(46, 125, 70, 0.16);
-  border-radius: 26rpx;
-  background: rgba(255, 255, 255, 0.94);
-}
-
-.goods-card--selected {
-  border-color: var(--vm-accent);
-  box-shadow: 0 12rpx 28rpx rgba(46, 125, 70, 0.12);
-}
-
-.goods-card__art {
-  display: grid;
-  height: 230rpx;
-  place-items: center;
-  overflow: hidden;
-  background: var(--vm-bg-soft);
-}
-
-.goods-card__image {
-  width: 100%;
-  height: 100%;
-}
-
-.goods-card__image-fallback {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12rpx;
-  color: var(--vm-muted);
-  font-size: 23rpx;
-  font-weight: 700;
-}
-
-.goods-card__copy {
-  display: flex;
-  min-height: 142rpx;
-  flex-direction: column;
-  gap: 12rpx;
-  padding: 20rpx 18rpx 8rpx;
-}
-
-.goods-card__name {
-  min-height: 68rpx;
-  color: var(--vm-ink);
-  font-size: 36rpx;
-  font-weight: 850;
-  line-height: 1.25;
-}
-
-.goods-card__available {
-  color: var(--vm-warning);
-  font-size: 33rpx;
-  font-weight: 850;
-  line-height: 1.25;
-}
-
-.goods-card__stepper {
-  display: grid;
-  grid-template-columns: minmax(76rpx, 1fr) 48rpx minmax(76rpx, 1fr);
-  align-items: center;
-  gap: 6rpx;
-  padding: 10rpx 14rpx 18rpx;
-}
-
-.goods-card__stepper-button {
-  width: 100%;
-  min-height: 88rpx;
-  margin: 0;
-  padding: 0;
-  border: 1rpx solid rgba(46, 125, 70, 0.18);
-  border-radius: 20rpx;
-  color: var(--vm-accent-strong);
-  background: rgba(255, 255, 255, 0.94);
-  font-size: 40rpx;
-  line-height: 88rpx;
-}
-
-.goods-card__stepper-button::after {
-  display: none;
-}
-
-.goods-card__stepper-button--plus {
-  color: #ffffff;
-  background: var(--vm-accent);
-}
-
-.goods-card__stepper-button[disabled] {
-  color: rgba(108, 98, 87, 0.42);
-  border-color: rgba(108, 98, 87, 0.1);
-  background: rgba(108, 98, 87, 0.06);
-}
-
-.goods-card__stepper-value {
-  color: var(--vm-ink);
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 900;
-}
-
-.goods-section__heading {
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-}
-
-.goods-section__title,
-.reservation-receipt__title,
-.locked-reservation__title {
-  color: var(--vm-ink);
-  font-size: 34rpx;
-  font-weight: 800;
-}
-
-.goods-section__hint,
-.locked-reservation__hint,
-.primary-action__hint {
-  color: var(--vm-muted);
-  font-size: 23rpx;
-  line-height: 1.6;
-}
-
-.goods-item {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  overflow: hidden;
-  border: 2rpx solid rgba(46, 125, 70, 0.28);
-  border-radius: 30rpx;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 12rpx 30rpx rgba(39, 70, 46, 0.06);
-}
-
-.goods-item--selected {
-  border-color: rgba(46, 125, 70, 0.68);
-  box-shadow: 0 14rpx 34rpx rgba(46, 125, 70, 0.12);
-}
-
-.goods-item__image-shell {
-  display: flex;
-  width: 100%;
-  height: 260rpx;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border-bottom: 1rpx solid rgba(46, 125, 70, 0.1);
-  background: linear-gradient(145deg, #f4f8ef, #fff7eb);
-}
-
-.goods-item__image {
-  display: block;
-  width: 100%;
-  height: 100%;
-  padding: 14rpx;
-}
-
-.goods-item__image-fallback {
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12rpx;
-  color: var(--vm-muted);
-  font-size: 23rpx;
-  font-weight: 700;
-}
-
-.goods-item__body {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  flex: 1;
-  gap: 18rpx;
-  padding: 22rpx 20rpx 20rpx;
-}
-
-.goods-item__name {
-  display: block;
-  min-height: 94rpx;
-  color: var(--vm-ink);
-  font-size: 34rpx;
-  font-weight: 800;
-  line-height: 1.38;
-  word-break: break-word;
-}
-
-.goods-item__stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10rpx;
-}
-
-.goods-stat {
-  display: flex;
-  min-width: 0;
-  min-height: 68rpx;
-  align-items: baseline;
-  justify-content: center;
-  gap: 7rpx;
-  padding: 10rpx 6rpx;
-  border-radius: 18rpx;
-  color: var(--vm-muted);
-  background: rgba(46, 125, 70, 0.08);
-  white-space: nowrap;
-}
-
-.goods-stat--available {
-  color: #7d4a18;
-  background: rgba(255, 138, 43, 0.12);
-}
-
-.goods-stat__label {
-  font-size: 24rpx;
-  font-weight: 750;
-}
-
-.goods-stat__value {
-  color: var(--vm-accent-strong);
-  font-family: var(--vm-font-number);
-  font-size: 40rpx;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.goods-stat--available .goods-stat__value {
-  color: var(--vm-warning);
-}
-
-.stepper {
-  display: grid;
-  grid-template-columns: 1fr 64rpx 1fr;
-  align-items: center;
-  width: 100%;
-  overflow: hidden;
-  border: 1px solid rgba(46, 125, 70, 0.2);
-  border-radius: 18rpx;
-  background: var(--vm-surface);
-}
-
-.stepper__button {
-  width: 100%;
-  min-height: 82rpx;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  color: var(--vm-accent-strong);
-  background: rgba(46, 125, 70, 0.08);
-  font-size: 34rpx;
-  line-height: 82rpx;
-}
-
-.stepper__button::after {
-  display: none;
-}
-
-.stepper__button[disabled] {
-  color: rgba(108, 98, 87, 0.44);
-  background: rgba(108, 98, 87, 0.06);
-}
-
-.stepper__value {
-  color: var(--vm-ink);
-  text-align: center;
-  font-size: 30rpx;
-  font-weight: 800;
-}
-
-.primary-action-spacer {
-  height: 260rpx;
-  flex-shrink: 0;
-  pointer-events: none;
-}
-
-.primary-action {
-  position: fixed;
-  z-index: 40;
-  left: 50%;
-  bottom: 0;
-  width: 100%;
-  max-width: 960rpx;
-  gap: 14rpx;
-  padding: 16rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  border-top: 1rpx solid rgba(46, 125, 70, 0.14);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 -18rpx 44rpx rgba(26, 51, 33, 0.13);
-}
-
-.primary-action__summary {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18rpx;
-}
-
-.primary-action__hint {
-  min-width: 0;
-  flex: 1;
-  line-height: 1.4;
-}
-
-.primary-action__count {
-  flex-shrink: 0;
-  color: var(--vm-accent-strong);
-  font-size: 26rpx;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.primary-action .vm-button {
-  min-height: 96rpx;
-  border-radius: 26rpx;
-  font-size: 32rpx;
-  font-weight: 800;
-}
-
-.primary-action__hint--error,
-.receipt-error {
-  color: var(--vm-danger);
-  font-weight: 700;
-}
-
-.receipt-error {
-  font-size: 24rpx;
-  line-height: 1.6;
-}
-
-.reservation-receipt,
-.locked-reservation {
-  gap: 18rpx;
-  padding: 24rpx;
-  border-radius: 24rpx;
-}
-
-.reservation-receipt {
-  border: 2rpx dashed rgba(46, 125, 70, 0.38);
-  background: rgba(236, 248, 238, 0.78);
-}
-
-.locked-reservation {
-  border: 1px solid rgba(46, 125, 70, 0.2);
-  background: rgba(236, 248, 238, 0.72);
-}
-
-.reservation-receipt__head,
-.locked-reservation__head,
-.receipt-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18rpx;
-}
-
-.reservation-receipt__heading {
-  gap: 4rpx;
-}
-
-.reservation-receipt__eyebrow {
-  color: var(--vm-accent-strong);
-  font-size: 22rpx;
-  font-weight: 800;
-  letter-spacing: 2rpx;
-}
-
-.reservation-receipt__status,
-.locked-reservation__status {
-  flex-shrink: 0;
-  padding: 8rpx 16rpx;
-  border-radius: 999rpx;
-  color: var(--vm-accent-strong);
-  background: rgba(46, 125, 70, 0.12);
-  font-size: 22rpx;
-  font-weight: 800;
-}
-
-.receipt-row {
-  padding-top: 16rpx;
-  border-top: 1px solid rgba(46, 125, 70, 0.12);
-}
-
-.receipt-row__label {
-  width: 92rpx;
-  flex-shrink: 0;
-  color: var(--vm-muted);
-  font-size: 24rpx;
-}
-
-.receipt-row__value,
-.locked-reservation__item {
-  color: var(--vm-ink);
-  font-size: 25rpx;
-  font-weight: 650;
-  line-height: 1.55;
-}
-
-.receipt-row__value {
-  text-align: right;
-}
-
-.receipt-row__items {
-  align-items: flex-end;
-  gap: 4rpx;
-}
-
-.receipt-cancel {
-  margin-top: 4rpx;
-}
-
-@media (max-width: 420px) {
-  .reservation-receipt__head,
-  .locked-reservation__head,
-  .receipt-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .receipt-row__label {
-    width: auto;
-    white-space: nowrap;
-  }
-
-  .receipt-row__value,
-  .receipt-row__items {
-    align-items: flex-start;
-    text-align: left;
-  }
-
-}
-
-.vm-page--accessible .primary-action-spacer {
-  height: 340rpx;
-}
-
-.vm-page--accessible .goods-list {
-  grid-template-columns: 1fr;
-}
-
-.vm-page--accessible .goods-item__image-shell {
-  height: 380rpx;
-}
-
-.vm-page--accessible .goods-item__name {
-  min-height: 0;
-  font-size: 42rpx;
-}
-
-.vm-page--accessible .goods-stat__label {
-  font-size: 30rpx;
-}
-
-.vm-page--accessible .goods-stat__value {
-  font-size: 50rpx;
-}
-
-.vm-page--accessible .stepper__button {
-  min-height: 108rpx;
-  font-size: 42rpx;
-  line-height: 108rpx;
-}
-
-.vm-page--accessible .stepper__value,
-.vm-page--accessible .primary-action__count {
-  font-size: 36rpx;
-}
-
-.vm-page--accessible .primary-action__hint {
-  color: var(--vm-text);
-  font-size: 30rpx;
-}
-
-.vm-page--accessible .primary-action__hint--error {
-  color: var(--vm-danger);
-}
+.pickup-shell, .pickup-card { overflow: visible !important; }
+.pickup-stack { display: flex; flex-direction: column; gap: 24rpx; }
+.cabinet-identity { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; padding-bottom: 24rpx; border-bottom: 1px solid rgba(46, 125, 70, 0.16); }
+.cabinet-identity__name { color: var(--vm-ink); font-size: 32rpx; font-weight: 800; }
+.cabinet-identity__code { color: var(--vm-accent-strong); font-size: 24rpx; }
+.flow-hint { color: var(--vm-muted); font-size: 27rpx; line-height: 1.6; }
+.quota-summary { display: flex; flex-wrap: wrap; gap: 12rpx; justify-content: space-between; padding: 20rpx; border-radius: 20rpx; background: rgba(255,255,255,.85); }
+.quota-summary__value { color: var(--vm-accent-strong); font-weight: 800; }
+.goods-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20rpx; }
+.goods-item { display: flex; flex-direction: column; overflow: hidden; border: 1rpx solid rgba(46,125,70,.18); border-radius: 26rpx; background: white; }
+.goods-item__image-shell { height: 220rpx; background: var(--vm-bg-soft); }
+.goods-item__image { width: 100%; height: 100%; }
+.goods-item__fallback { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12rpx; color: var(--vm-muted); font-size: 24rpx; }
+.goods-item__body { display: flex; flex: 1; flex-direction: column; gap: 18rpx; padding: 20rpx; }
+.goods-item__name { flex: 1; color: var(--vm-ink); font-size: 29rpx; font-weight: 800; overflow-wrap: anywhere; }
+.goods-item__stock { color: var(--vm-accent-strong); font-size: 26rpx; font-weight: 700; }
+.goods-item__stock--empty { color: var(--vm-muted); }
+.goods-item__expiry { color: var(--vm-muted); font-size: 23rpx; line-height: 1.4; }
+.primary-action-spacer { height: 260rpx; flex-shrink: 0; pointer-events: none; }
+.primary-action { position: fixed; z-index: 40; left: 50%; bottom: 0; width: 100%; max-width: 960rpx; display: flex; flex-direction: column; gap: 14rpx; padding: 16rpx 24rpx calc(20rpx + env(safe-area-inset-bottom)); transform: translateX(-50%); border-top: 1rpx solid rgba(46,125,70,.14); background: rgba(255,255,255,.98); box-shadow: 0 -18rpx 44rpx rgba(26,51,33,.13); }
+.primary-action__hint { color: var(--vm-muted); font-size: 26rpx; line-height: 1.5; }
+.primary-action__hint--error { color: var(--vm-danger); font-weight: 700; }
+.primary-action .vm-button { min-height: 96rpx; border-radius: 26rpx; font-size: 32rpx; font-weight: 800; }
+.vm-page--accessible .primary-action-spacer { height: 340rpx; }
+.vm-page--accessible .goods-list { grid-template-columns: minmax(0, 1fr); }
+.vm-page--accessible .flow-hint, .vm-page--accessible .primary-action__hint { font-size: 34rpx; }
 </style>

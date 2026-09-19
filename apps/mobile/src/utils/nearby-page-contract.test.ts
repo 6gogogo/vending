@@ -7,17 +7,17 @@ import { appCopy } from "../constants/copy";
 const nearbyPagePath = new URL("../pages/tabs/nearby.vue", import.meta.url);
 const manifestPath = new URL("../manifest.json", import.meta.url);
 
-test("特殊用户附近柜机保持预约与扫码并列且不再展示找柜机提示", async () => {
+test("特殊用户附近柜机保持查询与扫码并列且不再展示找柜机提示", async () => {
   const source = await readFile(nearbyPagePath, "utf8");
 
   assert.match(source, /appCopy\.nearbyCabinets/);
-  assert.equal(appCopy.nearbyCabinets.specialSubtitle, "可提前预约保留物资，也可到柜扫码直接领取。");
-  assert.equal(appCopy.nearbyCabinets.choice.reserve, "提前预约 · 保留物资");
+  assert.equal(appCopy.nearbyCabinets.specialSubtitle, "先查询柜内物资，到柜扫码后直接开门领取。");
+  assert.equal(appCopy.nearbyCabinets.choice.reserve, "物资查询 · 查看库存");
   assert.equal(appCopy.nearbyCabinets.choice.scan, "到柜扫码 · 直接领取");
   assert.match(
     source,
     /\.nearby-choice-summary text\s*\{[\s\S]*?white-space:\s*nowrap;/,
-    "预约与扫码两个并列入口在手机宽度下必须保持单行"
+    "查询与扫码两个并列入口在手机宽度下必须保持单行"
   );
   assert.doesNotMatch(source, /找柜机提示/);
 });

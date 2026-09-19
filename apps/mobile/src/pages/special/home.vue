@@ -15,7 +15,6 @@ import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import { formatBeijingDateTime, formatBeijingMonthDay } from "../../utils/datetime";
 import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
-import { getReceivableDeviceGoods } from "../../utils/receivable-goods";
 import { scanDeviceCode } from "../../utils/scan-device";
 
 const sessionStore = useSessionStore();
@@ -99,12 +98,10 @@ const accessibilityEnabled = computed(() => uiPreferencesStore.isAccessibilityEn
 const deviceEntries = computed(() =>
   devices.value.map((device) => ({
     device,
-    visibleGoods: getReceivableDeviceGoods(device, sessionStore.quota)
+    visibleGoods: device.doors.flatMap((door) => door.goods)
   }))
 );
-const visibleDeviceEntries = computed(() =>
-  accessibilityEnabled.value ? deviceEntries.value.filter((entry) => entry.visibleGoods.length) : deviceEntries.value
-);
+const visibleDeviceEntries = computed(() => deviceEntries.value);
 const firstAvailableEntry = computed(() =>
   loadError.value
     ? undefined
@@ -163,11 +160,6 @@ const openDeviceDetail = (device: DeviceRecord) => {
       confirmText: "我知道了",
       showCancel: false
     });
-    return;
-  }
-
-  if (!canOpenDevice(device)) {
-    showDeviceUnavailable(device);
     return;
   }
 
@@ -410,8 +402,8 @@ onShow(() => {
             />
 
             <view class="action-grid" :class="{ 'action-grid--single': accessibilityEnabled }">
-              <button class="vm-button" :disabled="Boolean(loadError) || !canOpenDevice(entry.device)" @tap="openDeviceDetail(entry.device)">
-                {{ loadError ? "状态待重新确认" : canOpenDevice(entry.device) ? "选择物资并取货" : "暂不可开柜" }}
+              <button class="vm-button" :disabled="Boolean(loadError)" @tap="openDeviceDetail(entry.device)">
+                {{ loadError ? "状态待重新确认" : "物资查询" }}
               </button>
               <button class="vm-button vm-button--ghost" @tap="goFeedback(entry.device.deviceCode)">
                 反馈这台柜机

@@ -1,6 +1,6 @@
 import type { UserRole } from "@vm/shared-types";
 
-export type CabinetEntryMode = "pickup" | "reservation";
+export type CabinetEntryMode = "pickup" | "query";
 
 export interface CabinetEntry {
   deviceCode: string;
@@ -52,7 +52,7 @@ export const resolveCabinetEntry = (query: Record<string, unknown>): CabinetEntr
 
   return {
     deviceCode,
-    mode: query.scan === "1" ? "pickup" : "reservation"
+    mode: query.scan === "1" ? "pickup" : "query"
   };
 };
 

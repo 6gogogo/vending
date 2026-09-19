@@ -11,6 +11,7 @@ import { CabinetOpenQuoteService } from "./cabinet-open-quote.service";
 import { CabinetEventsController } from "./cabinet-events.controller";
 import { CabinetEventsService } from "./cabinet-events.service";
 import { ManualSettlementRecoveryService } from "./manual-settlement-recovery.service";
+import { ZeroCostCompletionScheduler } from "./zero-cost-completion.scheduler";
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { ManualSettlementRecoveryService } from "./manual-settlement-recovery.se
     GuardsModule
   ],
   controllers: [CabinetEventsController],
-  providers: [CabinetEventsService, CabinetOpenQuoteService, ManualSettlementRecoveryService],
+  providers: [CabinetEventsService, CabinetOpenQuoteService, ManualSettlementRecoveryService, ZeroCostCompletionScheduler],
   exports: [CabinetEventsService, ManualSettlementRecoveryService]
 })
 export class CabinetEventsModule {}

@@ -138,3 +138,35 @@ test("已关门且回调超时的空取货可据现场事实补记，持久化�
   assert.deepEqual(validatePersistedState(JSON.parse(readFileSync(process.env.API_DATA_FILE!, "utf8"))).errors, []);
   assert.deepEqual({ inventory: h.store.inventory, batches: h.store.goodsBatches }, before);
 }));
+
+test("零元补发按分钟退避并复用交易号，成功后停止重试", async () => withHarness(async (h) => {
+  h.setFail(true);
+  await h.service.handleSettlement(h.payload);
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 1, completed: 0 });
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 0, completed: 0 });
+  h.setFail(false);
+  h.event.zeroCostCompletionAttemptedAt = new Date(Date.now() - 61_000).toISOString();
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 1, completed: 1 });
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 0, completed: 0 });
+  assert.equal(new Set(h.notifications.map((entry) => entry.transactionId)).size, 1);
+}));
+
+test("历史零元空取货无需意向明细也可补完，但未收到结算与非零订单不自动处理", async () => withHarness(async (h) => {
+  h.event.status = "settled";
+  h.event.platformAmount = 0;
+  h.event.billingStatus = "mismatch";
+  h.event.paymentNotifyStatus = "pending";
+  h.event.paymentNotifyUrl = h.payload.notifyUrl;
+  delete h.event.reservationOnlyPickup;
+  delete h.event.intentItems;
+  const unknown = { ...h.event, eventId: "unknown", orderNo: "unknown", platformAmount: undefined,
+    status: "closed" as const };
+  const charged = { ...h.event, eventId: "charged", orderNo: "charged", amount: 1, platformAmount: 1 };
+  h.store.events.push(unknown, charged);
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 1, completed: 1 });
+  assert.equal(h.event.billingStatus, "free");
+  assert.equal(h.reservations.findBlockingBillingEvent(h.event.userId)?.eventId, "unknown");
+  assert.equal(h.notifications.length, 1);
+  assert.equal(unknown.billingStatus, "mismatch");
+  assert.equal(charged.paymentNotifyStatus, "pending");
+}));

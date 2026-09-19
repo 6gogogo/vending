@@ -127,6 +127,7 @@ export const parseCabinetOpenRequest = (value: unknown): OpenRequestWithQuote =>
       "deviceCode",
       "doorNum",
       "reservationId",
+      "pickupMode",
       "category",
       "openMode",
       "operationType",
@@ -147,6 +148,7 @@ export const parseCabinetOpenRequest = (value: unknown): OpenRequestWithQuote =>
     deviceCode: requiredString(payload.deviceCode, "柜机编号", 128),
     doorNum: optionalString(payload.doorNum, "柜门编号", 64),
     reservationId: optionalString(payload.reservationId, "预约编号", 128),
+    pickupMode: optionalEnum(payload.pickupMode, new Set(["actual"]), "领取流程"),
     category: optionalEnum(payload.category, goodsCategories, "商品分类"),
     openMode: optionalEnum(payload.openMode, new Set(["manual", "scan"]), "开柜方式"),
     operationType: optionalEnum(

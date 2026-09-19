@@ -56,22 +56,20 @@ assert.match(
   /response\.state === "approved"[\s\S]+continueApprovedLogin\(response\)/,
   "验证码登录成功必须直接恢复扫码柜机目标"
 );
-assert.match(deviceDetailSource, /const requestOpenConfirmation\s*=\s*\(payload/, "开柜必须保留统一确认入口");
 const pickupSource = deviceDetailSource.slice(
   deviceDetailSource.indexOf("const handlePickup"),
-  deviceDetailSource.indexOf("const createReservation =")
+  deviceDetailSource.indexOf("const handlePrimaryAction")
 );
+assert.match(pickupSource, /if \(actionBusy\.value/, "开门按钮必须阻止提交期间的重复点击");
 assert.ok(
-  pickupSource.indexOf("requestOpenConfirmation") >= 0 &&
-    pickupSource.indexOf("requestOpenConfirmation") < pickupSource.indexOf("createReservationFromItems") &&
-    pickupSource.indexOf("createReservationFromItems") < pickupSource.indexOf("performOpen"),
-  "扫码即时领取必须先确认，再创建临时预约，最后只下发一次开柜请求"
+  pickupSource.indexOf("buildActualPickupRequest") >= 0 &&
+    pickupSource.indexOf("previewOpenSettlement") < pickupSource.indexOf("performOpen"),
+  "扫码开门先取得一次性令牌，再下发开门请求"
 );
-assert.match(pickupSource, /existingReservation\s*\?\?/, "已有预约必须优先复用，不能重复占用额度");
-assert.match(pickupSource, /cancelTemporaryReservation/, "明确开柜拒绝时必须自动取消新建临时预约");
-assert.match(deviceDetailSource, /v-if="!scanMode && nearestReservation"/, "普通预约成功后必须只在非扫码模式显示页内凭条");
-assert.match(cabinetCopySource, /eyebrow: "预约凭条"/, "普通入口必须展示页内预约凭条");
-assert.match(cabinetCopySource, /cancel: "取消预约"/, "页内预约凭条必须提供取消入口");
+assert.doesNotMatch(deviceDetailSource, /createReservation|cancelTemporaryReservation|selectedMap|updateSelected/, "新版查询和扫码流程不得创建预约或要求预选数量");
+const actualPickupRequestSource = readSource("apps/mobile/src/utils/actual-pickup.ts");
+assert.match(actualPickupRequestSource, /pickupMode: "actual"/, "新版开柜必须标记按实际领取结算");
+assert.doesNotMatch(actualPickupRequestSource, /intentItems:|reservationId:/, "新版开柜不得携带预选商品或预约标识");
 const nearbyDeviceActionSource = nearbyPageSource.slice(
   nearbyPageSource.indexOf("const openDevice"),
   nearbyPageSource.indexOf("const focusDevice")
@@ -79,15 +77,15 @@ const nearbyDeviceActionSource = nearbyPageSource.slice(
 assert.match(
   nearbyDeviceActionSource,
   /sessionStore\.user\?\.role === "special"[\s\S]+pages\/special\/device-detail\?deviceCode=/,
-  "附近柜机的特殊用户入口必须进入预约详情页"
+  "附近柜机的特殊用户入口必须进入物资查询页"
 );
 assert.doesNotMatch(
   nearbyDeviceActionSource,
   /scan=1/,
   "附近柜机卡片不得伪装成扫码入口或直接进入开柜模式"
 );
-assert.match(nearbyPageSource, /\? "预约领取"/, "附近柜机卡片必须明确表达预约行为");
-assert.match(nearbyPageSource, /\? "暂不可预约"/, "附近柜机不可用时不得显示开柜语义");
+assert.match(nearbyPageSource, /\? "物资查询"/, "附近柜机卡片必须明确表达查询行为");
+assert.match(nearbyPageSource, /sessionStore\.user\?\.role !== "special" && !canOpenDevice\(targetDevice\)/, "普通用户查询库存不应被柜门状态拦截");
 const nearbyScanSource = nearbyPageSource.slice(
   nearbyPageSource.indexOf("const scanAndOpen"),
   nearbyPageSource.indexOf("const formatDistance")
@@ -105,20 +103,11 @@ for (const removedSection of [
 ]) {
   assert.ok(!deviceDetailSource.includes(removedSection), `精简领取页不得恢复冗余区域：${removedSection}`);
 }
-assert.match(deviceDetailSource, /goods\.decreaseAriaLabel\(goods\.name\)/, "减少商品数量按钮必须有具体可访问名称");
-assert.match(deviceDetailSource, /goods\.increaseAriaLabel\(goods\.name\)/, "增加商品数量按钮必须有具体可访问名称");
-assert.match(deviceDetailSource, /class="stepper__value" aria-live="polite" aria-atomic="true"/, "商品数量变化必须向辅助技术播报");
-const openConfirmationSource = deviceDetailSource.slice(
-  deviceDetailSource.indexOf("const requestOpenConfirmation"),
-  deviceDetailSource.indexOf("const handlePickup")
-);
-assert.match(openConfirmationSource, /uni\.showModal/, "精简开柜确认必须使用小程序受管模态框");
-for (const requiredContext of ["deviceName.value", "confirmation.content", "goodsSummary"]) {
-  assert.ok(openConfirmationSource.includes(requiredContext), `开柜确认必须展示：${requiredContext}`);
-}
-assert.doesNotMatch(openConfirmationSource, /金额|距离|柜门/, "精简开柜确认只展示柜机与商品数量");
-assert.doesNotMatch(deviceDetailSource, /支付金额/, "预约取货确认不得展示支付金额");
-assert.doesNotMatch(deviceDetailSource, /quoteExpiresAt/, "预约取货确认不得依赖服务端支付报价有效期");
+assert.match(deviceDetailSource, /@tap="handlePrimaryAction"/, "只有用户点击主按钮才能触发开门处理");
+assert.match(deviceDetailSource, /scanMode\.value/, "普通查询和扫码开门必须分流");
+assert.doesNotMatch(deviceDetailSource, /支付金额/, "公益领取不展示支付金额");
+const entryLoadSource = deviceDetailSource.slice(deviceDetailSource.indexOf("onLoad((query)"), deviceDetailSource.indexOf("</script>"));
+assert.doesNotMatch(entryLoadSource, /performOpen|openCabinet|handlePickup/, "扫码进入页面不得自动下发开门指令");
 assert.match(
   deviceDetailSource,
   /const actionBusy = computed[\s\S]+openFlowLocked\.value/,
@@ -127,12 +116,12 @@ assert.match(
 assert.match(deviceDetailSource, /openFlowLocked\.value = true/, "进入开门状态或待确认结果后必须持续禁止重复操作");
 const openRecoverySource = deviceDetailSource.slice(
   deviceDetailSource.indexOf("const navigateToOpening"),
-  deviceDetailSource.indexOf("const createReservationFromItems")
+  deviceDetailSource.indexOf("const handlePickup")
 );
 assert.match(openRecoverySource, /findLikelyOpenEvent/, "开柜结果不确定时必须优先查询当前用户事件");
 assert.match(openRecoverySource, /resultType=open-pending/, "查不到开柜事件时必须进入待确认结果页");
-assert.doesNotMatch(openRecoverySource, /isOpenQuoteRefreshRequired|requote/, "预约取货开柜不得走支付报价重新预览链路");
-assert.doesNotMatch(openConfirmationSource, /previewOpenSettlement|openResult === "requote"/, "预约取货确认不得请求支付报价或重报价");
+assert.doesNotMatch(openRecoverySource, /isOpenQuoteRefreshRequired|requote/, "开门结果未知时不得重新取得令牌并再次下发");
+assert.equal((pickupSource.match(/await performOpen\(/g) ?? []).length, 1, "一次主按钮处理只允许一次开门请求");
 
 const openingSource = readSource("apps/mobile/src/pages/common/opening.vue");
 assert.match(openingSource, /resultType=open-stopped/, "开门终止状态必须使用不会诱导重试的结果类型");
@@ -1072,7 +1061,7 @@ assert.match(primarySource, /remainingFreeTotal/, "首页总剩余额度必须�
 assert.match(primarySource, /Math\.min\(sessionStore\.quota\?\.remainingDaily/, "旧会话数据也必须用每日总上限约束商品额度求和");
 assert.match(primarySource, /已用免费额度/, "首页不得把仅消耗免费额度的统计误写成全部领取数量");
 assert.doesNotMatch(primarySource, /按商品价格结算|超出免费额度的部分/, "当前公益领取入口不得保留普通用户付费导向文案");
-assert.doesNotMatch(deviceDetailSource, /quoteId:\s*preview\.quoteId/, "预约取货开柜不得携带支付报价标识");
+assert.match(deviceDetailSource, /payload\.quoteId = preview\.quoteId/, "实际领取开门必须复用本次取得的令牌以防请求重放");
 assert.match(mobileReviewsSource, /const loadError = ref\(""\)/, "移动审核工作台必须保留可见加载错误态");
 assert.match(mobileReviewsSource, /审核数据加载失败/, "移动审核工作台必须提供失败说明和重试入口");
 const mobileReviewsLoadSource = mobileReviewsSource.slice(

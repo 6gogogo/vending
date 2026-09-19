@@ -12,6 +12,7 @@ export interface CabinetOpenQuoteContext {
   deviceCode: string;
   doorNum: string;
   reservationId?: string;
+  pickupMode?: "actual";
   intentItems: CabinetIntentItem[];
   preSettlement?: CabinetPreSettlement;
 }
@@ -153,6 +154,7 @@ export class CabinetOpenQuoteService {
         deviceCode: context.deviceCode,
         doorNum: context.doorNum,
         reservationId: context.reservationId ?? null,
+        pickupMode: context.pickupMode ?? null,
         intentItems,
         preSettlement
       })

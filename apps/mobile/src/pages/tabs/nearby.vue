@@ -82,10 +82,7 @@ const subtitle = computed(() => {
 const deviceEntries = computed(() =>
   devices.value
     .map((device) => {
-      const visibleGoods =
-        sessionStore.user?.role === "special"
-          ? getReceivableDeviceGoods(device, sessionStore.quota)
-          : device.doors.flatMap((door) => door.goods);
+      const visibleGoods = device.doors.flatMap((door) => door.goods);
 
       return {
         device,
@@ -94,9 +91,7 @@ const deviceEntries = computed(() =>
       };
     })
 );
-const visibleDeviceEntries = computed(() =>
-  isAccessibleSpecial.value ? deviceEntries.value.filter((entry) => entry.visibleGoods.length) : deviceEntries.value
-);
+const visibleDeviceEntries = computed(() => deviceEntries.value);
 
 const visibleDevices = computed(() => visibleDeviceEntries.value.map((entry) => entry.device));
 const goodsSheetEntry = computed(() =>
@@ -205,7 +200,7 @@ const mapFocusStatusLabel = computed(() => {
     return "可操作";
   }
 
-  return "可预约";
+  return "可查询";
 });
 const mapFocusStatusTone = computed(() =>
   highlightedDevice.value
@@ -340,7 +335,7 @@ const load = async () => {
       distanceEnabled.value = true;
       phoneLocationStatus.value = "ready";
     } catch (error) {
-      // 手机定位失败不能阻断预约和扫码服务，列表继续按推荐顺序展示。
+      // 手机定位失败不能阻断查询和扫码服务，列表继续按推荐顺序展示。
       currentLocation.value = undefined;
       distanceEnabled.value = false;
       const failureKind = classifyPhoneLocationFailure(error);
@@ -393,7 +388,7 @@ const openDevice = (deviceCode: string) => {
     return;
   }
 
-  if (!canOpenDevice(targetDevice)) {
+  if (sessionStore.user?.role !== "special" && !canOpenDevice(targetDevice)) {
     const presentation = getDeviceStatusPresentation(targetDevice);
     uni.showModal({
       title: presentation.label,
@@ -759,7 +754,7 @@ onShow(() => {
               </view>
             </view>
 
-            <button v-if="highlightedDevice" class="map-focus-card" :disabled="!canOpenDevice(highlightedDevice)" @tap="openDevice(highlightedDevice.deviceCode)">
+            <button v-if="highlightedDevice" class="map-focus-card" :disabled="sessionStore.user?.role !== 'special' && !canOpenDevice(highlightedDevice)" @tap="openDevice(highlightedDevice.deviceCode)">
               <view class="map-focus-card__media" aria-hidden="true">
                 <view class="map-focus-card__machine" />
               </view>
@@ -864,17 +859,11 @@ onShow(() => {
             </view>
 
             <view class="action-grid" :class="{ 'action-grid--single': isAccessibleSpecial }">
-              <button class="vm-button" :disabled="!canOpenDevice(entry.device)" @tap.stop="openDevice(entry.device.deviceCode)">
+              <button class="vm-button" :disabled="sessionStore.user?.role !== 'special' && !canOpenDevice(entry.device)" @tap.stop="openDevice(entry.device.deviceCode)">
                 {{
-                  !canOpenDevice(entry.device)
-                    ? sessionStore.user?.role === "special"
-                      ? "暂不可预约"
-                      : "暂不可开柜"
-                    : sessionStore.user?.role === "special"
-                    ? "预约领取"
-                    : isStockOperator
-                      ? "补货 / 开门"
-                  : "运营开门"
+                  sessionStore.user?.role === "special" ? "物资查询"
+                    : !canOpenDevice(entry.device) ? "暂不可开柜"
+                    : isStockOperator ? "补货 / 开门" : "运营开门"
                 }}
               </button>
               <button class="vm-button vm-button--ghost" @tap.stop="goFeedback(entry.device.deviceCode)">反馈</button>

@@ -66,11 +66,11 @@ export const getSystemSettingOperatorDescription = (
     Partial<Pick<SystemSettingEntry, "description">>
 ) => {
   if (entry.key === "VM_RESERVATION_ONLY_PICKUP") {
-    return "开启后，用户须先预约再取货；本页不会显示或要求支付设置。关闭后按即时领取处理。";
+    return "仅兼容旧客户端的预约流程，开启时本页不会显示或要求支付设置。新版使用物资查询和扫码直接开门。";
   }
 
   if (entry.key === "SMARTVM_ADJUSTMENT_QUOTA_TIME_MODE") {
-    return "选择柜机实际领取数量与预约不一致时，差额计入哪一天的领取额度。一般保持“自动”。";
+    return "选择平台补充识别结果时，变化计入哪一天的领取额度。一般保持“自动”。";
   }
 
   if (entry.key === "VM_FULL_SIMULATION_VERIFICATION_MODE") {

@@ -107,7 +107,7 @@ export class AccessRulesService {
     }
   }
 
-  getQuotaSummaryForUser(user: UserRecord) {
+  getQuotaSummaryForUser(user: UserRecord, options: { ignoreReservationLocks?: boolean } = {}) {
     if (user.role !== "special") {
       return {
         role: user.role,
@@ -118,17 +118,17 @@ export class AccessRulesService {
 
     const quota = user.quota ?? this.store.rules.find((rule) => rule.role === "special");
     const currentBusinessDayKey = getBusinessDayKey(new Date());
-    const entitlementQuota = this.subtractActiveReservationLocks(
-      user,
-      getActiveWindowEntitlementQuota(
+    const availableQuota = getActiveWindowEntitlementQuota(
         user,
         this.store.specialAccessPolicies,
         this.store.inventory,
         this.store.goodsCatalog,
         this.store.goodsTaxonomyNodes,
         new Date()
-      )
-    );
+      );
+    const entitlementQuota = options.ignoreReservationLocks
+      ? availableQuota
+      : this.subtractActiveReservationLocks(user, availableQuota);
     if (entitlementQuota.remainingPools.length > 0) {
       const remainingToday = this.store.goodsCatalog.reduce<Record<string, number>>(
         (result, goods) => {
@@ -243,8 +243,8 @@ export class AccessRulesService {
     return this.getQuotaSummaryForUser(user);
   }
 
-  assertCanOpenSpecialCabinet(user: UserRecord) {
-    const summary = this.getQuotaSummaryForUser(user);
+  assertCanOpenSpecialCabinet(user: UserRecord, options: { ignoreReservationLocks?: boolean } = {}) {
+    const summary = this.getQuotaSummaryForUser(user, options);
     const activeWindows = summary.activeWindows ?? [];
 
     // 服务时段决定用户当前是否具备开柜资格；免费额度只参与后续预结算，

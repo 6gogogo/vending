@@ -18,7 +18,6 @@ import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 import {
   adjustmentQuotaModeSettingKey,
-  isPaymentOnlySetting,
   isReservationOnlyPickupEnabled,
   orderSystemSettingsGroups,
   reservationOnlyPickupSettingKey,
@@ -82,9 +81,6 @@ const optionLabel = (key: string) => {
 const reservationOnlyPickup = computed(() =>
   isReservationOnlyPickupEnabled(formValues[reservationOnlyPickupSettingKey])
 );
-const reservationOnlyPickupSetting = computed(() =>
-  settingsByKey.value.get(reservationOnlyPickupSettingKey)
-);
 const adjustmentQuotaModeSetting = computed(() =>
   settingsByKey.value.get(adjustmentQuotaModeSettingKey)
 );
@@ -147,12 +143,12 @@ const exampleSettingsIntro = computed(() =>
     ? "当前为服务商运维视图，可维护当前实例的登录服务、短信接口、地图、柜机接入及其他运行配置。"
     : manualVerificationSettingVisible.value
     ? "先确认领取方式、差异额度归属和 App 登录验证，再保存设置。"
-    : "先确认领取方式和差异额度归属，再保存设置。"
+    : "扫码领取与额度规则归属，再保存设置。"
 );
 const instanceSettingsIntro = computed(() =>
   manualVerificationSettingVisible.value
-    ? "人员额度、预约时段和审核规则请在“人员管理”中维护。"
-    : "人员额度、预约时段和审核规则请在“人员管理”中维护；App 登录方式由服务管理员维护。"
+    ? "人员额度、领取时段和审核规则请在“人员管理”中维护。"
+    : "人员额度、领取时段和审核规则请在“人员管理”中维护；App 登录方式由服务管理员维护。"
 );
 const settingsScopeIntro = computed(() =>
   isProviderTenantSession.value
@@ -364,30 +360,6 @@ const isBooleanEnabled = (key: string) => ["1", "true", "yes", "on"].includes((f
 
 const setBooleanValue = (key: string, checked: boolean) => {
   formValues[key] = checked ? "true" : "false";
-};
-
-const setReservationOnlyPickup = (enabled: boolean) => {
-  if (!reservationOnlyPickupSetting.value || !canEditEntry(reservationOnlyPickupSetting.value)) {
-    return;
-  }
-
-  setBooleanValue(reservationOnlyPickupSettingKey, enabled);
-
-  if (!enabled) {
-    return;
-  }
-
-  for (const entry of settings.value) {
-    if (isPaymentOnlySetting(entry.key)) {
-      formValues[entry.key] = originalValues.value[entry.key] ?? entry.value;
-    }
-  }
-
-  if (settingsByKey.value.has("PAYMENT_MODE")) {
-    formValues.PAYMENT_MODE = "disabled";
-  }
-
-  clearPaymentDiagnostics();
 };
 
 const isKeyRevealed = (key: string) => revealedKeys.value.has(key);
@@ -678,40 +650,17 @@ onBeforeUnmount(() => {
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">领取规则</span>
-            <h3 class="admin-panel__title">先确认领取方式和差异额度</h3>
+            <h3 class="admin-panel__title">扫码领取与额度规则</h3>
           </div>
         </div>
         <div class="settings-page__example-grid settings-page__example-grid--two">
           <section class="settings-page__example-card">
             <span class="settings-page__example-label">领取方式</span>
-            <div class="settings-page__choice-group" role="group" aria-label="领取方式">
-              <button
-                class="settings-page__choice"
-                :class="{ 'settings-page__choice--active': reservationOnlyPickup }"
-                type="button"
-                :disabled="!canEditSetting(reservationOnlyPickupSettingKey)"
-                :aria-pressed="reservationOnlyPickup"
-                @click="setReservationOnlyPickup(true)"
-              >
-                预约后取货
-              </button>
-              <button
-                class="settings-page__choice"
-                :class="{ 'settings-page__choice--active': !reservationOnlyPickup }"
-                type="button"
-                :disabled="!canEditSetting(reservationOnlyPickupSettingKey)"
-                :aria-pressed="!reservationOnlyPickup"
-                @click="setReservationOnlyPickup(false)"
-              >
-                即时领取
-              </button>
-            </div>
-            <p class="admin-copy">
-              {{ reservationOnlyPickup ? "当前流程不需要新建支付单或填写支付参数。" : "即时领取会显示支付相关设置。" }}
-            </p>
+            <strong>扫码直接开门</strong>
+            <p class="admin-copy">用户先查询物资，到柜扫码后点击开门。无需预约和选择数量，按实际取走的商品记录；未取货按零件完成，零元订单自动上报平台。</p>
           </section>
           <section class="settings-page__example-card">
-            <span class="settings-page__example-label">领取差异额度</span>
+            <span class="settings-page__example-label">补充回调额度日期</span>
             <select
               v-if="adjustmentQuotaModeSetting"
               v-model="formValues[adjustmentQuotaModeSettingKey]"
@@ -723,11 +672,11 @@ onBeforeUnmount(() => {
               </option>
             </select>
             <strong v-else>{{ adjustmentQuotaModeLabel }}</strong>
-            <p class="admin-copy">柜机实际数量与预约不一致时，系统按所选日期计算可领取额度。</p>
+            <p class="admin-copy">平台后续补充识别结果时，按所选日期计算额度；首次结算按开柜时的领取规则记录。</p>
           </section>
         </div>
         <p class="admin-copy settings-page__example-help">
-          修改后请点击“保存设置”。切换为预约取货时，尚未保存的支付项会恢复为原值，不会一并提交。
+          调整额度规则后请点击“保存设置”。物资查询不会锁定库存或消耗额度。
         </p>
       </section>
 
@@ -804,7 +753,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
       <div v-else class="admin-note settings-page__note settings-page__note--success">
-        当前为预约取货：新的领取流程不需要支付配置，支付自检与支付专用设置已收起；历史订单仍可在订单和日志中查询。
+        当前为免费领取：零元订单会自动完成并上报平台，无需支付配置；历史订单仍可在订单和日志中查询。
       </div>
 
     </section>

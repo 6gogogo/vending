@@ -38,7 +38,7 @@ test("微信二维码只解码一次并拒绝非专用前缀", () => {
   }
 });
 
-test("微信 q 和小程序内扫码都进入即时领取，普通入口进入预约", () => {
+test("微信 q 和小程序内扫码都进入即时领取，普通入口进入查询", () => {
   assert.deepEqual(
     resolveCabinetEntry({
       q: "https%3A%2F%2Fvending.5gogogo.top%2Fcabinet%2F91110265"
@@ -51,7 +51,7 @@ test("微信 q 和小程序内扫码都进入即时领取，普通入口进入�
   });
   assert.deepEqual(resolveCabinetEntry({ deviceCode: "CAB-1001" }), {
     deviceCode: "CAB-1001",
-    mode: "reservation"
+    mode: "query"
   });
 });
 
@@ -94,7 +94,7 @@ test("登录页只恢复有效的扫码领取目标", () => {
     undefined
   );
   assert.equal(
-    resolvePickupLoginTarget({ entry: "reservation", deviceCode: "CAB-1001" }),
+    resolvePickupLoginTarget({ entry: "query", deviceCode: "CAB-1001" }),
     undefined
   );
 });

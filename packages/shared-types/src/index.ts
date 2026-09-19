@@ -948,6 +948,8 @@ export interface CabinetOpenRequest {
   deviceCode: string;
   doorNum?: string;
   reservationId?: string;
+  /** 扫码直接开门，商品与数量以柜机实际结算为准。 */
+  pickupMode?: "actual";
   /**
    * 服务端预结算报价的一次性核销标识。收费开柜必须携带，避免确认后价格或额度漂移。
    */
@@ -1214,6 +1216,9 @@ export interface CabinetEventRecord {
    * 不能在回调时按当前部署开关重判。
    */
   reservationOnlyPickup?: boolean;
+  /** 开柜时固定流程，历史选择式订单继续按原规则核对。 */
+  pickupMode?: "actual";
+  zeroCostCompletionAttemptedAt?: string;
   intentItems?: CabinetIntentItem[];
   preSettlement?: CabinetPreSettlement;
   settlementComparison?: CabinetSettlementComparison;
