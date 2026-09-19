@@ -2278,7 +2278,129 @@ export class InMemoryStoreService {
       .at(0);
   }
 
+  findActiveGoodsByName(name: string) {
+    const normalized = name.trim();
+    return this.goodsCatalog.find((entry) => entry.status !== "inactive" &&
+      !entry.mergedIntoGoodsId && entry.name.trim() === normalized);
+  }
+
+  resolveGoodsId(goodsId: string) {
+    const seen = new Set<string>();
+    while (!seen.has(goodsId)) {
+      seen.add(goodsId);
+      const target = this.goodsCatalog.find((goods) => goods.goodsId === goodsId)?.mergedIntoGoodsId;
+      if (!target) return goodsId;
+      goodsId = target;
+    }
+    throw new BadRequestException("货品合并关系存在循环，请先核对货品记录。");
+  }
+
+  /** 平台同步以平台标识为准；同名手工货品的库存和规则随之归并。 */
+  ensurePlatformGoodsCatalogItem(item: GoodsCatalogItem) {
+    const resolvedId = this.resolveGoodsId(item.goodsId);
+    if (resolvedId !== item.goodsId) {
+      const canonical = this.goodsCatalog.find((goods) => goods.goodsId === resolvedId)!;
+      return this.ensureGoodsCatalogItem({ ...canonical, name: item.name, price: item.price, imageUrl: item.imageUrl });
+    }
+    const sameName = this.goodsCatalog.filter((entry) =>
+      entry.goodsId !== item.goodsId && entry.status !== "inactive" &&
+      !entry.mergedIntoGoodsId && entry.name.trim() === item.name.trim());
+    // 先校验所有候选，避免开柜中途改变商品身份。
+    for (const source of sameName) {
+      if (this.events.some((event) =>
+        !["settled", "refunded", "failed"].includes(event.status) &&
+        [...(event.intentItems ?? []), ...event.goods].some((line) => line.goodsId === source.goodsId))) {
+        throw new BadRequestException("同名货品尚有未结算的开柜，请完成后再同步。");
+      }
+    }
+    const existing = this.goodsCatalog.find((entry) => entry.goodsId === item.goodsId);
+    const metadata = existing ?? sameName[0];
+    const canonical = this.ensureGoodsCatalogItem({
+      ...metadata, ...item,
+      category: metadata?.category ?? item.category,
+      taxonomyNodeId: metadata?.taxonomyNodeId ?? item.taxonomyNodeId,
+      createdAt: metadata?.createdAt ?? item.createdAt,
+      mergedIntoGoodsId: undefined
+    });
+    for (const source of sameName) this.mergeGoodsCatalogIdentity(source, canonical);
+    return canonical;
+  }
+
+  private mergeGoodsCatalogIdentity(source: GoodsCatalogItem, canonical: GoodsCatalogItem) {
+    const now = new Date().toISOString();
+    const remap = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) { value.forEach(remap); return; }
+      const record = value as Record<string, unknown>;
+      if (record.goodsId === source.goodsId) record.goodsId = canonical.goodsId;
+      if (record.targetType === "goods" && record.targetId === source.goodsId) {
+        record.targetId = canonical.goodsId;
+      }
+      Object.values(record).forEach(remap);
+    };
+    // 两边均有柜机设置时保留平台商品原有设置，避免手工条目覆盖它。
+    for (let index = this.deviceGoodsSettings.length - 1; index >= 0; index--) {
+      const setting = this.deviceGoodsSettings[index]!;
+      if (setting.goodsId === source.goodsId && this.deviceGoodsSettings.some((entry) =>
+        entry.deviceCode === setting.deviceCode && entry.goodsId === canonical.goodsId)) {
+        this.deviceGoodsSettings.splice(index, 1);
+      }
+    }
+    // 回调、事件报价和操作日志保留原始身份；只归并当前配置、批次及额度核算流水。
+    [this.users, this.specialAccessPolicies, this.goodsAlertPolicies, this.deviceGoodsSettings,
+      this.goodsBatches, this.batchConsumptionTraces, this.inventory, this.inventoryTransfers,
+      this.stocktakes, this.expiredBatchDispositions, this.merchantGoodsTemplates].forEach(remap);
+    for (const device of this.devices) {
+      for (const door of device.doors) {
+        const oldEntry = door.goods.find((goods) => goods.goodsId === source.goodsId);
+        if (!oldEntry) continue;
+        const target = door.goods.find((goods) => goods.goodsId === canonical.goodsId);
+        if (target) door.goods.splice(door.goods.indexOf(oldEntry), 1);
+        else Object.assign(oldEntry, { goodsId: canonical.goodsId, goodsCode: canonical.goodsCode,
+          name: canonical.name, category: canonical.category, price: canonical.price, imageUrl: canonical.imageUrl });
+      }
+    }
+    for (let index = this.deviceGoodsSettings.length - 1; index >= 0; index--) {
+      const setting = this.deviceGoodsSettings[index]!;
+      if (this.deviceGoodsSettings.findIndex((entry) => entry.deviceCode === setting.deviceCode &&
+          entry.goodsId === setting.goodsId) !== index) this.deviceGoodsSettings.splice(index, 1);
+    }
+    for (const reservation of this.reservations) {
+      if (reservation.status !== "active" || !reservation.items.some((line) => line.goodsId === source.goodsId)) continue;
+      reservation.status = "cancelled";
+      reservation.cancelledAt = now;
+      reservation.cancelledByUserId = "system";
+      reservation.cancellationReason = "同名商品已合并到平台商品，请重新预约。";
+      reservation.updatedAt = now;
+    }
+    for (const log of this.logs) {
+      if (log.metadata?.goodsId === source.goodsId && log.metadata.undoState === "undoable") {
+        log.metadata.undoState = "not_undoable";
+        log.metadata.undoBlockedReason = "货品身份已合并，请在保留的商品上执行库存纠错。";
+      }
+    }
+    source.status = "inactive";
+    source.mergedIntoGoodsId = canonical.goodsId;
+    for (const alias of this.goodsCatalog) {
+      if (alias.mergedIntoGoodsId === source.goodsId) alias.mergedIntoGoodsId = canonical.goodsId;
+    }
+    source.updatedAt = now;
+    this.syncDeviceStocksFromBatches();
+    this.logOperation({
+      category: "goods", type: "merge-same-name-goods", status: "success",
+      actor: { type: "system", name: "商品同步" },
+      primarySubject: { type: "goods", id: canonical.goodsId, label: canonical.name },
+      description: `同名货品 ${source.name} 已归并到平台商品。`,
+      metadata: { sourceGoodsId: source.goodsId, goodsId: canonical.goodsId, undoState: "not_undoable" }
+    });
+  }
+
   ensureGoodsCatalogItem(item: GoodsCatalogItem) {
+    const resolvedId = this.resolveGoodsId(item.goodsId);
+    if (resolvedId !== item.goodsId) {
+      const canonical = this.goodsCatalog.find((goods) => goods.goodsId === resolvedId)!;
+      return canonical;
+    }
     const existing = this.goodsCatalog.find((entry) => entry.goodsId === item.goodsId);
 
     if (existing) {

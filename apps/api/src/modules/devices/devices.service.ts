@@ -591,24 +591,33 @@ export class DevicesService {
       });
 
       if (remoteGoods?.length) {
-        return remoteGoods.map((remoteItem) => {
+        const seen = new Set<string>();
+        return remoteGoods.flatMap((remoteItem) => {
+          const goodsId = this.store.resolveGoodsId(remoteItem.goodsId);
+          if (seen.has(goodsId)) return [];
+          seen.add(goodsId);
           const localMatch = localDevice.doors
             .flatMap((door) => door.goods)
-            .find((goods) => goods.goodsId === remoteItem.goodsId);
+            .find((goods) => goods.goodsId === goodsId);
           const catalogMatch = this.store.goodsCatalog.find(
-            (goods) => goods.goodsId === remoteItem.goodsId && goods.status !== "inactive"
+            (goods) => goods.goodsId === goodsId && goods.status !== "inactive"
           );
           const availableExpiryAt =
             viewerRole === "special"
-              ? this.store.getNearestAvailableExpiryAt(deviceCode, remoteItem.goodsId)
+              ? this.store.getNearestAvailableExpiryAt(deviceCode, goodsId)
               : remoteItem.expiresAt;
 
           return {
             ...remoteItem,
+            ...(goodsId !== remoteItem.goodsId && catalogMatch ? {
+              name: catalogMatch.name, price: catalogMatch.price, imageUrl: catalogMatch.imageUrl
+            } : {}),
+            goodsId,
+            goodsCode: catalogMatch?.goodsCode ?? remoteItem.goodsCode,
             category: localMatch?.category ?? "daily",
             taxonomyNodeId: catalogMatch?.taxonomyNodeId,
             taxonomyPath: this.buildGoodsTaxonomyPath(catalogMatch?.taxonomyNodeId),
-            stock: this.getStockForViewer(deviceCode, remoteItem.goodsId, viewerRole),
+            stock: this.getStockForViewer(deviceCode, goodsId, viewerRole),
             expiresAt: availableExpiryAt
           };
         });
@@ -1032,6 +1041,7 @@ export class DevicesService {
   }
 
   findGoods(deviceCode: string, goodsId: string) {
+    goodsId = this.store.resolveGoodsId(goodsId);
     return this.getByCode(deviceCode).doors
       .flatMap((door) => door.goods)
       .find((goods) => goods.goodsId === goodsId);

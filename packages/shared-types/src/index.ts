@@ -802,6 +802,8 @@ export interface MerchantGoodsTemplate {
 export interface GoodsCatalogItem {
   goodsCode: string;
   goodsId: string;
+  /** 合并后保留的历史身份，仅用于旧流水追溯，不再作为可选商品。 */
+  mergedIntoGoodsId?: string;
   name: string;
   fullName?: string;
   category: GoodsCategory;

@@ -316,9 +316,16 @@ const validateGoodsTaxonomy = (
   }
 
   const goodsCatalog = Array.isArray(state.goodsCatalog) ? state.goodsCatalog : [];
+  const goodsById = new Map(goodsCatalog.filter(isRecord).map((goods) => [goods.goodsId, goods]));
   for (const [index, goods] of goodsCatalog.entries()) {
-    if (!isRecord(goods) || goods.taxonomyNodeId === undefined) continue;
-    if (!isNonEmptyString(goods.taxonomyNodeId) || !ids.has(goods.taxonomyNodeId)) {
+    if (!isRecord(goods)) continue;
+    if (goods.mergedIntoGoodsId !== undefined) {
+      const target = goodsById.get(goods.mergedIntoGoodsId);
+      if (goods.status !== "inactive" || !target || target === goods || target.mergedIntoGoodsId !== undefined) {
+        result.errors.push(`goodsCatalog[${index}].mergedIntoGoodsId 必须由停用货品指向未合并的另一货品。`);
+      }
+    }
+    if (goods.taxonomyNodeId !== undefined && (!isNonEmptyString(goods.taxonomyNodeId) || !ids.has(goods.taxonomyNodeId))) {
       result.errors.push(`goodsCatalog[${index}].taxonomyNodeId 指向不存在的分类节点。`);
     }
   }

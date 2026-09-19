@@ -27,7 +27,7 @@ export class GoodsService {
   ) {}
 
   listCatalog() {
-    return [...this.store.goodsCatalog].sort((left, right) =>
+    return this.store.goodsCatalog.filter((entry) => !entry.mergedIntoGoodsId).sort((left, right) =>
       (right.createdAt ?? "").localeCompare(left.createdAt ?? "")
     );
   }
@@ -236,6 +236,18 @@ export class GoodsService {
 
     if (!Number.isFinite(price) || price < 0) {
       throw new BadRequestException("货品价格不能为负数。");
+    }
+
+    const sameName = this.store.findActiveGoodsByName(name);
+    if (sameName) {
+      this.store.logOperation({
+        category: "goods", type: "reuse-same-name-goods", status: "success",
+        actor: this.getActor(actorUserId),
+        primarySubject: { type: "goods", id: sameName.goodsId, label: sameName.name },
+        description: `已使用同名商品 ${sameName.name}，没有创建重复货品。`,
+        metadata: { goodsId: sameName.goodsId, undoState: "not_undoable" }
+      });
+      return sameName;
     }
 
     const existed = this.store.goodsCatalog.find(
@@ -920,7 +932,7 @@ export class GoodsService {
       })();
 
     for (const remoteItem of remoteGoods) {
-      const catalogItem = this.store.ensureGoodsCatalogItem({
+      const catalogItem = this.store.ensurePlatformGoodsCatalogItem({
         goodsCode: remoteItem.goodsCode,
         goodsId: remoteItem.goodsId,
         name: remoteItem.name,

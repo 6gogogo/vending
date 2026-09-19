@@ -1205,7 +1205,7 @@ export class InventoryOrdersService {
 
     const adjustmentGoods =
       payload.adjustment?.goods?.map((item) => ({
-        goodsId: item.goodsId,
+        goodsId: this.store.resolveGoodsId(item.goodsId),
         goodsName: item.goodsName,
         category: this.getGoodsCategory(event.deviceCode, item.goodsId),
         quantity: item.quantity,
@@ -1214,7 +1214,7 @@ export class InventoryOrdersService {
     const sourceGoods = adjustmentGoods.length
       ? adjustmentGoods
       : event.goods.map((item) => ({
-          goodsId: item.goodsId,
+          goodsId: this.store.resolveGoodsId(item.goodsId),
           goodsName: item.goodsName,
           category: item.category,
           quantity: item.quantity,
@@ -1327,6 +1327,7 @@ export class InventoryOrdersService {
       entitlementAllocations?: EntitlementAllocationLine[];
     }
   ): InventoryMovement {
+    goodsId = this.store.resolveGoodsId(goodsId);
     const localGoods = this.devicesService.findGoods(event.deviceCode, goodsId);
     const catalogGoods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
     const category = (localGoods?.category ?? catalogGoods?.category ?? "daily") as GoodsCategory;

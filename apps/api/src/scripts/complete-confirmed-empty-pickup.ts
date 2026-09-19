@@ -56,7 +56,7 @@ async function main() {
         const log = store.logs.find((entry) => entry.type === "manual-settlement-recovery" && entry.relatedEventId === eventId);
         if (log) log.actor = { type: "system", name: "现场确认空取货维护" };
         store.persist();
-        await cabinet.retryZeroCostPlatformCompletion(eventId, undefined, actor.tenantId, true);
+        await cabinet.retryZeroCostPlatformCompletion(eventId, actor.id, actor.tenantId, true);
       } else {
         await cabinet.completeEmptyPickup(eventId);
       }

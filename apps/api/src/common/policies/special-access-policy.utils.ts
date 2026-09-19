@@ -409,6 +409,7 @@ export const getActiveWindowEntitlementQuota = (
       activeWindows.some((window) => isMovementInsideWindow(movement, window, businessDateKey))
   );
   const legacyMovements: InventoryMovement[] = [];
+  const poolDeltaById = new Map<string, number>();
 
   for (const movement of relevantMovements) {
     const lines = movement.entitlementAllocations ?? [];
@@ -419,12 +420,26 @@ export const getActiveWindowEntitlementQuota = (
 
     const direction = movement.type === "refund" ? 1 : movement.type === "pickup" || movement.type === "adjustment" ? -1 : 0;
     if (direction === 0) continue;
+    let retiredPoolQuantity = 0;
     for (const line of lines) {
       const pool = poolById.get(line.poolId);
-      if (!pool) continue;
-      const maximum = poolMaximum.get(line.poolId) ?? pool.remaining;
-      pool.remaining = Math.min(maximum, Math.max(0, pool.remaining + direction * line.quantity));
+      if (!pool) {
+        retiredPoolQuantity += line.quantity;
+        continue;
+      }
+      poolDeltaById.set(line.poolId, (poolDeltaById.get(line.poolId) ?? 0) + direction * line.quantity);
     }
+    // 当天替换个人规则后旧额度池不再存在，已领取数量仍需按当前货品规则核算。
+    if (retiredPoolQuantity > 0) {
+      legacyMovements.push({ ...movement, quotaQuantity: Math.min(
+        movement.quotaQuantity ?? movement.quantity, retiredPoolQuantity
+      ), entitlementAllocations: undefined });
+    }
+  }
+  // 流水按新到旧存放，逐条限幅会先吞掉退款再扣领取；先求净额才能与存储顺序无关。
+  for (const pool of poolById.values()) {
+    const maximum = poolMaximum.get(pool.poolId) ?? pool.remaining;
+    pool.remaining = Math.min(maximum, Math.max(0, pool.remaining + (poolDeltaById.get(pool.poolId) ?? 0)));
   }
 
   const legacyRequests = goodsCatalog.flatMap((goods) => {

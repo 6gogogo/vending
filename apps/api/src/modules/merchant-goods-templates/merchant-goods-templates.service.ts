@@ -515,6 +515,13 @@ export class MerchantGoodsTemplatesService {
   }
 
   private ensureCatalogItemFromTemplate(template: MerchantGoodsTemplate) {
+    const sameName = this.store.findActiveGoodsByName(template.goodsName);
+    if (sameName) {
+      template.goodsId = sameName.goodsId;
+      template.goodsCode = sameName.goodsCode;
+      template.updatedAt = new Date().toISOString();
+      return sameName;
+    }
     if (template.goodsId) {
       const existing = this.store.goodsCatalog.find((entry) => entry.goodsId === template.goodsId);
 
