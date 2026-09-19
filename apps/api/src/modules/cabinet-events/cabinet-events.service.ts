@@ -860,6 +860,7 @@ export class CabinetEventsService {
 
     const settlementComparison = this.compareSettlement(event, payload);
     event.settlementComparison = settlementComparison;
+    const emptyPickup = this.isEmptyPickupSettlement(event);
 
     if (!settlementAlreadyRecorded.duplicated && callbackBilling) {
       this.applyCallbackBilling(event, callbackBilling, settlementComparison);
@@ -871,7 +872,13 @@ export class CabinetEventsService {
         : "mismatch";
     }
 
-    if (event.intentItems?.length && !settlementComparison.matched) {
+    if (emptyPickup) {
+      event.billingStatus = "free";
+      event.billingResolvedAt = event.updatedAt;
+      event.billingResolutionNote = "平台确认本次未取走商品，按零元空取货自动完成。";
+    }
+
+    if (event.intentItems?.length && !settlementComparison.matched && !emptyPickup) {
       this.alertsService.create({
         type: "callback",
         grade: "feedback",
@@ -951,7 +958,7 @@ export class CabinetEventsService {
     const shouldAutoForwardFreeSettlement =
       event.role === "special" &&
       event.amount <= 0 &&
-      settlementComparison.matched &&
+      (settlementComparison.matched || emptyPickup) &&
       event.billingDeltaType !== "supplement";
     const freeOnlyPickup = this.isFreeOnlyPickupEvent(event);
     const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
@@ -970,19 +977,28 @@ export class CabinetEventsService {
         shouldAutoForwardNoChargeOperationalSettlement
       )
     ) {
-      event.paymentNotifyMessage = reservationOnlyPickup
+      event.paymentNotifyMessage = emptyPickup
+        ? "本次未取走商品，系统将按零元空取货回写平台完成状态。"
+        : reservationOnlyPickup
         ? "预约取货已完成核对，系统将回写平台领取完成状态。"
         : shouldAutoForwardNoChargeOperationalSettlement
         ? "运营开门不向用户收费，系统将自动回写平台付款成功。"
         : shouldAutoForwardFreeSettlement
         ? "本次预结算金额为 0，系统将自动回写平台付款成功。"
         : "已收到结算回调，系统将自动回写平台付款成功。";
+      const transactionId = emptyPickup
+        ? event.paymentTransactionId ?? this.store.createReference("empty-pickup-completion")
+        : this.store.createReference("txn");
+      if (emptyPickup) {
+        event.paymentTransactionId = transactionId;
+        this.store.persist();
+      }
       const autoForwardCompletion = this.tryAutoForwardPaymentSuccess(
         event,
         {
           orderNo: event.orderNo,
           eventId: event.eventId,
-          transactionId: this.store.createReference("txn"),
+          transactionId,
           deviceCode: payload.deviceCode,
           amount: event.amount
         },
@@ -1390,6 +1406,52 @@ export class CabinetEventsService {
     }
 
     return result;
+  }
+
+  /** 仅处理平台已经确认的空取货，不推断柜门状态，也不补造结算明细。 */
+  async completeEmptyPickup(eventId: string) {
+    const event = this.store.events.find((entry) => entry.eventId === eventId);
+    if (!event || !this.isEmptyPickupSettlement(event) || !this.hasSettlementRecord(event) ||
+        event.physicalDoorState !== "closed" || event.adjustments?.length ||
+        this.store.paymentOrders.some((order) => order.eventId === eventId)) {
+      throw new BadRequestException("仅允许完成平台已结算、已关门且没有商品或费用的空取货订单。");
+    }
+    if (event.paymentNotifyStatus === "success" && event.billingStatus === "free") return event;
+    const note = "平台确认本次未取走商品，按零元空取货自动完成。";
+    if (event.billingStatus !== "free") {
+      event.billingStatus = "free";
+      event.billingResolvedAt = new Date().toISOString();
+      event.billingResolutionNote = note;
+      this.store.logOperation({
+        category: "pickup", type: "complete-empty-pickup", status: "success",
+        actor: { type: "system", name: "空取货自动处理" },
+        description: note, relatedEventId: eventId, relatedOrderNo: event.orderNo,
+        metadata: { undoState: "not_undoable" }
+      });
+    }
+    for (const alert of this.store.alerts) {
+      if (alert.relatedEventId === eventId && alert.status === "open" &&
+          alert.title === "实际领取与用户选择不一致") {
+        alert.status = "resolved";
+        alert.resolvedAt = new Date().toISOString();
+        alert.resolutionNote = note;
+      }
+    }
+    event.paymentTransactionId ??= this.store.createReference("empty-pickup-completion");
+    event.updatedAt = new Date().toISOString();
+    this.store.persist();
+    await this.tryAutoForwardPaymentSuccess(event, {
+      orderNo: event.orderNo, eventId, deviceCode: event.deviceCode,
+      transactionId: event.paymentTransactionId, amount: 0
+    }, event.paymentNotifyUrl);
+    this.store.persist();
+    return event;
+  }
+
+  private isEmptyPickupSettlement(event: CabinetEventRecord) {
+    return this.isFreeOnlyPickupEvent(event) && event.status === "settled" &&
+      event.platformAmount === 0 && event.amount === 0 && event.goods.length === 0 &&
+      !event.adjustments?.length;
   }
 
   async confirmBillingResolution(
@@ -2993,7 +3055,10 @@ export class CabinetEventsService {
   }
 
   private hasSettlementRecord(event: CabinetEventRecord) {
-    return this.findSettlementMovements(event).length > 0;
+    // 空取货没有库存流水，以已经保存的结算比对作为入账标记，避免重放时再次结算。
+    return this.findSettlementMovements(event).length > 0 ||
+      (event.goods.length === 0 && event.platformAmount !== undefined &&
+        event.settlementComparison !== undefined);
   }
 
   private buildCallbackBilling(

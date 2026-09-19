@@ -701,8 +701,8 @@ const validateManualSettlementRecords = (
   };
 
   const validateItems = (value: unknown, path: string) => {
-    if (!Array.isArray(value) || value.length === 0) {
-      result.errors.push(`${path} 必须是非空数组。`);
+    if (!Array.isArray(value)) {
+      result.errors.push(`${path} 必须是数组，空数组表示未取走商品。`);
       return;
     }
     const goodsIds = new Set<string>();
@@ -741,12 +741,13 @@ const validateManualSettlementRecords = (
     eventId: string | undefined,
     expectedType: string,
     expectedSource?: string,
-    optional = false
+    optional = false,
+    allowEmpty = false
   ) => {
     if (value === undefined && optional) {
       return;
     }
-    if (!Array.isArray(value) || value.length === 0) {
+    if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
       result.errors.push(`${path} 必须是非空数组。`);
       return;
     }
@@ -801,8 +802,14 @@ const validateManualSettlementRecords = (
       `${path}.movementIds`,
       isNonEmptyString(event.eventId) ? event.eventId : undefined,
       "pickup",
-      "manual_recovery"
+      "manual_recovery",
+      false,
+      Array.isArray(record.items) && record.items.length === 0
     );
+    if (Array.isArray(record.items) && record.items.length === 0 &&
+        Array.isArray(record.movementIds) && record.movementIds.length > 0) {
+      result.errors.push(`${path} 的空取货不得包含领取流水。`);
+    }
 
     if (record.status === "awaiting_order") {
       if (record.platformOrderNo !== undefined) {
@@ -871,7 +878,8 @@ const validateManualSettlementRecords = (
       isNonEmptyString(event.eventId) ? event.eventId : undefined,
       "pickup",
       "platform_callback",
-      record.conflictResolution !== "use_platform"
+      record.conflictResolution !== "use_platform",
+      isRecord(record.lateCallback) && Array.isArray(record.lateCallback.items) && record.lateCallback.items.length === 0
     );
     validateMovementIds(
       record.reversalMovementIds,
@@ -879,7 +887,8 @@ const validateManualSettlementRecords = (
       isNonEmptyString(event.eventId) ? event.eventId : undefined,
       "refund",
       undefined,
-      record.status !== "reverted" && record.conflictResolution !== "use_platform"
+      record.status !== "reverted" && record.conflictResolution !== "use_platform",
+      Array.isArray(record.items) && record.items.length === 0
     );
 
     if (record.conflictResolution !== undefined) {

@@ -1019,8 +1019,8 @@ export class ManualSettlementRecoveryService {
   private normalizeItemIdentities(
     rawItems: ManualSettlementCreatePayload["items"]
   ) {
-    if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems.length > 50) {
-      throw new BadRequestException("请填写 1 至 50 条实际取走商品明细。");
+    if (!Array.isArray(rawItems) || rawItems.length > 50) {
+      throw new BadRequestException("请填写最多 50 条实际取走商品明细；未取走商品时使用空数组。");
     }
 
     const seen = new Set<string>();
@@ -1092,10 +1092,6 @@ export class ManualSettlementRecoveryService {
     deviceCode: string,
     rawItems: NonNullable<SmartVmSettlementPayload["detail"]>
   ): ManualSettlementItem[] {
-    if (!rawItems.length) {
-      throw new BadRequestException("迟到结算回调缺少商品明细。");
-    }
-
     return rawItems.map((item) => {
       const catalogItem = this.store.goodsCatalog.find(
         (entry) => entry.goodsId === item.goodsId && entry.status === "active"
