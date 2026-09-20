@@ -140,6 +140,12 @@
       }
     },
     {
+      "path": "pages/admin/pickup-summary",
+      "style": {
+        "navigationBarTitleText": "每日领取汇总"
+      }
+    },
+    {
       "path": "pages/admin/reviews",
       "style": {
         "navigationBarTitleText": "审核工作台"

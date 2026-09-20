@@ -9,7 +9,8 @@ import type {
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
-import { formatDateTime, getTodayDateKeyInBeijing } from "../utils/datetime";
+import { formatDateTime } from "../utils/datetime";
+import { getAdminErrorMessage } from "../utils/error-message";
 
 const metricOptions: Array<{
   key: DataMonitorMetricKey;
@@ -31,20 +32,23 @@ const rangeOptions: Array<{ value: DataMonitorRange; label: string }> = [
   { value: "7d", label: "一周内" }
 ];
 
-const todayDateKey = getTodayDateKeyInBeijing();
 const router = useRouter();
 const snapshot = ref<DataMonitorSnapshot>();
 const loading = ref(false);
-const calendarMonth = ref(todayDateKey.slice(0, 7));
-const selectedDateKey = ref(todayDateKey);
+const loadError = ref("");
+// 首次日期由服务端业务日决定，避免凌晨自然日已切换而业务日仍属前一天。
+const calendarMonth = ref("");
+const selectedDateKey = ref("");
 const selectedMetric = ref<DataMonitorMetricKey>("servedUsers");
 const selectedRange = ref<DataMonitorRange>("today");
 
 let timer: ReturnType<typeof setInterval> | undefined;
 let visibilityHandler: (() => void) | undefined;
+let requestVersion = 0;
 
 const currentMonthTitle = computed(() => {
   const source = snapshot.value?.monthKey ?? calendarMonth.value;
+  if (!source) return "正在加载";
   const [year, month] = source.split("-");
   return `${year}年 ${month}月`;
 });
@@ -99,19 +103,24 @@ const formatRangeTitle = computed(() => {
 });
 
 const load = async () => {
+  const version = ++requestVersion;
   loading.value = true;
+  loadError.value = "";
   try {
     const response = await adminApi.dataMonitor({
-      month: calendarMonth.value,
-      date: selectedDateKey.value,
+      month: calendarMonth.value || undefined,
+      date: selectedDateKey.value || undefined,
       range: selectedRange.value
     });
+    if (version !== requestVersion) return;
     snapshot.value = response;
     calendarMonth.value = response.monthKey;
     selectedDateKey.value = response.selectedDateKey;
     selectedRange.value = response.range;
+  } catch (error) {
+    if (version === requestVersion) loadError.value = getAdminErrorMessage(error, "请稍后重试");
   } finally {
-    loading.value = false;
+    if (version === requestVersion) loading.value = false;
   }
 };
 
@@ -146,6 +155,7 @@ const changeMonth = async (offset: number) => {
 };
 
 const selectDate = async (dateKey: string) => {
+  if (!dateKey) return;
   selectedDateKey.value = dateKey;
   if (!dateKey.startsWith(calendarMonth.value)) {
     calendarMonth.value = dateKey.slice(0, 7);
@@ -201,6 +211,7 @@ onUnmounted(() => {
 
 <template>
   <section class="admin-page">
+    <p v-if="loadError" class="admin-note" role="alert">读取失败：{{ loadError }}。下方保留上次成功数据，请刷新重试。</p>
     <section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
@@ -214,6 +225,27 @@ onUnmounted(() => {
             {{ loading ? "刷新中" : "刷新数据" }}
           </button>
         </div>
+      </div>
+    </section>
+
+    <section v-if="snapshot?.dailyPickupSummary" class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">每日领取汇总 · {{ snapshot.dailyPickupSummary.businessDateKey }}</p>
+          <h3 class="admin-page__section-title">实际领取 {{ snapshot.dailyPickupSummary.totalQuantity }} 件，共 {{ snapshot.dailyPickupSummary.goodsKinds }} 种商品</h3>
+        </div>
+        <label class="admin-field">
+          <span class="admin-field__label">领取日期</span>
+          <input class="admin-input" type="date" :value="selectedDateKey" @change="selectDate(($event.target as HTMLInputElement).value)" />
+        </label>
+      </div>
+      <p class="admin-copy">只统计实际领取，退回物资扣回原领取日，不计补货和调拨；业务日从每日 {{ String(snapshot.dailyPickupSummary.businessDayStartHour).padStart(2, '0') }}:00 起算。</p>
+      <div class="admin-table-wrap">
+        <table v-if="snapshot.dailyPickupSummary.items.length" class="admin-table">
+          <thead><tr><th>商品</th><th>领取数量</th></tr></thead>
+          <tbody><tr v-for="item in snapshot.dailyPickupSummary.items" :key="item.goodsId"><td>{{ item.goodsName }}</td><td>{{ item.quantity }} 件</td></tr></tbody>
+        </table>
+        <p v-else class="admin-copy">该业务日暂无实际领取记录。</p>
       </div>
     </section>
 

@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { CabinetEventRecord } from "@vm/shared-types";
-import { buildActualPickupRequest, matchesActualPickupEvent } from "./actual-pickup";
+import { buildActualPickupRequest, getDailyPickupState, matchesActualPickupEvent } from "./actual-pickup";
+
+test("领取次数不等同于商品件数，空取货后仍可领取，实际领取后有剩余件数也不能再开门", () => {
+  const quota = { remainingToday: {}, remainingFreeTotal: 3,
+    dailyPickup: { businessDateKey: "2026-09-20", limit: 1, used: 0, remaining: 1 } };
+  assert.deepEqual(getDailyPickupState(quota), { used: 0, remaining: 1, canPickup: true });
+  assert.deepEqual(getDailyPickupState({ ...quota, dailyPickup: { ...quota.dailyPickup, used: 1, remaining: 0 } }),
+    { used: 1, remaining: 0, canPickup: false });
+  assert.equal(getDailyPickupState({ ...quota, remainingFreeTotal: 0 }).canPickup, false);
+  assert.equal(getDailyPickupState(undefined).canPickup, false);
+});
 
 test("扫码开门请求不携带预约、选择数量或商品明细", () => {
   const request = buildActualPickupRequest("13800000000", "91110265");

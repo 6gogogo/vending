@@ -333,6 +333,23 @@ export interface MobileAuthDraft {
   applicationId?: string;
 }
 
+export interface DailyPickupEntitlement {
+  businessDateKey: string;
+  limit: number;
+  used: number;
+  remaining: number;
+}
+
+/** 仅商品汇总，不包含领取人信息；退回数量扣回原领取日。 */
+export interface DailyPickupSummary {
+  businessDateKey: string;
+  businessDayStartHour: number;
+  totalQuantity: number;
+  goodsKinds: number;
+  items: Array<{ goodsId: string; goodsName: string; quantity: number }>;
+  generatedAt: string;
+}
+
 export interface MobileSessionSnapshot {
   token: string;
   user: {
@@ -353,6 +370,8 @@ export interface MobileSessionSnapshot {
     remainingPools?: EntitlementPoolSnapshot[];
     taxonomyRevision?: number;
     usedCount?: number;
+    /** 每个业务日实际领取后消耗一次，空开门不消耗。与商品件数额度分别计算。 */
+    dailyPickup?: DailyPickupEntitlement;
     remainingDaily?: number;
     /**
      * 同时受每日总上限与各商品/品类剩余额度约束后的真实可免费领取总数。
@@ -1302,6 +1321,7 @@ export interface CabinetReservationCreatePayload {
 
 export interface CabinetAdjustmentRecord {
   orderNo: string;
+  zeroCostCompletionAttemptedAt?: string;
   sourceOrderNo?: string;
   noticeUrl?: string;
   amount: number;
@@ -1925,6 +1945,7 @@ export interface DataMonitorSnapshot {
   range: DataMonitorRange;
   days: DataMonitorCalendarDay[];
   selectedDateSummary?: DataMonitorDailySummary;
+  dailyPickupSummary?: DailyPickupSummary;
   periodSummary?: DataMonitorDailySummary;
   rangeStartDateKey: string;
   rangeEndDateKey: string;

@@ -14,6 +14,7 @@ import type { BackofficePermission, UserRole } from "@vm/shared-types";
 import { RoleGuard } from "../src/common/guards/role.guard";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { AlertsController } from "../src/modules/alerts/alerts.controller";
+import { AnalyticsController } from "../src/modules/analytics/analytics.controller";
 import { AuthService } from "../src/modules/auth/auth.service";
 import { CabinetEventsController } from "../src/modules/cabinet-events/cabinet-events.controller";
 import { DevicesController } from "../src/modules/devices/devices.controller";
@@ -82,6 +83,7 @@ after(() => {
 });
 
 const mobileAdminRoutes: RouteTarget[] = [
+  { controller: AnalyticsController, method: "pickupSummary", label: "每日领取汇总" },
   { controller: RegistrationApplicationsController, method: "list", label: "注册申请列表" },
   { controller: RegistrationApplicationsController, method: "review", label: "注册申请审核" },
   { controller: UsersController, method: "list", label: "人员列表" },
@@ -100,6 +102,7 @@ const mobileAdminRoutes: RouteTarget[] = [
 ];
 
 const backofficeOnlyRoutes: RouteTarget[] = [
+  { controller: AnalyticsController, method: "dashboard", label: "包含人员名单的后台总览" },
   { controller: RegistrationApplicationsController, method: "detail", label: "未被移动端使用的申请详情" },
   { controller: UsersController, method: "createUser", label: "创建人员" },
   { controller: UsersController, method: "removeUser", label: "删除人员" },
@@ -126,6 +129,7 @@ const backofficeOnlyRoutes: RouteTarget[] = [
 ];
 
 const sharedBackofficePermissionRoutes: SharedBackofficePermissionRoute[] = [
+  { controller: AnalyticsController, method: "pickupSummary", label: "每日领取汇总", permission: "analytics:data-monitor:view" },
   {
     controller: CabinetEventsController,
     method: "list",

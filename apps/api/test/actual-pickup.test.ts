@@ -24,11 +24,16 @@ const harness = () => {
   store.specialAccessPolicies.splice(0);
   const config = new ConfigService({ VM_RESERVATION_ONLY_PICKUP: "true", SMARTVM_CALLBACK_MAX_AGE_SECONDS: "300" });
   const notifications: SmartVmPaymentPayload[] = [];
+  let failNotification = false;
   let opens = 0;
   const gateway = {
     openDoor: async () => ({ orderNo: `actual-order-${++opens}` }),
     verifySignedPayload: () => true, isUsingMockTransport: () => false,
-    notifyPaymentSuccess: async (payload: SmartVmPaymentPayload) => { notifications.push(payload); return {}; },
+    notifyPaymentSuccess: async (payload: SmartVmPaymentPayload) => {
+      notifications.push(payload);
+      if (failNotification) throw new Error("平台暂不可用");
+      return {};
+    },
     extractErrorMessage: (error: Error) => error.message, extractExchangeTrace: () => undefined
   } as unknown as SmartVmGateway;
   const batches = new InventoryBatchChangesService(store);
@@ -65,7 +70,7 @@ const harness = () => {
     return { event, result };
   };
   return { store, service, rules, reservations, device, goods, user, request, actor, settle,
-    notifications, config, opens: () => opens };
+    notifications, config, opens: () => opens, setFailNotification: (value: boolean) => { failNotification = value; } };
 };
 const withHarness = async (run: (h: ReturnType<typeof harness>) => Promise<void>) => {
   const path = mkdtempSync(join(tmpdir(), "vm-actual-pickup-"));
@@ -96,7 +101,7 @@ test("无需预约或选品即可开门，重放同一令牌只开一次，实�
   assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 0);
   assert.equal(h.notifications[0]?.amount, 0);
   assert.equal(h.reservations.findBlockingBillingEvent(h.user.id), undefined);
-  assert.throws(() => h.service.previewOpenSettlement(h.request, h.actor), /额度已用完/);
+  assert.throws(() => h.service.previewOpenSettlement(h.request, h.actor), /开门权益今日已用完/);
 }));
 
 test("空取货自动完结，库存和任意一件额度均保持不变", async () => withHarness(async (h) => {
@@ -127,6 +132,8 @@ test("平台漏返的本地商品查询、预约占用、取消及实际领取�
   h.reservations.cancel(reservation.id, h.actor);
   assert.equal(await visibleStock(), stock);
   assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 1);
+  assert.equal(h.rules.getQuotaSummaryForUser(h.user).dailyPickup?.remaining, 1);
+  assert.doesNotThrow(() => h.service.previewOpenSettlement(h.request, h.actor));
 
   await h.service.openCabinet(h.request, h.actor);
   const { event } = await h.settle(1);
@@ -134,6 +141,65 @@ test("平台漏返的本地商品查询、预约占用、取消及实际领取�
   assert.equal(event.paymentNotifyStatus, "success");
   assert.equal(await visibleStock(), stock - 1);
   assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 0);
+}));
+
+test("领取权益按实际领取次数限制，商品额度有剩余也不能当天再次开门", async () => withHarness(async (h) => {
+  h.user.accessPolicies![0]!.entitlementLimits![0]!.quantity = 3;
+  await h.service.openCabinet(h.request, h.actor);
+  await h.settle(1);
+  const quota = h.rules.getQuotaSummaryForUser(h.user);
+  assert.equal(quota.remainingFreeTotal, 2);
+  assert.equal(quota.dailyPickup?.used, 1);
+  assert.equal(quota.dailyPickup?.remaining, 0);
+  assert.throws(() => h.service.previewOpenSettlement(h.request, h.actor), /开门权益今日已用完/);
+  await assert.rejects(h.service.openCabinet(h.request, h.actor), /开门权益今日已用完/);
+  assert.equal(h.opens(), 1);
+  const pickup = h.store.inventory.find((entry) => entry.userId === h.user.id && entry.type === "pickup")!;
+  h.store.inventory.push({ ...pickup, id: "returned", type: "refund" });
+  assert.equal(h.rules.getQuotaSummaryForUser(h.user).dailyPickup?.remaining, 1);
+}));
+
+test("旧版预选差异按实际物资入账并零元完结，回调重放不重复扣库存或外呼", async () => withHarness(async (h) => {
+  await h.service.openCabinet(h.request, h.actor);
+  const event = h.store.events[0]!;
+  event.pickupMode = undefined;
+  event.reservationOnlyPickup = true;
+  event.intentItems = [{ goodsId: h.goods.goodsId, goodsName: h.goods.name, category: h.goods.category, quantity: 2 }];
+  const stock = h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId);
+  await h.settle(1);
+  assert.equal(event.settlementComparison?.matched, false);
+  assert.equal(event.billingStatus, "free");
+  assert.equal(event.paymentNotifyStatus, "success");
+  assert.equal(h.notifications[0]?.amount, 0);
+  assert.equal(h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId), stock - 1);
+  assert.equal(h.store.paymentOrders.length, 0);
+  const inventory = structuredClone(h.store.inventory);
+  await h.settle(1);
+  assert.deepEqual(h.store.inventory, inventory);
+  assert.equal(h.notifications.length, 1);
+}));
+
+test("历史已入账的零元差异自动补完，失败退避且复用交易号，不触碰缺少结算的订单", async () => withHarness(async (h) => {
+  await h.service.openCabinet(h.request, h.actor);
+  h.setFailNotification(true);
+  const { event } = await h.settle(1);
+  event.pickupMode = undefined;
+  event.reservationOnlyPickup = true;
+  event.billingStatus = "mismatch";
+  event.paymentNotifyStatus = "pending";
+  h.store.events.push({ ...structuredClone(event), eventId: "unknown", orderNo: "unknown", platformAmount: undefined,
+    paymentTransactionId: undefined });
+  const inventory = structuredClone(h.store.inventory);
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 1, completed: 0 });
+  assert.equal(event.billingStatus, "free");
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 0, completed: 0 });
+  event.zeroCostCompletionAttemptedAt = new Date(Date.now() - 61_000).toISOString();
+  h.setFailNotification(false);
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 1, completed: 1 });
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 0, completed: 0 });
+  assert.equal(new Set(h.notifications.map((item) => item.transactionId)).size, 1);
+  assert.deepEqual(h.store.inventory, inventory);
+  assert.equal(h.store.events.find((item) => item.eventId === "unknown")?.paymentNotifyStatus, "pending");
 }));
 
 test("实际拿走数量完整入账，不因未预选商品生成差异核对任务", async () => withHarness(async (h) => {
@@ -173,6 +239,33 @@ test("实际领取模式不能绕过身份、领取时段或非法模式校验",
   h.user.accessPolicies = [];
   assert.throws(() => h.service.previewOpenSettlement(h.request, h.actor), /时间段/);
   assert.equal(h.opens(), 0);
+}));
+
+test("平台补充的实际商品及时扣库存并零元完结，失败后按同一交易号补发", async () => withHarness(async (h) => {
+  await h.service.openCabinet(h.request, h.actor);
+  const { event } = await h.settle(1);
+  const stock = h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId);
+  h.setFailNotification(true);
+  const payload = { orgOrderNo: event.orderNo, orderNo: "actual-extra", eventId: event.eventId,
+    phone: h.user.phone, deviceCode: h.device.deviceCode, amount: 100,
+    detail: [{ goodsId: h.goods.goodsId, goodsName: h.goods.name, quantity: 1, unitPrice: 100 }],
+    noticeUrl: "http://127.0.0.1/actual-extra", clientId: "test", nonceStr: "actual-extra",
+    timestamp: Math.floor(Date.now() / 1000), sign: "verified" };
+  await h.service.handleAdjustment(payload);
+  assert.equal(event.billingStatus, "free");
+  assert.equal(event.adjustments?.[0]?.paymentNotifyStatus, "failed");
+  assert.equal(h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId), stock - 1);
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 0, completed: 0 });
+  h.setFailNotification(false);
+  event.adjustments![0]!.zeroCostCompletionAttemptedAt = new Date(Date.now() - 61_000).toISOString();
+  assert.deepEqual(await h.service.completePendingZeroCostOrders(), { attempted: 1, completed: 1 });
+  await h.service.handleAdjustment(payload);
+  assert.equal(h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId), stock - 1);
+  const attempts = h.notifications.filter((item) => item.orderNo === payload.orderNo);
+  assert.equal(attempts.length, 2);
+  assert.equal(new Set(attempts.map((item) => item.transactionId)).size, 1);
+  assert.ok(attempts.every((item) => item.amount === 0));
+  assert.equal(h.store.paymentOrders.length, 0);
 }));
 
 test("保质期仅提醒时到期批次贯通查询、预约、预结算、实际领取及库存扣减", async () => withHarness(async (h) => {

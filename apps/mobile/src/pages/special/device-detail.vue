@@ -10,7 +10,7 @@ import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
 import { buildPickupDeviceUrl, buildPickupLoginUrl, resolveCabinetEntry,
   shouldPreparePickupHomeStack } from "../../utils/cabinet-entry";
-import { buildActualPickupRequest, matchesActualPickupEvent } from "../../utils/actual-pickup";
+import { buildActualPickupRequest, getDailyPickupState, matchesActualPickupEvent } from "../../utils/actual-pickup";
 import { getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { formatBeijingShortDateTime } from "../../utils/datetime";
 import { getErrorMessage } from "../../utils/error-message";
@@ -40,13 +40,16 @@ const deviceStatusPresentation = computed(() => currentDevice.value
 const deviceCanOpen = computed(() => deviceStatusPresentation.value.canOpen);
 const actionBusy = computed(() => loading.value || submitting.value || openFlowLocked.value);
 const showPrimaryAction = true;
+const pickupState = computed(() => getDailyPickupState(sessionStore.quota));
 const primaryActionLabel = computed(() => loadFailed.value ? pickupCopy.action.reload
+  : pickupState.value.used > 0 ? pickupCopy.rightsUsedUp
+  : !pickupState.value.canPickup ? pickupCopy.action.noEntitlement
   : scanMode.value ? (deviceCanOpen.value ? pickupCopy.action.open : pickupCopy.action.unavailable) : pickupCopy.action.scan);
 const primaryActionDisabled = computed(() => actionBusy.value ||
-  (!loadFailed.value && scanMode.value && !deviceCanOpen.value));
-const remainingTotal = computed(() => Math.max(0,
-  sessionStore.quota?.remainingFreeTotal ?? sessionStore.quota?.remainingDaily ?? 0));
+  (!loadFailed.value && (!pickupState.value.canPickup || (scanMode.value && !deviceCanOpen.value))));
 const actionHint = computed(() => actionError.value || (loading.value ? pickupCopy.syncingState
+  : pickupState.value.used > 0 ? pickupCopy.rightsUsedUp
+  : !pickupState.value.canPickup ? pickupCopy.noEntitlementHint
   : scanMode.value && !deviceCanOpen.value ? deviceStatusPresentation.value.actionHint
   : scanMode.value ? pickupCopy.pickupHint : pickupCopy.queryHint));
 
@@ -230,6 +233,7 @@ const performOpen = async (
 const handlePickup = async () => {
   if (actionBusy.value || !sessionStore.user) return;
   actionError.value = "";
+  if (!pickupState.value.canPickup) { actionError.value = pickupState.value.used > 0 ? pickupCopy.rightsUsedUp : pickupCopy.noEntitlementHint; return; }
   if (!deviceCanOpen.value) { actionError.value = deviceStatusPresentation.value.actionHint; return; }
   submitting.value = true;
   try {
@@ -247,6 +251,7 @@ const handlePickup = async () => {
 const handlePrimaryAction = async () => {
   if (actionBusy.value) return;
   if (loadFailed.value) { await load(); return; }
+  if (!pickupState.value.canPickup) return;
   if (scanMode.value) { await handlePickup(); return; }
   submitting.value = true;
   actionError.value = "";
@@ -301,7 +306,7 @@ onLoad((query) => {
         </view>
         <text class="flow-hint">{{ scanMode ? pickupCopy.pickupDescription : pickupCopy.queryDescription }}</text>
         <view v-if="!loading && !loadFailed" class="quota-summary">
-          <text>{{ pickupCopy.quotaLabel }}</text><text class="quota-summary__value">{{ pickupCopy.quotaCount(remainingTotal) }}</text>
+          <text>{{ pickupCopy.quotaLabel }}</text><text class="quota-summary__value">{{ pickupCopy.quotaCount(pickupState.remaining) }}</text>
         </view>
         <text v-if="loading" class="flow-hint" role="status">{{ pickupCopy.loadingGoods }}</text>
         <view v-else-if="goodsList.length" class="goods-list">

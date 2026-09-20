@@ -892,7 +892,9 @@ export class CabinetEventsService {
       event.billingResolutionNote = "平台确认本次未取走商品，按零元空取货自动完成。";
     }
 
-    if (event.intentItems?.length && !settlementComparison.matched && !emptyPickup) {
+    this.resolveConfirmedFreePickupMismatch(event);
+
+    if (event.intentItems?.length && !settlementComparison.matched && !emptyPickup && event.billingStatus !== "free") {
       this.alertsService.create({
         type: "callback",
         grade: "feedback",
@@ -972,7 +974,7 @@ export class CabinetEventsService {
     const shouldAutoForwardFreeSettlement =
       event.role === "special" &&
       event.amount <= 0 &&
-      (settlementComparison.matched || emptyPickup) &&
+      (settlementComparison.matched || emptyPickup || (this.isFreeOnlyPickupEvent(event) && event.billingStatus === "free")) &&
       event.billingDeltaType !== "supplement";
     const freeOnlyPickup = this.isFreeOnlyPickupEvent(event);
     const reservationOnlyPickup = this.isReservationOnlyPickupEvent(event);
@@ -994,11 +996,11 @@ export class CabinetEventsService {
       event.paymentNotifyMessage = emptyPickup
         ? "本次未取走商品，系统将按零元空取货回写平台完成状态。"
         : reservationOnlyPickup
-        ? "预约取货已完成核对，系统将回写平台领取完成状态。"
+        ? "已按平台实际领取记录入账，系统将回写零元领取完成状态。"
         : shouldAutoForwardNoChargeOperationalSettlement
         ? "运营开门不向用户收费，系统将自动回写平台付款成功。"
         : shouldAutoForwardFreeSettlement
-        ? "本次预结算金额为 0，系统将自动回写平台付款成功。"
+        ? "本次公益领取无需付款，系统将回写平台零元完成状态。"
         : "已收到结算回调，系统将自动回写平台付款成功。";
       const transactionId = event.paymentTransactionId ?? this.store.createReference("zero-cost-completion");
       event.paymentTransactionId = transactionId;
@@ -1082,13 +1084,14 @@ export class CabinetEventsService {
           }
         : undefined
     );
+    const confirmedFreeAdjustment = this.isConfirmedFreeAdjustment(event, adjustment);
     const callbackLog = this.getOrCreateSmartVmCallbackLog("adjustment", payload, callbackReplay);
 
     if (!adjustmentRecorded.duplicated) {
       this.store.logOperation({
         category: "inventory",
         type: "adjustment-callback",
-        status: freeOnlyPickup || payload.amount > 0 ? "warning" : "success",
+        status: confirmedFreeAdjustment ? "success" : freeOnlyPickup || payload.amount > 0 ? "warning" : "success",
         actor: {
           type: "system",
           name: "补扣回调"
@@ -1104,7 +1107,7 @@ export class CabinetEventsService {
           label: event.orderNo
         },
         description: `订单 ${payload.orderNo} 收到补扣回调。`,
-        detail: freeOnlyPickup
+        detail: confirmedFreeAdjustment ? "平台补充的实际领取已入账，系统自动按零元完成，无需用户付款。" : freeOnlyPickup
           ? reservationOnlyPickup
             ? "预约取货模式不产生补扣；实际物资变化已入账，等待管理员核对。"
             : "当前公益物资不产生补扣；实际物资变化已入账，等待管理员核对。"
@@ -1129,6 +1132,17 @@ export class CabinetEventsService {
       event.billingActualAmount = 0;
       event.billingDeltaAmount = 0;
       event.billingDeltaType = "none";
+      if (confirmedFreeAdjustment) {
+        if (event.adjustments?.every((entry) => entry.paymentNotifyStatus === "success" || this.isConfirmedFreeAdjustment(event, entry))) {
+          event.billingStatus = "free";
+          event.billingResolvedAt = new Date().toISOString();
+          event.billingResolutionNote = "已按平台补充的实际领取入账，公益物资无需付款。";
+        }
+        return this.completeFreeAdjustment(event, adjustment).then(() => ({ code: 200,
+          message: adjustment.paymentNotifyStatus === "success"
+            ? "实际领取补充记录已入账，平台零元完成状态已回写" : "实际领取补充记录已入账，平台完成状态将自动重试",
+          duplicated: adjustmentRecorded.duplicated }));
+      }
       event.billingStatus = "mismatch";
       event.billingResolvedAt = undefined;
       event.billingConfirmedByUserId = undefined;
@@ -1465,6 +1479,60 @@ export class CabinetEventsService {
       !event.adjustments?.length;
   }
 
+  private isConfirmedFreeAdjustment(event: CabinetEventRecord, adjustment: NonNullable<CabinetEventRecord["adjustments"]>[number]) {
+    return event.status === "settled" && this.isFreeOnlyPickupEvent(event) && event.amount === 0 &&
+      !event.manualSettlement && !adjustment.refundedAt && Boolean(adjustment.goods?.length) &&
+      !this.store.paymentOrders.some((order) => order.eventId === event.eventId) &&
+      adjustment.goods!.every((goods) => goods.quantity > 0 && this.store.inventory.filter((movement) =>
+        movement.type === "adjustment" && movement.orderNo === adjustment.orderNo &&
+        movement.deviceCode === event.deviceCode && movement.userId === event.userId &&
+        this.store.resolveGoodsId(movement.goodsId) === this.store.resolveGoodsId(goods.goodsId)
+      ).reduce((sum, movement) => sum + movement.quantity, 0) === goods.quantity);
+  }
+
+  private async completeFreeAdjustment(event: CabinetEventRecord, adjustment: NonNullable<CabinetEventRecord["adjustments"]>[number]) {
+    if (adjustment.paymentNotifyStatus === "success") return;
+    adjustment.paymentNotifyStatus = "pending";
+    adjustment.paymentNotifyMessage = "实际领取已入账，正在回写平台零元完成状态。";
+    adjustment.paymentTransactionId ??= this.store.createReference("zero-cost-adjustment");
+    adjustment.zeroCostCompletionAttemptedAt = new Date().toISOString();
+    this.syncLatestAdjustmentFields(event);
+    this.store.persist();
+    await this.tryAutoForwardPaymentSuccess(event, { eventId: event.eventId, orderNo: adjustment.orderNo,
+      deviceCode: event.deviceCode, transactionId: adjustment.paymentTransactionId, amount: 0 }, adjustment.noticeUrl);
+    this.store.persist();
+  }
+
+  private canResolveConfirmedFreePickupMismatch(event: CabinetEventRecord) {
+    return event.status === "settled" && event.billingStatus === "mismatch" &&
+      this.isFreeOnlyPickupEvent(event) && event.amount === 0 &&
+      event.platformAmount !== undefined && event.settlementComparison !== undefined &&
+      this.hasSettlementRecord(event) && event.billingDeltaType !== "supplement" &&
+      !event.manualSettlement && !event.adjustments?.length &&
+      !this.store.paymentOrders.some((order) => order.eventId === event.eventId);
+  }
+
+  /** 旧版预选差异保留审计，已确认的实际公益领取不再因此进入付款或人工核对流程。 */
+  private resolveConfirmedFreePickupMismatch(event: CabinetEventRecord) {
+    if (!this.canResolveConfirmedFreePickupMismatch(event)) return;
+    const note = "已按平台实际领取入账；旧版预选差异仅保留审计，公益物资按零元完成。";
+    event.billingStatus = "free";
+    event.billingResolvedAt = new Date().toISOString();
+    event.billingResolutionNote = note;
+    event.updatedAt = event.billingResolvedAt;
+    for (const alert of this.store.alerts) {
+      if (alert.relatedEventId === event.eventId && alert.status === "open" &&
+          alert.title === "实际领取与用户选择不一致") {
+        alert.status = "resolved";
+        alert.resolvedAt = event.billingResolvedAt;
+        alert.resolutionNote = note;
+      }
+    }
+    this.store.logOperation({ category: "pickup", type: "complete-free-pickup-mismatch", status: "success",
+      actor: { type: "system", name: "公益领取自动处理" }, description: note,
+      relatedEventId: event.eventId, relatedOrderNo: event.orderNo, metadata: { undoState: "not_undoable" } });
+  }
+
   /** 自动补完已知的零元结算；缺少结算事实的关门事件绝不按空取货猜测。 */
   async completePendingZeroCostOrders(assertRuntimeSafety: () => void = () => {}) {
     const lastAttempt = (event: CabinetEventRecord) => Date.parse(event.zeroCostCompletionAttemptedAt ?? "") || 0;
@@ -1472,9 +1540,11 @@ export class CabinetEventsService {
       const emptyPickup = this.isEmptyPickupSettlement(event);
       return event.status === "settled" && event.physicalDoorState === "closed" && event.amount === 0 &&
         event.paymentNotifyStatus !== "success" && Boolean(event.paymentNotifyUrl) &&
-        !event.adjustments?.length && !this.store.paymentOrders.some((order) => order.eventId === event.eventId) &&
+        (!event.adjustments?.length || event.adjustments.every((entry) => this.isConfirmedFreeAdjustment(event, entry))) &&
+        !this.store.paymentOrders.some((order) => order.eventId === event.eventId) &&
         (!emptyPickup || !this.findSettlementMovements(event).some((movement) => movement.quantity > 0)) &&
-        (emptyPickup || (this.isFreeOnlyPickupEvent(event) && ["free", "admin_confirmed"].includes(event.billingStatus ?? ""))) &&
+        (emptyPickup || this.canResolveConfirmedFreePickupMismatch(event) ||
+          (this.isFreeOnlyPickupEvent(event) && ["free", "admin_confirmed"].includes(event.billingStatus ?? ""))) &&
         Date.now() - lastAttempt(event) >= 60_000;
     }).sort((left, right) => lastAttempt(left) - lastAttempt(right)).slice(0, 10);
     for (const event of candidates) {
@@ -1484,6 +1554,7 @@ export class CabinetEventsService {
       if (this.isEmptyPickupSettlement(event)) {
         await this.completeEmptyPickup(event.eventId);
       } else {
+        this.resolveConfirmedFreePickupMismatch(event);
         event.paymentTransactionId ??= this.store.createReference("zero-cost-completion");
         this.store.persist();
         await this.tryAutoForwardPaymentSuccess(event, { eventId: event.eventId, orderNo: event.orderNo,
@@ -1491,7 +1562,19 @@ export class CabinetEventsService {
         this.store.persist();
       }
     }
-    return { attempted: candidates.length, completed: candidates.filter((event) => event.paymentNotifyStatus === "success").length };
+    const adjustments = this.store.events.flatMap((event) => (event.adjustments ?? []).map((adjustment) => ({ event, adjustment })))
+      .filter(({ event, adjustment }) => event.physicalDoorState === "closed" &&
+        adjustment.paymentNotifyStatus !== "success" && Boolean(adjustment.noticeUrl) &&
+        this.isConfirmedFreeAdjustment(event, adjustment) &&
+        Date.now() - (Date.parse(adjustment.zeroCostCompletionAttemptedAt ?? "") || 0) >= 60_000)
+      .slice(0, 10);
+    for (const { event, adjustment } of adjustments) {
+      assertRuntimeSafety();
+      await this.completeFreeAdjustment(event, adjustment);
+    }
+    return { attempted: candidates.length + adjustments.length,
+      completed: candidates.filter((event) => event.paymentNotifyStatus === "success").length +
+        adjustments.filter(({ adjustment }) => adjustment.paymentNotifyStatus === "success").length };
   }
 
   async confirmBillingResolution(
@@ -2576,6 +2659,11 @@ export class CabinetEventsService {
       user.role === "special"
         ? this.accessRulesService.assertCanOpenSpecialCabinet(user, { ignoreReservationLocks: actualPickup })
         : undefined;
+
+    if (user.role === "special" && (actualPickup || this.isReservationOnlyPickup()) &&
+        (quotaSummary?.dailyPickup?.used ?? 0) > 0) {
+      throw new BadRequestException("开门权益今日已用完，实际领取后每日限一次。");
+    }
 
     if (user.role === "special" && !actualPickup && !intentItems.length) {
       throw new BadRequestException("正式开柜前请先选择本次计划领取的商品。");

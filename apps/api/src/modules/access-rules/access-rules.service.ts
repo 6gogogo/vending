@@ -9,7 +9,8 @@ import {
   getActiveWindowCategoryQuota,
   getActiveWindowEntitlementQuota,
   subtractLockedEntitlements,
-  sumNetQuotaQuantity
+  sumNetQuotaQuantity,
+  sumNetPickupQuantity
 } from "../../common/policies/special-access-policy.utils";
 
 const GOODS_CATEGORIES = new Set<GoodsCategory>(["food", "drink", "daily"]);
@@ -118,6 +119,10 @@ export class AccessRulesService {
 
     const quota = user.quota ?? this.store.rules.find((rule) => rule.role === "special");
     const currentBusinessDayKey = getBusinessDayKey(new Date());
+    const usedDailyPickup = sumNetPickupQuantity(this.store.inventory, (entry) =>
+      entry.userId === user.id && getBusinessDayKey(entry.happenedAt) === currentBusinessDayKey) > 0 ? 1 : 0;
+    const dailyPickup = { businessDateKey: currentBusinessDayKey, limit: 1,
+      used: usedDailyPickup, remaining: 1 - usedDailyPickup };
     const availableQuota = getActiveWindowEntitlementQuota(
         user,
         this.store.specialAccessPolicies,
@@ -143,6 +148,7 @@ export class AccessRulesService {
       return {
         role: user.role,
         limit: quota,
+        dailyPickup,
         remainingToday,
         remainingByGoods: entitlementQuota.receivableByGoods,
         receivableByGoods: entitlementQuota.receivableByGoods,
@@ -214,6 +220,7 @@ export class AccessRulesService {
     return {
       role: user.role,
       limit: quota,
+      dailyPickup,
       remainingToday,
       remainingByGoods,
       usedCount,

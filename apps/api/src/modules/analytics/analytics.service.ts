@@ -1,7 +1,8 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 
 import type {
   BackofficeRole,
+  DailyPickupSummary,
   DataMonitorDailySummary,
   DataMonitorMetricBar,
   DataMonitorRange,
@@ -16,9 +17,10 @@ import type {
 } from "@vm/shared-types";
 
 import {
-  summarizeBusinessDayForUser
+  summarizeBusinessDayForUser,
+  sumNetPickupQuantity
 } from "../../common/policies/special-access-policy.utils";
-import { addDaysToDateKey, getBusinessDayKey, getWeekdayForDateKey } from "../../common/time/business-day";
+import { addDaysToDateKey, getBusinessDayKey, getBusinessDayStartHour, getWeekdayForDateKey } from "../../common/time/business-day";
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 import { AlertsService } from "../alerts/alerts.service";
 import { GoodsService } from "../goods/goods.service";
@@ -30,6 +32,34 @@ export class AnalyticsService {
     @Inject(AlertsService) private readonly alertsService: AlertsService,
     @Inject(GoodsService) private readonly goodsService: GoodsService
   ) {}
+
+  getDailyPickupSummary(date?: string): DailyPickupSummary {
+    const businessDateKey = date ?? getBusinessDayKey();
+    const parsed = new Date(`${businessDateKey}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDateKey) || !Number.isFinite(parsed.getTime()) ||
+        parsed.toISOString().slice(0, 10) !== businessDateKey) {
+      throw new BadRequestException("请选择有效日期（YYYY-MM-DD）。");
+    }
+    // 先统一历史货号，确保合并商品及其退回记录归到同一商品。
+    const inventory = this.store.inventory.map((entry) => ({ ...entry,
+      goodsId: entry.goodsId ? this.store.resolveGoodsId(entry.goodsId) : entry.goodsId }));
+    const goodsNames = new Map<string, string>();
+    for (const entry of inventory) {
+      if ((entry.type === "pickup" || entry.type === "adjustment") && entry.goodsId &&
+          getBusinessDayKey(entry.happenedAt) === businessDateKey) {
+        goodsNames.set(entry.goodsId, entry.goodsName ?? entry.goodsId);
+      }
+    }
+    const items = [...goodsNames].map(([goodsId, historicalName]) => ({ goodsId,
+      goodsName: this.store.goodsCatalog.find((goods) => goods.goodsId === goodsId)?.name ?? historicalName,
+      quantity: sumNetPickupQuantity(inventory, (entry) => entry.goodsId === goodsId &&
+        getBusinessDayKey(entry.happenedAt) === businessDateKey)
+    })).filter((item) => item.quantity > 0)
+      .sort((left, right) => right.quantity - left.quantity || left.goodsId.localeCompare(right.goodsId));
+    return { businessDateKey, businessDayStartHour: getBusinessDayStartHour(),
+      totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0), goodsKinds: items.length,
+      items, generatedAt: new Date().toISOString() };
+  }
 
   getDashboard(viewerBackofficeRole?: BackofficeRole): DashboardSnapshot {
     const businessDateKey = getBusinessDayKey(new Date());
@@ -198,6 +228,7 @@ export class AnalyticsService {
       range,
       days: this.buildMonthCalendar(currentMonth, dayActivity),
       selectedDateSummary,
+      dailyPickupSummary: this.getDailyPickupSummary(selectedDateKey),
       periodSummary,
       rangeStartDateKey: rangeDateKeys[0] ?? selectedDateKey,
       rangeEndDateKey: rangeDateKeys[rangeDateKeys.length - 1] ?? selectedDateKey,

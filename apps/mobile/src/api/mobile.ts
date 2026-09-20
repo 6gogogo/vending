@@ -13,6 +13,7 @@ import type {
   CabinetReservationRecord,
   DeviceMonitoringDetail,
   DeviceRecord,
+  DailyPickupSummary,
   GoodsCategory,
   GoodsCategoryRecord,
   InventoryMovement,
@@ -95,6 +96,9 @@ export const mobileApi = {
     return mobileClient.get<MobileSessionSnapshot["quota"]>("/access-rules/summary", {
       query: { phone }
     });
+  },
+  dailyPickupSummary(date?: string) {
+    return mobileClient.get<DailyPickupSummary>("/analytics/pickup-summary", { query: { date } });
   },
   listDevices(query?: { longitude?: number; latitude?: number }) {
     return mobileClient.get<DeviceRecord[]>("/devices", {

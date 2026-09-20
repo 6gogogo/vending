@@ -16,6 +16,7 @@ import { formatBeijingDateTime, formatBeijingMonthDay } from "../../utils/dateti
 import { canOpenDevice, getDeviceStatusPresentation } from "../../utils/device-readiness";
 import { appendErrorContext, getErrorMessage } from "../../utils/error-message";
 import { scanDeviceCode } from "../../utils/scan-device";
+import { getDailyPickupState } from "../../utils/actual-pickup";
 
 const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
@@ -63,7 +64,7 @@ const totalRemaining = computed(() => {
     Math.min(sessionStore.quota?.remainingDaily ?? visibleGoodsTotal, visibleGoodsTotal)
   );
 });
-const usedCount = computed(() => sessionStore.quota?.usedCount ?? 0);
+const pickupState = computed(() => getDailyPickupState(sessionStore.quota));
 const categoryOrder: Array<{ key: GoodsCategory; label: string; tone: "drink" | "food" | "daily" }> = [
   { key: "drink", label: "饮品", tone: "drink" },
   { key: "food", label: "食品", tone: "food" },
@@ -263,7 +264,7 @@ onShow(() => {
           <view class="today-card__head">
             <view>
               <text class="today-card__eyebrow">今日资格</text>
-              <text class="today-card__title">{{ totalRemaining > 0 ? "今日可领取" : "当前暂无可领取" }}</text>
+              <text class="today-card__title">{{ pickupState.used > 0 ? appCopy.cabinetPickup.rightsUsedUp : pickupState.canPickup ? "今日可领取" : "当前暂无可领取" }}</text>
             </view>
             <text class="vm-status" :class="totalRemaining > 0 ? 'vm-status--available' : 'vm-status--warning'">
               {{ serviceWindows.length ? "开放中" : "未到时段" }}
@@ -272,16 +273,16 @@ onShow(() => {
 
           <view class="today-card__metrics">
             <view class="today-card__metric">
-              <text class="today-card__number vm-number">{{ totalRemaining }}</text>
-              <text class="today-card__label">可领取</text>
+              <text class="today-card__number vm-number">{{ pickupState.remaining }}</text>
+              <text class="today-card__label">剩余领取权益（次）</text>
             </view>
             <view class="today-card__metric">
-              <text class="today-card__number vm-number">{{ usedCount }}</text>
-              <text class="today-card__label">已用免费额度</text>
+              <text class="today-card__number vm-number">{{ pickupState.used }}</text>
+              <text class="today-card__label">已用领取权益（次）</text>
             </view>
             <view class="today-card__metric">
               <text class="today-card__number vm-number">{{ permissionList.length }}</text>
-              <text class="today-card__label">可选种类</text>
+              <text class="today-card__label">物资种类</text>
             </view>
           </view>
 

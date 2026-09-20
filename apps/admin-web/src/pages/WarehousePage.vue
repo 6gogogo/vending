@@ -92,6 +92,9 @@ const transferForm = ref({
   quantity: 1,
   note: ""
 });
+const isShelvingToMachine = computed(() => transferForm.value.fromCode === "WAREHOUSE-LOCAL" &&
+  devices.value.some((device) => device.deviceCode === transferForm.value.toCode));
+const transferActionLabel = computed(() => isShelvingToMachine.value ? "上架机器" : "库存调拨");
 
 const stocktakeForm = ref({
   deviceCode: "",
@@ -292,7 +295,7 @@ const submitTransfer = async () => {
   const sourceName = locationOptions.value.find((item) => item.code === transferForm.value.fromCode)?.name;
   const targetName = locationOptions.value.find((item) => item.code === transferForm.value.toCode)?.name;
   const transferConfirmed = await requestConfirmation({
-    title: "最后核对库存调拨",
+    title: `最后核对${transferActionLabel.value}`,
     description: "确认后将立即变更来源与目标位置的批次库存。",
     rows: [
       { label: "来源", value: `${sourceName ?? transferForm.value.fromCode}（${transferForm.value.fromCode}）` },
@@ -302,7 +305,7 @@ const submitTransfer = async () => {
       { label: "批次到期", value: formatBatchDate(selectedBatch.value?.expiresAt) },
       { label: "数量", value: String(transferForm.value.quantity) }
     ],
-    confirmLabel: "确认并立即调拨"
+    confirmLabel: isShelvingToMachine.value ? "确认上架机器" : "确认并立即调拨"
   });
 
   if (!transferConfirmed) {
@@ -323,7 +326,7 @@ const submitTransfer = async () => {
       sourceBatchId: transferForm.value.sourceBatchId,
       note: transferForm.value.note || undefined
     });
-    showMessage("success", `已调拨 ${goodsName} x${quantity} 到 ${toCode}，来源批次 ${sourceBatchId}。`);
+    showMessage("success", `${isShelvingToMachine.value ? "已上架机器" : "已调拨"}：${goodsName} x${quantity}，目标 ${toCode}，来源批次 ${sourceBatchId}。`);
     transferForm.value.note = "";
     await load();
   } catch (error) {
@@ -692,8 +695,8 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
         <article class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
-              <span class="admin-kicker">调拨</span>
-              <h3 class="admin-panel__title">在柜机与本地仓库之间调拨物资</h3>
+              <span class="admin-kicker">{{ transferActionLabel }}</span>
+              <h3 class="admin-panel__title">{{ isShelvingToMachine ? "将本地仓库货品上架机器" : "在柜机与本地仓库之间调拨物资" }}</h3>
             </div>
           </div>
 
@@ -742,15 +745,15 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
             </label>
             <label class="admin-field">
               <span class="admin-field__label">备注</span>
-              <input v-model="transferForm.note" class="admin-input" placeholder="例如 上午调拨" />
+              <input v-model="transferForm.note" class="admin-input" :placeholder="isShelvingToMachine ? '例如 上午上架机器' : '例如 上午调拨'" />
             </label>
             <div v-if="selectedBatch" class="admin-note">
               当前选择批次：保质期 {{ formatBatchDate(selectedBatch.expiresAt) }}，可调拨 {{ selectedBatch.remainingQuantity }} 件。
             </div>
             <div v-else class="admin-note warehouse-note--error">
-              当前来源没有可调拨批次；已过期批次仍保留在库存中，但不能进入正常调拨流程。
+              当前来源没有可用批次，请核对库存和保质期设置。
             </div>
-            <button class="admin-button" :disabled="saving || !selectedBatch" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
+            <button class="admin-button" :disabled="saving || !selectedBatch" @click="submitTransfer">{{ saving ? "处理中" : transferActionLabel }}</button>
           </div>
           <div v-else class="admin-note">当前账号只能查看仓库库存，提交调拨需要“仓库调拨”权限。</div>
         </article>

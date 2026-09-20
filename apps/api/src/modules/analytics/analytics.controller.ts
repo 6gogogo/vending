@@ -3,6 +3,7 @@ import { Controller, Get, Inject, Query, Req, UseGuards } from "@nestjs/common";
 import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
+  AllowedBackofficeSessionPermissions,
   AllowedRoles
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
@@ -24,6 +25,13 @@ export class AnalyticsController {
   @Get("personas")
   personas() {
     return ok(this.analyticsService.getPersonaPlaceholders());
+  }
+
+  @Get("pickup-summary")
+  @AllowedBackofficePermissions()
+  @AllowedBackofficeSessionPermissions("analytics:data-monitor:view")
+  pickupSummary(@Query("date") date?: string) {
+    return ok(this.analyticsService.getDailyPickupSummary(date));
   }
 
   @Get("layout-suggestions")

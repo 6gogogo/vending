@@ -114,6 +114,16 @@ onShow(() => {
         </view>
 
         <view class="menu-grid">
+          <button class="menu-card" @tap="navigate('/pages/admin/pickup-summary')">
+            <view class="menu-card__top">
+              <MenuIcon name="box" size="lg" />
+              <view class="menu-card__title-group">
+                <text class="menu-card__tag">物资</text>
+                <text class="menu-card__title">每日领取汇总</text>
+              </view>
+            </view>
+            <text class="menu-card__desc">按日期查看各商品实际领取件数</text>
+          </button>
           <button class="menu-card" @tap="navigate('/pages/admin/reviews')">
             <view class="menu-card__top">
               <MenuIcon name="review" size="lg" />
