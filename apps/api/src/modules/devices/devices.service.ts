@@ -445,6 +445,7 @@ export class DevicesService {
 
     return {
       device: this.decorateDevice(device),
+      goodsExpiryMode: this.store.getGoodsExpiryMode(),
       runtime: this.store.getDeviceRuntime(deviceCode),
       businessDateKey,
       servedUsers: new Set(
@@ -544,10 +545,12 @@ export class DevicesService {
       doors: device.doors.map((door) => ({
         ...door,
         goods: door.goods.map((goods) => {
+          const catalogGoods = this.store.goodsCatalog.find((entry) => entry.goodsId === goods.goodsId);
           const setting = this.store.getDeviceGoodsSetting(device.deviceCode, goods.goodsId);
           const nearestExpiryAt =
             viewerRole === "special"
-              ? this.store.getNearestAvailableExpiryAt(device.deviceCode, goods.goodsId)
+              ? this.store.getGoodsExpiryMode() === "warning_only" ? undefined
+                : this.store.getNearestAvailableExpiryAt(device.deviceCode, goods.goodsId)
               : this.store.getNearestExpiryAt(device.deviceCode, goods.goodsId);
           const expiringSoon =
             nearestExpiryAt !== undefined &&
@@ -558,6 +561,7 @@ export class DevicesService {
 
           return {
             ...goods,
+            status: catalogGoods?.status ?? goods.status,
             stock: this.getStockForViewer(device.deviceCode, goods.goodsId, viewerRole),
             expiresAt: nearestExpiryAt,
             thresholdEnabled,
@@ -583,68 +587,56 @@ export class DevicesService {
       viewerTenantId
     );
     const localDevice = this.getByCode(deviceCode);
+    const localGoods = new Map(
+      localDevice.doors
+        .filter((door) => !doorNum || door.doorNum === doorNum)
+        .flatMap((door) => door.goods)
+        .map((goods) => [this.store.resolveGoodsId(goods.goodsId), goods])
+    );
+    let remoteGoods: DeviceGoods[] | undefined;
 
     try {
-      const remoteGoods = await this.smartVmGateway.getGoodsInfo({
+      remoteGoods = await this.smartVmGateway.getGoodsInfo({
         deviceCode,
         doorNum
       });
-
-      if (remoteGoods?.length) {
-        const seen = new Set<string>();
-        return remoteGoods.flatMap((remoteItem) => {
-          const goodsId = this.store.resolveGoodsId(remoteItem.goodsId);
-          if (seen.has(goodsId)) return [];
-          seen.add(goodsId);
-          const localMatch = localDevice.doors
-            .flatMap((door) => door.goods)
-            .find((goods) => goods.goodsId === goodsId);
-          const catalogMatch = this.store.goodsCatalog.find(
-            (goods) => goods.goodsId === goodsId && goods.status !== "inactive"
-          );
-          const availableExpiryAt =
-            viewerRole === "special"
-              ? this.store.getNearestAvailableExpiryAt(deviceCode, goodsId)
-              : remoteItem.expiresAt;
-
-          return {
-            ...remoteItem,
-            ...(goodsId !== remoteItem.goodsId && catalogMatch ? {
-              name: catalogMatch.name, price: catalogMatch.price, imageUrl: catalogMatch.imageUrl
-            } : {}),
-            goodsId,
-            goodsCode: catalogMatch?.goodsCode ?? remoteItem.goodsCode,
-            category: localMatch?.category ?? "daily",
-            taxonomyNodeId: catalogMatch?.taxonomyNodeId,
-            taxonomyPath: this.buildGoodsTaxonomyPath(catalogMatch?.taxonomyNodeId),
-            stock: this.getStockForViewer(deviceCode, goodsId, viewerRole),
-            expiresAt: availableExpiryAt
-          };
-        });
-      }
     } catch {
-      // 外部测试服务不稳定时，回退到本地种子数据，保证前端流程可继续调试。
+      // 平台暂不可用时仍使用本地柜门配置及库存账本。
     }
 
-    return localDevice.doors
-      .filter((door) => !doorNum || door.doorNum === doorNum)
-      .flatMap((door) =>
-        door.goods.map((goods) => {
-          const catalogMatch = this.store.goodsCatalog.find(
-            (entry) => entry.goodsId === goods.goodsId && entry.status !== "inactive"
-          );
-          return {
-            ...goods,
-            taxonomyNodeId: catalogMatch?.taxonomyNodeId,
-            taxonomyPath: this.buildGoodsTaxonomyPath(catalogMatch?.taxonomyNodeId),
-            stock: this.getStockForViewer(deviceCode, goods.goodsId, viewerRole),
-            expiresAt:
-              viewerRole === "special"
-                ? this.store.getNearestAvailableExpiryAt(deviceCode, goods.goodsId)
-                : goods.expiresAt
-          };
-        })
-      );
+    // 平台商品清单可能不完整，不能覆盖本地仍在柜内的货品。这里只合并查询结果，
+    // 不同步目录、不自动启用停用商品，也不采用平台库存覆盖本地账本。
+    const goodsById = new Map<string, DeviceGoods>();
+    for (const goods of remoteGoods ?? []) {
+      const goodsId = this.store.resolveGoodsId(goods.goodsId);
+      if (!goodsById.has(goodsId) || goods.goodsId === goodsId) goodsById.set(goodsId, goods);
+    }
+    for (const [goodsId, goods] of localGoods) {
+      if (!goodsById.has(goodsId)) goodsById.set(goodsId, goods);
+    }
+
+    return [...goodsById].map(([goodsId, goods]) => {
+      const localMatch = localGoods.get(goodsId);
+      const catalogMatch = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
+      return {
+        ...goods,
+        ...(goodsId !== goods.goodsId && catalogMatch ? {
+          name: catalogMatch.name, price: catalogMatch.price, imageUrl: catalogMatch.imageUrl
+        } : {}),
+        goodsId,
+        goodsCode: catalogMatch?.goodsCode ?? goods.goodsCode,
+        category: catalogMatch?.category ?? localMatch?.category ?? "daily",
+        status: catalogMatch?.status ?? goods.status,
+        mergedIntoGoodsId: catalogMatch?.mergedIntoGoodsId,
+        taxonomyNodeId: catalogMatch?.taxonomyNodeId,
+        taxonomyPath: this.buildGoodsTaxonomyPath(catalogMatch?.taxonomyNodeId),
+        stock: this.getStockForViewer(deviceCode, goodsId, viewerRole),
+        expiresAt: viewerRole === "special"
+          ? this.store.getGoodsExpiryMode() === "warning_only" ? undefined
+            : this.store.getNearestAvailableExpiryAt(deviceCode, goodsId)
+          : this.store.getNearestExpiryAt(deviceCode, goodsId) ?? goods.expiresAt
+      };
+    });
   }
 
   private buildGoodsTaxonomyPath(nodeId?: string) {
@@ -671,6 +663,8 @@ export class DevicesService {
     // 特殊用户看到的数量必须和创建预约使用同一份可预约库存，避免把已被
     // 其他有效预约锁定的物资继续显示为“未预约”。
     if (viewerRole === "special" || this.store.isManualAppAcceptanceFixtureMode()) {
+      const goods = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
+      if (goods?.status === "inactive" || goods?.mergedIntoGoodsId) return 0;
       return this.store.getReservableStock(deviceCode, goodsId);
     }
 

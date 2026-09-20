@@ -245,10 +245,15 @@ export const summarizeBusinessDayForUser = (
   policies: SpecialAccessPolicy[],
   inventory: InventoryMovement[],
   goodsCatalog: GoodsCatalogItem[],
-  businessDateKey: string = getBusinessDayKey(new Date())
+  businessDateKey: string = getBusinessDayKey(new Date()),
+  taxonomyNodes: GoodsTaxonomyNode[] = []
 ) => {
   const windows = getBusinessDayWindowsForUser(user, policies, businessDateKey);
   const catalogMap = buildCatalogMap(goodsCatalog);
+  // 分类额度是共享池，不能展开成每个可选商品再相加，也不能把预约锁定算作已服务。
+  const entitlementPools = buildEntitlementPoolsForWindows(
+    user, inventory, goodsCatalog, taxonomyNodes, windows, businessDateKey, true
+  );
 
   const windowSummaries: SpecialAccessWindowUsage[] = windows.map((window) => ({
     policyId: window.policyId,
@@ -257,7 +262,20 @@ export const summarizeBusinessDayForUser = (
     dateKey: window.dateKey,
     startHour: window.startHour,
     endHour: window.endHour,
-    goodsUsage: window.goodsLimits.map((limit) => {
+    entitlementUsage: window.entitlementLimits.map((limit) => {
+      const pool = entitlementPools.find((entry) => entry.poolId === buildEntitlementPoolId(window, limit.id));
+      return {
+        poolId: buildEntitlementPoolId(window, limit.id),
+        targetType: limit.targetType,
+        targetId: limit.targetId,
+        targetName: limit.targetType === "goods"
+          ? catalogMap.get(limit.targetId)?.name ?? limit.targetId
+          : taxonomyNodes.find((node) => node.id === limit.targetId)?.name ?? "分类额度",
+        quantityLimit: limit.quantity,
+        usedQuantity: limit.quantity - (pool?.remaining ?? limit.quantity)
+      };
+    }),
+    goodsUsage: (window.entitlementLimits.length ? [] : window.goodsLimits).map((limit) => {
       const usedQuantity = sumNetPickupQuantity(
         inventory,
         (entry) => {
@@ -283,7 +301,7 @@ export const summarizeBusinessDayForUser = (
     })
   }));
 
-  const allUsage = windowSummaries.flatMap((entry) => entry.goodsUsage);
+  const allUsage = windowSummaries.flatMap((entry) => [...entry.goodsUsage, ...(entry.entitlementUsage ?? [])]);
   const totalGoods = allUsage.reduce((sum, entry) => sum + entry.quantityLimit, 0);
   const fulfilledGoods = allUsage.reduce(
     (sum, entry) => sum + Math.min(entry.quantityLimit, entry.usedQuantity),
@@ -374,16 +392,15 @@ const buildEntitlementPoolId = (window: PolicyWindow, limitId: string) =>
  * 将树状领取规则、当天流水和退款收敛成一个额度快照。旧流水没有记录额度池时，
  * 会按实际货品重新分配；新流水则按保存的精确池恢复，避免分类移动改写历史。
  */
-export const getActiveWindowEntitlementQuota = (
+const buildEntitlementPoolsForWindows = (
   user: UserRecord,
-  policies: SpecialAccessPolicy[],
   inventory: InventoryMovement[],
   goodsCatalog: GoodsCatalogItem[],
   taxonomyNodes: GoodsTaxonomyNode[],
-  value: string | Date = new Date()
+  activeWindows: PolicyWindow[],
+  businessDateKey: string,
+  includeRelatedRefunds = false
 ) => {
-  const activeWindows = getActiveWindowsForUser(user, policies, value);
-  const businessDateKey = getBusinessDayKey(value);
   const poolMaximum = new Map<string, number>();
   const poolById = new Map<string, EntitlementPoolSnapshot>();
 
@@ -408,6 +425,19 @@ export const getActiveWindowEntitlementQuota = (
       movement.userId === user.id &&
       activeWindows.some((window) => isMovementInsideWindow(movement, window, businessDateKey))
   );
+  if (includeRelatedRefunds) {
+    // 服务记录按原领取业务日归属；稍后发生的退款也要撤销原日的服务完成量。
+    const consumptionKeys = new Set(relevantMovements
+      .filter((entry) => entry.type === "pickup" || entry.type === "adjustment")
+      .map(quotaMovementKey).filter((key): key is string => Boolean(key)));
+    for (const movement of inventory) {
+      const key = quotaMovementKey(movement);
+      if (movement.userId === user.id && movement.type === "refund" && key &&
+          consumptionKeys.has(key) && !relevantMovements.includes(movement)) {
+        relevantMovements.push(movement);
+      }
+    }
+  }
   const legacyMovements: InventoryMovement[] = [];
   const poolDeltaById = new Map<string, number>();
 
@@ -462,8 +492,22 @@ export const getActiveWindowEntitlementQuota = (
     }
   }
 
-  const remainingPools = [...poolById.values()].sort((left, right) =>
+  return [...poolById.values()].sort((left, right) =>
     left.poolId.localeCompare(right.poolId)
+  );
+};
+
+export const getActiveWindowEntitlementQuota = (
+  user: UserRecord,
+  policies: SpecialAccessPolicy[],
+  inventory: InventoryMovement[],
+  goodsCatalog: GoodsCatalogItem[],
+  taxonomyNodes: GoodsTaxonomyNode[],
+  value: string | Date = new Date()
+) => {
+  const activeWindows = getActiveWindowsForUser(user, policies, value);
+  const remainingPools = buildEntitlementPoolsForWindows(
+    user, inventory, goodsCatalog, taxonomyNodes, activeWindows, getBusinessDayKey(value)
   );
   const receivableByGoods: Record<string, number> = {};
   for (const goods of goodsCatalog.filter((entry) => entry.status !== "inactive")) {

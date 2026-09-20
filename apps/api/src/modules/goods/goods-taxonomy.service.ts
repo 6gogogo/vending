@@ -49,12 +49,13 @@ export class GoodsTaxonomyService {
     const nodes = this.store.goodsTaxonomyNodes
       .slice()
       .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name));
+    const goods = this.listClassifiableGoods();
 
     return {
       revision: this.getTreeRevision(),
       nodes,
-      goods: this.store.goodsCatalog.map((goods) => this.decorateGoods(goods)),
-      unassignedGoodsIds: this.store.goodsCatalog
+      goods: goods.map((item) => this.decorateGoods(item)),
+      unassignedGoodsIds: goods
         .filter((goods) => !goods.taxonomyNodeId)
         .map((goods) => goods.goodsId)
     };
@@ -140,7 +141,7 @@ export class GoodsTaxonomyService {
 
     const reservationImpact = !blockReason && this.hasReservationImpact(node, patch, nextParentId);
     const affectedNodeIds = reservationImpact ? subtreeNodeIds : [];
-    const affectedGoodsIds = this.store.goodsCatalog
+    const affectedGoodsIds = this.listClassifiableGoods()
       .filter((goods) => goods.taxonomyNodeId && affectedNodeIds.includes(goods.taxonomyNodeId))
       .map((goods) => goods.goodsId);
     const affectedPolicyIds = new Set<string>();
@@ -313,6 +314,9 @@ export class GoodsTaxonomyService {
       (goodsId) => !this.store.goodsCatalog.some((entry) => entry.goodsId === goodsId)
     );
     if (missing.length) throw new NotFoundException(`未找到货品：${missing.join("、")}。`);
+    if (goodsIds.some((goodsId) => this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId)?.mergedIntoGoodsId)) {
+      throw new BadRequestException("所选货品已合并，请刷新货品分类后重新选择。");
+    }
     const affectedGoodsIds = goodsIds.filter(
       (goodsId) => this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId)?.taxonomyNodeId !== node.id
     );
@@ -378,6 +382,11 @@ export class GoodsTaxonomyService {
 
   getTreeRevision() {
     return this.store.goodsTaxonomyNodes.reduce((maximum, node) => Math.max(maximum, node.revision), 0);
+  }
+
+  private listClassifiableGoods() {
+    // 合并前的身份只用于历史追溯；普通停用商品仍可维护分类。
+    return this.store.goodsCatalog.filter((goods) => !goods.mergedIntoGoodsId);
   }
 
   private assertCurrentInstanceTenant(actorTenantId?: string) {

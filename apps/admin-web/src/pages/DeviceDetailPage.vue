@@ -1701,6 +1701,9 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <p v-if="detail.goodsExpiryMode === 'warning_only'" class="admin-note">
+            当前保质期仅作后台提醒，登记到期的批次仍计入库存，可按领取规则正常领取；请核对并补全实际保质期。
+          </p>
           <div v-if="canManageDevice" class="device-goods-toolbar">
             <label class="admin-field admin-field--inline device-goods-toolbar__field">
               <span class="admin-field__label">新增货品</span>
@@ -1747,6 +1750,9 @@ onUnmounted(() => {
                   </td>
                   <td class="admin-code">
                     {{ formatDate(goods.expiresAt) }}
+                    <span v-if="goods.expiresAt && Date.parse(goods.expiresAt) <= Date.now()" class="admin-pill admin-pill--warning">
+                      {{ detail.goodsExpiryMode === "warning_only" ? "登记已到期 · 仅提醒" : "已到期" }}
+                    </span>
                   </td>
                   <td>
                     <button

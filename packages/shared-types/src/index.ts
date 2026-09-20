@@ -2,6 +2,7 @@ export type UserRole = "admin" | "merchant" | "restocker" | "special";
 export type BackofficeRole = "super_admin" | "admin" | "merchant" | "restocker";
 export type BackofficeScope = "provider" | "tenant";
 export type RuntimeDataPlane = "simulation" | "live";
+export type GoodsExpiryMode = "enforced" | "warning_only";
 export type AmapRuntimeMode = "mock" | "real";
 export type VerificationProvider = "mock" | "manual" | "aliyun_pnvs";
 export interface PublicRuntimeConfig {
@@ -1685,6 +1686,7 @@ export interface ExpiredBatchDispositionRecord {
 }
 
 export interface WarehouseInventorySnapshot {
+  goodsExpiryMode?: GoodsExpiryMode;
   warehouse: WarehouseRecord;
   /** @deprecated 使用 physicalTotalStock。 */
   totalStock: number;
@@ -1755,6 +1757,7 @@ export interface DashboardSnapshot {
 }
 
 export interface DeviceMonitoringDetail {
+  goodsExpiryMode?: GoodsExpiryMode;
   device: DeviceRecord;
   runtime: DeviceRuntimeState;
   businessDateKey: string;
@@ -1794,6 +1797,14 @@ export interface SpecialAccessWindowUsage {
   dateKey: string;
   startHour: number;
   endHour: number;
+  entitlementUsage?: Array<{
+    poolId: string;
+    targetType: EntitlementTargetType;
+    targetId: string;
+    targetName: string;
+    quantityLimit: number;
+    usedQuantity: number;
+  }>;
   goodsUsage: Array<{
     goodsId: string;
     goodsName: string;

@@ -112,6 +112,7 @@ export const mobileApi = {
       price: number;
       imageUrl: string;
       category: GoodsCategory;
+      status?: "active" | "inactive";
       taxonomyNodeId?: string;
       taxonomyPath?: Array<{ id: string; name: string; sortOrder: number }>;
       stock?: number;

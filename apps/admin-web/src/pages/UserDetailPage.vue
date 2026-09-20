@@ -1027,7 +1027,7 @@ onMounted(async () => {
               <tr v-for="window in selectedDateSummary.windows" :key="`${window.policyId}-${window.startHour}-${window.dateKey}`">
                 <td class="admin-code">{{ String(window.startHour).padStart(2, "0") }}:00-{{ String(window.endHour).padStart(2, "0") }}:00</td>
                 <td>{{ window.policyName }}</td>
-                <td><div class="user-detail__usage-list"><span v-for="goods in window.goodsUsage" :key="goods.goodsId">{{ goods.goodsName }} {{ goods.usedQuantity }}/{{ goods.quantityLimit }}</span></div></td>
+                <td><div class="user-detail__usage-list"><span v-for="goods in window.goodsUsage" :key="goods.goodsId">{{ goods.goodsName }} {{ goods.usedQuantity }}/{{ goods.quantityLimit }}</span><span v-for="usage in window.entitlementUsage ?? []" :key="usage.poolId">{{ usage.targetName }} {{ usage.usedQuantity }}/{{ usage.quantityLimit }}</span></div></td>
               </tr>
             </tbody>
           </table>

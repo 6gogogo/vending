@@ -36,7 +36,7 @@ export class WarehousesService {
       this.store.isGoodsBatchAvailable(entry, now)
     );
     const expiredBatches = physicalBatches.filter(
-      (entry) => !this.store.isGoodsBatchAvailable(entry, now)
+      (entry) => this.store.isGoodsBatchExpired(entry, now)
     );
     const warehousePhysicalBatches = physicalBatches.filter(
       (entry) => entry.deviceCode === warehouse.code
@@ -51,6 +51,7 @@ export class WarehousesService {
 
     return {
       warehouse,
+      goodsExpiryMode: this.store.getGoodsExpiryMode(),
       totalStock: physicalTotalStock,
       physicalTotalStock,
       transferableTotalStock: this.sumBatchStock(warehouseTransferableBatches),

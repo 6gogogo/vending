@@ -58,7 +58,7 @@ const harness = () => {
     paymentTransactionId: "merge-payment", goods: [{ goodsId: source.goodsId,
       goodsName: source.name, category: source.category, quantity: 1, unitPrice: 500 }]
   };
-  return { store, device, user, source, remote, goodsService, devices, orders, rules, event };
+  return { store, device, user, source, remote, goodsService, devices, orders, rules, event, taxonomy };
 };
 
 test("平台已有同名货品时手工新增复用原条目，不覆盖平台价格和编号", () => {
@@ -69,6 +69,77 @@ test("平台已有同名货品时手工新增复用原条目，不覆盖平台�
   assert.equal(created.goodsId, h.source.goodsId);
   assert.notEqual(created.goodsCode, "another-code");
   assert.equal(h.store.goodsCatalog.length, before);
+});
+
+test("同条码商品合并后分类列表只展示保留商品，历史身份和库存重启后仍保留", async () => {
+  const h = harness();
+  h.source.name = h.remote.name = "爱心盲盒";
+  h.source.goodsCode = h.remote.goodsCode = "6975658955636";
+  const inactive = h.store.goodsCatalog.find((goods) => goods.goodsId !== h.source.goodsId)!;
+  inactive.status = "inactive";
+  await h.goodsService.syncDeviceGoods(h.device.deviceCode);
+  const before = structuredClone(h.store.snapshot());
+  const tree = h.taxonomy.getTree(h.store.getDefaultTenantId());
+
+  assert.deepEqual(tree.goods.filter((goods) => goods.goodsCode === h.remote.goodsCode)
+    .map((goods) => goods.goodsId), [h.remote.goodsId]);
+  assert.ok(tree.goods.some((goods) => goods.goodsId === inactive.goodsId), "普通停用商品仍可管理分类");
+  assert.deepEqual(h.store.snapshot(), before, "分类查询不能删除历史身份或更改库存");
+  h.store.persist();
+  const reloaded = new InMemoryStoreService();
+  const reloadedTree = new GoodsTaxonomyService(reloaded).getTree(reloaded.getDefaultTenantId());
+  assert.deepEqual(reloadedTree.goods.filter((goods) => goods.goodsCode === h.remote.goodsCode)
+    .map((goods) => goods.goodsId), [h.remote.goodsId]);
+  assert.equal(reloaded.resolveGoodsId(h.source.goodsId), h.remote.goodsId);
+  assert.deepEqual(reloaded.goodsBatches, JSON.parse(JSON.stringify(before.goodsBatches)));
+  assert.deepEqual(reloaded.inventory, JSON.parse(JSON.stringify(before.inventory)));
+});
+
+test("已合并的历史商品不计入分类变更影响或待归类清单", async () => {
+  const h = harness();
+  const tenantId = h.store.getDefaultTenantId();
+  const child = h.taxonomy.createNode({ name: "其他", parentId: h.source.taxonomyNodeId! }, undefined, tenantId);
+  h.source.taxonomyNodeId = child.id;
+  await h.goodsService.syncDeviceGoods(h.device.deviceCode);
+  const before = structuredClone(h.store.snapshot());
+  const preview = h.taxonomy.previewChange(child.id, { name: "其他物资" }, tenantId);
+  assert.deepEqual(preview.affectedGoodsIds, [h.remote.goodsId]);
+  assert.deepEqual(h.store.snapshot(), before);
+
+  delete h.source.taxonomyNodeId;
+  const unassigned = h.store.goodsCatalog.find((goods) => goods.goodsId !== h.source.goodsId &&
+    goods.goodsId !== h.remote.goodsId)!;
+  delete unassigned.taxonomyNodeId;
+  const tree = h.taxonomy.getTree(tenantId);
+  assert.ok(!tree.unassignedGoodsIds.includes(h.source.goodsId));
+  assert.ok(tree.unassignedGoodsIds.includes(unassigned.goodsId));
+});
+
+test("旧页面提交已合并商品时要求刷新且整批不写入，当前商品可正常归类", async () => {
+  const h = harness();
+  const tenantId = h.store.getDefaultTenantId();
+  const child = h.taxonomy.createNode({ name: "其他", parentId: h.source.taxonomyNodeId! }, undefined, tenantId);
+  const stalePayload = { taxonomyNodeId: child.id, goodsIds: [h.source.goodsId] };
+  const stalePreview = h.taxonomy.previewGoodsAssignment(stalePayload, tenantId);
+  await h.goodsService.syncDeviceGoods(h.device.deviceCode);
+  const before = structuredClone(h.store.snapshot());
+
+  for (const goodsIds of [[h.source.goodsId], [h.remote.goodsId, h.source.goodsId]]) {
+    const payload = { ...stalePayload, goodsIds, expectedRevision: stalePreview.expectedRevision };
+    assert.throws(() => h.taxonomy.previewGoodsAssignment(payload, tenantId), /货品已合并.*刷新/);
+    assert.throws(() => h.taxonomy.assignGoods(payload, undefined, tenantId), /货品已合并.*刷新/);
+    assert.deepEqual(h.store.snapshot(), before, "不能部分归类或改变预约、库存与历史记录");
+  }
+
+  const payload = { taxonomyNodeId: child.id, goodsIds: [h.remote.goodsId, h.remote.goodsId] };
+  const preview = h.taxonomy.previewGoodsAssignment(payload, tenantId);
+  assert.deepEqual(preview.affectedGoodsIds, [h.remote.goodsId]);
+  const result = h.taxonomy.assignGoods({ ...payload, expectedRevision: preview.expectedRevision }, undefined, tenantId);
+  assert.deepEqual(result.updated.map((goods) => goods.goodsId), [h.remote.goodsId]);
+  assert.deepEqual(result.updated[0]!.taxonomyPath?.map((node) => node.name), ["任意", "其他"]);
+  assert.deepEqual(h.source, before.goodsCatalog.find((goods) => goods.goodsId === h.source.goodsId));
+  assert.deepEqual(h.store.goodsBatches, before.goodsBatches);
+  assert.deepEqual(h.store.inventory, before.inventory);
 });
 
 test("平台同步归并手工库存和已用额度，原始订单及回调重放保持有效，重启不恢复重复商品", async () => {
@@ -159,10 +230,14 @@ test("清理错误重复批次后归并只保留平台原库存，平台重复�
     getGoodsInfo: async () => [h.source, h.remote]
   } as never);
   const visible = await devices.getGoods(h.device.deviceCode);
-  assert.equal(visible.length, 1);
-  assert.equal(visible[0]!.goodsId, h.remote.goodsId);
-  assert.equal(visible[0]!.stock, 20);
-  assert.equal(visible[0]!.price, h.remote.price);
+  const mergedGoods = visible.filter((goods) => goods.name === h.source.name);
+  assert.equal(mergedGoods.length, 1);
+  assert.equal(mergedGoods[0]!.goodsId, h.remote.goodsId);
+  assert.equal(mergedGoods[0]!.stock, 20);
+  assert.equal(mergedGoods[0]!.price, h.remote.price);
+  for (const goods of h.device.doors.flatMap((door) => door.goods)) {
+    assert.ok(visible.some((item) => item.goodsId === goods.goodsId), "柜内其他商品也必须保留");
+  }
   assert.deepEqual(validatePersistedState(h.store.snapshot()).errors, []);
   h.source.mergedIntoGoodsId = h.source.goodsId;
   assert.ok(validatePersistedState(h.store.snapshot()).errors.some((e) => e.includes("mergedIntoGoodsId")));

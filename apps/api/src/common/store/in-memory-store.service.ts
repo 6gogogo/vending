@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { getGoodsExpiryMode } from "../config/goods-expiry-policy";
 import {
   createHash,
   randomBytes,
@@ -1943,7 +1944,7 @@ export class InMemoryStoreService {
       .filter((item) => item.goodsId === goodsId)
       .reduce((sum, item) => sum + item.quantity, 0);
 
-    return Math.max(0, this.getAvailableStock(deviceCode, goodsId) - reservedQuantity);
+    return Math.max(0, this.getAvailableStock(deviceCode, goodsId, now) - reservedQuantity);
   }
 
   private normalizePrefix(prefix: string) {
@@ -2223,17 +2224,19 @@ export class InMemoryStoreService {
     );
   }
 
-  isGoodsBatchAvailable(batch: GoodsBatchRecord, now = Date.now()) {
-    if (batch.remainingQuantity <= 0) {
-      return false;
-    }
+  getGoodsExpiryMode() {
+    return getGoodsExpiryMode();
+  }
 
-    if (!batch.expiresAt) {
-      return true;
-    }
-
+  isGoodsBatchExpired(batch: GoodsBatchRecord, now = Date.now()) {
+    if (!batch.expiresAt) return false;
     const expirationTime = Date.parse(batch.expiresAt);
-    return Number.isFinite(expirationTime) && expirationTime > now;
+    return !Number.isFinite(expirationTime) || expirationTime <= now;
+  }
+
+  isGoodsBatchAvailable(batch: GoodsBatchRecord, now = Date.now()) {
+    return batch.remainingQuantity > 0 &&
+      (this.getGoodsExpiryMode() === "warning_only" || !this.isGoodsBatchExpired(batch, now));
   }
 
   getAvailableGoodsBatches(deviceCode?: string, goodsId?: string, now = Date.now()) {

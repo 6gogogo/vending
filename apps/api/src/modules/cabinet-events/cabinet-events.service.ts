@@ -2889,6 +2889,9 @@ export class CabinetEventsService {
       }
 
       const catalogGoods = this.store.goodsCatalog.find((goods) => goods.goodsId === goodsId);
+      if (catalogGoods?.status === "inactive" || catalogGoods?.mergedIntoGoodsId) {
+        throw new BadRequestException(`货品 ${catalogGoods.name} 已停用，不能开柜领取。`);
+      }
       const existing = resolved.get(goodsId);
       // 名称和品类必须以后端柜门/目录为准，避免客户端改写品类绕过额度。
       const goodsName = deviceGoods.name || catalogGoods?.name || goodsId;

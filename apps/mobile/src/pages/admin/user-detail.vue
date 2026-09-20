@@ -264,7 +264,8 @@ onLoad((query) => {
             <text class="list-item__title">{{ String(window.startHour).padStart(2, '0') }}:00-{{ String(window.endHour).padStart(2, '0') }}:00</text>
             <text class="list-item__meta">
               {{
-                window.goodsUsage.map((item) => `${item.goodsName} ${item.usedQuantity}/${item.quantityLimit}`).join("，")
+                [...window.goodsUsage.map((item) => `${item.goodsName} ${item.usedQuantity}/${item.quantityLimit}`),
+                 ...(window.entitlementUsage ?? []).map((item) => `${item.targetName} ${item.usedQuantity}/${item.quantityLimit}`)].join("，")
               }}
             </text>
           </view>

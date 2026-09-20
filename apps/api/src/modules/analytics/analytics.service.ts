@@ -34,7 +34,7 @@ export class AnalyticsService {
   getDashboard(viewerBackofficeRole?: BackofficeRole): DashboardSnapshot {
     const businessDateKey = getBusinessDayKey(new Date());
     const activeSpecialUsers = this.store.users.filter(
-      (user) => user.role === "special" && user.status === "active"
+      (user) => user.role === "special" && user.status === "active" && user.mobileProfileCompleted === true
     );
     const usersWithPolicies = activeSpecialUsers
       .map((user) => {
@@ -43,7 +43,8 @@ export class AnalyticsService {
           this.store.specialAccessPolicies,
           this.store.inventory,
           this.store.goodsCatalog,
-          businessDateKey
+          businessDateKey,
+          this.store.goodsTaxonomyNodes
         );
 
         return {
@@ -71,8 +72,11 @@ export class AnalyticsService {
       summary: `已领取 ${entry.summary.fulfilledGoods}/${entry.summary.totalGoods} 件应领物资`,
       detailLines: entry.summary.windows.map((window) => {
         const rangeLabel = `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`;
-        const goodsLabel = window.goodsUsage
-          .map((usage) => `${usage.goodsName} ${Math.min(usage.usedQuantity, usage.quantityLimit)}/${usage.quantityLimit}`)
+        const goodsLabel = [
+          ...window.goodsUsage.map((usage) => ({ ...usage, label: usage.goodsName })),
+          ...(window.entitlementUsage ?? []).map((usage) => ({ ...usage, label: usage.targetName }))
+        ]
+          .map((usage) => `${usage.label} ${Math.min(usage.usedQuantity, usage.quantityLimit)}/${usage.quantityLimit}`)
           .join("，");
 
         return `${rangeLabel} ${goodsLabel}`;
@@ -244,7 +248,8 @@ export class AnalyticsService {
           this.store.specialAccessPolicies,
           this.store.inventory,
           this.store.goodsCatalog,
-          key
+          key,
+          this.store.goodsTaxonomyNodes
         );
 
         if (summary.totalGoods <= 0) {

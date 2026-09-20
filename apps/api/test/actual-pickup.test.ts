@@ -65,7 +65,7 @@ const harness = () => {
     return { event, result };
   };
   return { store, service, rules, reservations, device, goods, user, request, actor, settle,
-    notifications, opens: () => opens };
+    notifications, config, opens: () => opens };
 };
 const withHarness = async (run: (h: ReturnType<typeof harness>) => Promise<void>) => {
   const path = mkdtempSync(join(tmpdir(), "vm-actual-pickup-"));
@@ -110,6 +110,32 @@ test("空取货自动完结，库存和任意一件额度均保持不变", async
   assert.equal(h.reservations.findBlockingBillingEvent(h.user.id), undefined);
 }));
 
+test("平台漏返的本地商品查询、预约占用、取消及实际领取使用同一库存与额度", async () => withHarness(async (h) => {
+  const devices = new DevicesService(h.store, new InventoryBatchChangesService(h.store), {
+    getGoodsInfo: async () => [{ ...h.goods, goodsId: "platform-other", name: "平台另一个商品" }]
+  } as never);
+  const visibleStock = async () => (await devices.getGoods(h.device.deviceCode, "1", "special"))
+    .find((goods) => goods.goodsId === h.goods.goodsId)?.stock;
+  const stock = h.store.getReservableStock(h.device.deviceCode, h.goods.goodsId);
+  assert.equal(await visibleStock(), stock);
+  assert.equal(h.rules.getQuotaSummaryForUser(h.user).receivableByGoods?.[h.goods.goodsId], 1);
+
+  const reservation = h.reservations.create({ deviceCode: h.device.deviceCode, doorNum: "1",
+    intentItems: [{ goodsId: h.goods.goodsId, goodsName: h.goods.name, category: h.goods.category, quantity: 1 }] }, h.actor);
+  assert.equal(await visibleStock(), stock - 1);
+  assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 0);
+  h.reservations.cancel(reservation.id, h.actor);
+  assert.equal(await visibleStock(), stock);
+  assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 1);
+
+  await h.service.openCabinet(h.request, h.actor);
+  const { event } = await h.settle(1);
+  assert.equal(event.billingStatus, "free");
+  assert.equal(event.paymentNotifyStatus, "success");
+  assert.equal(await visibleStock(), stock - 1);
+  assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 0);
+}));
+
 test("实际拿走数量完整入账，不因未预选商品生成差异核对任务", async () => withHarness(async (h) => {
   const stock = h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId);
   await h.service.openCabinet(h.request, h.actor);
@@ -147,4 +173,57 @@ test("实际领取模式不能绕过身份、领取时段或非法模式校验",
   h.user.accessPolicies = [];
   assert.throws(() => h.service.previewOpenSettlement(h.request, h.actor), /时间段/);
   assert.equal(h.opens(), 0);
+}));
+
+test("保质期仅提醒时到期批次贯通查询、预约、预结算、实际领取及库存扣减", async () => withHarness(async (h) => {
+  const previous = process.env.VM_GOODS_EXPIRY_MODE;
+  process.env.VM_GOODS_EXPIRY_MODE = "warning_only";
+  try {
+    h.store.goodsBatches.splice(0);
+    const batches = new InventoryBatchChangesService(h.store);
+    const expired = batches.recordBatchOnly({ deviceCode: h.device.deviceCode, goodsId: h.goods.goodsId,
+      quantity: 5, expiresAt: "2000-01-01T00:00:00.000Z", sourceType: "system" }).createdBatches[0]!;
+    const devices = new DevicesService(h.store, batches, { getGoodsInfo: async () => [] } as never);
+    const visible = (await devices.getGoods(h.device.deviceCode, "1", "special")).find((goods) => goods.goodsId === h.goods.goodsId)!;
+    assert.equal(visible.stock, 5);
+    assert.equal(visible.expiresAt, undefined, "未核实的登记日期只在后台提醒");
+    const detail = devices.monitoringDetail(h.device.deviceCode);
+    assert.equal(detail.goodsExpiryMode, "warning_only");
+    assert.equal(detail.device.doors[0]!.goods.find((goods) => goods.goodsId === h.goods.goodsId)?.expiresAt, expired.expiresAt);
+    const intentItems = [{ goodsId: h.goods.goodsId, goodsName: h.goods.name, category: h.goods.category, quantity: 1 }];
+    const reservation = h.reservations.create({ deviceCode: h.device.deviceCode, doorNum: "1", intentItems }, h.actor);
+    const preview = h.service.previewOpenSettlement({ ...h.request, pickupMode: undefined, reservationId: reservation.id, intentItems }, h.actor);
+    assert.ok(preview.quoteId);
+    h.reservations.cancel(reservation.id, h.actor);
+    await h.service.openCabinet(h.request, h.actor);
+    await h.settle(1);
+    assert.equal(expired.remainingQuantity, 4);
+    assert.equal(h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId), 4);
+    assert.equal(h.store.goodsBatches.some((batch) => batch.remainingQuantity < 0), false);
+    assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 0);
+    assert.equal(expired.expiresAt, "2000-01-01T00:00:00.000Z");
+  } finally {
+    if (previous === undefined) delete process.env.VM_GOODS_EXPIRY_MODE;
+    else process.env.VM_GOODS_EXPIRY_MODE = previous;
+  }
+}));
+
+test("停用货品即使仍有库存也不能从旧客户端预约或预选开柜，恢复启用后按原额度领取", async () => withHarness(async (h) => {
+  h.config.set("VM_RESERVATION_ONLY_PICKUP", "false");
+  const catalog = h.store.goodsCatalog.find((goods) => goods.goodsId === h.goods.goodsId)!;
+  catalog.status = "inactive";
+  const intentItems = [{ goodsId: h.goods.goodsId, goodsName: h.goods.name, category: h.goods.category, quantity: 1 }];
+  const beforeStock = h.store.getCurrentStock(h.device.deviceCode, h.goods.goodsId);
+  assert.throws(() => h.reservations.create({ deviceCode: h.device.deviceCode, doorNum: "1", intentItems }, h.actor), /已停用/);
+  const request = { ...h.request, pickupMode: undefined, intentItems };
+  assert.throws(() => h.service.previewOpenSettlement(request, h.actor), /已停用/);
+  await assert.rejects(h.service.openCabinet(request, h.actor), /已停用/);
+  assert.equal(h.opens(), 0);
+  assert.equal(h.store.getCurrentStock(h.device.deviceCode, h.goods.goodsId), beforeStock);
+  assert.equal(h.store.reservations.length, 0);
+
+  catalog.status = "active";
+  assert.equal(h.rules.getQuotaSummaryForUser(h.user).receivableByGoods?.[h.goods.goodsId], 1);
+  const reservation = h.reservations.create({ deviceCode: h.device.deviceCode, doorNum: "1", intentItems }, h.actor);
+  assert.equal(reservation.status, "active");
 }));

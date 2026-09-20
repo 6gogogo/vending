@@ -136,7 +136,9 @@ export class UsersService {
             user,
             this.store.specialAccessPolicies,
             this.store.inventory,
-            this.store.goodsCatalog
+            this.store.goodsCatalog,
+            undefined,
+            this.store.goodsTaxonomyNodes
           )
         : undefined;
     const monthKey = options?.monthKey ?? getBusinessDayKey(new Date()).slice(0, 7);
@@ -185,7 +187,8 @@ export class UsersService {
                 this.store.specialAccessPolicies,
                 this.store.inventory,
                 this.store.goodsCatalog,
-                day.dateKey
+                day.dateKey,
+                this.store.goodsTaxonomyNodes
               );
 
               return {
@@ -208,7 +211,8 @@ export class UsersService {
                 this.store.specialAccessPolicies,
                 this.store.inventory,
                 this.store.goodsCatalog,
-                selectedDateKey
+                selectedDateKey,
+                this.store.goodsTaxonomyNodes
               );
 
               if (summary.fulfilledGoods <= 0) {
@@ -1877,7 +1881,9 @@ export class UsersService {
         user,
         this.store.specialAccessPolicies,
         this.store.inventory,
-        this.store.goodsCatalog
+        this.store.goodsCatalog,
+        undefined,
+        this.store.goodsTaxonomyNodes
       );
 
       if (summary.completionStatus === "complete") {

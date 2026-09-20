@@ -631,8 +631,8 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
           :value="snapshot?.physicalTotalStock ?? 0"
           hint="包含可调拨与过期待处置物资"
         />
-        <StatTile title="可调拨库存" :value="snapshot?.transferableTotalStock ?? 0" hint="仍在有效期内，可进入正常调拨" />
-        <StatTile title="过期待处置" :value="snapshot?.expiredTotalStock ?? 0" hint="已隔离，不会进入正常调拨" />
+        <StatTile title="可调拨库存" :value="snapshot?.transferableTotalStock ?? 0" :hint="snapshot?.goodsExpiryMode === 'warning_only' ? '登记保质期仅作提醒，不限制正常调拨' : '仍在有效期内，可进入正常调拨'" />
+        <StatTile :title="snapshot?.goodsExpiryMode === 'warning_only' ? '登记到期库存' : '过期待处置'" :value="snapshot?.expiredTotalStock ?? 0" :hint="snapshot?.goodsExpiryMode === 'warning_only' ? '仅作提醒，数量也计入可调拨库存，请核对登记日期' : '已隔离，不会进入正常调拨'" />
         <StatTile title="仓库货品种类" :value="snapshot?.goodsKinds ?? 0" hint="本地仓库当前覆盖种类" />
       </div>
     </section>
@@ -805,11 +805,11 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
-            <span class="admin-kicker">过期待处置队列</span>
-            <h3 class="admin-panel__title">隔离展示已过期批次，按批次完成处置</h3>
+            <span class="admin-kicker">{{ snapshot?.goodsExpiryMode === 'warning_only' ? '登记保质期提醒' : '过期待处置队列' }}</span>
+            <h3 class="admin-panel__title">{{ snapshot?.goodsExpiryMode === 'warning_only' ? '请核对登记日期，当前不自动隔离或扣除这些批次' : '隔离展示已过期批次，按批次完成处置' }}</h3>
           </div>
           <span class="admin-pill" :class="expiredWarehouseBatches.length ? 'admin-pill--danger' : 'admin-pill--success'">
-            {{ expiredWarehouseBatches.length ? `${snapshot?.expiredTotalStock ?? 0} 件待处置` : "队列已清空" }}
+            {{ expiredWarehouseBatches.length ? `${snapshot?.expiredTotalStock ?? 0} 件${snapshot?.goodsExpiryMode === 'warning_only' ? '待核对' : '待处置'}` : "队列已清空" }}
           </span>
         </div>
 

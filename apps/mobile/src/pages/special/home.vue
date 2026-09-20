@@ -386,7 +386,7 @@ onShow(() => {
                   <text class="goods-item__name">{{ goods.name }}</text>
                   <text class="goods-item__meta">
                     {{
-                      accessibilityEnabled
+                      goods.status === "inactive" ? appCopy.cabinetPickup.inactiveGoods : accessibilityEnabled
                         ? `柜内 ${goods.stock ?? 0} 件 · 今日免费 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
                         : `${categoryLabelMap[goods.category]} · 现有 ${goods.stock ?? 0} 件 · 免费 ${sessionStore.quota?.remainingByGoods?.[goods.goodsId] ?? 0} 件`
                     }}

@@ -732,6 +732,9 @@ export class ReservationsService {
       }
 
       const catalogGoods = this.store.goodsCatalog.find((goods) => goods.goodsId === goodsId);
+      if (catalogGoods?.status === "inactive" || catalogGoods?.mergedIntoGoodsId) {
+        throw new BadRequestException(`货品 ${catalogGoods.name} 已停用，不能预约。`);
+      }
       const existing = resolved.get(goodsId);
       // 名称和品类只采用后端柜门/目录数据，不能信任客户端可改写字段。
       const goodsName = deviceGoods.name || catalogGoods?.name || goodsId;

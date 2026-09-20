@@ -318,7 +318,7 @@ onLoad((query) => {
             <view class="goods-item__body">
               <text class="goods-item__name">{{ goods.name }}</text>
               <text class="goods-item__stock" :class="{ 'goods-item__stock--empty': (goods.stock ?? 0) <= 0 }">
-                {{ (goods.stock ?? 0) > 0 ? pickupCopy.stockCount(goods.stock ?? 0) : pickupCopy.emptyStock }}
+                {{ goods.status === "inactive" ? pickupCopy.inactiveGoods : (goods.stock ?? 0) > 0 ? pickupCopy.stockCount(goods.stock ?? 0) : pickupCopy.emptyStock }}
               </text>
               <text v-if="goods.expiresAt" class="goods-item__expiry">{{ pickupCopy.expiryLabel }} {{ formatBeijingShortDateTime(goods.expiresAt) }}</text>
             </view>

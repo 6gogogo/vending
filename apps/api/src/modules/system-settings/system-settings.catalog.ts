@@ -147,6 +147,17 @@ export const systemSettingCatalog: Record<string, SystemSettingMetadata> = {
     inputType: "boolean",
     restartRequired: true
   },
+  VM_GOODS_EXPIRY_MODE: {
+    group: "实例设置",
+    label: "货品保质期处理",
+    description: "严格校验会排除登记已到期的库存；仅后台提醒会保留到期提示，库存、预约和实际领取仍按账本数量计算。修改后需重启服务。",
+    inputType: "select",
+    options: [
+      { label: "严格校验", value: "enforced" },
+      { label: "仅后台提醒", value: "warning_only" }
+    ],
+    restartRequired: true
+  },
   VM_DATA_ROOT: {
     label: "运行数据根目录",
     description: "真实平面与全真模拟均从此根目录统一派生状态、审计、上传、备份和金融租约路径；全真模拟必须使用与其他平面不同的目录。",

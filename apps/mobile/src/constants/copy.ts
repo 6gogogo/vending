@@ -176,6 +176,7 @@ export const appCopy = {
     goodsUnavailable: "暂时无法读取库存，请稍后刷新。",
     emptyGoods: "当前尚未录入商品。",
     emptyStock: "暂无库存",
+    inactiveGoods: "已停用",
     imageUnavailable: "暂无图片",
     quotaLabel: "当前可领取额度",
     quotaCount: (count: number) => `合计 ${count} 件`,
