@@ -187,9 +187,9 @@ export const appCopy = {
     pickupTitle: "开门后按需领取",
     queryTitle: "柜内物资",
     pickupDescription: "无需选择商品，开门后按需领取。实际取走物资后使用一次权益，空开门不扣权益。",
-    queryDescription: "选择柜机即可查看商品库存，无需扫码。领取时到柜机前扫码开门。",
+    queryDescription: "查看柜内商品库存，领取时请到柜机前扫码。",
     pickupHint: "取走商品后请关好柜门，系统按实际取走的商品记录。",
-    queryHint: "查询不占用库存。到柜机前扫码即可开门领取。",
+    queryHint: "请到柜机前扫码领取。",
     invalidEntry: {
       title: "未识别到有效柜机",
       content: "请重新扫描柜机上的二维码。系统不会读取库存或发送开门指令。",

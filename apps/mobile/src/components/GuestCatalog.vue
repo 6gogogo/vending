@@ -106,7 +106,6 @@ onBeforeUnmount(() => { latestRequest += 1; });
     </GlassCard>
     <GlassCard tone="quiet">
       <view class="vm-stack">
-        <text class="guest-body">{{ copy.loginPurpose }}</text>
         <button class="vm-button" @tap="login">{{ isDetail ? copy.pickupLogin : copy.login }}</button>
         <button class="vm-button vm-button--ghost" @tap="isDetail ? browse() : help()">{{ isDetail ? copy.browse : copy.help }}</button>
       </view>
