@@ -22,10 +22,13 @@ const cabinetCopySource = readSource("apps/mobile/src/constants/copy.ts");
 assert.match(deviceDetailSource, /resolveCabinetEntry\(query\)/, "柜机页必须统一解析微信 q 与内部扫码入口");
 const guestCatalogSource = readSource("apps/mobile/src/components/GuestCatalog.vue");
 assert.match(deviceDetailSource, /<GuestCatalog[\s\S]+:scanned="scanMode"/, "未登录扫码只能浏览商品，并保留扫码来源");
-assert.match(guestCatalogSource, /resolveGuestPickupLoginUrl\(props, scanDeviceCode\)/, "游客领取入口必须扫码后才恢复登录目标");
+assert.match(guestCatalogSource, /resolveGuestPrimaryActionUrl\(rescan \? \{\} : props, scanDeviceCode\)/, "扫码先浏览，已扫码后主动开门才进入登录");
 assert.match(guestCatalogSource, /listPublicProducts\(\)/, "游客只读取商品橱窗接口");
 assert.doesNotMatch(guestCatalogSource, /listPublicDevices|getPublicDevice|\.stock|\.address|\.doors/, "游客商品页不得读取或展示柜机库存");
-assert.match(guestCatalogSource, /@tap="pickup"/, "扫码必须由用户点击主按钮触发");
+assert.match(guestCatalogSource, /@tap="pickup\(\)"/, "扫码必须由用户点击主按钮触发");
+assert.doesNotMatch(guestCatalogSource, /getQuotaSummary|remainingDaily|quotaCount|领取次数/, "游客不读取或展示领取次数");
+assert.equal(JSON.parse(readSource("apps/mobile/src/pages.json")).pages[0].path, "pages/tabs/primary", "默认启动页必须是商品首页");
+assert.match(appLoginPageSource, /v-if="showLoginForm"/, "旧登录链接冷启动重定向期间不得闪现登录表单");
 assert.doesNotMatch(guestCatalogSource, /getLocation|requestCode|openCabinet|previewOpenSettlement/, "游客浏览不得自动定位、取验证码或开门");
 assert.match(
   appLoginPageSource,

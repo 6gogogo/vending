@@ -1,13 +1,14 @@
-import { buildPickupLoginUrl } from "./cabinet-entry";
+import { buildPickupDeviceUrl, buildPickupLoginUrl } from "./cabinet-entry";
 
-export const resolveGuestPickupLoginUrl = async (
+export const resolveGuestPrimaryActionUrl = async (
   entry: { deviceCode?: string; scanned?: boolean },
   scan: () => Promise<string>
 ) => {
   try {
-    // 已经从柜机二维码进入的游客不重复扫码；普通浏览入口必须先扫码。
-    const deviceCode = entry.scanned && entry.deviceCode ? entry.deviceCode : await scan();
-    return deviceCode ? buildPickupLoginUrl(deviceCode) : undefined;
+    // 扫码只进入浏览；在已扫码页面主动点击开门才进入登录，不发开门请求。
+    if (entry.scanned && entry.deviceCode) return buildPickupLoginUrl(entry.deviceCode);
+    const deviceCode = await scan();
+    return deviceCode ? buildPickupDeviceUrl(deviceCode) : undefined;
   } catch (error) {
     const message = (error as { errMsg?: string })?.errMsg;
     if (typeof message === "string" && /cancel/i.test(message)) return undefined;

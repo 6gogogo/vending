@@ -9,6 +9,7 @@ import { loadMobileRuntimeConfig } from "../../api/runtime-config";
 import { appCopy } from "../../constants/copy";
 import { guestCopy } from "../../constants/guest-copy";
 import { resolveGuestReturnTab, resumeGuestBrowsing } from "../../utils/guest-navigation";
+import { guestLaunchGuard } from "../../utils/guest-launch";
 import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?raw";
 import { useSessionStore } from "../../stores/session";
 import { createAppLoginContinuation } from "../../utils/app-login-continuation";
@@ -40,6 +41,7 @@ let disclaimerPreviousFocus: HTMLElement | undefined;
 const verificationProvider = ref<VerificationProvider>();
 const pendingPickupTarget = ref<PickupLoginTarget>();
 const returnTab = ref<string>();
+const showLoginForm = ref(false);
 let entryRestored = false;
 const showVerificationPreview =
   import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
@@ -258,12 +260,20 @@ const goFeedback = () => {
 };
 
 onLoad((query) => {
+  const browse = guestLaunchGuard.takeBrowseDestination(query);
+  if (browse) {
+    if (browse.kind === "page") uni.redirectTo({ url: browse.url });
+    else uni.switchTab({ url: browse.url });
+    return;
+  }
+  showLoginForm.value = true;
   pendingPickupTarget.value = resolvePickupLoginTarget(query);
   returnTab.value = typeof query.returnTab === "string" ? query.returnTab : undefined;
   if (typeof query.phone === "string") phone.value = query.phone;
 });
 
 onShow(() => {
+  if (!showLoginForm.value) return;
   void restoreEntry();
   void loadVerificationProvider();
 });
@@ -278,7 +288,7 @@ onUnload(() => {
 </script>
 
 <template>
-  <view class="auth-page">
+  <view v-if="showLoginForm" class="auth-page">
     <view class="auth-header"><text>{{ authCopy.login.pageTitle }}</text></view>
 
     <view class="brand-hero">

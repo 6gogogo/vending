@@ -43,6 +43,10 @@ if (!existsSync(clientBundlePath)) {
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const expectedAppId = manifest["mp-weixin"]?.appid;
 const builtProjectConfig = JSON.parse(readFileSync(projectConfigPath, "utf8"));
+const builtAppConfig = JSON.parse(readFileSync(resolve(buildOutputPath, "app.json"), "utf8"));
+if (builtAppConfig.pages?.[0] !== "pages/tabs/primary") {
+  throw new Error("微信小程序默认入口必须是游客可浏览的商品首页，不能是登录页。");
+}
 const clientBundle = readFileSync(clientBundlePath, "utf8");
 const localSourceBytes = getDirectorySize(buildOutputPath);
 

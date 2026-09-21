@@ -5,7 +5,7 @@ import type { PublicProduct } from "@vm/shared-types";
 import { mobileApi } from "../api/mobile";
 import { guestCopy as copy } from "../constants/guest-copy";
 import MobileShell from "../layouts/MobileShell.vue";
-import { resolveGuestPickupLoginUrl } from "../utils/guest-pickup";
+import { resolveGuestPrimaryActionUrl } from "../utils/guest-pickup";
 import { scanDeviceCode } from "../utils/scan-device";
 import GlassCard from "./ui/GlassCard.vue";
 
@@ -36,11 +36,11 @@ const load = async () => {
   }
 };
 
-const pickup = async () => {
+const pickup = async (rescan = false) => {
   if (scanning.value) return;
   scanning.value = true;
   try {
-    const url = await resolveGuestPickupLoginUrl(props, scanDeviceCode);
+    const url = await resolveGuestPrimaryActionUrl(rescan ? {} : props, scanDeviceCode);
     if (url) uni.navigateTo({ url });
   } catch {
     uni.showToast({ title: copy.scanFailed, icon: "none" });
@@ -53,7 +53,8 @@ onBeforeUnmount(() => { latestRequest += 1; });
 </script>
 
 <template>
-  <MobileShell class="guest-storefront" mode="care" eyebrow="小柜大爱" :title="copy.title" :subtitle="copy.subtitle">
+  <MobileShell class="guest-storefront" mode="care" eyebrow="小柜大爱" :title="copy.title"
+    :subtitle="scanned && deviceCode ? `柜机编号 ${deviceCode}，开门需先登录。` : copy.subtitle">
     <GlassCard v-if="loading || failed || !products.length" tone="quiet">
       <text class="guest-message" :role="failed ? 'alert' : 'status'">
         {{ loading ? copy.loading : failed ? copy.failed : copy.emptyProducts }}
@@ -72,15 +73,16 @@ onBeforeUnmount(() => { latestRequest += 1; });
       </view>
     </view>
     <view class="guest-scanbar">
-      <button class="vm-button guest-scanbar__button" :disabled="scanning" @tap="pickup">
-        {{ scanning ? copy.scanning : copy.scan }}
+      <button class="vm-button guest-scanbar__button" :disabled="scanning" @tap="pickup()">
+        {{ scanning ? copy.scanning : scanned && deviceCode ? '开门' : copy.scan }}
       </button>
+      <button v-if="scanned && deviceCode" class="vm-button vm-button--ghost guest-rescan" :disabled="scanning" @tap="pickup(true)">重新扫码</button>
     </view>
   </MobileShell>
 </template>
 
 <style scoped>
-.guest-storefront { padding-bottom: calc(170rpx + env(safe-area-inset-bottom)); }
+.guest-storefront { padding-bottom: calc(240rpx + env(safe-area-inset-bottom)); }
 .guest-message { display: block; color: var(--vm-muted); font-size: 28rpx; line-height: 1.6; }
 .guest-products { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24rpx; }
 .guest-product { overflow: hidden; border: 1rpx solid var(--vm-line); border-radius: 24rpx; background: var(--vm-surface); }
@@ -90,4 +92,5 @@ onBeforeUnmount(() => { latestRequest += 1; });
 .guest-product__name { display: block; min-height: 3em; padding: 20rpx; color: var(--vm-text); font-size: 29rpx; font-weight: 600; line-height: 1.5; word-break: break-word; }
 .guest-scanbar { position: fixed; z-index: 40; left: 50%; bottom: 0; width: 100%; max-width: 960rpx; box-sizing: border-box; padding: 20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); transform: translateX(-50%); border-top: 1rpx solid rgba(46,125,70,.12); background: rgba(255,255,255,.98); box-shadow: 0 -10rpx 30rpx rgba(26,51,33,.07); }
 .guest-scanbar__button { min-height: 100rpx; margin: 0; font-size: 34rpx; font-weight: 700; }
+.guest-rescan { margin-top: 12rpx; min-height: 60rpx; padding: 8rpx; font-size: 26rpx; }
 </style>

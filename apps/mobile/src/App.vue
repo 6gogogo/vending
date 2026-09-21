@@ -3,6 +3,7 @@ import { onLaunch } from "@dcloudio/uni-app";
 
 import { useSessionStore } from "./stores/session";
 import { useUiPreferencesStore } from "./stores/ui-preferences";
+import { guestLaunchGuard } from "./utils/guest-launch";
 
 import "./styles/theme.css";
 
@@ -28,7 +29,8 @@ const installH5TabBarAccessibility = () => {
   observer.observe(document.documentElement, { childList: true, subtree: true });
 };
 
-onLaunch(() => {
+onLaunch((options) => {
+  guestLaunchGuard.launched(options?.path);
   uiPreferencesStore.hydrate();
   sessionStore.bootstrap();
 

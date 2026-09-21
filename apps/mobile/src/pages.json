@@ -1,6 +1,12 @@
 {
   "pages": [
     {
+      "path": "pages/tabs/primary",
+      "style": {
+        "navigationBarTitleText": "首页"
+      }
+    },
+    {
       "path": "pages/common/login",
       "style": {
         "navigationStyle": "custom",
@@ -65,12 +71,6 @@
       "path": "pages/common/operation-open",
       "style": {
         "navigationBarTitleText": "运营开门"
-      }
-    },
-    {
-      "path": "pages/tabs/primary",
-      "style": {
-        "navigationBarTitleText": "首页"
       }
     },
     {
