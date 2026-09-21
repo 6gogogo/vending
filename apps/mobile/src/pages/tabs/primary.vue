@@ -26,6 +26,7 @@ import { buildHomeQuotaRows } from "../../utils/home-quota-presentation";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import {
   isStockOperatorRole,
+  syncGuestTabBar,
   syncRoleTabBar
 } from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
@@ -385,7 +386,7 @@ const load = async () => {
   const sessionToken = sessionStore.token;
 
   if (!user) {
-    syncRoleTabBar("special");
+    syncGuestTabBar();
     guestRefreshKey.value += 1;
     return;
   }

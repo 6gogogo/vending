@@ -5,7 +5,7 @@ import GlassCard from "./ui/GlassCard.vue";
 
 const props = defineProps<{ mode: "records" | "settings" }>();
 const login = () => uni.navigateTo({ url: `/pages/common/app-login?returnTab=${props.mode}` });
-const browse = () => uni.switchTab({ url: "/pages/tabs/nearby" });
+const browse = () => uni.switchTab({ url: "/pages/tabs/primary" });
 const help = () => uni.navigateTo({ url: "/pages/common/help-center" });
 </script>
 

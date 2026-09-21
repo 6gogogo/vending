@@ -27,6 +27,7 @@ import { getReceivableDeviceGoods, getReceivableGoodsOptions } from "../../utils
 import {
   isStockOperatorRole,
   resolveTabIconPath,
+  syncGuestTabBar,
   syncRoleTabBar
 } from "../../utils/role-routing";
 import { scanDeviceCode } from "../../utils/scan-device";
@@ -308,7 +309,7 @@ const load = async () => {
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
-    syncRoleTabBar("special");
+    syncGuestTabBar();
     guestRefreshKey.value += 1;
     return;
   }
@@ -639,7 +640,7 @@ onShow(() => {
 </script>
 
 <template>
-  <GuestCatalog v-if="sessionStore.bootstrapped && !sessionStore.user" mode="nearby" :refresh-key="guestRefreshKey" />
+  <GuestCatalog v-if="sessionStore.bootstrapped && !sessionStore.user" :refresh-key="guestRefreshKey" />
   <MobileShell
     v-else-if="sessionStore.user"
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"

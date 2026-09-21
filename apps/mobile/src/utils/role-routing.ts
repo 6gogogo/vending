@@ -76,6 +76,12 @@ const getCurrentPageRoute = () => {
   return pages[pages.length - 1]?.route;
 };
 
+export const syncGuestTabBar = () => {
+  if (isSharedTabPageRoute(getCurrentPageRoute()) && typeof uni.hideTabBar === "function") {
+    uni.hideTabBar({ animation: false });
+  }
+};
+
 export const syncRoleTabBar = (role?: UserRole) => {
   if (!role || !isSharedTabPageRoute(getCurrentPageRoute())) {
     return;
@@ -83,6 +89,8 @@ export const syncRoleTabBar = (role?: UserRole) => {
 
   const labels = roleTabLabels[role];
   const icons = roleTabIcons[role];
+
+  if (typeof uni.showTabBar === "function") uni.showTabBar({ animation: false });
 
   if (typeof uni.setTabBarStyle === "function") {
     uni.setTabBarStyle({

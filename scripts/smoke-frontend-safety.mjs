@@ -21,8 +21,11 @@ const appLoginPageSource = readSource("apps/mobile/src/pages/common/app-login.vu
 const cabinetCopySource = readSource("apps/mobile/src/constants/copy.ts");
 assert.match(deviceDetailSource, /resolveCabinetEntry\(query\)/, "柜机页必须统一解析微信 q 与内部扫码入口");
 const guestCatalogSource = readSource("apps/mobile/src/components/GuestCatalog.vue");
-assert.match(deviceDetailSource, /<GuestCatalog[\s\S]+:scanned="scanMode"/, "未登录扫码先浏览柜机，并保留扫码来源");
-assert.match(guestCatalogSource, /props\.scanned \? buildPickupLoginUrl\(props\.deviceCode\) : buildQueryLoginUrl/, "游客主动登录时必须区分查询与扫码入口");
+assert.match(deviceDetailSource, /<GuestCatalog[\s\S]+:scanned="scanMode"/, "未登录扫码只能浏览商品，并保留扫码来源");
+assert.match(guestCatalogSource, /resolveGuestPickupLoginUrl\(props, scanDeviceCode\)/, "游客领取入口必须扫码后才恢复登录目标");
+assert.match(guestCatalogSource, /listPublicProducts\(\)/, "游客只读取商品橱窗接口");
+assert.doesNotMatch(guestCatalogSource, /listPublicDevices|getPublicDevice|\.stock|\.address|\.doors/, "游客商品页不得读取或展示柜机库存");
+assert.match(guestCatalogSource, /@tap="pickup"/, "扫码必须由用户点击主按钮触发");
 assert.doesNotMatch(guestCatalogSource, /getLocation|requestCode|openCabinet|previewOpenSettlement/, "游客浏览不得自动定位、取验证码或开门");
 assert.match(
   appLoginPageSource,

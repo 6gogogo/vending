@@ -13,7 +13,7 @@ import type {
   CabinetReservationRecord,
   DeviceMonitoringDetail,
   DeviceRecord,
-  PublicDevice,
+  PublicProduct,
   DailyPickupSummary,
   GoodsCategory,
   GoodsCategoryRecord,
@@ -44,11 +44,8 @@ import type {
 import { mobileApiBaseUrl, mobileClient } from "./client";
 
 export const mobileApi = {
-  listPublicDevices() {
-    return mobileClient.get<PublicDevice[]>("/public/devices");
-  },
-  getPublicDevice(deviceCode: string) {
-    return mobileClient.get<PublicDevice>(`/public/devices/${encodeURIComponent(deviceCode)}`);
+  listPublicProducts() {
+    return mobileClient.get<PublicProduct[]>("/public/products");
   },
   requestCode(phone: string, scene: "app-login" | "register" | "general" = "general") {
     return mobileClient.post<{

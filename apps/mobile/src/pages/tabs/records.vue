@@ -15,6 +15,7 @@ import { formatBeijingDate, formatBeijingDateTime } from "../../utils/datetime";
 import { showOperationFailure, showOperationSuccess } from "../../utils/operation-feedback";
 import {
   isStockOperatorRole,
+  syncGuestTabBar,
   syncRoleTabBar
 } from "../../utils/role-routing";
 
@@ -101,7 +102,7 @@ const load = async () => {
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
-    syncRoleTabBar("special");
+    syncGuestTabBar();
     records.value = [];
     adminUsers.value = [];
     adminLogs.value = [];

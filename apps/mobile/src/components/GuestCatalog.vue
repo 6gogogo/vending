@@ -1,41 +1,34 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import type { PublicDevice } from "@vm/shared-types";
+import { onBeforeUnmount, reactive, ref, watch } from "vue";
+import type { PublicProduct } from "@vm/shared-types";
 
 import { mobileApi } from "../api/mobile";
 import { guestCopy as copy } from "../constants/guest-copy";
 import MobileShell from "../layouts/MobileShell.vue";
-import { buildDeviceQueryUrl, buildPickupLoginUrl, buildQueryLoginUrl } from "../utils/cabinet-entry";
+import { resolveGuestPickupLoginUrl } from "../utils/guest-pickup";
+import { scanDeviceCode } from "../utils/scan-device";
 import GlassCard from "./ui/GlassCard.vue";
 
 const props = withDefaults(defineProps<{
-  mode?: "home" | "nearby";
   deviceCode?: string;
   scanned?: boolean;
   refreshKey?: number;
-}>(), { mode: "home", deviceCode: "", scanned: false, refreshKey: 0 });
-const devices = ref<PublicDevice[]>([]);
+}>(), { deviceCode: "", scanned: false, refreshKey: 0 });
+const products = ref<PublicProduct[]>([]);
 const loading = ref(false);
 const failed = ref(false);
+const scanning = ref(false);
 const brokenImages = reactive<Record<string, boolean>>({});
 let latestRequest = 0;
-const isDetail = computed(() => Boolean(props.deviceCode));
-const title = computed(() => isDetail.value ? devices.value[0]?.name ?? "柜机物资"
-  : props.mode === "home" ? copy.title : copy.nearbyTitle);
-const subtitle = computed(() => isDetail.value ? copy.detailSubtitle
-  : props.mode === "home" ? copy.subtitle : copy.nearbySubtitle);
 
 const load = async () => {
   const request = ++latestRequest;
   loading.value = true;
   failed.value = false;
-  // 重新查询期间隐藏旧库存；失败时不把缓存数量当作实时数量。
-  devices.value = [];
+  products.value = [];
   try {
-    const result = props.deviceCode
-      ? [await mobileApi.getPublicDevice(props.deviceCode)]
-      : await mobileApi.listPublicDevices();
-    if (request === latestRequest) devices.value = result;
+    const result = await mobileApi.listPublicProducts();
+    if (request === latestRequest) products.value = result;
   } catch {
     if (request === latestRequest) failed.value = true;
   } finally {
@@ -43,90 +36,58 @@ const load = async () => {
   }
 };
 
-const browse = () => uni.switchTab({ url: "/pages/tabs/nearby" });
-const showDevice = (deviceCode: string) => uni.navigateTo({ url: buildDeviceQueryUrl(deviceCode) });
-const login = () => uni.navigateTo({
-  url: props.deviceCode
-    ? props.scanned ? buildPickupLoginUrl(props.deviceCode) : buildQueryLoginUrl(props.deviceCode)
-    : "/pages/common/app-login"
-});
-const help = () => uni.navigateTo({ url: "/pages/common/help-center" });
-watch(() => [props.deviceCode, props.refreshKey], () => { void load(); }, { immediate: true });
+const pickup = async () => {
+  if (scanning.value) return;
+  scanning.value = true;
+  try {
+    const url = await resolveGuestPickupLoginUrl(props, scanDeviceCode);
+    if (url) uni.navigateTo({ url });
+  } catch {
+    uni.showToast({ title: copy.scanFailed, icon: "none" });
+  } finally {
+    scanning.value = false;
+  }
+};
+watch(() => props.refreshKey, () => { void load(); }, { immediate: true });
 onBeforeUnmount(() => { latestRequest += 1; });
 </script>
 
 <template>
-  <MobileShell mode="care" :eyebrow="isDetail ? '柜机物资' : '公益服务'" :title="title" :subtitle="subtitle">
-    <GlassCard v-if="!isDetail && mode === 'home'" tone="accent">
-      <view class="vm-stack">
-        <text class="guest-heading">{{ copy.serviceTitle }}</text>
-        <text class="guest-body">{{ copy.serviceBody }}</text>
-        <view v-for="(step, index) in copy.steps" :key="step" class="guest-step">
-          <text class="guest-step__number">{{ index + 1 }}</text><text>{{ step }}</text>
-        </view>
-        <button class="vm-button" @tap="browse">{{ copy.browse }}</button>
-      </view>
-    </GlassCard>
-
-    <view class="guest-toolbar">
-      <text class="guest-heading">{{ isDetail ? '物资与库存' : copy.devices }}</text>
-      <button class="vm-button vm-button--ghost guest-refresh" :disabled="loading" @tap="load">{{ copy.refresh }}</button>
-    </view>
-    <GlassCard v-if="loading || failed || !devices.length" tone="quiet">
-      <text class="guest-body" :role="failed ? 'alert' : 'status'">
-        {{ loading ? copy.loading : failed ? copy.failed : copy.emptyDevices }}
+  <MobileShell class="guest-storefront" mode="care" eyebrow="小柜大爱" :title="copy.title" :subtitle="copy.subtitle">
+    <GlassCard v-if="loading || failed || !products.length" tone="quiet">
+      <text class="guest-message" :role="failed ? 'alert' : 'status'">
+        {{ loading ? copy.loading : failed ? copy.failed : copy.emptyProducts }}
       </text>
       <button v-if="failed" class="vm-button vm-button--soft" @tap="load">{{ copy.refresh }}</button>
     </GlassCard>
-    <GlassCard v-for="device in devices" :key="device.deviceCode" tone="quiet">
-      <view class="vm-stack">
-        <view class="guest-device-heading">
-          <text class="guest-heading">{{ device.name }}</text>
-          <text class="guest-status">{{ copy.status[device.status] }}</text>
+    <view v-else class="guest-products">
+      <view v-for="product in products" :key="product.goodsId" class="guest-product">
+        <view class="guest-product__picture">
+          <image v-if="product.imageUrl && !brokenImages[product.goodsId]" class="guest-product__image"
+            :src="product.imageUrl" :alt="product.name" mode="aspectFit"
+            @error="brokenImages[product.goodsId] = true" />
+          <view v-else class="guest-product__placeholder">{{ copy.imageFallback }}</view>
         </view>
-        <text class="guest-body">{{ device.address || device.location }}</text>
-        <view v-for="door in device.doors" :key="door.doorNum" class="vm-stack">
-          <text v-if="device.doors.length > 1" class="guest-door">{{ door.label }}</text>
-          <text v-if="!door.goods.length" class="guest-body">{{ copy.emptyGoods }}</text>
-          <view v-for="goods in door.goods" :key="goods.goodsId" class="guest-goods">
-            <image v-if="goods.imageUrl && !brokenImages[goods.goodsId]" class="guest-goods__image"
-              :src="goods.imageUrl" :alt="goods.name" mode="aspectFit"
-              @error="brokenImages[goods.goodsId] = true" />
-            <view v-else class="guest-goods__placeholder">{{ copy.imageFallback }}</view>
-            <view class="guest-goods__body">
-              <text class="guest-goods__name">{{ goods.name }}</text>
-              <text class="guest-goods__stock" :class="{ 'guest-goods__stock--empty': goods.stock <= 0 }">
-                {{ goods.status === 'inactive' ? copy.inactive : goods.stock > 0 ? copy.stock(goods.stock) : copy.emptyStock }}
-              </text>
-            </view>
-          </view>
-        </view>
-        <button v-if="!isDetail" class="vm-button vm-button--soft" @tap="showDevice(device.deviceCode)">{{ copy.detail }}</button>
+        <text class="guest-product__name">{{ product.name }}</text>
       </view>
-    </GlassCard>
-    <GlassCard tone="quiet">
-      <view class="vm-stack">
-        <button class="vm-button" @tap="login">{{ isDetail ? copy.pickupLogin : copy.login }}</button>
-        <button class="vm-button vm-button--ghost" @tap="isDetail ? browse() : help()">{{ isDetail ? copy.browse : copy.help }}</button>
-      </view>
-    </GlassCard>
+    </view>
+    <view class="guest-scanbar">
+      <button class="vm-button guest-scanbar__button" :disabled="scanning" @tap="pickup">
+        {{ scanning ? copy.scanning : copy.scan }}
+      </button>
+    </view>
   </MobileShell>
 </template>
 
 <style scoped>
-.guest-heading { font-size: 32rpx; font-weight: 700; color: var(--vm-text); }
-.guest-body { display: block; font-size: 27rpx; line-height: 1.7; color: var(--vm-muted); }
-.guest-step { display: flex; align-items: flex-start; gap: 16rpx; font-size: 28rpx; line-height: 1.6; }
-.guest-step__number { flex-shrink: 0; width: 44rpx; text-align: center; border-radius: 50%; background: var(--vm-accent-soft); color: var(--vm-accent); font-weight: 700; }
-.guest-toolbar, .guest-device-heading { display: flex; justify-content: space-between; align-items: center; gap: 20rpx; }
-.guest-refresh { flex-shrink: 0; width: auto; margin: 0; padding: 12rpx 20rpx; min-height: 72rpx; font-size: 26rpx; }
-.guest-status { flex-shrink: 0; font-size: 24rpx; color: var(--vm-muted); }
-.guest-door { font-size: 26rpx; color: var(--vm-muted); }
-.guest-goods { display: flex; align-items: center; gap: 20rpx; padding: 18rpx 0; border-top: 1rpx solid var(--vm-line); }
-.guest-goods__image, .guest-goods__placeholder { flex-shrink: 0; width: 120rpx; height: 120rpx; border-radius: 20rpx; background: var(--vm-bg-soft); }
-.guest-goods__placeholder { display: flex; align-items: center; justify-content: center; font-size: 23rpx; color: var(--vm-muted); }
-.guest-goods__body { display: flex; flex-direction: column; gap: 12rpx; min-width: 0; }
-.guest-goods__name { font-size: 29rpx; line-height: 1.5; font-weight: 600; }
-.guest-goods__stock { font-size: 27rpx; color: var(--vm-accent-strong); }
-.guest-goods__stock--empty { color: var(--vm-muted); }
+.guest-storefront { padding-bottom: calc(170rpx + env(safe-area-inset-bottom)); }
+.guest-message { display: block; color: var(--vm-muted); font-size: 28rpx; line-height: 1.6; }
+.guest-products { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24rpx; }
+.guest-product { overflow: hidden; border: 1rpx solid var(--vm-line); border-radius: 24rpx; background: var(--vm-surface); }
+.guest-product__picture { position: relative; width: 100%; padding-bottom: 100%; background: #fff; }
+.guest-product__image, .guest-product__placeholder { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.guest-product__placeholder { display: flex; align-items: center; justify-content: center; color: var(--vm-muted); font-size: 28rpx; background: var(--vm-bg-soft); }
+.guest-product__name { display: block; min-height: 3em; padding: 20rpx; color: var(--vm-text); font-size: 29rpx; font-weight: 600; line-height: 1.5; word-break: break-word; }
+.guest-scanbar { position: fixed; z-index: 40; left: 50%; bottom: 0; width: 100%; max-width: 960rpx; box-sizing: border-box; padding: 20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); transform: translateX(-50%); border-top: 1rpx solid rgba(46,125,70,.12); background: rgba(255,255,255,.98); box-shadow: 0 -10rpx 30rpx rgba(26,51,33,.07); }
+.guest-scanbar__button { min-height: 100rpx; margin: 0; font-size: 34rpx; font-weight: 700; }
 </style>

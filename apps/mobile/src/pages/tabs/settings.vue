@@ -13,6 +13,7 @@ import { useSessionStore } from "../../stores/session";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
 import {
   isStockOperatorRole,
+  syncGuestTabBar,
   syncRoleTabBar
 } from "../../utils/role-routing";
 import { getSupportGuideTopics } from "../../utils/support-guides";
@@ -42,7 +43,7 @@ const bootstrap = async () => {
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
-    syncRoleTabBar("special");
+    syncGuestTabBar();
     return;
   }
 

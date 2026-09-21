@@ -6,6 +6,7 @@ import {
   resolveTabIconPath,
   roleTabIcons,
   roleTabLabels,
+  syncGuestTabBar,
   syncRoleTabBar
 } from "./role-routing";
 
@@ -95,4 +96,25 @@ test("进入底部导航页面后仍会同步当前角色样式", () => {
     runtimeGlobals.uni = originalUni;
     runtimeGlobals.getCurrentPages = originalGetCurrentPages;
   }
+});
+
+test("游客商品页收起底部栏目，登录后恢复本角色导航", () => {
+  const runtime = globalThis as typeof globalThis & {
+    uni?: Record<string, unknown>;
+    getCurrentPages?: () => Array<{ route?: string }>;
+  };
+  const previousUni = runtime.uni;
+  const previousPages = runtime.getCurrentPages;
+  const calls: string[] = [];
+  runtime.uni = { hideTabBar: () => calls.push("hide"), showTabBar: () => calls.push("show") };
+  runtime.getCurrentPages = () => [{ route: "pages/tabs/primary" }];
+  try {
+    syncGuestTabBar();
+    syncRoleTabBar("special");
+    assert.deepEqual(calls, ["hide", "show"]);
+    runtime.getCurrentPages = () => [{ route: "pages/common/app-login" }];
+    syncGuestTabBar();
+    syncRoleTabBar("special");
+    assert.deepEqual(calls, ["hide", "show"]);
+  } finally { runtime.uni = previousUni; runtime.getCurrentPages = previousPages; }
 });

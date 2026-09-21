@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
-import type { PublicDevice } from "@vm/shared-types";
+import type { PublicProduct } from "@vm/shared-types";
 
 import { AppModule } from "../src/app.module";
 import { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
@@ -28,52 +28,56 @@ const isolate = () => {
   process.env.API_DATA_FILE = join(directory, "store.json");
 };
 
-test("游客库存使用真实账本，合并旧货号，保留停用和负库存边界，且不改变任何业务记录", () => {
+test("游客只看到去重的商品图片与名称，不读取或泄露柜机、库存、可领状态及业务记录", () => {
   isolate();
   const store = new InMemoryStoreService();
   const catalog = new PublicCatalogService(store);
   const device = store.devices[0]!;
+  store.devices.splice(1);
   const source = store.goodsCatalog[0]!;
-  const goods = store.ensureGoodsCatalogItem({ ...source, goodsId: "guest-good", goodsCode: "guest-good", status: "active" });
-  const inactive = store.ensureGoodsCatalogItem({ ...source, goodsId: "guest-inactive", goodsCode: "guest-inactive", status: "inactive" });
-  const negative = store.ensureGoodsCatalogItem({ ...source, goodsId: "guest-negative", goodsCode: "guest-negative", status: "active" });
+  const addProduct = (goodsId: string, status: "active" | "inactive" = "active") =>
+    store.ensureGoodsCatalogItem({ ...source, goodsId, goodsCode: goodsId, status });
+  const goods = addProduct("guest-good");
+  const inactive = addProduct("guest-inactive", "inactive");
+  const negative = addProduct("guest-negative");
+  const empty = addProduct("guest-empty");
+  const unassigned = addProduct("guest-unassigned");
   store.goodsCatalog.push({ ...goods, goodsId: "guest-alias", mergedIntoGoodsId: goods.goodsId });
-  device.doors = [{ doorNum: "1", label: "一号门", goods: [
+  device.address = "private-address";
+  device.doors = [{ doorNum: "1", label: "private-door", goods: [
     { ...goods, stock: 999 }, { ...goods, goodsId: "guest-alias", stock: 999 },
-    { ...inactive, stock: 999 }, { ...negative, stock: 999 }
+    { ...inactive, stock: 999 }, { ...negative, stock: -3 }, { ...empty, stock: 0 }
   ] }];
+  store.devices.push({ ...structuredClone(device), deviceCode: "PRIVATE-SECOND" });
   store.goodsBatches.splice(0);
   store.reservations.splice(0);
   const batches = new InventoryBatchChangesService(store);
-  const add = (goodsId: string, quantity: number, expiresAt?: string) =>
-    batches.recordBatchOnly({ deviceCode: device.deviceCode, goodsId, quantity, expiresAt, sourceType: "system" });
-  add(goods.goodsId, 5);
-  add(goods.goodsId, 2, "2000-01-01T00:00:00.000Z");
-  add(inactive.goodsId, 10);
+  batches.recordBatchOnly({ deviceCode: device.deviceCode, goodsId: goods.goodsId, quantity: 7,
+    expiresAt: "2000-01-01T00:00:00.000Z", sourceType: "system" });
   store.consumeGoodsBatches(device.deviceCode, negative.goodsId, 3);
-  const now = new Date().toISOString();
-  store.reservations.push({
-    id: "private-reservation", userId: "private-person", phone: "19900000001", userName: "私人姓名",
-    deviceCode: device.deviceCode, doorNum: "1", status: "active",
-    inventoryReservationMode: "goods_quantity", batchAllocationTiming: "on_open",
-    items: [{ goodsId: goods.goodsId, goodsName: goods.name, category: goods.category, quantity: 1 }], reservedAt: now, createdAt: now, updatedAt: now,
-    expiresAt: "2100-01-01T00:00:00.000Z"
-  });
-  for (const [mode, expectedStock] of [["warning_only", 6], ["enforced", 4]] as const) {
+  store.getReservableStock = () => { throw new Error("游客橱窗不得读取可用库存"); };
+  let baseline: PublicProduct[] | undefined;
+  for (const mode of ["warning_only", "enforced"]) {
     process.env.VM_GOODS_EXPIRY_MODE = mode;
     const before = structuredClone(store.snapshot());
-    const result = catalog.detail(device.deviceCode, store.getDefaultTenantId());
-    assert.equal(result.doors[0]!.goods.length, 3);
-    assert.equal(result.doors[0]!.goods.find((item) => item.goodsId === goods.goodsId)?.stock, expectedStock);
-    assert.equal(result.doors[0]!.goods.find((item) => item.goodsId === inactive.goodsId)?.stock, 0);
-    assert.equal(result.doors[0]!.goods.find((item) => item.goodsId === negative.goodsId)?.stock, 0);
-    assert.deepEqual(store.snapshot(), before);
-    assert.deepEqual(Object.keys(result.doors[0]!.goods[0]!).sort(), ["category", "goodsId", "imageUrl", "name", "status", "stock"]);
-    assert.doesNotMatch(JSON.stringify(result), /private-person|private-reservation|私人姓名|tenantId|runtime|lastSeenAt|threshold|phone|sourceUser|batchId/);
+    const result = catalog.list(store.getDefaultTenantId());
+    assert.deepEqual(result.map((item) => item.goodsId), [goods.goodsId, negative.goodsId, empty.goodsId]);
+    assert.ok(!result.some((item) => item.goodsId === inactive.goodsId || item.goodsId === unassigned.goodsId));
+    for (const product of result) {
+      assert.deepEqual(Object.keys(product).sort(), ["goodsId", "imageUrl", "name"]);
+    }
+    assert.doesNotMatch(JSON.stringify(result), /private-address|private-door|PRIVATE-SECOND|stock|deviceCode|tenantId|status|phone|batchId/);
+    assert.deepEqual(store.snapshot(), before, "游客浏览不写入任何业务记录");
+    if (baseline) assert.deepEqual(result, baseline, "商品橱窗不随保质期或库存策略暴露可领状态");
+    baseline = result;
   }
+  store.goodsBatches.splice(0);
+  device.status = "offline";
+  for (const item of device.doors[0]!.goods) item.stock = 0;
+  assert.deepEqual(catalog.list(store.getDefaultTenantId()), baseline, "库存和设备状态改变不影响游客商品信息");
 });
 
-test("匿名 HTTP 查询仅能读取域名所属实例，未知、重名、暂停入口及跨实例编号均拒绝，写入仍需登录", async () => {
+test("商品橱窗按域名隔离实例；旧公开库存接口已移除，私人接口与开门仍拒绝匿名调用", async () => {
   isolate();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: false });
   app.setGlobalPrefix("api");
@@ -86,36 +90,42 @@ test("匿名 HTTP 查询仅能读取域名所属实例，未知、重名、暂�
     const tenantB = { ...tenantA, id: "guest-tenant-b", code: "guest-b", instanceUrl: "https://guest-b.example.test" };
     store.platformTenants.push(tenantB);
     const deviceA = store.devices[0]!;
-    const deviceB = { ...structuredClone(deviceA), deviceCode: "GUEST-B", tenantId: tenantB.id };
-    store.devices.push(deviceB);
+    const goodsB = store.ensureGoodsCatalogItem({ ...store.goodsCatalog[0]!, goodsId: "guest-b-product", goodsCode: "guest-b-product", status: "active" });
+    store.devices.push({ ...structuredClone(deviceA), deviceCode: "GUEST-B", tenantId: tenantB.id,
+      doors: [{ doorNum: "1", label: "B 门", goods: [{ ...goodsB, stock: 123 }] }] });
     const request = (path: string, host = "guest-a.example.test", method = "GET") =>
-      fetch(`http://127.0.0.1:${port}/api${path}`, {
+      fetch("http://127.0.0.1:" + port + "/api" + path, {
         method, headers: { "x-forwarded-host": host, "content-type": "application/json" },
         ...(method === "POST" ? { body: JSON.stringify({ deviceCode: deviceA.deviceCode, phone: "19900000001" }) } : {})
       });
     const before = structuredClone(store.snapshot());
-    const response = await request("/public/devices?tenantId=guest-tenant-b");
+    const response = await request("/public/products?tenantId=guest-tenant-b&deviceCode=GUEST-B");
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
-    const payload = await response.json() as { data: PublicDevice[] };
-    assert.ok(payload.data.some((device) => device.deviceCode === deviceA.deviceCode));
-    assert.ok(!payload.data.some((device) => device.deviceCode === deviceB.deviceCode));
-    assert.equal((await request(`/public/devices/${deviceA.deviceCode}`)).status, 200);
-    assert.equal((await request(`/public/devices/${deviceB.deviceCode}`)).status, 404);
-    assert.equal((await request(`/public/devices/${deviceB.deviceCode}`, "guest-b.example.test")).status, 200);
-    assert.equal((await request("/public/devices", "unbound.example.test")).status, 404);
-    assert.deepEqual(store.snapshot(), before, "公开 GET 不得写入任何业务数据");
+    const payload = await response.json() as { data: PublicProduct[] };
+    assert.ok(payload.data.length > 0);
+    assert.ok(!payload.data.some((product) => product.goodsId === goodsB.goodsId));
+    for (const product of payload.data) assert.deepEqual(Object.keys(product).sort(), ["goodsId", "imageUrl", "name"]);
+    const responseB = await request("/public/products", "guest-b.example.test");
+    assert.equal(responseB.status, 200);
+    const payloadB = await responseB.json() as { data: PublicProduct[] };
+    assert.deepEqual(payloadB.data.map((item) => item.goodsId), [goodsB.goodsId]);
+    assert.equal((await request("/public/products", "unbound.example.test")).status, 404);
+    for (const path of ["/public/devices", "/public/devices/" + deviceA.deviceCode, "/public/devices/GUEST-B"]) {
+      assert.equal((await request(path)).status, 404, "旧游客接口不能继续暴露柜机库存");
+    }
+    assert.deepEqual(store.snapshot(), before);
     tenantB.status = "paused";
-    assert.equal((await request("/public/devices", "guest-b.example.test")).status, 404);
+    assert.equal((await request("/public/products", "guest-b.example.test")).status, 404);
     tenantB.status = tenantA.status;
     tenantB.instanceUrl = tenantA.instanceUrl;
-    assert.equal((await request("/public/devices")).status, 404);
+    assert.equal((await request("/public/products")).status, 404);
     tenantB.instanceUrl = "https://guest-b.example.test";
-    for (const path of ["/devices", `/devices/${deviceA.deviceCode}`, "/users", "/inventory-orders", "/access-rules/summary"]) {
+    for (const path of ["/devices", "/devices/" + deviceA.deviceCode, "/users", "/inventory-orders", "/access-rules/summary"]) {
       assert.equal((await request(path)).status, 403, path);
     }
     const beforeProtected = structuredClone(store.snapshot());
-    for (const path of ["/cabinet-events/open", "/cabinet-events/open/pre-settlement", "/public/devices", `/devices/${deviceA.deviceCode}/goods/query`]) {
+    for (const path of ["/cabinet-events/open", "/cabinet-events/open/pre-settlement", "/public/products", "/devices/" + deviceA.deviceCode + "/goods/query"]) {
       assert.ok([403, 404].includes((await request(path, "guest-a.example.test", "POST")).status), path);
     }
     assert.deepEqual(store.snapshot(), beforeProtected, "匿名请求不能开门或生成订单、扣库存");
