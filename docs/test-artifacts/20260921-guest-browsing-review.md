@@ -137,3 +137,13 @@
 - 移动端类型检查、前端安全冒烟通过。微信生产包原地重新构建，1461.27 KiB，构建校验增加默认页必须为 `pages/tabs/primary`；AppID 和生产 API 校验通过。
 - 本次为移动端路由与构建修正，未修改后端接口和开门认证，未操作正式业务数据、短信或实机开门。本次未操作开发者工具、上传或送审；上述为代码及自动化验证，不能替代微信原生视觉验收。
 - 固定产物目录仍为 `C:/Users/LEGION/.codex/worktrees/goods-classification-dedup/vending machine/apps/mobile/dist/build/mp-weixin`。此前开发者工具界面曾指向旧 `vending machine deliveries` 目录，上传前应核对导入路径与普通编译入口。
+
+## 实际运行目录纠正与微信原生验收
+
+用户再次报告启动仍为登录后，通过微信开发者工具中 `project.config.json` 的“在资源管理器中显示”确认：当前导入的是 `F:/Data/work document/codex/vending-machine-deliveries/20260921-pickup-summary/mp-weixin`，不是上述源码构建目录，也不是此前的 guest-browsing 交付包。原包默认页为 `pages/common/login`，界面甚至没有后续新增的“暂不登录，继续浏览”。因此最新源码构建与用户实际运行包不一致是此次可见故障的直接原因。
+
+按用户“哪里上传就在哪里改”的要求，在确认两端 AppID 相同后，先将现有上传目录压缩备份至 `C:/Users/LEGION/AppData/Local/Temp/vending-open-project-before-update-20260921-155659.zip`，再将 `c08c1a1` 已验证的 213 个构建文件原地同步到当前导入目录，逐文件 SHA-256 一致；保留开发者工具自己的 `project.config.json` 与 `project.private.config.json`，未更改安全设置，未删除文件或新建交付目录。
+
+微信开发者工具真实模拟器已显示：默认首页为“商品列表”，两列商品图片与名称，底部“扫码开柜”；没有登录表单、柜机库存、领取次数或游客底部栏目。随后执行普通编译复核。未登录、发送短信、真实扫码或开柜，未上传及送审。
+
+后续本机交付须区分源码构建目录和实际导入上传目录：继续使用当前打开的上述 `20260921-pickup-summary/mp-weixin` 项目，并在每次构建后同步、核对产物；不能只更新 C 盘产物就声称用户当前预览已更新。
