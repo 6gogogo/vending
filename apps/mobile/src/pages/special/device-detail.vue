@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { onLoad } from "@dcloudio/uni-app";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import type { CabinetOpenRequest, DeviceRecord } from "@vm/shared-types";
 import { mobileApi } from "../../api/mobile";
+import GuestCatalog from "../../components/GuestCatalog.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
 import { appCopy } from "../../constants/copy";
 import MobileShell from "../../layouts/MobileShell.vue";
 import { useSessionStore } from "../../stores/session";
-import { buildPickupDeviceUrl, buildPickupLoginUrl, resolveCabinetEntry,
+import { buildPickupDeviceUrl, resolveCabinetEntry,
   shouldPreparePickupHomeStack } from "../../utils/cabinet-entry";
 import { buildActualPickupRequest, getDailyPickupState, matchesActualPickupEvent } from "../../utils/actual-pickup";
 import { getDeviceStatusPresentation } from "../../utils/device-readiness";
@@ -22,6 +23,7 @@ type OpenAttemptResult = { state: "navigated" } | { state: "rejected"; message: 
 const sessionStore = useSessionStore();
 const pickupCopy = appCopy.cabinetPickup;
 const loading = ref(false);
+const guestRefreshKey = ref(0);
 const loadFailed = ref(false);
 const submitting = ref(false);
 const openFlowLocked = ref(false);
@@ -97,7 +99,7 @@ const load = async () => {
   if (!deviceCode.value) return;
   await sessionStore.bootstrap();
   if (!sessionStore.user) {
-    uni.redirectTo({ url: scanMode.value ? buildPickupLoginUrl(deviceCode.value) : "/pages/common/app-login" });
+    guestRefreshKey.value += 1;
     return;
   }
   if (sessionStore.user.role !== "special") { redirectUnsupportedRole(); return; }
@@ -291,12 +293,15 @@ onLoad((query) => {
 
   deviceCode.value = entry.deviceCode;
   scanMode.value = entry.mode === "pickup";
-  void load();
 });
+
+onShow(() => { if (deviceCode.value) void load(); });
 </script>
 
 <template>
-  <MobileShell class="pickup-shell" :eyebrow="scanMode ? pickupCopy.entry.pickup : pickupCopy.entry.query"
+  <GuestCatalog v-if="sessionStore.bootstrapped && !sessionStore.user && deviceCode"
+    :device-code="deviceCode" :scanned="scanMode" :refresh-key="guestRefreshKey" />
+  <MobileShell v-else-if="sessionStore.user" class="pickup-shell" :eyebrow="scanMode ? pickupCopy.entry.pickup : pickupCopy.entry.query"
     :title="deviceName" :subtitle="pickupCopy.entry.code(deviceCode)">
     <GlassCard tone="accent" class="pickup-card">
       <view class="pickup-stack">

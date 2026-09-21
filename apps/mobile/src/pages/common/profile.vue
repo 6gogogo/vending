@@ -11,6 +11,8 @@ import type {
 import { mobileApi } from "../../api/mobile";
 import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
+import { guestCopy } from "../../constants/guest-copy";
+import { resumeGuestBrowsing } from "../../utils/guest-navigation";
 import { createAppLoginContinuation } from "../../utils/app-login-continuation";
 import { getErrorMessage } from "../../utils/error-message";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
@@ -248,6 +250,7 @@ onShow(() => {
         <textarea v-model="form.note" class="text-area" maxlength="1000" :placeholder="profileCopy.notePlaceholder" />
       </view>
 
+      <button class="vm-button vm-button--ghost" :disabled="saving" @tap="resumeGuestBrowsing(sessionStore)">{{ guestCopy.continueBrowse }}</button>
       <button class="primary-button" :loading="saving" :disabled="saving" @tap="submit">
         {{ isImported ? profileCopy.confirm : profileCopy.submitReview }}
       </button>

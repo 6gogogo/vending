@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 
 import { mobileApi } from "../../api/mobile";
+import GuestAccountPrompt from "../../components/GuestAccountPrompt.vue";
 import AccessibilityModeMenu from "../../components/ui/AccessibilityModeMenu.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
@@ -41,7 +42,7 @@ const bootstrap = async () => {
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
-    uni.reLaunch({ url: "/pages/common/login" });
+    syncRoleTabBar("special");
     return;
   }
 
@@ -89,7 +90,9 @@ onShow(() => {
 </script>
 
 <template>
+  <GuestAccountPrompt v-if="sessionStore.bootstrapped && !sessionStore.user" mode="settings" />
   <MobileShell
+    v-else-if="sessionStore.user"
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
     eyebrow="我的"
     title="我的账户"

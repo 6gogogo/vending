@@ -17,6 +17,7 @@ import { MerchantGoodsTemplatesModule } from "./modules/merchant-goods-templates
 import { OperationLogsModule } from "./modules/operation-logs/operation-logs.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { PlatformModule } from "./modules/platform/platform.module";
+import { PublicCatalogModule } from "./modules/public-catalog/public-catalog.module";
 import { RegistrationApplicationsModule } from "./modules/registration-applications/registration-applications.module";
 import { RegionsModule } from "./modules/regions/regions.module";
 import { ReservationsModule } from "./modules/reservations/reservations.module";
@@ -70,6 +71,7 @@ const resolveEnvFilePath = () => {
     UsersModule,
     AccessRulesModule,
     DevicesModule,
+    PublicCatalogModule,
     GoodsModule,
     MerchantGoodsTemplatesModule,
     AlertsModule,

@@ -44,7 +44,7 @@ uiPreferencesStore.hydrate();
 const isGuestPage = computed(() => {
   const currentPage = getCurrentPages().at(-1);
   const route = typeof currentPage?.route === "string" ? currentPage.route : "";
-  return route.startsWith("pages/common/");
+  return !sessionStore.user || route.startsWith("pages/common/");
 });
 
 const accessibilityEnabled = computed(() => {

@@ -84,7 +84,7 @@ test("二维码把领取页作为根页面时先补首页返回栈", () => {
   assert.equal(shouldPreparePickupHomeStack(undefined), false);
 });
 
-test("登录页只恢复有效的扫码领取目标", () => {
+test("登录页只恢复规范柜机目标，并保留查询模式", () => {
   assert.deepEqual(
     resolvePickupLoginTarget({ entry: "pickup", deviceCode: "CAB-1001" }),
     { deviceCode: "CAB-1001" }
@@ -93,9 +93,9 @@ test("登录页只恢复有效的扫码领取目标", () => {
     resolvePickupLoginTarget({ entry: "pickup", deviceCode: "../CAB-1001" }),
     undefined
   );
-  assert.equal(
+  assert.deepEqual(
     resolvePickupLoginTarget({ entry: "query", deviceCode: "CAB-1001" }),
-    undefined
+    { deviceCode: "CAB-1001", mode: "query" }
   );
 });
 

@@ -4,6 +4,7 @@ import { onShow } from "@dcloudio/uni-app";
 import type { DeviceRecord } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import GuestCatalog from "../../components/GuestCatalog.vue";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MobileShell from "../../layouts/MobileShell.vue";
@@ -44,6 +45,7 @@ const sessionStore = useSessionStore();
 const uiPreferencesStore = useUiPreferencesStore();
 const devices = ref<DeviceRecord[]>([]);
 const loading = ref(false);
+const guestRefreshKey = ref(0);
 const loadError = ref("");
 const distanceEnabled = ref(false);
 const mapExpanded = ref(false);
@@ -306,7 +308,8 @@ const load = async () => {
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
-    uni.reLaunch({ url: "/pages/common/login" });
+    syncRoleTabBar("special");
+    guestRefreshKey.value += 1;
     return;
   }
 
@@ -636,7 +639,9 @@ onShow(() => {
 </script>
 
 <template>
+  <GuestCatalog v-if="sessionStore.bootstrapped && !sessionStore.user" mode="nearby" :refresh-key="guestRefreshKey" />
   <MobileShell
+    v-else-if="sessionStore.user"
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
     :eyebrow="pageEyebrow"
     :title="roleLabelMap[sessionStore.user?.role ?? 'special']"

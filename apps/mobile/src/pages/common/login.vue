@@ -30,15 +30,8 @@ const route = async () => {
     });
     return;
   }
-  if (sessionStore.application && sessionStore.draft) {
-    uni.reLaunch({ url: "/pages/common/review-status" });
-    return;
-  }
-  if (sessionStore.draft) {
-    uni.reLaunch({ url: "/pages/common/profile" });
-    return;
-  }
-  uni.reLaunch({ url: "/pages/common/app-login" });
+  // 首次进入、登录失效或资料尚未审核时，均先允许浏览公开服务。
+  uni.switchTab({ url: resolveHomePath() });
 };
 
 onShow(() => { void route(); });

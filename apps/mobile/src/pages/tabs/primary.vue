@@ -11,6 +11,7 @@ import type {
 } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import GuestCatalog from "../../components/GuestCatalog.vue";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
@@ -33,6 +34,7 @@ type AdminTaskFilter = "all" | "expiry" | "feedback" | "system";
 
 const sessionStore = useSessionStore();
 const loading = ref(false);
+const guestRefreshKey = ref(0);
 const loadError = ref("");
 const specialHasLoadedData = ref(false);
 const records = ref<InventoryMovement[]>([]);
@@ -383,7 +385,8 @@ const load = async () => {
   const sessionToken = sessionStore.token;
 
   if (!user) {
-    uni.reLaunch({ url: "/pages/common/login" });
+    syncRoleTabBar("special");
+    guestRefreshKey.value += 1;
     return;
   }
 
@@ -645,7 +648,9 @@ onShow(() => {
 </script>
 
 <template>
+  <GuestCatalog v-if="sessionStore.bootstrapped && !sessionStore.user" :refresh-key="guestRefreshKey" />
   <MobileShell
+    v-else-if="sessionStore.user"
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
     :header-style="sessionStore.user?.role === 'special' ? 'panel' : 'compact'"
     :eyebrow="roleLabelMap[sessionStore.user?.role ?? 'special']"

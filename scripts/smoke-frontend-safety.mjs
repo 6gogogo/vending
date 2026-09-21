@@ -20,7 +20,10 @@ const nearbyPageSource = readSource("apps/mobile/src/pages/tabs/nearby.vue");
 const appLoginPageSource = readSource("apps/mobile/src/pages/common/app-login.vue");
 const cabinetCopySource = readSource("apps/mobile/src/constants/copy.ts");
 assert.match(deviceDetailSource, /resolveCabinetEntry\(query\)/, "柜机页必须统一解析微信 q 与内部扫码入口");
-assert.match(deviceDetailSource, /buildPickupLoginUrl\(deviceCode\.value\)/, "未登录扫码必须保留柜机目标进入登录页");
+const guestCatalogSource = readSource("apps/mobile/src/components/GuestCatalog.vue");
+assert.match(deviceDetailSource, /<GuestCatalog[\s\S]+:scanned="scanMode"/, "未登录扫码先浏览柜机，并保留扫码来源");
+assert.match(guestCatalogSource, /props\.scanned \? buildPickupLoginUrl\(props\.deviceCode\) : buildQueryLoginUrl/, "游客主动登录时必须区分查询与扫码入口");
+assert.doesNotMatch(guestCatalogSource, /getLocation|requestCode|openCabinet|previewOpenSettlement/, "游客浏览不得自动定位、取验证码或开门");
 assert.match(
   appLoginPageSource,
   /createAppLoginContinuation\([\s\S]+bootstrapSession:[\s\S]+getSessionRole:[\s\S]+setSession:[\s\S]+redirectTo:[\s\S]+routeRoleHome:/,

@@ -4,6 +4,8 @@ import { onShow } from "@dcloudio/uni-app";
 
 import { appCopy } from "../../constants/copy";
 import { useSessionStore } from "../../stores/session";
+import { guestCopy } from "../../constants/guest-copy";
+import { resumeGuestBrowsing } from "../../utils/guest-navigation";
 import { createAppLoginContinuation } from "../../utils/app-login-continuation";
 import { getErrorMessage } from "../../utils/error-message";
 import { resolveHomePath, syncRoleTabBar } from "../../utils/role-routing";
@@ -92,6 +94,7 @@ onShow(() => {
         {{ isRejected ? reviewCopy.edit : reviewCopy.refresh }}
       </button>
       <button class="support-button" @tap="feedback">{{ reviewCopy.support }}</button>
+      <button class="support-button" @tap="resumeGuestBrowsing(sessionStore)">{{ guestCopy.continueBrowse }}</button>
     </view>
   </view>
 </template>

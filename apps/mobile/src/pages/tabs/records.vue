@@ -4,6 +4,7 @@ import { onShow } from "@dcloudio/uni-app";
 import type { InventoryMovement, OperationLogRecord, RegistrationApplication, UserRecord } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
+import GuestAccountPrompt from "../../components/GuestAccountPrompt.vue";
 import EmptyState from "../../components/ui/EmptyState.vue";
 import GlassCard from "../../components/ui/GlassCard.vue";
 import MenuIcon from "../../components/ui/MenuIcon.vue";
@@ -100,7 +101,11 @@ const load = async () => {
   await sessionStore.bootstrap();
 
   if (!sessionStore.user) {
-    uni.reLaunch({ url: "/pages/common/login" });
+    syncRoleTabBar("special");
+    records.value = [];
+    adminUsers.value = [];
+    adminLogs.value = [];
+    pendingApplications.value = [];
     return;
   }
 
@@ -219,7 +224,9 @@ onShow(() => {
 </script>
 
 <template>
+  <GuestAccountPrompt v-if="sessionStore.bootstrapped && !sessionStore.user" mode="records" />
   <MobileShell
+    v-else-if="sessionStore.user"
     :mode="sessionStore.user?.role === 'special' ? 'care' : sessionStore.user?.role ? 'ops' : 'care'"
     eyebrow="记录"
     :title="title"

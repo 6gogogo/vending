@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
-import { onLoad, onShow } from "@dcloudio/uni-app";
+import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 
 import type { AppLoginResult, VerificationProvider } from "@vm/shared-types";
 
 import { mobileApi } from "../../api/mobile";
 import { loadMobileRuntimeConfig } from "../../api/runtime-config";
 import { appCopy } from "../../constants/copy";
+import { guestCopy } from "../../constants/guest-copy";
+import { resolveGuestReturnTab, resumeGuestBrowsing } from "../../utils/guest-navigation";
 import userDisclaimerText from "../../content/smart-cabinet-user-disclaimer.md?raw";
 import { useSessionStore } from "../../stores/session";
 import { createAppLoginContinuation } from "../../utils/app-login-continuation";
@@ -37,6 +39,8 @@ const disclaimerDialog = ref<HTMLElement | { $el?: HTMLElement }>();
 let disclaimerPreviousFocus: HTMLElement | undefined;
 const verificationProvider = ref<VerificationProvider>();
 const pendingPickupTarget = ref<PickupLoginTarget>();
+const returnTab = ref<string>();
+let entryRestored = false;
 const showVerificationPreview =
   import.meta.env.DEV && import.meta.env.VITE_SHOW_VERIFICATION_PREVIEW === "true";
 
@@ -59,7 +63,7 @@ const { continueApprovedLogin } = createAppLoginContinuation({
   redirectTo: (url) => uni.redirectTo({ url }),
   routeRoleHome: (role) => {
     syncRoleTabBar(role);
-    uni.switchTab({ url: resolveHomePath(role) });
+    uni.switchTab({ url: returnTab.value ? resolveGuestReturnTab(returnTab.value) : resolveHomePath(role) });
   }
 });
 
@@ -222,9 +226,10 @@ const submit = async () => {
 
 const restoreEntry = async () => {
   await sessionStore.bootstrap();
-  if (pendingPickupTarget.value) {
+  if (!entryRestored) {
     sessionStore.setPickupTarget(pendingPickupTarget.value);
     pendingPickupTarget.value = undefined;
+    entryRestored = true;
   }
 
   if (sessionStore.user) {
@@ -254,6 +259,7 @@ const goFeedback = () => {
 
 onLoad((query) => {
   pendingPickupTarget.value = resolvePickupLoginTarget(query);
+  returnTab.value = typeof query.returnTab === "string" ? query.returnTab : undefined;
   if (typeof query.phone === "string") phone.value = query.phone;
 });
 
@@ -264,6 +270,10 @@ onShow(() => {
 
 onMounted(() => {
   void syncLoginInputAccessibility();
+});
+
+onUnload(() => {
+  if (!sessionStore.user && !sessionStore.draft) sessionStore.setPickupTarget(undefined);
 });
 </script>
 
@@ -285,6 +295,7 @@ onMounted(() => {
         <view class="auth-card__accent-orange" />
       </view>
       <text class="auth-card__title">{{ authCopy.login.cardTitle }}</text>
+      <text class="login-purpose">{{ guestCopy.loginPurpose }}</text>
 
       <view class="field-group">
         <text id="app-login-phone-label" class="field-label">{{ authCopy.login.phoneLabel }}</text>
@@ -363,6 +374,7 @@ onMounted(() => {
         {{ authCopy.login.submit }}
       </button>
       <button class="support-button" @tap="goFeedback">{{ authCopy.login.support }}</button>
+      <button class="support-button" :disabled="submitting" @tap="resumeGuestBrowsing(sessionStore, returnTab)">{{ guestCopy.continueBrowse }}</button>
     </view>
 
     <view v-if="showDisclaimer" class="disclaimer-mask">
@@ -396,6 +408,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.login-purpose { display: block; color: #6c6257; font-size: 27rpx; line-height: 1.65; }
 .auth-page {
   box-sizing: border-box;
   min-height: 100vh;

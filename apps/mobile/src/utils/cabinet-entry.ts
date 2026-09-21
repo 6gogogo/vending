@@ -9,6 +9,8 @@ export interface CabinetEntry {
 
 export interface PickupLoginTarget {
   deviceCode: string;
+  /** 查询入口不应因登录而被当作已经现场扫码。旧扫码目标省略此字段。 */
+  mode?: CabinetEntryMode;
 }
 
 const DEVICE_CODE_PATTERN = /^[A-Za-z0-9-]+$/;
@@ -70,21 +72,31 @@ export const buildPickupLoginUrl = (deviceCode: string) =>
 export const buildPickupDeviceUrl = (deviceCode: string) =>
   `/pages/special/device-detail?deviceCode=${requireDeviceCode(deviceCode)}&scan=1`;
 
+export const buildDeviceQueryUrl = (deviceCode: string) =>
+  `/pages/special/device-detail?deviceCode=${requireDeviceCode(deviceCode)}`;
+
+export const buildQueryLoginUrl = (deviceCode: string) =>
+  `/pages/common/app-login?entry=query&deviceCode=${requireDeviceCode(deviceCode)}`;
+
 export const shouldPreparePickupHomeStack = (pageCount: number | undefined) =>
   pageCount === 1;
 
 export const resolvePickupLoginTarget = (
   query: Record<string, unknown>
 ): PickupLoginTarget | undefined => {
-  if (query.entry !== "pickup") {
+  if (query.entry !== "pickup" && query.entry !== "query") {
     return undefined;
   }
 
   const deviceCode = normalizeDeviceCode(query.deviceCode);
-  return deviceCode ? { deviceCode } : undefined;
+  return deviceCode
+    ? query.entry === "query" ? { deviceCode, mode: "query" } : { deviceCode }
+    : undefined;
 };
 
 export const resolvePickupPostLoginUrl = (
   role: UserRole,
   target?: PickupLoginTarget
-) => role === "special" && target ? buildPickupDeviceUrl(target.deviceCode) : undefined;
+) => role === "special" && target
+  ? target.mode === "query" ? buildDeviceQueryUrl(target.deviceCode) : buildPickupDeviceUrl(target.deviceCode)
+  : undefined;

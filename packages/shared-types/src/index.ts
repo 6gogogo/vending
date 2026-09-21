@@ -923,6 +923,25 @@ export interface DeviceDoor {
   goods: DeviceGoods[];
 }
 
+/** 游客浏览专用白名单，不包含人员、账本批次或柜门运行明细。 */
+export interface PublicDeviceGoods {
+  goodsId: string;
+  name: string;
+  category: GoodsCategory;
+  imageUrl: string;
+  stock: number;
+  status: "active" | "inactive";
+}
+
+export interface PublicDevice {
+  deviceCode: string;
+  name: string;
+  location: string;
+  address?: string;
+  status: DeviceStatus;
+  doors: Array<{ doorNum: string; label: string; goods: PublicDeviceGoods[] }>;
+}
+
 export interface DeviceRuntimeState {
   deviceCode: string;
   doorState: "open" | "closed" | "unknown";
