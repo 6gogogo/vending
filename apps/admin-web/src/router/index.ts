@@ -13,25 +13,25 @@ import {
 } from "../stores/session";
 import { adminApiBaseUrl } from "../api/client";
 import AdminLayout from "../layouts/AdminLayout.vue";
-import AdminLoginPage from "../pages/AdminLoginPage.vue";
-import BackofficePasswordResetPage from "../pages/BackofficePasswordResetPage.vue";
-import PublicGuidePage from "../pages/PublicGuidePage.vue";
-import AiWorkspacePage from "../pages/AiWorkspacePage.vue";
-import DataMonitorPage from "../pages/DataMonitorPage.vue";
-import DashboardPage from "../pages/DashboardPage.vue";
-import DeviceWorkspacePage from "../pages/DeviceWorkspacePage.vue";
-import GoodsDetailPage from "../pages/GoodsDetailPage.vue";
-import LogsPage from "../pages/LogsPage.vue";
-import LogDetailPage from "../pages/LogDetailPage.vue";
-import MerchantBackofficePage from "../pages/MerchantBackofficePage.vue";
-import OperationsPage from "../pages/OperationsPage.vue";
-import PlatformOverviewPage from "../pages/PlatformOverviewPage.vue";
-import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
-import GoodsTaxonomyPage from "../pages/GoodsTaxonomyPage.vue";
-import SystemSettingsPage from "../pages/SystemSettingsPage.vue";
-import UserDetailPage from "../pages/UserDetailPage.vue";
-import UsersPage from "../pages/UsersPage.vue";
-import WarehousePage from "../pages/WarehousePage.vue";
+const AdminLoginPage = () => import("../pages/AdminLoginPage.vue");
+const BackofficePasswordResetPage = () => import("../pages/BackofficePasswordResetPage.vue");
+const PublicGuidePage = () => import("../pages/PublicGuidePage.vue");
+const AiWorkspacePage = () => import("../pages/AiWorkspacePage.vue");
+const DataMonitorPage = () => import("../pages/DataMonitorPage.vue");
+const DashboardPage = () => import("../pages/DashboardPage.vue");
+const DeviceWorkspacePage = () => import("../pages/DeviceWorkspacePage.vue");
+const GoodsDetailPage = () => import("../pages/GoodsDetailPage.vue");
+const LogsPage = () => import("../pages/LogsPage.vue");
+const LogDetailPage = () => import("../pages/LogDetailPage.vue");
+const MerchantBackofficePage = () => import("../pages/MerchantBackofficePage.vue");
+const OperationsPage = () => import("../pages/OperationsPage.vue");
+const PlatformOverviewPage = () => import("../pages/PlatformOverviewPage.vue");
+const GoodsOverviewPage = () => import("../pages/GoodsOverviewPage.vue");
+const GoodsTaxonomyPage = () => import("../pages/GoodsTaxonomyPage.vue");
+const SystemSettingsPage = () => import("../pages/SystemSettingsPage.vue");
+const UserDetailPage = () => import("../pages/UserDetailPage.vue");
+const UsersPage = () => import("../pages/UsersPage.vue");
+const WarehousePage = () => import("../pages/WarehousePage.vue");
 
 const resolveDefaultBackofficePath = () => {
   const sessionStore = useAdminSessionStore();
@@ -61,6 +61,11 @@ const resolveRequiredBackofficeRoles = (meta: Record<string, unknown>): Backoffi
 
 export const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition;
+    if (to.path !== from.path || to.query.section !== from.query.section) return { top: 0 };
+    return false;
+  },
   routes: [
     {
       path: "/login",

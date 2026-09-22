@@ -196,7 +196,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="admin-page">
+  <section class="admin-page logs-workspace">
     <section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>

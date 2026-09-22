@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkspaceSections from "../components/WorkspaceSections.vue";
+import { useWorkspaceSection } from "../utils/use-workspace-section";
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { readSheet } from "read-excel-file/browser";
@@ -1940,25 +1942,302 @@ const applyBatchPolicies = async () => {
 };
 
 onMounted(load);
+const workspaceSections = computed(() => [
+  { value: "directory", label: "人员台账", count: users.value.length },
+  ...(canReviewRegistrations.value ? [{ value: "registrations", label: "注册审核", count: pendingRegistrationCount.value }] : []),
+  ...(showExtendedUserConfiguration.value ? [{ value: "rules", label: "领取与预约" }] : [{ value: "setup", label: "初始化指引" }]),
+  ...(showExtendedUserConfiguration.value && canManageUsers.value ? [{ value: "regions", label: "地区管理" }] : []),
+  ...(canManageManualVerificationCodes.value ? [{ value: "verification", label: "验证码记录" }] : [])
+]);
+const activeSection = useWorkspaceSection(workspaceSections);
+const expandedUserId = ref<string>();
 </script>
 
 <template>
-  <section class="admin-page">
-    <section v-if="showExtendedUserConfiguration" class="admin-page__section users-setup-section">
+<section class="admin-page users-workspace">
+<WorkspaceSections :active="activeSection" :items="workspaceSections" />
+<div class="workspace-toolbar"><p class="admin-copy">共 {{ users.length }} 位人员<span v-if="selectedUserIds.length"> · 已选 {{ selectedUserIds.length }} 人</span></p><div class="admin-inline-links"><RouterLink v-if="showExtendedUserConfiguration && selectedSpecialUsers.length" class="admin-button admin-button--ghost" to="/users?section=rules">批量绑定规则（{{ selectedSpecialUsers.length }}）</RouterLink><template v-if="canManageUsers"><a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>下载 Excel 模板</a><button class="admin-button admin-button--ghost" @click="openPersonnelImport">导入 Excel</button><button class="admin-button" @click="openCreateUser">新增人员</button></template></div></div>
+<div
+      v-if="actionMessage"
+      class="users-action-message"
+      :class="actionMessage.type === 'error' ? 'admin-alert admin-alert--danger' : 'users-action-message--success'"
+      :role="actionMessage.type === 'error' ? 'alert' : 'status'"
+      :aria-live="actionMessage.type === 'error' ? 'assertive' : 'polite'"
+      aria-atomic="true"
+    >
+      {{ actionMessage.text }}
+    </div>
+<section v-show="activeSection === 'directory'" class="admin-page__section">
+
+
+      <div class="users-filters admin-panel admin-panel-block">
+        <label class="admin-field">
+          <span class="admin-field__label">分类</span>
+          <select v-model="roleFilter" class="admin-select">
+            <option value="all">全部</option>
+            <option value="special">特殊群体</option>
+            <option value="merchant">商家</option>
+            <option value="restocker">补货员</option>
+            <option value="admin">管理员</option>
+          </select>
+        </label>
+        <label v-if="showExtendedUserConfiguration" class="admin-field">
+          <span class="admin-field__label">按地区分类</span>
+          <select v-model="regionFilter" class="admin-select">
+            <option value="all">全部地区</option>
+            <option v-for="regionName in visibleRegionNames" :key="regionName" :value="regionName">
+              {{ regionName }}
+            </option>
+          </select>
+        </label>
+        <label class="admin-field">
+          <span class="admin-field__label">搜索</span>
+          <input v-model="keyword" class="admin-input" placeholder="输入姓名、手机号、标签或区域" />
+        </label>
+
+        <div class="users-filters__summary users-compact-status">
+          当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。人员台账默认按地区分组，特殊群体领取状态单独显示。
+        </div>
+      </div>
+    </section>
+<article v-show="activeSection === 'directory'" class="admin-panel admin-panel-block">
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">人员台账</span>
+            <h3 class="admin-panel__title">人员列表</h3>
+          </div>
+          <div class="admin-inline-links">
+            <button class="admin-button admin-button--ghost" @click="toggleSelectAll">{{ allFilteredSelected ? "取消全选" : "全选当前结果" }}</button>
+            <select v-if="canManageUsers" v-model="migrationRegionId" class="admin-select users-region-migrate-select">
+              <option value="">迁移到地区</option>
+              <option v-for="region in regionOptions" :key="region.id" :value="region.id">{{ region.name }}</option>
+            </select>
+            <button
+              v-if="canManageUsers"
+              class="admin-button admin-button--ghost"
+              :disabled="migratingUsers || !selectedUsers.length || !migrationRegionId"
+              @click="migrateSelectedUsers"
+            >
+              {{ migratingUsers ? "迁移中" : `批量迁移（${selectedUsers.length}）` }}
+            </button>
+            <button
+              v-if="canManageUsers"
+              class="admin-button admin-button--danger"
+              :disabled="removingSelectedUsers || !selectedUsers.length"
+              @click="removeSelectedUsers"
+            >
+              {{
+                removingSelectedUsers
+                  ? adminCopy.users.batchRemovingButton
+                  : adminCopy.users.batchRemoveButton(selectedUsers.length)
+              }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="groupedUsers.length" class="users-region-groups users-directory-table">
+          <section v-for="group in groupedUsers" :key="group.regionName" class="users-region-group">
+            <div class="users-region-group__head">
+              <span class="admin-kicker">{{ group.regionName }}</span>
+              <span class="admin-table__subtext">{{ group.users.length }} 人</span>
+            </div>
+            <table class="admin-table">
+              <thead><tr><th>选择</th><th>人员 / 角色</th><th>手机号</th><th>地区 / 标签</th><th>每日物资</th><th>台账状态</th><th>操作</th></tr></thead>
+              <tbody>
+                <template v-for="user in group.users" :key="user.id"><tr><td><input type="checkbox" :checked="selectedUserIds.includes(user.id)" :aria-label="`选择人员 ${user.name}`" @change="toggleUser(user.id)" /></td>
+<td>
+                    <RouterLink class="admin-link" :to="`/users/${user.id}`">{{ user.name }}</RouterLink>
+                    <span class="admin-table__subtext">{{ formatRole(user.role) }}</span>
+                  </td>
+<td>
+                    <span class="admin-code">{{ user.phone }}</span>
+                    <span class="admin-table__subtext">{{ registrationLabel(user) }}</span>
+                  </td>
+<td>
+                    <span class="admin-table__strong">{{ user.regionName || "未分配区域" }}</span>
+                    <span class="admin-table__subtext">{{ user.tags.join("、") || "无标签" }}</span>
+                  </td>
+<td><span class="admin-table__strong">{{ user.role === "special" ? policySummary(user.id) : "不适用" }}</span></td>
+<td>
+                    <span class="admin-pill" :class="ledgerStatusTone(user.ledgerStatus)">{{ formatLedgerStatus(user.ledgerStatus) }}</span>
+                  </td>
+<td>
+                    <div class="admin-inline-links">
+                      <RouterLink class="admin-link" :to="`/users/${user.id}`">详情</RouterLink>
+                      <button v-if="canManageUsers" class="admin-text-button" @click="openEditUser(user)">编辑</button>
+
+                    <button class="admin-text-button" :aria-expanded="expandedUserId === user.id" :aria-controls="'user-management-' + user.id" @click="expandedUserId = expandedUserId === user.id ? undefined : user.id">{{ expandedUserId === user.id ? '收起管理' : '管理' }}</button></div>
+                  </td></tr><tr v-if="expandedUserId === user.id" :id="'user-management-' + user.id" class="users-management-row"><td colspan="7"><div class="users-management-grid"><div><span class="admin-kicker">账号权限</span>
+                    <span class="admin-table__strong">{{ backofficeStatusLabel(user) }}</span>
+                    <button
+                      v-if="canManageBackofficeCredentials && isBackofficeEligibleUser(user)"
+                      class="admin-text-button"
+                      type="button"
+                      @click="openBackofficeAccount(user)"
+                    >
+                      {{ backofficeCredentialForUser(user) ? "配置权限" : "开通后台" }}
+                    </button>
+                    <button
+                      v-if="canSupervisorResetPassword(user)"
+                      class="admin-text-button"
+                      type="button"
+                      @click="openSupervisorPasswordReset(user)"
+                    >
+                      代重置密码
+                    </button>
+                  </div><div><span class="admin-kicker">柜机分配</span>
+                    <span class="admin-table__strong">{{ assignedDeviceSummary(user) }}</span>
+                    <button
+                      v-if="canManageUsers && isDeviceAssignableUser(user)"
+                      class="admin-text-button"
+                      type="button"
+                      @click="openDeviceAssignment(user)"
+                    >
+                      分配柜机
+                    </button>
+                  </div><div><span class="admin-kicker">登录验证</span><span class="admin-table__subtext">{{ user.status === 'active' ? '账号已启用' : '账号已停用' }} · {{ user.id }}</span><button
+                        v-if="canManageManualVerificationCodes && user.status === 'active'"
+                        class="admin-text-button"
+                        type="button"
+                        @click="openManualVerificationCode(user)"
+                      >
+                        签发验证码
+                      </button></div></div></td></tr></template>
+              </tbody>
+            </table>
+          </section>
+        </div>
+        <div v-else class="admin-empty">
+          <div class="admin-empty__title">{{ loading ? "正在加载人员列表" : "没有匹配到任何人员" }}</div>
+          <div class="admin-empty__body">请调整筛选条件，或确认后端当前是否已有人员数据。</div>
+        </div>
+      </article>
+<section v-show="activeSection === 'registrations'" v-if="canReviewRegistrations" class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
-          <p class="admin-kicker">业务配置</p>
-          <h3 class="admin-page__section-title">先建人员，再配置每日可领取物资和预约规则</h3>
-        </div>
-        <div v-if="canManageUsers" class="admin-inline-links">
-          <a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>下载 Excel 模板</a>
-          <button class="admin-button admin-button--ghost" @click="openPersonnelImport">导入 Excel</button>
-          <button class="admin-button" @click="openCreateUser">新增人员</button>
+          <p class="admin-kicker">注册审核</p>
+          <h3 class="admin-page__section-title">处理注册申请</h3>
         </div>
       </div>
 
+      <div class="admin-panel admin-panel-block users-review-block">
+        <div
+          v-if="registrationApplicationsError"
+          class="admin-alert admin-alert--danger"
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
+        >
+          审核数据加载失败：{{ registrationApplicationsError }}
+          <button class="admin-text-button" type="button" @click="loadRegistrationApplications">重试审核数据</button>
+        </div>
+        <div class="users-review-tabs" role="group" aria-label="审核状态">
+          <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'pending' }" @click="reviewFilter = 'pending'">待审核 {{ registrationApplications.filter((item) => item.status === "pending").length }}</button>
+          <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'rejected' }" @click="reviewFilter = 'rejected'">已驳回 {{ registrationApplications.filter((item) => item.status === "rejected").length }}</button>
+          <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'approved' }" @click="reviewFilter = 'approved'">已登记 {{ registrationApplications.filter((item) => item.status === "approved").length }}</button>
+        </div>
+
+        <div v-if="!registrationApplicationsError && filteredApplications.length" class="admin-list users-contained-list">
+          <div v-for="item in filteredApplications" :key="item.id" class="admin-list__row users-review-row">
+            <div class="admin-list__main">
+              <span class="admin-list__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</span>
+              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : item.requestedRole === "restocker" ? "补货员" : "实例管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
+              <span class="admin-table__subtext">{{ item.requestedRole === "special" ? `${item.profile.regionName || "待补充区域"}${item.profile.note ? ` · ${item.profile.note}` : ""}` : item.requestedRole === "merchant" ? `${item.profile.contactName || "待补充联系人"} · ${item.profile.address || "待补充地址"}` : `${item.profile.organization || "待补充单位"} · ${item.profile.title || "待补充职务"}` }}</span>
+              <span v-if="item.reviewReason" class="users-review-row__reason">驳回原因：{{ item.reviewReason }}</span>
+            </div>
+            <div class="users-review-row__actions">
+              <span class="admin-pill" :class="item.status === 'approved' ? 'admin-pill--success' : item.status === 'pending' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ item.status === "pending" ? "待审核" : item.status === "approved" ? "已通过" : "已驳回" }}</span>
+              <template v-if="item.status === 'pending'">
+                <input v-if="canReviewRegistrations" v-model="rejectReasons[item.id]" class="admin-input" placeholder="驳回时填写原因（选填）" />
+                <div v-if="canReviewRegistrations" class="admin-inline-links">
+                  <button class="admin-button" :disabled="saving || Boolean(reviewingApplicationId)" @click="reviewApplication(item.id, 'approved')">{{ reviewingApplicationId === item.id ? "处理中" : "通过" }}</button>
+                  <button class="admin-button admin-button--ghost" :disabled="saving || Boolean(reviewingApplicationId)" @click="reviewApplication(item.id, 'rejected')">{{ reviewingApplicationId === item.id ? "处理中" : "驳回" }}</button>
+                </div>
+                <span v-else class="admin-table__subtext">审核申请需要“注册审核”权限。</span>
+              </template>
+              <RouterLink v-if="item.linkedUserId" class="admin-link" :to="`/users/${item.linkedUserId}`">查看已登记详情</RouterLink>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="!registrationApplicationsError" class="admin-empty">
+          <div class="admin-empty__title">{{ loading ? "正在加载审核列表" : "当前分类下没有注册申请" }}</div>
+          <div class="admin-empty__body">新的注册申请会在这里出现，审核通过后会自动进入已登记人员列表。</div>
+        </div>
+      </div>
+    </section>
+<aside v-show="activeSection === 'rules'" v-if="showExtendedUserConfiguration" class="admin-grid">
+        <article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">批量策略绑定</span>
+              <h3 class="admin-panel__title">模板用于批量生成每日可领取物资</h3>
+            </div>
+          </div>
+          <div class="users-side-block">
+            <div class="admin-note">
+              {{ canManageUserRules ? `已选特殊群体 ${selectedSpecialUsers.length} 人。绑定后会按模板的星期、时段和货品数量生效。` : "当前账号只能查看每日物资模板，批量绑定或覆盖需要“取货规则管理”权限。" }}
+            </div>
+            <label class="admin-field">
+              <span class="admin-field__label">操作方式</span>
+              <select v-model="batchMode" class="admin-select" :disabled="!canManageUserRules">
+                <option value="bind">新增为个人设定</option>
+                <option value="replace">覆盖个人设定</option>
+                <option value="unbind">解绑以下模板</option>
+              </select>
+            </label>
+            <div class="admin-field">
+              <span class="admin-field__label">模板选择</span>
+              <div class="users-policy-checklist">
+                <label v-for="policy in policies" :key="policy.id" class="users-policy-check">
+                  <input v-model="batchPolicyIds" type="checkbox" :value="policy.id" :disabled="!canManageUserRules" />
+                  <span>{{ policy.name }}</span>
+                  <span class="admin-table__subtext">{{ policy.applicableUserIds.length }} 人</span>
+                </label>
+              </div>
+            </div>
+            <div class="admin-note">
+              {{
+                batchMode === "replace"
+                  ? "覆盖会把模板拆成按货品的每日设定，并在下一个业务日替换当前个人设置。"
+                  : "新增会把模板中的每个货品最小单元追加到所选特殊群体人员的每日设定中。"
+              }}
+            </div>
+            <button class="admin-button" :disabled="saving || !canManageUserRules || !selectedSpecialUsers.length || !batchPolicyIds.length" @click="applyBatchPolicies">{{ saving ? "保存中" : batchMode === "replace" ? "覆盖每日物资" : "新增每日物资" }}</button>
+          </div>
+        </article>
+
+        <article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head">
+            <div>
+              <span class="admin-kicker">每日物资模板库</span>
+              <h3 class="admin-panel__title">管理时段、星期和货品数量</h3>
+            </div>
+            <button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="openCreatePolicy">新增模板</button>
+          </div>
+          <div v-if="policies.length" class="admin-list users-contained-list users-contained-list--side">
+            <div v-for="policy in policies" :key="policy.id" class="admin-list__row users-policy-row">
+              <div class="admin-list__main">
+                <span class="admin-list__title">{{ policy.name }}</span>
+                <span class="admin-list__meta">{{ formatWeekdays(policy.weekdays) }} · {{ String(policy.startHour).padStart(2, "0") }}:00-{{ String(policy.endHour).padStart(2, "0") }}:00 · {{ policy.applicableUserIds.length }} 人</span>
+                <span class="admin-table__subtext">{{ formatPolicyLimits(policy) }}</span>
+              </div>
+              <div class="admin-inline-links">
+                <span class="admin-pill" :class="policy.status === 'active' ? 'admin-pill--success' : 'admin-pill--warning'">{{ policy.status === "active" ? "启用中" : "已停用" }}</span>
+                <button v-if="canManageUserRules" class="admin-text-button" @click="openEditPolicy(policy)">编辑</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="admin-empty">
+            <div class="admin-empty__title">当前还没有每日物资模板</div>
+            <div class="admin-empty__body">请先新增模板，再批量绑定到特殊群体人员。</div>
+          </div>
+        </article>
+      </aside>
+<section v-show="activeSection === 'rules'" v-if="showExtendedUserConfiguration" class="admin-page__section users-setup-section">
+
+
       <div class="users-setup-grid">
-        <article class="admin-panel admin-panel-block users-setup-flow">
+        <details class="workspace-details users-setup-help"><summary>首次配置指引 · 人员、物资与模板</summary><div class="workspace-details__body"><article class="admin-panel admin-panel-block users-setup-flow">
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">配置顺序</span>
@@ -2001,7 +2280,7 @@ onMounted(load);
               <button class="admin-button admin-button--ghost" @click="loadReservationSettings">刷新</button>
             </div>
           </div>
-        </article>
+        </article></div></details>
 
         <article class="admin-panel admin-panel-block users-reservation-card">
           <div class="admin-panel__head">
@@ -2068,19 +2347,8 @@ onMounted(load);
         </article>
       </div>
     </section>
+<section v-show="activeSection === 'setup'" v-if="!showExtendedUserConfiguration" class="admin-page__section">
 
-    <section v-else class="admin-page__section">
-      <div class="admin-page__section-head">
-        <div>
-          <p class="admin-kicker">实例初始化</p>
-          <h3 class="admin-page__section-title">先新增人员，再分配柜机并开通登录</h3>
-        </div>
-        <div v-if="canManageUsers" class="admin-inline-links">
-          <a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>下载 Excel 模板</a>
-          <button class="admin-button admin-button--ghost" @click="openPersonnelImport">导入 Excel</button>
-          <button class="admin-button" @click="openCreateUser">新增人员</button>
-        </div>
-      </div>
       <article class="admin-panel admin-panel-block users-tenant-flow">
         <div class="users-setup-step">
           <span class="users-setup-step__index">1</span>
@@ -2113,207 +2381,7 @@ onMounted(load);
       </article>
     </section>
 
-    <div
-      v-if="actionMessage"
-      class="users-action-message"
-      :class="actionMessage.type === 'error' ? 'admin-alert admin-alert--danger' : 'users-action-message--success'"
-      :role="actionMessage.type === 'error' ? 'alert' : 'status'"
-      :aria-live="actionMessage.type === 'error' ? 'assertive' : 'polite'"
-      aria-atomic="true"
-    >
-      {{ actionMessage.text }}
-    </div>
-
-    <section v-if="canManageManualVerificationCodes" class="admin-page__section">
-      <div class="admin-page__section-head">
-        <div>
-          <p class="admin-kicker">一次性验证码</p>
-          <h3 class="admin-page__section-title">只为当前实例中的已启用账号签发</h3>
-        </div>
-        <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
-          {{ loading ? "刷新中" : "刷新记录" }}
-        </button>
-      </div>
-      <article class="admin-panel admin-panel-block users-manual-grants">
-        <div class="users-compact-status">
-          <span>6 位、单次使用；连续输错 5 次锁定</span>
-          <div class="admin-inline-links">
-            <button
-              class="admin-text-button"
-              type="button"
-              :disabled="!terminalManualVerificationGrants.length || clearingManualGrantHistory"
-              @click="toggleAllTerminalManualGrants"
-            >
-              {{ allTerminalManualGrantsSelected ? "取消选择历史" : "选择全部历史" }}
-            </button>
-            <button
-              class="admin-button admin-button--danger"
-              type="button"
-              :disabled="!selectedManualGrantIds.length || clearingManualGrantHistory"
-              @click="clearSelectedManualVerificationGrants"
-            >
-              {{ clearingManualGrantHistory ? "清除中" : `批量清除（${selectedManualGrantIds.length}）` }}
-            </button>
-          </div>
-        </div>
-        <table v-if="visibleManualVerificationGrants.length" class="admin-table">
-          <thead>
-            <tr>
-              <th>选择</th>
-              <th>目标账号</th>
-              <th>用途</th>
-              <th>状态</th>
-              <th>有效期</th>
-              <th>失败次数</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="grant in visibleManualVerificationGrants" :key="grant.id">
-              <td>
-                <input
-                  v-if="grant.status !== 'active'"
-                  type="checkbox"
-                  :checked="selectedManualGrantIds.includes(grant.id)"
-                  :aria-label="`选择验证码历史 ${grant.userName}`"
-                  @change="toggleManualGrant(grant.id)"
-                />
-                <span v-else class="admin-table__subtext">—</span>
-              </td>
-              <td>
-                <span class="admin-table__strong">{{ grant.userName }}</span>
-                <span class="admin-table__subtext">{{ grant.userId }}</span>
-              </td>
-              <td>{{ manualPurposeLabel(grant.purpose) }}</td>
-              <td>
-                <span class="admin-pill" :class="manualGrantStatusTone(grant.status)">
-                  {{ manualGrantStatusLabel(grant.status) }}
-                </span>
-              </td>
-              <td class="admin-code">{{ formatDateTime(grant.expiresAt) }}</td>
-              <td>{{ grant.failedAttempts }}/5</td>
-              <td>
-                <button
-                  v-if="grant.status === 'active'"
-                  class="admin-text-button"
-                  type="button"
-                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId || clearingManualGrantHistory)"
-                  @click="revokeManualVerificationGrant(grant)"
-                >
-                  {{ revokingManualGrantId === grant.id ? "撤销中" : "撤销" }}
-                </button>
-                <button
-                  v-else
-                  class="admin-text-button"
-                  type="button"
-                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId || clearingManualGrantHistory)"
-                  @click="clearManualVerificationGrant(grant)"
-                >
-                  {{ clearingManualGrantId === grant.id ? "清除中" : "清除记录" }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="admin-empty">
-          <div class="admin-empty__title">还没有一次性验证码记录</div>
-          <div class="admin-empty__body">在下方人员台账选择已启用账号并点击“签发验证码”。</div>
-        </div>
-      </article>
-    </section>
-
-    <section v-if="canReviewRegistrations" class="admin-page__section">
-      <div class="admin-page__section-head">
-        <div>
-          <p class="admin-kicker">注册审核</p>
-          <h3 class="admin-page__section-title">同页处理待审核、已驳回和已登记人员</h3>
-        </div>
-      </div>
-
-      <div class="admin-panel admin-panel-block users-review-block">
-        <div
-          v-if="registrationApplicationsError"
-          class="admin-alert admin-alert--danger"
-          role="alert"
-          aria-live="assertive"
-          aria-atomic="true"
-        >
-          审核数据加载失败：{{ registrationApplicationsError }}
-          <button class="admin-text-button" type="button" @click="loadRegistrationApplications">重试审核数据</button>
-        </div>
-        <div class="users-review-tabs">
-          <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'pending' }" @click="reviewFilter = 'pending'">待审核 {{ registrationApplications.filter((item) => item.status === "pending").length }}</button>
-          <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'rejected' }" @click="reviewFilter = 'rejected'">已驳回 {{ registrationApplications.filter((item) => item.status === "rejected").length }}</button>
-          <button class="admin-button" :class="{ 'admin-button--ghost': reviewFilter !== 'approved' }" @click="reviewFilter = 'approved'">已登记 {{ registrationApplications.filter((item) => item.status === "approved").length }}</button>
-        </div>
-
-        <div v-if="!registrationApplicationsError && filteredApplications.length" class="admin-list users-contained-list">
-          <div v-for="item in filteredApplications" :key="item.id" class="admin-list__row users-review-row">
-            <div class="admin-list__main">
-              <span class="admin-list__title">{{ item.profile.merchantName || item.profile.name || item.phone }}</span>
-              <span class="admin-list__meta">{{ item.phone }} · {{ item.requestedRole === "special" ? "用户" : item.requestedRole === "merchant" ? "商家" : item.requestedRole === "restocker" ? "补货员" : "实例管理员" }} · 更新于 {{ formatDateTime(item.updatedAt) }}</span>
-              <span class="admin-table__subtext">{{ item.requestedRole === "special" ? `${item.profile.regionName || "待补充区域"}${item.profile.note ? ` · ${item.profile.note}` : ""}` : item.requestedRole === "merchant" ? `${item.profile.contactName || "待补充联系人"} · ${item.profile.address || "待补充地址"}` : `${item.profile.organization || "待补充单位"} · ${item.profile.title || "待补充职务"}` }}</span>
-              <span v-if="item.reviewReason" class="users-review-row__reason">驳回原因：{{ item.reviewReason }}</span>
-            </div>
-            <div class="users-review-row__actions">
-              <span class="admin-pill" :class="item.status === 'approved' ? 'admin-pill--success' : item.status === 'pending' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ item.status === "pending" ? "待审核" : item.status === "approved" ? "已通过" : "已驳回" }}</span>
-              <template v-if="item.status === 'pending'">
-                <input v-if="canReviewRegistrations" v-model="rejectReasons[item.id]" class="admin-input" placeholder="驳回时填写原因（选填）" />
-                <div v-if="canReviewRegistrations" class="admin-inline-links">
-                  <button class="admin-button" :disabled="saving || Boolean(reviewingApplicationId)" @click="reviewApplication(item.id, 'approved')">{{ reviewingApplicationId === item.id ? "处理中" : "通过" }}</button>
-                  <button class="admin-button admin-button--ghost" :disabled="saving || Boolean(reviewingApplicationId)" @click="reviewApplication(item.id, 'rejected')">{{ reviewingApplicationId === item.id ? "处理中" : "驳回" }}</button>
-                </div>
-                <span v-else class="admin-table__subtext">审核申请需要“注册审核”权限。</span>
-              </template>
-              <RouterLink v-if="item.linkedUserId" class="admin-link" :to="`/users/${item.linkedUserId}`">查看已登记详情</RouterLink>
-            </div>
-          </div>
-        </div>
-        <div v-else-if="!registrationApplicationsError" class="admin-empty">
-          <div class="admin-empty__title">{{ loading ? "正在加载审核列表" : "当前分类下没有注册申请" }}</div>
-          <div class="admin-empty__body">新的注册申请会在这里出现，审核通过后会自动进入已登记人员列表。</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="admin-page__section">
-      <div class="admin-page__section-head">
-        <div>
-          <p class="admin-kicker">人员检索</p>
-          <h3 class="admin-page__section-title">按区域分组查看人员台账并批量绑定特殊群体策略</h3>
-        </div>
-        <div v-if="canManageUsers" class="admin-inline-links">
-          <a class="admin-button admin-button--ghost" href="/templates/公益智助柜人员导入模板.xlsx" download>下载 Excel 模板</a>
-          <button class="admin-button admin-button--ghost" @click="openPersonnelImport">导入 Excel</button>
-          <button class="admin-button" @click="openCreateUser">新增人员</button>
-        </div>
-      </div>
-
-      <div class="users-filters admin-panel admin-panel-block">
-        <label class="admin-field">
-          <span class="admin-field__label">分类</span>
-          <select v-model="roleFilter" class="admin-select">
-            <option value="all">全部</option>
-            <option value="special">特殊群体</option>
-            <option value="merchant">商家</option>
-            <option value="restocker">补货员</option>
-            <option value="admin">管理员</option>
-          </select>
-        </label>
-        <label v-if="showExtendedUserConfiguration" class="admin-field">
-          <span class="admin-field__label">按地区分类</span>
-          <select v-model="regionFilter" class="admin-select">
-            <option value="all">全部地区</option>
-            <option v-for="regionName in visibleRegionNames" :key="regionName" :value="regionName">
-              {{ regionName }}
-            </option>
-          </select>
-        </label>
-        <label class="admin-field">
-          <span class="admin-field__label">搜索</span>
-          <input v-model="keyword" class="admin-input" placeholder="输入姓名、手机号、标签或区域" />
-        </label>
-        <div v-if="showExtendedUserConfiguration && canManageUsers" class="admin-field users-region-create-field">
+<section v-show="activeSection === 'regions'" class="admin-panel admin-panel-block"><div class="admin-panel__head"><div><span class="admin-kicker">地区管理</span><h3 class="admin-panel__title">维护人员分组与服务位置</h3></div></div><div v-if="showExtendedUserConfiguration && canManageUsers" class="admin-field users-region-create-field">
           <span class="admin-field__label">地区分类</span>
           <div class="users-region-create-card">
             <div class="users-region-form-grid">
@@ -2429,222 +2497,105 @@ onMounted(load);
               </div>
             </div>
           </div>
+        </div></section>
+<section v-show="activeSection === 'verification'" v-if="canManageManualVerificationCodes" class="admin-page__section">
+      <div class="admin-page__section-head">
+        <div>
+          <p class="admin-kicker">一次性验证码</p>
+          <h3 class="admin-page__section-title">只为当前实例中的已启用账号签发</h3>
         </div>
-        <div class="users-filters__summary users-compact-status">
-          当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。人员台账默认按地区分组，特殊群体领取状态单独显示。
-        </div>
+        <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
+          {{ loading ? "刷新中" : "刷新记录" }}
+        </button>
       </div>
-    </section>
-
-    <section
-      class="admin-grid"
-      :class="{ 'admin-grid--main-aside': showExtendedUserConfiguration }"
-    >
-      <article class="admin-panel admin-panel-block">
-        <div class="admin-panel__head">
-          <div>
-            <span class="admin-kicker">人员台账</span>
-            <h3 class="admin-panel__title">按区域分组，状态显示注册与领取进度</h3>
-          </div>
+      <article class="admin-panel admin-panel-block users-manual-grants">
+        <div class="users-compact-status">
+          <span>6 位、单次使用；连续输错 5 次锁定</span>
           <div class="admin-inline-links">
-            <button class="admin-button admin-button--ghost" @click="toggleSelectAll">{{ allFilteredSelected ? "取消全选" : "全选当前结果" }}</button>
-            <select v-if="canManageUsers" v-model="migrationRegionId" class="admin-select users-region-migrate-select">
-              <option value="">迁移到地区</option>
-              <option v-for="region in regionOptions" :key="region.id" :value="region.id">{{ region.name }}</option>
-            </select>
             <button
-              v-if="canManageUsers"
-              class="admin-button admin-button--ghost"
-              :disabled="migratingUsers || !selectedUsers.length || !migrationRegionId"
-              @click="migrateSelectedUsers"
+              class="admin-text-button"
+              type="button"
+              :disabled="!terminalManualVerificationGrants.length || clearingManualGrantHistory"
+              @click="toggleAllTerminalManualGrants"
             >
-              {{ migratingUsers ? "迁移中" : `批量迁移（${selectedUsers.length}）` }}
+              {{ allTerminalManualGrantsSelected ? "取消选择历史" : "选择全部历史" }}
             </button>
             <button
-              v-if="canManageUsers"
               class="admin-button admin-button--danger"
-              :disabled="removingSelectedUsers || !selectedUsers.length"
-              @click="removeSelectedUsers"
+              type="button"
+              :disabled="!selectedManualGrantIds.length || clearingManualGrantHistory"
+              @click="clearSelectedManualVerificationGrants"
             >
-              {{
-                removingSelectedUsers
-                  ? adminCopy.users.batchRemovingButton
-                  : adminCopy.users.batchRemoveButton(selectedUsers.length)
-              }}
+              {{ clearingManualGrantHistory ? "清除中" : `批量清除（${selectedManualGrantIds.length}）` }}
             </button>
           </div>
         </div>
-
-        <div v-if="groupedUsers.length" class="users-region-groups users-contained-list users-contained-list--large">
-          <section v-for="group in groupedUsers" :key="group.regionName" class="users-region-group">
-            <div class="users-region-group__head">
-              <span class="admin-kicker">{{ group.regionName }}</span>
-              <span class="admin-table__subtext">{{ group.users.length }} 人</span>
-            </div>
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>选择</th>
-                  <th>姓名</th>
-                  <th>角色</th>
-                  <th>后台权限</th>
-                  <th>柜机范围</th>
-                  <th>手机号</th>
-                  <th>台账状态</th>
-                  <th>区域 / 标签</th>
-                  <th>每日物资</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in group.users" :key="user.id">
-                  <td><input type="checkbox" :checked="selectedUserIds.includes(user.id)" :aria-label="`选择人员 ${user.name}`" @change="toggleUser(user.id)" /></td>
-                  <td>
-                    <RouterLink class="admin-link" :to="`/users/${user.id}`">{{ user.name }}</RouterLink>
-                    <span class="admin-table__subtext">{{ user.id }}</span>
-                  </td>
-                  <td>
-                    <span class="admin-table__strong">{{ formatRole(user.role) }}</span>
-                    <span class="admin-table__subtext">{{ user.status === "active" ? "账号已启用" : "账号已停用" }}</span>
-                  </td>
-                  <td>
-                    <span class="admin-table__strong">{{ backofficeStatusLabel(user) }}</span>
-                    <button
-                      v-if="canManageBackofficeCredentials && isBackofficeEligibleUser(user)"
-                      class="admin-text-button"
-                      type="button"
-                      @click="openBackofficeAccount(user)"
-                    >
-                      {{ backofficeCredentialForUser(user) ? "配置权限" : "开通后台" }}
-                    </button>
-                    <button
-                      v-if="canSupervisorResetPassword(user)"
-                      class="admin-text-button"
-                      type="button"
-                      @click="openSupervisorPasswordReset(user)"
-                    >
-                      代重置密码
-                    </button>
-                  </td>
-                  <td>
-                    <span class="admin-table__strong">{{ assignedDeviceSummary(user) }}</span>
-                    <button
-                      v-if="canManageUsers && isDeviceAssignableUser(user)"
-                      class="admin-text-button"
-                      type="button"
-                      @click="openDeviceAssignment(user)"
-                    >
-                      分配柜机
-                    </button>
-                  </td>
-                  <td>
-                    <span class="admin-code">{{ user.phone }}</span>
-                    <span class="admin-table__subtext">{{ registrationLabel(user) }}</span>
-                  </td>
-                  <td>
-                    <span class="admin-pill" :class="ledgerStatusTone(user.ledgerStatus)">{{ formatLedgerStatus(user.ledgerStatus) }}</span>
-                  </td>
-                  <td>
-                    <span class="admin-table__strong">{{ user.regionName || "未分配区域" }}</span>
-                    <span class="admin-table__subtext">{{ user.tags.join("、") || "无标签" }}</span>
-                  </td>
-                  <td><span class="admin-table__strong">{{ user.role === "special" ? policySummary(user.id) : "不适用" }}</span></td>
-                  <td>
-                    <div class="admin-inline-links">
-                      <RouterLink class="admin-link" :to="`/users/${user.id}`">详情</RouterLink>
-                      <button v-if="canManageUsers" class="admin-text-button" @click="openEditUser(user)">编辑</button>
-                      <button
-                        v-if="canManageManualVerificationCodes && user.status === 'active'"
-                        class="admin-text-button"
-                        type="button"
-                        @click="openManualVerificationCode(user)"
-                      >
-                        签发验证码
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-        </div>
+        <table v-if="visibleManualVerificationGrants.length" class="admin-table">
+          <thead>
+            <tr>
+              <th>选择</th>
+              <th>目标账号</th>
+              <th>用途</th>
+              <th>状态</th>
+              <th>有效期</th>
+              <th>失败次数</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="grant in visibleManualVerificationGrants" :key="grant.id">
+              <td>
+                <input
+                  v-if="grant.status !== 'active'"
+                  type="checkbox"
+                  :checked="selectedManualGrantIds.includes(grant.id)"
+                  :aria-label="`选择验证码历史 ${grant.userName}`"
+                  @change="toggleManualGrant(grant.id)"
+                />
+                <span v-else class="admin-table__subtext">—</span>
+              </td>
+              <td>
+                <span class="admin-table__strong">{{ grant.userName }}</span>
+                <span class="admin-table__subtext">{{ grant.userId }}</span>
+              </td>
+              <td>{{ manualPurposeLabel(grant.purpose) }}</td>
+              <td>
+                <span class="admin-pill" :class="manualGrantStatusTone(grant.status)">
+                  {{ manualGrantStatusLabel(grant.status) }}
+                </span>
+              </td>
+              <td class="admin-code">{{ formatDateTime(grant.expiresAt) }}</td>
+              <td>{{ grant.failedAttempts }}/5</td>
+              <td>
+                <button
+                  v-if="grant.status === 'active'"
+                  class="admin-text-button"
+                  type="button"
+                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId || clearingManualGrantHistory)"
+                  @click="revokeManualVerificationGrant(grant)"
+                >
+                  {{ revokingManualGrantId === grant.id ? "撤销中" : "撤销" }}
+                </button>
+                <button
+                  v-else
+                  class="admin-text-button"
+                  type="button"
+                  :disabled="Boolean(revokingManualGrantId || clearingManualGrantId || clearingManualGrantHistory)"
+                  @click="clearManualVerificationGrant(grant)"
+                >
+                  {{ clearingManualGrantId === grant.id ? "清除中" : "清除记录" }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
         <div v-else class="admin-empty">
-          <div class="admin-empty__title">{{ loading ? "正在加载人员列表" : "没有匹配到任何人员" }}</div>
-          <div class="admin-empty__body">请调整筛选条件，或确认后端当前是否已有人员数据。</div>
+          <div class="admin-empty__title">还没有一次性验证码记录</div>
+          <div class="admin-empty__body">在下方人员台账选择已启用账号并点击“签发验证码”。</div>
         </div>
       </article>
-
-      <aside v-if="showExtendedUserConfiguration" class="admin-grid">
-        <article class="admin-panel admin-panel-block">
-          <div class="admin-panel__head">
-            <div>
-              <span class="admin-kicker">批量策略绑定</span>
-              <h3 class="admin-panel__title">模板用于批量生成每日可领取物资</h3>
-            </div>
-          </div>
-          <div class="users-side-block">
-            <div class="admin-note">
-              {{ canManageUserRules ? `已选特殊群体 ${selectedSpecialUsers.length} 人。绑定后会按模板的星期、时段和货品数量生效。` : "当前账号只能查看每日物资模板，批量绑定或覆盖需要“取货规则管理”权限。" }}
-            </div>
-            <label class="admin-field">
-              <span class="admin-field__label">操作方式</span>
-              <select v-model="batchMode" class="admin-select" :disabled="!canManageUserRules">
-                <option value="bind">新增为个人设定</option>
-                <option value="replace">覆盖个人设定</option>
-                <option value="unbind">解绑以下模板</option>
-              </select>
-            </label>
-            <div class="admin-field">
-              <span class="admin-field__label">模板选择</span>
-              <div class="users-policy-checklist">
-                <label v-for="policy in policies" :key="policy.id" class="users-policy-check">
-                  <input v-model="batchPolicyIds" type="checkbox" :value="policy.id" :disabled="!canManageUserRules" />
-                  <span>{{ policy.name }}</span>
-                  <span class="admin-table__subtext">{{ policy.applicableUserIds.length }} 人</span>
-                </label>
-              </div>
-            </div>
-            <div class="admin-note">
-              {{
-                batchMode === "replace"
-                  ? "覆盖会把模板拆成按货品的每日设定，并在下一个业务日替换当前个人设置。"
-                  : "新增会把模板中的每个货品最小单元追加到所选特殊群体人员的每日设定中。"
-              }}
-            </div>
-            <button class="admin-button" :disabled="saving || !canManageUserRules || !selectedSpecialUsers.length || !batchPolicyIds.length" @click="applyBatchPolicies">{{ saving ? "保存中" : batchMode === "replace" ? "覆盖每日物资" : "新增每日物资" }}</button>
-          </div>
-        </article>
-
-        <article class="admin-panel admin-panel-block">
-          <div class="admin-panel__head">
-            <div>
-              <span class="admin-kicker">每日物资模板库</span>
-              <h3 class="admin-panel__title">管理时段、星期和货品数量</h3>
-            </div>
-            <button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="openCreatePolicy">新增模板</button>
-          </div>
-          <div v-if="policies.length" class="admin-list users-contained-list users-contained-list--side">
-            <div v-for="policy in policies" :key="policy.id" class="admin-list__row users-policy-row">
-              <div class="admin-list__main">
-                <span class="admin-list__title">{{ policy.name }}</span>
-                <span class="admin-list__meta">{{ formatWeekdays(policy.weekdays) }} · {{ String(policy.startHour).padStart(2, "0") }}:00-{{ String(policy.endHour).padStart(2, "0") }}:00 · {{ policy.applicableUserIds.length }} 人</span>
-                <span class="admin-table__subtext">{{ formatPolicyLimits(policy) }}</span>
-              </div>
-              <div class="admin-inline-links">
-                <span class="admin-pill" :class="policy.status === 'active' ? 'admin-pill--success' : 'admin-pill--warning'">{{ policy.status === "active" ? "启用中" : "已停用" }}</span>
-                <button v-if="canManageUserRules" class="admin-text-button" @click="openEditPolicy(policy)">编辑</button>
-              </div>
-            </div>
-          </div>
-          <div v-else class="admin-empty">
-            <div class="admin-empty__title">当前还没有每日物资模板</div>
-            <div class="admin-empty__body">请先新增模板，再批量绑定到特殊群体人员。</div>
-          </div>
-        </article>
-      </aside>
     </section>
-
-    <div v-if="drawerMode" class="users-drawer-backdrop">
+<div v-if="drawerMode" class="users-drawer-backdrop">
       <aside class="users-drawer admin-panel">
         <div class="admin-panel__head">
           <div>
@@ -3109,8 +3060,7 @@ onMounted(load);
         </div>
       </aside>
     </div>
-
-    <div v-if="regionMapPickerVisible" class="users-map-backdrop">
+<div v-if="regionMapPickerVisible" class="users-map-backdrop">
       <section class="users-map-panel admin-panel">
         <AmapLocationPicker
           :initial-longitude="regionMapInitialLongitude"
@@ -3125,7 +3075,7 @@ onMounted(load);
         />
       </section>
     </div>
-  </section>
+</section>
 </template>
 
 <style scoped>

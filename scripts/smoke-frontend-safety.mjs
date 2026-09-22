@@ -443,9 +443,12 @@ const routeBlock = (path) => {
   return start >= 0 ? adminRouterSource.slice(start, end >= 0 ? end : undefined) : "";
 };
 const navBlock = (path) => {
-  const start = roleBoundaryLayoutSource.indexOf(`to: "${path}"`);
-  const end = roleBoundaryLayoutSource.indexOf("\n      {", start + 1);
-  return start >= 0 ? roleBoundaryLayoutSource.slice(start, end >= 0 ? end : undefined) : "";
+  const navigationSource = readSource("apps/admin-web/src/utils/admin-navigation.ts");
+  const start = navigationSource.indexOf(`path: "${path}"`);
+  const end = navigationSource.indexOf("\n", start + 1);
+  const block = start >= 0 ? navigationSource.slice(start, end >= 0 ? end : undefined) : "";
+  assert.match(navigationSource, /const administrators[^=]*= \["super_admin", "admin"\]/);
+  return block.replace("roles: administrators", 'roles: ["super_admin", "admin"]');
 };
 for (const path of [
   "/dashboard",
@@ -494,13 +497,13 @@ assert.match(
 );
 assert.match(
   roleBoundaryLayoutSource,
-  /const canViewDataMonitor = computed\(\(\) =>[\s\S]{0,180}hasBackofficeRouteRole\(sessionStore\.user\?\.backofficeRole, \["super_admin", "admin"\]\)/,
-  "顶部数据监控入口必须同时限制管理员角色"
+  /canAccessAdminDestination\(item, sessionStore\.user\?\.backofficeRole, sessionStore\.can\)/,
+  "所有导航与检索入口必须同时校验角色和会话权限"
 );
 assert.match(
   roleBoundaryLayoutSource,
-  /v-if="canViewDataMonitor"[\s\S]{0,80}to="\/data-monitor"/,
-  "顶部数据监控直链必须复用角色受限的可见条件"
+  /searchableEntries = computed\(\(\) => visibleDestinations\.value/,
+  "功能检索必须复用经过权限过滤的导航入口"
 );
 for (const path of ["/goods", "/warehouse", "/logs"]) {
   const defaultRouteStart = adminSessionSource.indexOf(`path: "${path}"`);
@@ -1010,8 +1013,8 @@ const mobileApiSource = readSource("apps/mobile/src/api/mobile.ts");
 const mobileSettingsSource = readSource("apps/mobile/src/pages/tabs/settings.vue");
 assert.match(adminApiSource, /post<\{ revoked: boolean \}>\("\/auth\/logout"\)/, "后台必须调用服务端退出接口");
 assert.match(
-  adminLayoutSource,
-  /to: "\/merchant"[\s\S]{0,180}roles: \["merchant"\]/,
+  navBlock("/merchant"),
+  /roles: \["merchant"\]/,
   "商家工作台菜单必须同时限制商家角色"
 );
 assert.match(mobileApiSource, /post<\{ revoked: boolean \}>\("\/auth\/logout"\)/, "移动端必须调用服务端退出接口");
@@ -1120,6 +1123,7 @@ assert.equal(
 
 const dashboardSource = readSource("apps/admin-web/src/pages/DashboardPage.vue");
 const adminGlobalStyleSource = readSource("apps/admin-web/src/styles/global.css");
+const adminWorkspaceStyleSource = readSource("apps/admin-web/src/styles/workspace.css");
 assert.doesNotMatch(dashboardSource, /待办 TOPS/, "后台待办标题不得使用不自然的 TOPS 文案");
 assert.match(cabinetCopySource, /requestCode: "获取验证码"/, "登录验证码按钮文案必须说明具体动作");
 assert.match(appLoginSource, /\{\{ authCopy\.login\.requestCode \}\}/, "登录页必须使用集中维护的获取验证码文案");
@@ -1138,7 +1142,7 @@ assert.match(
   /\.input-shell\s*\{[\s\S]{0,120}display:\s*flex[\s\S]{0,180}align-items:\s*center/,
   "验证码字段必须保留可收缩输入框与右侧操作的横向布局"
 );
-assert.match(adminGlobalStyleSource, /"brand nav" auto[\s\S]{0,120}"status nav" auto/, "后台窄屏布局必须并排压缩导航，避免主内容被整页导航推离首屏");
+assert.match(adminWorkspaceStyleSource, /@media \(max-width: 800px\)[\s\S]{0,180}\.console-sidebar \{ display: none; \}/, "后台窄屏布局必须收起侧栏，避免主内容被整页导航推离首屏");
 
 const mobileAdminUsersSource = readSource("apps/mobile/src/pages/admin/users.vue");
 const mobileAdminLogsSource = readSource("apps/mobile/src/pages/admin/logs.vue");
@@ -1204,15 +1208,16 @@ assert.doesNotMatch(operationsEmptySource, /@click="load"/, "柜机空态不得�
 assert.match(operationsSource, /stock <= 0[\s\S]{0,120}缺货/, "柜机列表只有零库存才应标记缺货");
 assert.match(operationsSource, /goods\.stock <= goods\.lowStockThreshold[\s\S]{0,120}低库存/, "柜机列表达到阈值但未归零时应标记低库存");
 assert.match(
-  adminLayoutSource,
-  /@media \(min-width: 561px\) and \(max-width: 760px\) and \(max-height: 650px\)[\s\S]*?\.workbench__sidebar\s*\{[\s\S]*?display:\s*flex/,
-  "低高度窄屏后台必须压缩侧栏，让主要内容更早出现"
+  adminWorkspaceStyleSource,
+  /\.console-navigation-dialog[\s\S]*?height: 100dvh; max-height: 100dvh/,
+  "窄屏导航弹窗必须限制在可视高度内"
 );
 assert.match(
-  adminLayoutSource,
-  /\.workbench__nav[\s\S]{0,260}overflow-x: auto/,
-  "压缩侧栏后的导航必须可横向滚动，不能裁掉入口"
+  adminWorkspaceStyleSource,
+  /\.console-nav \{[^}]*min-height: 0;[^}]*overflow-y: auto/,
+  "导航必须可独立滚动，不能裁掉低高度屏幕的入口"
 );
+assert.equal((adminLayoutSource.match(/<AdminNavigation :sections="visibleNavSections"/g) || []).length, 2, "桌面和移动导航必须共用完整且受权限约束的菜单");
 assert.match(adminDeviceSource, /stock <= 0[\s\S]{0,120}缺货/, "柜机详情只有零库存才应标记缺货");
 assert.match(adminDeviceSource, /goods\.stock <= goods\.lowStockThreshold[\s\S]{0,120}低库存/, "柜机详情达到阈值但未归零时应标记低库存");
 assert.ok(

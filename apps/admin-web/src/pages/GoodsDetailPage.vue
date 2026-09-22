@@ -5,7 +5,7 @@ import type { GoodsCategory, GoodsCategoryRecord, WarehouseRecord } from "@vm/sh
 
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
-import { formatDate, formatDateTime } from "../utils/datetime";
+import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
 
 const route = useRoute();

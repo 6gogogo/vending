@@ -143,7 +143,7 @@ const exampleSettingsIntro = computed(() =>
     ? "当前为服务商运维视图，可维护当前实例的登录服务、短信接口、地图、柜机接入及其他运行配置。"
     : manualVerificationSettingVisible.value
     ? "先确认领取方式、差异额度归属和 App 登录验证，再保存设置。"
-    : "扫码领取与额度规则归属，再保存设置。"
+    : "管理扫码领取与差异额度的归属规则。"
 );
 const instanceSettingsIntro = computed(() =>
   manualVerificationSettingVisible.value
@@ -518,9 +518,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="admin-page settings-page">
-    <section class="admin-page__section">
-      <div class="admin-page__section-head settings-page__topbar">
+<section class="admin-page settings-page"><section class="admin-page__section"><div class="admin-page__section-head settings-page__topbar">
         <div class="settings-page__heading-copy">
           <p class="admin-copy">
             {{ exampleSettingsIntro }}
@@ -557,17 +555,16 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-
-      <div v-if="!canUpdateSettings" class="admin-note settings-page__note">
+<div v-if="!canUpdateSettings" class="admin-note settings-page__note">
         当前账号只有查看权限，不能修改或保存系统设置。
       </div>
-      <div class="admin-note settings-page__note">
+<div class="admin-note settings-page__note">
         {{ settingsScopeIntro }}
       </div>
-      <div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
+<div v-if="loadError" class="admin-note settings-page__note settings-page__note--danger">
         {{ loadError }}
       </div>
-      <div
+<div
         v-if="saveMessage"
         class="admin-note settings-page__note"
         :class="{ 'settings-page__note--danger': saveMessage.type === 'error', 'settings-page__note--success': saveMessage.type === 'success' }"
@@ -577,11 +574,10 @@ onBeforeUnmount(() => {
           其中 {{ lastSaveResult.restartRequiredKeys.length }} 项需要重启后完全生效。
         </span>
       </div>
-      <div v-if="hasDirtyChanges" class="admin-note settings-page__note settings-page__note--warning">
+<div v-if="hasDirtyChanges" class="admin-note settings-page__note settings-page__note--warning">
         当前有 {{ dirtyKeys.length }} 项未保存；{{ runtimeDirtyKeys.length }} 项保存后立即生效，{{ restartDirtyKeys.length }} 项需要重新启用服务后完全生效。
       </div>
-
-      <section
+<section
         v-if="isProviderTenantSession && restartPanelOpen"
         class="admin-panel admin-panel-block settings-page__restart-panel"
       >
@@ -644,121 +640,8 @@ onBeforeUnmount(() => {
         >
           {{ restartSubmitting ? "正在安排重启" : "确认重启当前实例" }}
         </button>
-      </section>
-
-      <section class="admin-panel admin-panel-block settings-page__example-overview">
-        <div class="admin-panel__head">
-          <div>
-            <span class="admin-kicker">领取规则</span>
-            <h3 class="admin-panel__title">扫码领取与额度规则</h3>
-          </div>
-        </div>
-        <div class="settings-page__example-grid settings-page__example-grid--two">
-          <section class="settings-page__example-card">
-            <span class="settings-page__example-label">领取方式</span>
-            <strong>扫码直接开门</strong>
-            <p class="admin-copy">用户先查询物资，到柜扫码后点击开门。无需预约和选择数量，按实际取走的商品记录；未取货按零件完成，零元订单自动上报平台。</p>
-          </section>
-          <section class="settings-page__example-card">
-            <span class="settings-page__example-label">补充回调额度日期</span>
-            <select
-              v-if="adjustmentQuotaModeSetting"
-              v-model="formValues[adjustmentQuotaModeSettingKey]"
-              class="admin-select"
-              :disabled="!canEditSetting(adjustmentQuotaModeSettingKey)"
-            >
-              <option v-for="option in adjustmentQuotaModeSetting.options" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-            <strong v-else>{{ adjustmentQuotaModeLabel }}</strong>
-            <p class="admin-copy">平台后续补充识别结果时，按所选日期计算额度；首次结算按开柜时的领取规则记录。</p>
-          </section>
-        </div>
-        <p class="admin-copy settings-page__example-help">
-          调整额度规则后请点击“保存设置”。物资查询不会锁定库存或消耗额度。
-        </p>
-      </section>
-
-      <section v-if="!reservationOnlyPickup" class="admin-panel admin-panel-block payment-diagnostics">
-        <div class="admin-panel__head payment-diagnostics__head">
-          <div>
-            <span class="admin-kicker">支付自检</span>
-            <h3 class="admin-panel__title">当前支付运行状态</h3>
-          </div>
-          <button
-            class="admin-button admin-button--ghost"
-            type="button"
-            :disabled="paymentDiagnosticsLoading"
-            @click="loadPaymentDiagnostics"
-          >
-            {{ paymentDiagnosticsLoading ? "刷新中" : "刷新自检" }}
-          </button>
-        </div>
-
-        <div v-if="paymentDiagnosticsError" class="admin-note settings-page__note settings-page__note--danger">
-          {{ paymentDiagnosticsError }}
-        </div>
-
-        <div v-if="paymentDiagnostics" class="payment-diagnostics__body">
-          <div class="payment-diagnostics__summary" :class="paymentSummaryClass">
-            <span>支付服务：{{ paymentEffectiveModeLabel(paymentDiagnostics.summary.effectiveMode) }}</span>
-            <span>服务方式：{{ paymentRuntimeModeLabel(paymentDiagnostics.requestedMode) }}</span>
-            <span>当前状态：{{ paymentDiagnostics.summary.strictRealEnabled ? "已按真实服务要求运行" : "按当前设置运行" }}</span>
-          </div>
-
-          <div class="payment-diagnostics__reconciliation">
-            <div>
-              <span class="admin-kicker">资金恢复</span>
-              <strong>自动对账：{{ paymentDiagnostics.reconciliation.automaticEnabled ? "已启用" : "未启用" }}</strong>
-            </div>
-            <span>处理服务：{{ paymentDiagnostics.reconciliation.singleWriterHeld ? "正常" : "待处理" }}</span>
-            <span>待确认支付：{{ paymentDiagnostics.reconciliation.pendingPayments }}</span>
-            <span>待完成柜机通知：{{ paymentDiagnostics.reconciliation.pendingSmartVmForwards }}</span>
-            <span>待确认退款：{{ paymentDiagnostics.reconciliation.pendingRefunds }}</span>
-            <span>当前到期：{{ paymentDiagnostics.reconciliation.dueNow }}</span>
-            <span>人工核对：{{ paymentDiagnostics.reconciliation.manualReview }}</span>
-            <span>已告警：{{ paymentDiagnostics.reconciliation.alerted }}</span>
-          </div>
-
-          <div class="payment-diagnostics__providers">
-            <section
-              v-for="provider in paymentDiagnostics.providers"
-              :key="provider.provider"
-              class="payment-diagnostics__provider"
-              :class="providerStateClass(provider)"
-            >
-              <div class="payment-diagnostics__provider-head">
-                <span class="payment-diagnostics__provider-title">{{ provider.label }}</span>
-                <span class="admin-pill" :class="provider.effectiveMode === 'real' ? 'admin-pill--success' : 'admin-pill--warning'">
-                  {{ paymentEffectiveModeLabel(provider.effectiveMode) }}
-                </span>
-              </div>
-              <p class="admin-copy">
-                {{ provider.readyForRealPayment ? "支付服务已准备就绪。" : "支付服务资料尚未齐备，请联系服务管理员完成设置。" }}
-              </p>
-            </section>
-          </div>
-
-        <div v-if="paymentDiagnostics.warnings.length" class="payment-diagnostics__warnings">
-          <p class="admin-copy payment-diagnostics__warning-text">
-            支付服务存在待处理事项，请联系服务管理员查看并处理。
-          </p>
-          </div>
-        </div>
-
-        <div v-else-if="paymentDiagnosticsLoading" class="admin-empty">
-          <div class="admin-empty__title">正在加载支付自检</div>
-          <div class="admin-empty__body">请稍候。</div>
-        </div>
-      </section>
-      <div v-else class="admin-note settings-page__note settings-page__note--success">
-        当前为免费领取：零元订单会自动完成并上报平台，无需支付配置；历史订单仍可在订单和日志中查询。
-      </div>
-
-    </section>
-
-    <section class="settings-page__workspace">
+      </section></section>
+  <section class="settings-page__workspace">
       <aside class="admin-panel admin-panel-block settings-page__sidebar">
         <label class="admin-field">
           <span class="admin-field__label">搜索设置</span>
@@ -845,6 +728,7 @@ onBeforeUnmount(() => {
               </label>
 
               <select v-else-if="entry.inputType === 'select'" v-model="formValues[entry.key]" class="admin-select" :disabled="!canEditEntry(entry)">
+                <option v-if="!formValues[entry.key]" value="" disabled>未配置 · 沿用默认行为</option>
                 <option v-for="option in entry.options" :key="option.value" :value="option.value">
                   {{ option.label }}
                 </option>
@@ -905,8 +789,115 @@ onBeforeUnmount(() => {
         </div>
       </article>
     </section>
+  <details class="workspace-details"><summary>领取方式与额度计算 · 扫码直接开门</summary><div class="workspace-details__body"><section class="admin-panel admin-panel-block settings-page__example-overview">
+        <div class="admin-panel__head">
+          <div>
+            <span class="admin-kicker">领取规则</span>
+            <h3 class="admin-panel__title">扫码领取与额度规则</h3>
+          </div>
+        </div>
+        <div class="settings-page__example-grid settings-page__example-grid--two">
+          <section class="settings-page__example-card">
+            <span class="settings-page__example-label">领取方式</span>
+            <strong>扫码直接开门</strong>
+            <p class="admin-copy">用户先查询物资，到柜扫码后点击开门。无需预约和选择数量，按实际取走的商品记录；未取货按零件完成，零元订单自动上报平台。</p>
+          </section>
+          <section class="settings-page__example-card">
+            <span class="settings-page__example-label">补充回调额度日期</span>
+            <select
+              v-if="adjustmentQuotaModeSetting"
+              v-model="formValues[adjustmentQuotaModeSettingKey]"
+              class="admin-select"
+              :disabled="!canEditSetting(adjustmentQuotaModeSettingKey)"
+            >
+              <option v-for="option in adjustmentQuotaModeSetting.options" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <strong v-else>{{ adjustmentQuotaModeLabel }}</strong>
+            <p class="admin-copy">平台后续补充识别结果时，按所选日期计算额度；首次结算按开柜时的领取规则记录。</p>
+          </section>
+        </div>
+        <p class="admin-copy settings-page__example-help">
+          调整额度规则后请点击“保存设置”。物资查询不会锁定库存或消耗额度。
+        </p>
+      </section></div></details>
+  <details class="workspace-details"><summary>支付通道状态与诊断</summary><div class="workspace-details__body"><section v-if="!reservationOnlyPickup" class="admin-panel admin-panel-block payment-diagnostics">
+        <div class="admin-panel__head payment-diagnostics__head">
+          <div>
+            <span class="admin-kicker">支付自检</span>
+            <h3 class="admin-panel__title">当前支付运行状态</h3>
+          </div>
+          <button
+            class="admin-button admin-button--ghost"
+            type="button"
+            :disabled="paymentDiagnosticsLoading"
+            @click="loadPaymentDiagnostics"
+          >
+            {{ paymentDiagnosticsLoading ? "刷新中" : "刷新自检" }}
+          </button>
+        </div>
 
-    <div v-if="leaveDialogOpen" class="settings-page__modal-backdrop">
+        <div v-if="paymentDiagnosticsError" class="admin-note settings-page__note settings-page__note--danger">
+          {{ paymentDiagnosticsError }}
+        </div>
+
+        <div v-if="paymentDiagnostics" class="payment-diagnostics__body">
+          <div class="payment-diagnostics__summary" :class="paymentSummaryClass">
+            <span>支付服务：{{ paymentEffectiveModeLabel(paymentDiagnostics.summary.effectiveMode) }}</span>
+            <span>服务方式：{{ paymentRuntimeModeLabel(paymentDiagnostics.requestedMode) }}</span>
+            <span>当前状态：{{ paymentDiagnostics.summary.strictRealEnabled ? "已按真实服务要求运行" : "按当前设置运行" }}</span>
+          </div>
+
+          <div class="payment-diagnostics__reconciliation">
+            <div>
+              <span class="admin-kicker">资金恢复</span>
+              <strong>自动对账：{{ paymentDiagnostics.reconciliation.automaticEnabled ? "已启用" : "未启用" }}</strong>
+            </div>
+            <span>处理服务：{{ paymentDiagnostics.reconciliation.singleWriterHeld ? "正常" : "待处理" }}</span>
+            <span>待确认支付：{{ paymentDiagnostics.reconciliation.pendingPayments }}</span>
+            <span>待完成柜机通知：{{ paymentDiagnostics.reconciliation.pendingSmartVmForwards }}</span>
+            <span>待确认退款：{{ paymentDiagnostics.reconciliation.pendingRefunds }}</span>
+            <span>当前到期：{{ paymentDiagnostics.reconciliation.dueNow }}</span>
+            <span>人工核对：{{ paymentDiagnostics.reconciliation.manualReview }}</span>
+            <span>已告警：{{ paymentDiagnostics.reconciliation.alerted }}</span>
+          </div>
+
+          <div class="payment-diagnostics__providers">
+            <section
+              v-for="provider in paymentDiagnostics.providers"
+              :key="provider.provider"
+              class="payment-diagnostics__provider"
+              :class="providerStateClass(provider)"
+            >
+              <div class="payment-diagnostics__provider-head">
+                <span class="payment-diagnostics__provider-title">{{ provider.label }}</span>
+                <span class="admin-pill" :class="provider.effectiveMode === 'real' ? 'admin-pill--success' : 'admin-pill--warning'">
+                  {{ paymentEffectiveModeLabel(provider.effectiveMode) }}
+                </span>
+              </div>
+              <p class="admin-copy">
+                {{ provider.readyForRealPayment ? "支付服务已准备就绪。" : "支付服务资料尚未齐备，请联系服务管理员完成设置。" }}
+              </p>
+            </section>
+          </div>
+
+        <div v-if="paymentDiagnostics.warnings.length" class="payment-diagnostics__warnings">
+          <p class="admin-copy payment-diagnostics__warning-text">
+            支付服务存在待处理事项，请联系服务管理员查看并处理。
+          </p>
+          </div>
+        </div>
+
+        <div v-else-if="paymentDiagnosticsLoading" class="admin-empty">
+          <div class="admin-empty__title">正在加载支付自检</div>
+          <div class="admin-empty__body">请稍候。</div>
+        </div>
+      </section>
+<div v-else class="admin-note settings-page__note settings-page__note--success">
+        当前为免费领取：零元订单会自动完成并上报平台，无需支付配置；历史订单仍可在订单和日志中查询。
+      </div></div></details>
+  <div v-if="leaveDialogOpen" class="settings-page__modal-backdrop">
       <section class="admin-panel settings-page__modal">
         <div class="admin-panel__head">
           <div>
@@ -923,8 +914,7 @@ onBeforeUnmount(() => {
           <button class="admin-button" type="button" @click="resolveLeave('save')">保存并离开</button>
         </div>
       </section>
-    </div>
-  </section>
+    </div></section>
 </template>
 
 <style scoped>

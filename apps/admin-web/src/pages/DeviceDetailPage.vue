@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import WorkspaceSections from "../components/WorkspaceSections.vue";
+import { useWorkspaceSection } from "../utils/use-workspace-section";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { ApiError } from "@vm/shared-client";
-import type { DeviceRecord } from "@vm/shared-types";
+import type { DeviceRecord, UserRole } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import AmapLocationPicker from "../components/AmapLocationPicker.vue";
@@ -18,7 +20,7 @@ import {
   isFinancialActionOutcomeUncertain,
   validateLegacyFullRefundAmount
 } from "../utils/financial-action-safety";
-import { categoryLabelMap } from "../utils/labels";
+import { categoryLabelMap, roleLabelMap } from "../utils/labels";
 import {
   buildAlertContextSummary,
   buildAlertIdentitySummary,
@@ -495,8 +497,7 @@ const refundActionLabel = (event: NonNullable<typeof recentEvents.value>[number]
 const formatLogStatus = (status: string) =>
   status === "success" ? "成功" : status === "warning" ? "预警" : status === "failed" ? "失败" : "待处理";
 
-const formatUserRole = (role: "admin" | "merchant" | "special") =>
-  role === "admin" ? "管理员" : role === "merchant" ? "商家" : "用户";
+const formatUserRole = (role: UserRole) => roleLabelMap[role];
 
 const formatDebugPayload = (value: unknown) => {
   if (value === undefined || value === null) {
@@ -1606,11 +1607,18 @@ onUnmounted(() => {
     document.removeEventListener("visibilitychange", visibilityHandler);
   }
 });
+const workspaceSections = computed(() => [
+  { value: "inventory", label: "库存与领取" },
+  { value: "manage", label: "柜机管理" },
+  { value: "events", label: "开柜与结算" },
+  { value: "logs", label: "操作日志" },
+  ...(canViewDebugPanel.value ? [{ value: "debug", label: "平台联调" }] : [])
+]);
+const activeSection = useWorkspaceSection(workspaceSections);
 </script>
 
 <template>
-  <section class="admin-page">
-    <section class="admin-page__section">
+<section class="admin-page device-detail-workspace"><section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">单柜机值守页</p>
@@ -1622,12 +1630,11 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
-
-    <div v-if="loadError" class="admin-alert admin-alert--danger" role="alert" aria-live="assertive">
+<div v-if="loadError" class="admin-alert admin-alert--danger" role="alert" aria-live="assertive">
       {{ loadError }}
       <button class="admin-text-button" type="button" @click="load">重试</button>
     </div>
-    <div
+<div
       v-if="actionMessage"
       class="admin-alert"
       :class="{ 'admin-alert--danger': actionMessage.type === 'error' }"
@@ -1637,9 +1644,8 @@ onUnmounted(() => {
     >
       {{ actionMessage.text }}
     </div>
-
-    <section v-if="detail" class="admin-grid">
-      <article class="admin-panel admin-panel-block">
+<WorkspaceSections :active="activeSection" :items="workspaceSections" />
+<section v-if="detail" class="admin-grid"><article class="admin-panel admin-panel-block">
         <div class="device-detail-status">
           <div class="device-detail-status__item">
             <span class="admin-kicker">柜机状态</span>
@@ -1678,9 +1684,7 @@ onUnmounted(() => {
           </div>
         </div>
       </article>
-
-      <section class="admin-grid admin-grid--main-aside device-detail__layout">
-        <article class="admin-panel admin-panel-block device-detail__main">
+  <section v-show="activeSection === 'inventory'" class="admin-grid"><article class="admin-panel admin-panel-block device-detail__main">
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">货品台账</span>
@@ -1769,38 +1773,7 @@ onUnmounted(() => {
               </tbody>
             </table>
           </div>
-        </article>
-
-        <aside class="admin-grid device-detail__aside">
-          <article class="admin-panel admin-panel-block">
-            <div class="admin-panel__head">
-              <div>
-                <span class="admin-kicker">地图位置</span>
-                <h3 class="admin-panel__title">保存柜机坐标后，移动端会按距离排序</h3>
-              </div>
-              <button v-if="canManageDevice" class="admin-button admin-button--ghost" :disabled="updatingLocation" @click="mapPickerVisible = true">
-                {{ updatingLocation ? "保存中" : "设置位置" }}
-              </button>
-            </div>
-            <div class="admin-kv">
-              <div class="admin-kv__row">
-                <span class="admin-kv__label">位置说明</span>
-                <span class="admin-kv__value">{{ detail.device.location }}</span>
-              </div>
-              <div class="admin-kv__row">
-                <span class="admin-kv__label">坐标</span>
-                <span class="admin-kv__value admin-code">
-                  {{
-                    detail.device.longitude !== undefined && detail.device.latitude !== undefined
-                      ? `${detail.device.longitude.toFixed(6)}, ${detail.device.latitude.toFixed(6)}`
-                      : "未设置"
-                  }}
-                </span>
-              </div>
-            </div>
-          </article>
-
-          <article class="admin-panel admin-panel-block">
+        </article><article class="admin-panel admin-panel-block">
             <div class="admin-panel__head">
               <div>
                 <span class="admin-kicker">今日服务人员</span>
@@ -1833,9 +1806,8 @@ onUnmounted(() => {
               <div class="admin-empty__title">今日还没有人员操作这台柜机</div>
               <div class="admin-empty__body">领取、补货和手工补扣都会在这里汇总。</div>
             </div>
-          </article>
-
-          <article class="admin-panel admin-panel-block">
+          </article></section>
+  <section v-show="activeSection === 'manage'" class="admin-grid admin-grid--two"><article class="admin-panel admin-panel-block">
             <div class="admin-panel__head">
               <div>
                 <span class="admin-kicker">控制区</span>
@@ -1869,8 +1841,34 @@ onUnmounted(() => {
               </button>
             </div>
           </article>
-
-          <article class="admin-panel admin-panel-block">
+<article class="admin-panel admin-panel-block">
+            <div class="admin-panel__head">
+              <div>
+                <span class="admin-kicker">地图位置</span>
+                <h3 class="admin-panel__title">保存柜机坐标后，移动端会按距离排序</h3>
+              </div>
+              <button v-if="canManageDevice" class="admin-button admin-button--ghost" :disabled="updatingLocation" @click="mapPickerVisible = true">
+                {{ updatingLocation ? "保存中" : "设置位置" }}
+              </button>
+            </div>
+            <div class="admin-kv">
+              <div class="admin-kv__row">
+                <span class="admin-kv__label">位置说明</span>
+                <span class="admin-kv__value">{{ detail.device.location }}</span>
+              </div>
+              <div class="admin-kv__row">
+                <span class="admin-kv__label">坐标</span>
+                <span class="admin-kv__value admin-code">
+                  {{
+                    detail.device.longitude !== undefined && detail.device.latitude !== undefined
+                      ? `${detail.device.longitude.toFixed(6)}, ${detail.device.latitude.toFixed(6)}`
+                      : "未设置"
+                  }}
+                </span>
+              </div>
+            </div>
+          </article>
+<article class="admin-panel admin-panel-block">
             <div class="admin-panel__head">
               <div>
                 <span class="admin-kicker">待处理任务</span>
@@ -1916,9 +1914,8 @@ onUnmounted(() => {
               <div class="admin-empty__title">当前没有待处理任务</div>
               <div class="admin-empty__body">低库存、长时间敞门和用户反馈会显示在这里。</div>
             </div>
-          </article>
-
-          <article class="admin-panel admin-panel-block">
+          </article></section>
+  <section v-show="activeSection === 'events'" class="admin-grid"><article class="admin-panel admin-panel-block">
             <div class="admin-panel__head">
               <div>
                 <span class="admin-kicker">最近开柜事件</span>
@@ -2053,11 +2050,60 @@ onUnmounted(() => {
               <div class="admin-empty__title">{{ loading ? "正在加载事件" : "当前没有开柜事件" }}</div>
               <div class="admin-empty__body">远程开门、用户取货和商家补货都会在这里记录。</div>
             </div>
-          </article>
-        </aside>
-      </section>
+          </article></section>
+  <section v-show="activeSection === 'logs'" class="admin-grid"><section class="admin-page__section">
+        <div class="admin-page__section-head">
+          <div>
+            <p class="admin-kicker">柜机日志</p>
+            <h3 class="admin-page__section-title">查看该柜机的全部关键操作和异常</h3>
+          </div>
+          <RouterLink class="admin-link" :to="`/logs?subjectType=device&subjectId=${detail.device.deviceCode}`">进入日志总览</RouterLink>
+        </div>
 
-      <section v-if="canViewDebugPanel" class="admin-page__section">
+        <article class="admin-panel admin-panel-block">
+          <div v-if="recentLogs.length" class="device-table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>动作</th>
+                  <th>业务对象</th>
+                  <th>状态</th>
+                  <th>详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="log in recentLogs" :key="log.id">
+                  <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
+                  <td>
+                    <span class="admin-table__strong">{{ log.description }}</span>
+                    <span class="admin-table__subtext">{{ log.actor.name }} · {{ formatActorTypeLabel(log.actor.type) }} · {{ formatLogCategoryLabel(log.category) }} · {{ log.type }}</span>
+                  </td>
+                  <td>
+                    <span class="admin-context-main">{{ logContextSummary(log) }}</span>
+                    <span v-if="logSubjectSummary(log)" class="admin-context-meta">{{ logSubjectSummary(log) }}</span>
+                    <span v-if="logReferenceSummary(log)" class="admin-context-meta admin-code">{{ logReferenceSummary(log) }}</span>
+                  </td>
+                  <td>
+                    <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
+                      {{ formatLogStatus(log.status) }}
+                    </span>
+                  </td>
+                  <td>
+                    <span class="admin-table__subtext">{{ log.detail }}</span>
+                    <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="admin-empty">
+            <div class="admin-empty__title">当前没有柜机日志</div>
+            <div class="admin-empty__body">刷新、远程开门、故障回调和货品流转会自动记录在这里。</div>
+          </div>
+        </article>
+      </section></section>
+  <section v-show="activeSection === 'debug'" class="admin-grid"><section v-if="canViewDebugPanel" class="admin-page__section">
         <div class="admin-page__section-head">
           <div>
             <p class="admin-kicker">底层调试</p>
@@ -2161,63 +2207,8 @@ onUnmounted(() => {
             </section>
           </div>
         </article>
-      </section>
-
-      <section class="admin-page__section">
-        <div class="admin-page__section-head">
-          <div>
-            <p class="admin-kicker">柜机日志</p>
-            <h3 class="admin-page__section-title">查看该柜机的全部关键操作和异常</h3>
-          </div>
-          <RouterLink class="admin-link" :to="`/logs?subjectType=device&subjectId=${detail.device.deviceCode}`">进入日志总览</RouterLink>
-        </div>
-
-        <article class="admin-panel admin-panel-block">
-          <div v-if="recentLogs.length" class="device-table-scroll">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>时间</th>
-                  <th>动作</th>
-                  <th>业务对象</th>
-                  <th>状态</th>
-                  <th>详情</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="log in recentLogs" :key="log.id">
-                  <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
-                  <td>
-                    <span class="admin-table__strong">{{ log.description }}</span>
-                    <span class="admin-table__subtext">{{ log.actor.name }} · {{ formatActorTypeLabel(log.actor.type) }} · {{ formatLogCategoryLabel(log.category) }} · {{ log.type }}</span>
-                  </td>
-                  <td>
-                    <span class="admin-context-main">{{ logContextSummary(log) }}</span>
-                    <span v-if="logSubjectSummary(log)" class="admin-context-meta">{{ logSubjectSummary(log) }}</span>
-                    <span v-if="logReferenceSummary(log)" class="admin-context-meta admin-code">{{ logReferenceSummary(log) }}</span>
-                  </td>
-                  <td>
-                    <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
-                      {{ formatLogStatus(log.status) }}
-                    </span>
-                  </td>
-                  <td>
-                    <span class="admin-table__subtext">{{ log.detail }}</span>
-                    <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="admin-empty">
-            <div class="admin-empty__title">当前没有柜机日志</div>
-            <div class="admin-empty__body">刷新、远程开门、故障回调和货品流转会自动记录在这里。</div>
-          </div>
-        </article>
-      </section>
-    </section>
-
-    <dialog
+      </section></section>
+  </section><dialog
       v-if="remoteOpenDialogStep"
       ref="remoteOpenDialog"
       class="remote-open-dialog admin-panel"
@@ -2331,15 +2322,14 @@ onUnmounted(() => {
           </div>
       </div>
     </dialog>
-
-    <dialog
+<dialog
       ref="doorClosedDialog"
       class="remote-open-dialog admin-panel"
       role="dialog"
       aria-modal="true"
       aria-labelledby="door-closed-dialog-title"
       aria-describedby="door-closed-dialog-description"
-      @cancel.prevent="closeDoorClosedDialog"
+      @cancel.prevent="closeDoorClosedDialog()"
     >
       <header class="remote-open-dialog__head">
         <div>
@@ -2351,7 +2341,7 @@ onUnmounted(() => {
           class="admin-button admin-button--ghost"
           :disabled="confirmingDoorClosed"
           aria-label="关闭现场状态确认对话框"
-          @click="closeDoorClosedDialog"
+          @click="closeDoorClosedDialog()"
         >
           取消
         </button>
@@ -2378,7 +2368,7 @@ onUnmounted(() => {
             type="button"
             class="admin-button admin-button--ghost"
             :disabled="confirmingDoorClosed"
-            @click="closeDoorClosedDialog"
+            @click="closeDoorClosedDialog()"
           >
             返回核对
           </button>
@@ -2393,8 +2383,7 @@ onUnmounted(() => {
         </div>
       </div>
     </dialog>
-
-    <dialog
+<dialog
       v-if="financialAction"
       ref="financialDialog"
       class="remote-open-dialog financial-action-dialog admin-panel"
@@ -2609,8 +2598,7 @@ onUnmounted(() => {
         </div>
       </div>
     </dialog>
-
-    <div v-if="mapPickerVisible" class="device-map-backdrop">
+<div v-if="mapPickerVisible && detail" class="device-map-backdrop">
       <section class="device-map-panel admin-panel">
         <AmapLocationPicker
           :initial-longitude="detail.device.longitude"
@@ -2621,8 +2609,7 @@ onUnmounted(() => {
           @confirm="saveLocation"
         />
       </section>
-    </div>
-  </section>
+    </div></section>
 </template>
 
 <style scoped>

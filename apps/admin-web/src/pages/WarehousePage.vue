@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkspaceSections from "../components/WorkspaceSections.vue";
+import { useWorkspaceSection } from "../utils/use-workspace-section";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 
@@ -605,17 +607,19 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
   const expiresAt = Date.parse(batch.expiresAt);
   return Number.isFinite(expiresAt) && expiresAt > now;
 }
+const workspaceSections = computed(() => [
+  { value: "inventory", label: "库存台账" },
+  { value: "transfer", label: "上架与盘点" },
+  { value: "expiry", label: "过期处置", count: expiredWarehouseBatches.value.length },
+  { value: "records", label: "出入库记录" }
+]);
+const activeSection = useWorkspaceSection(workspaceSections);
 </script>
 
 <template>
-  <section class="admin-page">
-    <section class="admin-page__section">
-      <div class="admin-page__section-head">
-        <div>
-          <p class="admin-kicker">本地仓库</p>
-          <h3 class="admin-page__section-title">作为中转站处理调拨、盘点与库存衔接</h3>
-        </div>
-      </div>
+<section class="admin-page warehouse-workspace"><WorkspaceSections :active="activeSection" :items="workspaceSections" />
+<section class="admin-page__section">
+
 
       <div
         v-if="message"
@@ -639,9 +643,7 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
         <StatTile title="仓库货品种类" :value="snapshot?.goodsKinds ?? 0" hint="本地仓库当前覆盖种类" />
       </div>
     </section>
-
-    <section class="admin-grid admin-grid--main-aside">
-      <article class="admin-panel admin-panel-block">
+<article v-show="activeSection === 'inventory'" class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">仓库库存</span>
@@ -690,8 +692,7 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
           <div class="admin-empty__body">调拨到本地仓库后，这里会展示当前在库情况。</div>
         </div>
       </article>
-
-      <aside class="admin-grid">
+<aside v-show="activeSection === 'transfer'" class="admin-grid">
         <article class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div>
@@ -802,9 +803,7 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
           <div v-else class="admin-note">当前账号只能查看盘点记录，提交盘点需要“仓库盘点”权限。</div>
         </article>
       </aside>
-    </section>
-
-    <section class="admin-grid admin-grid--main-aside">
+<section v-show="activeSection === 'expiry'" class="admin-grid admin-grid--main-aside">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
@@ -926,8 +925,7 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
         <div v-else class="admin-note">当前账号只能查看待处置队列，提交处置需要“过期物资处置”权限。</div>
       </aside>
     </section>
-
-    <section class="admin-panel admin-panel-block">
+<section v-show="activeSection === 'expiry'" class="admin-panel admin-panel-block">
       <div class="admin-panel__head">
         <div>
           <span class="admin-kicker">最近处置记录</span>
@@ -967,8 +965,7 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
         <div class="admin-empty__body">完成一次处置后，这里会显示可追溯的最近记录。</div>
       </div>
     </section>
-
-    <section class="admin-grid admin-grid--main-aside">
+<section v-show="activeSection === 'records'" class="admin-grid admin-grid--main-aside">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
@@ -1053,8 +1050,7 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
         </div>
       </article>
     </section>
-
-    <dialog
+<dialog
       v-if="confirmation"
       ref="confirmationDialog"
       class="warehouse-confirm admin-panel"
@@ -1104,7 +1100,7 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
         </button>
       </div>
     </dialog>
-  </section>
+</section>
 </template>
 
 <style scoped>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkspaceSections from "../components/WorkspaceSections.vue";
+import { useWorkspaceSection } from "../utils/use-workspace-section";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import type { DashboardSnapshot, OperationLogRecord } from "@vm/shared-types";
@@ -317,11 +319,17 @@ onUnmounted(() => {
     document.removeEventListener("visibilitychange", visibilityHandler);
   }
 });
+const workspaceSections = computed(() => [
+  { value: "overview", label: "今日概况" },
+  { value: "tasks", label: "待办任务", count: pendingTasks.value.length },
+  { value: "activity", label: "近期动态" }
+]);
+const activeSection = useWorkspaceSection(workspaceSections);
 </script>
 
 <template>
-  <section class="admin-page">
-    <div v-if="loadError" class="admin-alert admin-alert--danger dashboard-load-error">
+<section class="admin-page dashboard-workspace"><WorkspaceSections :active="activeSection" :items="workspaceSections" />
+<div v-if="loadError" class="admin-alert admin-alert--danger dashboard-load-error">
       <div>
         <strong>运营总览加载失败</strong>
         <p class="admin-copy">{{ loadError }}</p>
@@ -330,33 +338,17 @@ onUnmounted(() => {
         {{ loading ? "重试中" : "重试" }}
       </button>
     </div>
-
-    <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
+<div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
       {{ actionMessage.text }}
     </div>
-
-    <article v-if="loading && !dashboard" class="admin-panel admin-loading">
+<article v-if="loading && !dashboard" class="admin-panel admin-loading">
       <span class="admin-kicker">正在同步</span>
       <div class="admin-skeleton admin-skeleton--wide"></div>
       <div class="admin-skeleton admin-skeleton--mid"></div>
       <div class="admin-skeleton admin-skeleton--short"></div>
     </article>
-
-    <section v-if="dashboard" class="admin-page__section">
-      <article class="dashboard-command admin-panel">
-        <div class="dashboard-command__main">
-          <span class="admin-kicker">今日看板</span>
-          <h3 class="dashboard-command__title">先确认服务覆盖，再处理风险任务</h3>
-          <p class="admin-subtitle">
-            今日已统计 {{ serviceTotalCount }} 人，仍有 {{ serviceFollowUpCount }} 人需要继续跟进；任务池每 15 秒自动刷新一次。
-          </p>
-        </div>
-        <div class="dashboard-command__side">
-          <span class="admin-pill admin-pill--success">自动刷新 15s</span>
-          <strong class="dashboard-command__value admin-code">{{ serviceFollowUpCount }}</strong>
-          <span class="admin-copy">需跟进人员</span>
-        </div>
-      </article>
+<section v-show="activeSection === 'overview'" v-if="dashboard" class="admin-page__section">
+      <div class="workspace-toolbar dashboard-intro"><p>今日已统计 <strong>{{ serviceTotalCount }}</strong> 位服务对象，<strong>{{ serviceFollowUpCount }}</strong> 位需要跟进。</p><span class="admin-pill admin-pill--success">每 15 秒自动更新</span></div>
 
       <div class="admin-grid admin-grid--stats-4">
         <button class="dashboard-stat-button" @click="openBucket('completeUsers')">
@@ -406,7 +398,7 @@ onUnmounted(() => {
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">服务趋势</span>
-              <h3 class="admin-panel__title">今日服务与跟进走势</h3>
+              <h3 class="admin-panel__title">近 7 日服务趋势</h3>
             </div>
             <span class="admin-pill admin-pill--success">实时</span>
           </div>
@@ -414,6 +406,7 @@ onUnmounted(() => {
             v-if="hasServiceTrendChart"
             class="dashboard-line-chart"
             viewBox="0 0 460 180"
+            preserveAspectRatio="none"
             role="img"
             :aria-label="trendChartLabel"
           >
@@ -453,7 +446,7 @@ onUnmounted(() => {
             </g>
           </svg>
           <div v-if="hasServiceTrendChart" class="dashboard-line-chart__labels">
-            <span v-for="point in serviceTrend" :key="point.label">{{ point.label }}</span>
+            <span v-for="(point, index) in serviceTrend" :key="point.label" :style="{ left: `${(servedTrendPlot.markers[index]?.x ?? 0) / 460 * 100}%` }">{{ point.label }}</span>
           </div>
           <div v-else class="admin-empty admin-empty--compact">
             <div class="admin-empty__title">暂无近 7 日服务趋势</div>
@@ -472,7 +465,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="dashboard-mix-card__body">
-            <div class="dashboard-donut" :style="serviceMixStyle">
+            <div class="dashboard-donut" :class="{ 'dashboard-donut--empty': serviceTotalCount === 0 }" :style="serviceMixStyle">
               <span>{{ serviceTotalCount }}</span>
             </div>
             <div class="dashboard-mix-card__legend">
@@ -487,7 +480,7 @@ onUnmounted(() => {
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">重点待办</span>
-              <h3 class="admin-panel__title">高优先级任务</h3>
+              <h3 class="admin-panel__title">重点待办</h3><RouterLink class="admin-link dashboard-all-tasks" to="/dashboard?section=tasks">查看全部 {{ pendingTasks.length }} 项</RouterLink>
             </div>
           </div>
           <div v-if="highPriorityTasks.length" class="dashboard-mini-list">
@@ -522,15 +515,14 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
-
-    <section class="admin-grid admin-grid--main-aside">
+<section v-show="activeSection === 'tasks'" class="admin-grid">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">待处理事件</span>
             <h3 class="admin-panel__title">统一任务池</h3>
           </div>
-          <span class="admin-pill admin-pill--warning">OPEN {{ pendingTasks.length }}</span>
+          <span class="admin-pill admin-pill--warning">待处理 {{ pendingTasks.length }}</span>
         </div>
 
         <table v-if="pendingTasks.length" class="admin-table">
@@ -631,8 +623,7 @@ onUnmounted(() => {
         </article>
       </aside>
     </section>
-
-    <section class="admin-page__section">
+<section v-show="activeSection === 'activity'" class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">汇总日志</p>
@@ -706,8 +697,7 @@ onUnmounted(() => {
         </div>
       </article>
     </section>
-
-    <div v-if="activeBucket && activeBucketData" class="dashboard-drawer-backdrop">
+<div v-if="activeBucket && activeBucketData" class="dashboard-drawer-backdrop">
       <article class="dashboard-drawer admin-panel">
         <div class="admin-panel__head">
           <div>
@@ -751,8 +741,7 @@ onUnmounted(() => {
         </table>
       </article>
     </div>
-
-    <div v-if="activeTask" class="dashboard-drawer-backdrop">
+<div v-if="activeTask" class="dashboard-drawer-backdrop">
       <article class="dashboard-drawer admin-panel">
         <div class="admin-panel__head">
           <div>
@@ -777,7 +766,7 @@ onUnmounted(() => {
         </div>
       </article>
     </div>
-  </section>
+</section>
 </template>
 
 <style scoped>
@@ -950,15 +939,18 @@ onUnmounted(() => {
 }
 
 .dashboard-line-chart__labels {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
+  position: relative;
+  height: 24px;
   margin-top: -8px;
-  padding: 0 18px 4px 20px;
   color: var(--admin-muted);
   font-family: var(--admin-code-font);
   font-size: 0.7rem;
   text-align: center;
+}
+.dashboard-line-chart__labels span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .dashboard-chart-legend,
@@ -1017,6 +1009,10 @@ onUnmounted(() => {
   font-family: var(--admin-code-font);
   font-size: 1.25rem;
   font-weight: 800;
+}
+
+.dashboard-donut--empty {
+  background: #e6ecef;
 }
 
 .dashboard-mix-card__legend {

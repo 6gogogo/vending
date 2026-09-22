@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkspaceSections from "../components/WorkspaceSections.vue";
+import { useWorkspaceSection } from "../utils/use-workspace-section";
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import type {
@@ -968,11 +970,18 @@ onMounted(async () => {
   ensureCalendarState();
   await load();
 });
+const workspaceSections = computed(() => [
+  { value: "overview", label: "人员概况" },
+  ...(detail.value?.user.role === "special" ? [{ value: "rules", label: "领取规则" }] : []),
+  { value: "records", label: "活动记录" },
+  ...(detail.value?.user.role === "special" && (canRecoverSettlement.value || canAdjustStock.value) ? [{ value: "recovery", label: "结算与纠错" }] : [])
+]);
+const requestedSection = useWorkspaceSection(workspaceSections);
+const activeSection = computed(() => !route.query.section && route.query.manualSettlementEventId && canRecoverSettlement.value ? "recovery" : requestedSection.value);
 </script>
 
 <template>
-  <section class="admin-page">
-    <section class="admin-page__section">
+<section class="admin-page user-detail-workspace"><section class="admin-page__section">
       <div class="admin-page__section-head">
         <div><p class="admin-kicker">人员详情</p><h3 class="admin-page__section-title">{{ detail?.user.name ?? "加载中" }}</h3></div>
       </div>
@@ -980,10 +989,9 @@ onMounted(async () => {
         {{ actionMessage.text }}
       </div>
     </section>
-
-    <section v-if="detail" class="admin-grid admin-grid--main-aside">
-      <div class="admin-grid">
-        <article class="admin-panel admin-panel-block">
+<WorkspaceSections :active="activeSection" :items="workspaceSections" />
+<template v-if="detail">
+  <section v-show="activeSection === 'overview'" class="admin-grid admin-grid--main-aside"><div class="admin-grid"><article class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">基本信息</span><h3 class="admin-panel__title">人员信息与当前状态</h3></div></div>
           <div class="admin-kv">
             <div class="admin-kv__row"><span class="admin-kv__label">姓名</span><span class="admin-kv__value">{{ detail.user.name }}</span></div>
@@ -993,8 +1001,7 @@ onMounted(async () => {
             <div class="admin-kv__row"><span class="admin-kv__label">标签</span><span class="admin-kv__value">{{ detail.user.tags.join("、") || "暂无标签" }}</span></div>
           </div>
         </article>
-
-        <article v-if="detail.user.role === 'special' && detail.stats" class="admin-panel admin-panel-block">
+<article v-if="detail.user.role === 'special' && detail.stats" class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">统计情况</span><h3 class="admin-panel__title">取货、补货与补扣</h3></div></div>
           <div class="admin-grid admin-grid--stats-3">
             <StatTile title="取货件数" :value="detail.stats.pickupCount" hint="该人员累计取货数量" tone="accent" />
@@ -1003,8 +1010,7 @@ onMounted(async () => {
           </div>
           <div class="admin-note">最近活跃时间：{{ formatDateTime(detail.stats.lastActiveAt) }}</div>
         </article>
-
-        <article v-if="detail.user.role === 'special' && detail.policyCalendar" class="admin-panel admin-panel-block">
+<article v-if="detail.user.role === 'special' && detail.policyCalendar" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div><span class="admin-kicker">领取情况日历</span><h3 class="admin-panel__title">按日期查看各时间段领取完成情况</h3></div>
             <div class="admin-toolbar">
@@ -1031,69 +1037,7 @@ onMounted(async () => {
               </tr>
             </tbody>
           </table>
-        </article>
-
-        <article v-if="detail.user.role === 'merchant'" class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">待办任务</span><h3 class="admin-panel__title">该商家关联任务</h3></div></div>
-          <table v-if="detail.relatedTasks?.length" class="admin-table">
-            <thead><tr><th>到期时间</th><th>任务</th><th>柜机</th></tr></thead>
-            <tbody>
-              <tr v-for="task in detail.relatedTasks" :key="task.id">
-                <td class="admin-code">{{ formatDateTime(task.dueAt) }}</td>
-                <td><span class="admin-table__strong">{{ task.title }}</span><span class="admin-table__subtext">{{ task.detail }}</span></td>
-                <td><RouterLink v-if="task.deviceCode" class="admin-link" :to="`/operations/${task.deviceCode}`">{{ task.deviceCode }}</RouterLink><span v-else>-</span></td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="admin-empty"><div class="admin-empty__title">当前没有关联任务</div><div class="admin-empty__body">临期、缺货和设备问题会在这里显示。</div></div>
-        </article>
-
-        <article class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">日志记录</span><h3 class="admin-panel__title">该人员相关日志</h3></div></div>
-          <table v-if="detail.recentLogs.length" class="admin-table">
-            <thead><tr><th>时间</th><th>动作</th><th>动作人</th><th>状态</th><th>详情</th></tr></thead>
-            <tbody>
-              <tr v-for="log in detail.recentLogs" :key="log.id">
-                <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
-                <td><span class="admin-table__strong">{{ log.description }}</span><span class="admin-table__subtext">{{ log.detail }}</span></td>
-                <td><RouterLink v-if="resolveLogActorRoute(log.actor)" class="admin-link" :to="resolveLogActorRoute(log.actor)!">{{ log.actor.name }}</RouterLink><span v-else>{{ log.actor.name }}</span><span class="admin-table__subtext">{{ log.actor.type }}</span></td>
-                <td><span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">{{ formatLogStatus(log.status) }}</span></td>
-                <td><RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink></td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="admin-empty"><div class="admin-empty__title">还没有相关日志</div><div class="admin-empty__body">当该人员发生取货、补货、补扣或状态调整时，这里会自动记录。</div></div>
-        </article>
-
-        <article v-if="detail.user.role !== 'admin'" class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">记录明细</span><h3 class="admin-panel__title">{{ detail.user.role === "merchant" ? "最近投放记录" : "最近取货 / 补货记录" }}</h3></div></div>
-          <table class="admin-table">
-            <thead><tr><th>时间</th><th>货品</th><th>数量</th><th>柜机</th><th>类型</th><th>平台关联</th></tr></thead>
-            <tbody>
-              <tr v-for="record in detail.recentRecords" :key="record.id">
-                <td class="admin-code">{{ formatDateTime(record.happenedAt) }}</td>
-                <td><span class="admin-table__strong">{{ record.goodsName }}</span><span class="admin-table__subtext">{{ record.goodsId }}</span></td>
-                <td class="admin-code">{{ record.quantity }}</td>
-                <td><RouterLink class="admin-link" :to="`/operations/${record.deviceCode}`">{{ record.deviceCode }}</RouterLink></td>
-                <td>{{ formatRecordType(record.type) }}</td>
-                <td>
-                  <span v-if="isLocalOnlyRecord(record)" class="admin-table__strong user-detail__local-only">仅本地，未同步平台</span>
-                  <span v-else-if="isPlatformRefundRecord(record)" class="admin-table__strong">已同步平台退款</span>
-                  <span v-else-if="record.orderNo || record.sourceOrderNo || record.transactionId" class="admin-table__strong">已关联平台订单</span>
-                  <span v-if="record.orderNo" class="admin-table__subtext">订单 {{ record.orderNo }}</span>
-                  <span v-if="record.sourceOrderNo" class="admin-table__subtext">原订单 {{ record.sourceOrderNo }}</span>
-                  <span v-if="record.transactionId" class="admin-table__subtext">交易号 {{ record.transactionId }}</span>
-                  <span v-if="record.refundNo" class="admin-table__subtext">退款单 {{ record.refundNo }}</span>
-                  <span v-if="!record.orderNo && !record.sourceOrderNo && !record.transactionId && !record.refundNo" class="admin-table__subtext">{{ isLocalOnlyRecord(record) ? "本地手工记录" : "本地记录" }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </article>
-      </div>
-
-      <aside class="admin-grid">
-        <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
+        </article></div><div class="admin-grid"><article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div><span class="admin-kicker">预约管理</span><h3 class="admin-panel__title">查看并取消当前预约</h3></div>
           </div>
@@ -1129,8 +1073,21 @@ onMounted(async () => {
           </div>
           <div v-if="reservations.some((entry) => entry.status === 'active') && !canCancelReservations" class="admin-note">当前账号可以查看预约，但取消操作需要“预约规则管理”权限。</div>
         </article>
-
-        <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
+<article v-if="detail.user.role === 'merchant'" class="admin-panel admin-panel-block">
+          <div class="admin-panel__head"><div><span class="admin-kicker">待办任务</span><h3 class="admin-panel__title">该商家关联任务</h3></div></div>
+          <table v-if="detail.relatedTasks?.length" class="admin-table">
+            <thead><tr><th>到期时间</th><th>任务</th><th>柜机</th></tr></thead>
+            <tbody>
+              <tr v-for="task in detail.relatedTasks" :key="task.id">
+                <td class="admin-code">{{ formatDateTime(task.dueAt) }}</td>
+                <td><span class="admin-table__strong">{{ task.title }}</span><span class="admin-table__subtext">{{ task.detail }}</span></td>
+                <td><RouterLink v-if="task.deviceCode" class="admin-link" :to="`/operations/${task.deviceCode}`">{{ task.deviceCode }}</RouterLink><span v-else>-</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="admin-empty"><div class="admin-empty__title">当前没有关联任务</div><div class="admin-empty__body">临期、缺货和设备问题会在这里显示。</div></div>
+        </article></div></section>
+  <section v-show="activeSection === 'rules'" class="admin-grid admin-grid--two"><article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div><span class="admin-kicker">分类额度</span><h3 class="admin-panel__title">按分类设置每日可领取数量</h3></div>
             <button v-if="canManageUserRules" class="admin-button admin-button--ghost" type="button" @click="resetEntitlementPolicyForm">新增分类额度</button>
@@ -1175,8 +1132,7 @@ onMounted(async () => {
           </div>
           <div v-else-if="canManageUserRules" class="admin-note">当前尚未建立分类树；请先到“货品分类”完成分类和货品归属。</div>
         </article>
-
-        <article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
+<article v-if="detail.user.role === 'special'" class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">每日可领取物资</span><h3 class="admin-panel__title">按人维护可领取物资、数量和时间</h3></div><button v-if="canManageUserRules" class="admin-button admin-button--ghost" @click="resetAccessPolicyForm">新增可领物资</button></div>
           <div v-if="groupedPersonalPolicies.length" class="user-policy-groups">
             <section v-for="group in groupedPersonalPolicies" :key="group.goodsId" class="user-policy-group">
@@ -1224,8 +1180,7 @@ onMounted(async () => {
           </div>
           <div v-else class="admin-note">当前账号只能查看每日可领取物资，新增、修改或立即生效需要“取货规则管理”权限。</div>
         </article>
-
-        <article v-if="detail.user.role === 'special' && canManageUserRules" class="admin-panel admin-panel-block">
+<article v-if="detail.user.role === 'special' && canManageUserRules" class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">模板操作</span><h3 class="admin-panel__title">用模板批量填入每日可领取物资</h3></div></div>
           <div class="user-detail-form">
             <label class="admin-field"><span class="admin-field__label">应用方式</span><select v-model="templateApplyForm.mode" class="admin-select"><option value="bind">新增到个人设定</option><option value="replace">覆盖个人设定</option></select></label>
@@ -1233,9 +1188,59 @@ onMounted(async () => {
             <div class="admin-note">{{ templateApplyForm.mode === "replace" ? "覆盖会在二次确认后，于下一个业务日替换当前个人设定。" : "新增会把模板中的每个货品最小单元追加到该人员的个人设定中。" }}</div>
             <button class="admin-button" :disabled="saving || !templateApplyForm.policyIds.length" @click="applyTemplatePolicies">{{ saving ? "处理中" : templateApplyForm.mode === "replace" ? "覆盖个人设定" : "新增到个人设定" }}</button>
           </div>
+        </article></section>
+  <section v-show="activeSection === 'records'" class="admin-grid"><article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head"><div><span class="admin-kicker">日志记录</span><h3 class="admin-panel__title">该人员相关日志</h3></div></div>
+          <table v-if="detail.recentLogs.length" class="admin-table">
+            <thead><tr><th>时间</th><th>动作</th><th>动作人</th><th>状态</th><th>详情</th></tr></thead>
+            <tbody>
+              <tr v-for="log in detail.recentLogs" :key="log.id">
+                <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
+                <td><span class="admin-table__strong">{{ log.description }}</span><span class="admin-table__subtext">{{ log.detail }}</span></td>
+                <td><RouterLink v-if="resolveLogActorRoute(log.actor)" class="admin-link" :to="resolveLogActorRoute(log.actor)!">{{ log.actor.name }}</RouterLink><span v-else>{{ log.actor.name }}</span><span class="admin-table__subtext">{{ log.actor.type }}</span></td>
+                <td><span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">{{ formatLogStatus(log.status) }}</span></td>
+                <td><RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink></td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="admin-empty"><div class="admin-empty__title">还没有相关日志</div><div class="admin-empty__body">当该人员发生取货、补货、补扣或状态调整时，这里会自动记录。</div></div>
         </article>
-
-        <article v-if="detail.user.role === 'special' && canRecoverSettlement" class="admin-panel admin-panel-block">
+<article v-if="detail.user.role !== 'admin'" class="admin-panel admin-panel-block">
+          <div class="admin-panel__head"><div><span class="admin-kicker">记录明细</span><h3 class="admin-panel__title">{{ detail.user.role === "merchant" ? "最近投放记录" : "最近取货 / 补货记录" }}</h3></div></div>
+          <table class="admin-table">
+            <thead><tr><th>时间</th><th>货品</th><th>数量</th><th>柜机</th><th>类型</th><th>平台关联</th></tr></thead>
+            <tbody>
+              <tr v-for="record in detail.recentRecords" :key="record.id">
+                <td class="admin-code">{{ formatDateTime(record.happenedAt) }}</td>
+                <td><span class="admin-table__strong">{{ record.goodsName }}</span><span class="admin-table__subtext">{{ record.goodsId }}</span></td>
+                <td class="admin-code">{{ record.quantity }}</td>
+                <td><RouterLink class="admin-link" :to="`/operations/${record.deviceCode}`">{{ record.deviceCode }}</RouterLink></td>
+                <td>{{ formatRecordType(record.type) }}</td>
+                <td>
+                  <span v-if="isLocalOnlyRecord(record)" class="admin-table__strong user-detail__local-only">仅本地，未同步平台</span>
+                  <span v-else-if="isPlatformRefundRecord(record)" class="admin-table__strong">已同步平台退款</span>
+                  <span v-else-if="record.orderNo || record.sourceOrderNo || record.transactionId" class="admin-table__strong">已关联平台订单</span>
+                  <span v-if="record.orderNo" class="admin-table__subtext">订单 {{ record.orderNo }}</span>
+                  <span v-if="record.sourceOrderNo" class="admin-table__subtext">原订单 {{ record.sourceOrderNo }}</span>
+                  <span v-if="record.transactionId" class="admin-table__subtext">交易号 {{ record.transactionId }}</span>
+                  <span v-if="record.refundNo" class="admin-table__subtext">退款单 {{ record.refundNo }}</span>
+                  <span v-if="!record.orderNo && !record.sourceOrderNo && !record.transactionId && !record.refundNo" class="admin-table__subtext">{{ isLocalOnlyRecord(record) ? "本地手工记录" : "本地记录" }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+<article class="admin-panel admin-panel-block">
+          <div class="admin-panel__head"><div><span class="admin-kicker">关联事件</span><h3 class="admin-panel__title">最近开柜事件</h3></div></div>
+          <div v-if="detail.recentEvents.length" class="admin-list">
+            <div v-for="event in detail.recentEvents" :key="event.eventId" class="admin-list__row">
+              <div class="admin-list__main"><span class="admin-list__title">{{ event.orderNo }}</span><span class="admin-list__meta">{{ formatDateTime(event.updatedAt) }} · {{ event.deviceCode }} · {{ event.status }}</span></div>
+              <RouterLink class="admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">查看日志</RouterLink>
+            </div>
+          </div>
+          <div v-else class="admin-empty"><div class="admin-empty__title">{{ loading ? "正在加载事件记录" : "还没有开柜事件" }}</div><div class="admin-empty__body">后续产生的开柜链路会同步显示在这里。</div></div>
+        </article></section>
+  <section v-show="activeSection === 'recovery'" class="admin-grid"><article v-if="detail.user.role === 'special' && canRecoverSettlement" class="admin-panel admin-panel-block">
           <div class="admin-panel__head">
             <div><span class="admin-kicker">缺失结算补记</span><h3 class="admin-panel__title">按开柜事件补记实际领取</h3></div>
           </div>
@@ -1365,8 +1370,7 @@ onMounted(async () => {
             </button>
           </div>
         </article>
-
-        <article v-if="detail.user.role === 'special' && canAdjustStock" class="admin-panel admin-panel-block">
+<article v-if="detail.user.role === 'special' && canAdjustStock" class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">库存纠错</span><h3 class="admin-panel__title">修正本地库存与人员记录</h3></div></div>
           <div class="user-detail-form">
             <label class="admin-field"><span class="admin-field__label">柜机</span><select v-model="form.deviceCode" class="admin-select"><option v-for="device in devices" :key="device.deviceCode" :value="device.deviceCode">{{ device.name }} / {{ device.deviceCode }}</option></select></label>
@@ -1377,21 +1381,8 @@ onMounted(async () => {
             <div class="admin-note">库存纠错只修正本地库存与人员记录，不会补写开柜结算，也不会在平台创建订单。缺少平台结算明细时请使用上方“缺失结算补记”。</div>
             <button class="admin-button" :disabled="saving || !selectedGoods" @click="submitAdjustment">{{ saving ? "提交中" : form.direction === "restock" ? "提交手工补货" : "提交手工补扣" }}</button>
           </div>
-        </article>
-
-        <article class="admin-panel admin-panel-block">
-          <div class="admin-panel__head"><div><span class="admin-kicker">关联事件</span><h3 class="admin-panel__title">最近开柜事件</h3></div></div>
-          <div v-if="detail.recentEvents.length" class="admin-list">
-            <div v-for="event in detail.recentEvents" :key="event.eventId" class="admin-list__row">
-              <div class="admin-list__main"><span class="admin-list__title">{{ event.orderNo }}</span><span class="admin-list__meta">{{ formatDateTime(event.updatedAt) }} · {{ event.deviceCode }} · {{ event.status }}</span></div>
-              <RouterLink class="admin-link" :to="`/logs?subjectType=event&subjectId=${event.eventId}`">查看日志</RouterLink>
-            </div>
-          </div>
-          <div v-else class="admin-empty"><div class="admin-empty__title">{{ loading ? "正在加载事件记录" : "还没有开柜事件" }}</div><div class="admin-empty__body">后续产生的开柜链路会同步显示在这里。</div></div>
-        </article>
-      </aside>
-    </section>
-  </section>
+        </article></section>
+  </template></section>
 </template>
 
 <style scoped>

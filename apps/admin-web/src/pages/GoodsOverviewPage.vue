@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkspaceSections from "../components/WorkspaceSections.vue";
+import { useWorkspaceSection } from "../utils/use-workspace-section";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import type {
@@ -956,18 +958,24 @@ function sortExpiry(current?: string, next?: string) {
 function resolveGoodsName(goodsId: string) {
   return catalog.value.find((item) => item.goodsId === goodsId)?.name ?? goodsId;
 }
+const workspaceSections = [
+  { value: "catalog", label: "货品台账" },
+  { value: "inventory", label: "库存与预警" },
+  { value: "transfer", label: "库存调拨" }
+];
+const activeSection = useWorkspaceSection(workspaceSections);
 </script>
 
 <template>
-  <section class="admin-page">
-    <section class="admin-page__section">
+<section class="admin-page goods-workspace"><WorkspaceSections :active="activeSection" :items="workspaceSections" />
+<section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">货品总览</p>
-          <h3 class="admin-page__section-title">维护货品主数据、分类、阈值模板、库存分布与调拨</h3>
+          <h3 class="admin-page__section-title">货品概况</h3>
         </div>
         <div class="admin-toolbar">
-          <span class="admin-copy">货品主数据、分类、阈值模板和本地仓库调拨统一在此维护</span>
+
           <button v-if="canManageGoods" class="admin-button" :disabled="syncBusy" @click="syncPlatformGoods">
             {{ syncBusy ? "同步中…" : "同步平台货品" }}
           </button>
@@ -978,7 +986,7 @@ function resolveGoodsName(goodsId: string) {
         </div>
       </div>
 
-      <div class="admin-note" aria-live="polite">
+      <details class="workspace-details" :open="Boolean(syncStatusError || platformSync?.report?.doors.some(door => door.status === 'failed'))"><summary>平台货品同步 · 每日 23:00 自动更新<span v-if="platformSync?.report"> · {{ syncStateLabels[platformSync.report.status] }}</span></summary><div class="admin-note" aria-live="polite">
         <p>每天 23:00（北京时间）自动同步全部柜机的货品资料，新增柜机自动纳入。库存与领取规则在本地维护。</p>
         <p v-if="platformSync?.report">
           {{ syncStateLabels[platformSync.report.status] }} · {{ formatDateTime(platformSync.report.startedAt) }} ·
@@ -993,7 +1001,7 @@ function resolveGoodsName(goodsId: string) {
             {{ door.deviceName }}（{{ door.deviceCode }}）· 门 {{ door.doorNum }}：{{ door.message }}
           </li>
         </ul>
-      </div>
+      </div></details>
 
       <div
         v-if="message"
@@ -1055,8 +1063,7 @@ function resolveGoodsName(goodsId: string) {
         </table>
       </div>
     </section>
-
-    <section class="admin-page__section">
+<section v-show="activeSection === 'catalog'" class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">货品主数据台账</p>
@@ -1129,8 +1136,7 @@ function resolveGoodsName(goodsId: string) {
         </div>
       </article>
     </section>
-
-    <section class="admin-grid admin-grid--main-aside">
+<section v-show="activeSection === 'inventory'" class="admin-grid admin-grid--main-aside">
       <article class="admin-panel admin-panel-block goods-contained-table">
         <div class="admin-panel__head">
           <div>
@@ -1311,8 +1317,7 @@ function resolveGoodsName(goodsId: string) {
         </article>
       </aside>
     </section>
-
-    <section class="admin-grid admin-grid--main-aside">
+<section v-show="activeSection === 'transfer'" class="admin-grid admin-grid--main-aside">
       <article class="admin-panel admin-panel-block">
         <div class="admin-panel__head">
           <div>
@@ -1422,8 +1427,7 @@ function resolveGoodsName(goodsId: string) {
         </article>
       </aside>
     </section>
-
-    <dialog
+<dialog
       v-if="transferConfirmation"
       ref="transferConfirmationDialog"
       class="goods-transfer-confirm admin-panel"
@@ -1474,8 +1478,7 @@ function resolveGoodsName(goodsId: string) {
         </button>
       </div>
     </dialog>
-
-    <div v-if="editorMode" class="goods-editor-backdrop">
+<div v-if="editorMode" class="goods-editor-backdrop">
       <aside class="goods-editor admin-panel">
         <div class="admin-panel__head">
           <div>
@@ -1538,7 +1541,7 @@ function resolveGoodsName(goodsId: string) {
         </div>
       </aside>
     </div>
-  </section>
+</section>
 </template>
 
 <style scoped>

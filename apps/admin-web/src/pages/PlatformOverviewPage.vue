@@ -35,7 +35,7 @@ const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(nu
 const overview = ref<PlatformOverviewSnapshot>();
 const provisioned = ref<PlatformTenantProvisioningResult>();
 
-const createForm = reactive<PlatformTenantCreatePayload>({
+const createForm = reactive<Required<PlatformTenantCreatePayload>>({
   code: "",
   name: "",
   serviceMode: "production",
@@ -51,7 +51,7 @@ const createForm = reactive<PlatformTenantCreatePayload>({
     password: ""
   }
 });
-const editForm = reactive<PlatformTenantUpdatePayload>({
+const editForm = reactive<Required<PlatformTenantUpdatePayload>>({
   name: "",
   status: "trial",
   instanceUrl: "",

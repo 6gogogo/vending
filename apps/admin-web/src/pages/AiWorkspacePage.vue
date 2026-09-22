@@ -785,8 +785,7 @@ onMounted(() => {
       <div class="admin-page__section-head ai-page__section-head">
         <div class="ai-page__section-copy">
           <p class="admin-kicker">模型接入状态</p>
-          <h3 class="admin-page__section-title">AI 接入控制台</h3>
-          <p class="admin-copy">把状态查看、连通测试和模型配置集中在这一块处理。</p>
+          <h3 class="admin-page__section-title">模型与连接</h3>
         </div>
         <div class="admin-toolbar ai-page__status-actions">
           <span class="admin-pill" :class="isAiEnabled ? 'admin-pill--success' : 'admin-pill--warning'">
@@ -835,7 +834,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="admin-grid admin-grid--stats-4 ai-page__status-grid">
+      <details class="workspace-details"><summary>查看模型与连接详情</summary>
+      <div class="admin-grid admin-grid--stats-4 ai-page__status-grid workspace-details__body">
         <article
           v-for="card in statusCards"
           :key="card.key"
@@ -853,6 +853,7 @@ onMounted(() => {
         </article>
       </div>
 
+      </details>
       <div v-if="statusError" class="admin-note ai-page__note ai-page__note--danger">{{ statusError }}</div>
       <div v-if="testError" class="admin-note ai-page__note ai-page__note--danger">{{ testError }}</div>
       <div v-if="testResult" class="admin-note ai-page__note ai-page__note--success">
@@ -868,7 +869,7 @@ onMounted(() => {
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">功能选择</span>
-            <h3 class="admin-panel__title">先选当前要生成的 AI 能力</h3>
+            <h3 class="admin-panel__title">选择分析任务</h3>
           </div>
           <span class="admin-copy">当前页签：{{ activeTabMeta.label }}</span>
         </div>
@@ -1188,7 +1189,7 @@ onMounted(() => {
           <div v-if="customResult" class="ai-page__result">
             <div class="ai-page__meta">
               <span class="admin-pill admin-pill--success">
-                {{ rangeOptions.find((item) => item.value === customResult.range)?.label ?? customResult.range }}
+                {{ rangeOptions.find((item) => item.value === customResult?.range)?.label ?? customResult.range }}
               </span>
               <span class="admin-copy">
                 {{ customResult.meta.model }} · {{ formatDateTime(customResult.meta.generatedAt) }}
