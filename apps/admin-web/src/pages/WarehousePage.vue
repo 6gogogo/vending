@@ -663,7 +663,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </div>
         </div>
 
-        <table v-if="snapshot?.items.length" class="admin-table">
+        <table v-if="snapshot?.items.length" class="admin-table admin-table--mobile-cards">
           <thead>
             <tr>
               <th>货品</th>
@@ -675,15 +675,15 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </thead>
           <tbody>
             <tr v-for="item in snapshot.items" :key="item.goodsId">
-              <td>
+              <td class="mobile-card__title">
                 <RouterLink class="admin-link admin-table__strong" :to="`/goods/${item.goodsId}`">
                   {{ item.goodsName }}
                 </RouterLink>
                 <span class="admin-table__subtext">{{ item.goodsId }}</span>
               </td>
-              <td class="admin-code">{{ item.totalStock }}</td>
-              <td class="admin-code">{{ item.batchCount }}</td>
-              <td>
+              <td data-label="库存" class="admin-code">{{ item.totalStock }}</td>
+              <td data-label="批次数" class="admin-code">{{ item.batchCount }}</td>
+              <td data-label="批次明细" class="mobile-card__wide">
                 <div class="warehouse-batch-list">
                   <div v-for="batch in item.batches.slice(0, 4)" :key="batch.batchId" class="warehouse-batch-item">
                     <span class="admin-table__strong">{{ formatBatchDate(batch.expiresAt) }}</span>
@@ -695,7 +695,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
                   </span>
                 </div>
               </td>
-              <td><RouterLink class="admin-link" :to="`/goods/${item.goodsId}`">详情</RouterLink></td>
+              <td class="mobile-card__actions"><RouterLink class="admin-link" :to="`/goods/${item.goodsId}`">详情</RouterLink></td>
             </tr>
           </tbody>
         </table>
@@ -827,7 +827,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </span>
         </div>
 
-        <table v-if="expiredWarehouseBatches.length" class="admin-table">
+        <table v-if="expiredWarehouseBatches.length" class="admin-table admin-table--mobile-cards">
           <thead>
             <tr>
               <th>货品</th>
@@ -839,16 +839,16 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </thead>
           <tbody>
             <tr v-for="batch in expiredWarehouseBatches" :key="batch.batchId">
-              <td>
+              <td class="mobile-card__title">
                 <RouterLink class="admin-link admin-table__strong" :to="`/goods/${batch.goodsId}`">
                   {{ resolveGoodsName(batch.goodsId) }}
                 </RouterLink>
                 <span class="admin-table__subtext">{{ batch.goodsId }}</span>
               </td>
-              <td class="admin-code">{{ batch.batchId }}</td>
-              <td>{{ formatBatchDate(batch.expiresAt) }}</td>
-              <td class="admin-code">{{ batch.remainingQuantity }}</td>
-              <td>
+              <td data-label="批次" class="admin-code mobile-card__wide">{{ batch.batchId }}</td>
+              <td data-label="过期日期">{{ formatBatchDate(batch.expiresAt) }}</td>
+              <td data-label="待处置" class="admin-code">{{ batch.remainingQuantity }}</td>
+              <td class="mobile-card__actions">
                 <button
                   v-if="canDisposeExpiredWarehouse"
                   type="button"

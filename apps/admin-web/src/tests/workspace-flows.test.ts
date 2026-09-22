@@ -99,7 +99,7 @@ const button = (wrapper: VueWrapper, label: string) => {
   return found;
 };
 const field = (wrapper: VueWrapper, label: string) => {
-  const found = wrapper.findAll("label").find(item => item.isVisible() && item.find(".admin-field__label").text() === label);
+  const found = wrapper.findAll("label").find(item => item.isVisible() && item.find(".admin-field__label").exists() && item.find(".admin-field__label").text() === label);
   if (!found) throw new Error(`找不到可见字段：${label}`);
   return found.get("input,select,textarea");
 };
@@ -372,19 +372,25 @@ describe("人员页面分区和提交", () => {
     expect(api.createUser).toHaveBeenCalledTimes(1);
   });
 
-  it("切换分区、后退和前进保留筛选与选择，并且不重复请求人员数据", async () => {
+  it.each(["链接", "手机选择器"])("通过 %s 切换分区、后退和前进保留筛选与选择，并且不重复请求人员数据", async navigation => {
     const { wrapper, router } = await start("/users?section=directory&from=review");
     await wrapper.get('input[placeholder="输入姓名、手机号、标签或区域"]').setValue("流程测试");
     await wrapper.get('input[type="checkbox"][aria-label="选择人员 流程测试人员"]').setValue(true);
-    await wrapper.get('.workspace-sections a[href="/users?section=rules&from=review"]').trigger("click");
+    if (navigation === "手机选择器") {
+      await wrapper.get(".workspace-sections__mobile select").setValue("rules");
+    } else {
+      await wrapper.get('.workspace-sections a[href="/users?section=rules&from=review"]').trigger("click");
+    }
     await flushPromises();
     expect(router.currentRoute.value.query.from).toBe("review");
     expect(wrapper.get(".workspace-toolbar").text()).toContain("已选 1 人");
     router.back(); await flushPromises();
     expect(router.currentRoute.value.query.section).toBe("directory");
+    expect((wrapper.get(".workspace-sections__mobile select").element as HTMLSelectElement).value).toBe("directory");
     expect((wrapper.get('input[placeholder="输入姓名、手机号、标签或区域"]').element as HTMLInputElement).value).toBe("流程测试");
     router.forward(); await flushPromises();
     expect(router.currentRoute.value.query.section).toBe("rules");
+    expect((wrapper.get(".workspace-sections__mobile select").element as HTMLSelectElement).value).toBe("rules");
     expect(api.users).toHaveBeenCalledTimes(1);
   });
 
@@ -398,6 +404,7 @@ describe("人员页面分区和提交", () => {
     const { wrapper } = await start("/users?section=verification", "admin", ["users:view"]);
     expect(wrapper.get('.workspace-sections [aria-current="page"]').text()).toContain("人员台账");
     expect(wrapper.findAll(".workspace-sections a").map(item => item.text())).toEqual(["人员台账1", "初始化指引"]);
+    expect(wrapper.findAll(".workspace-sections__mobile option").map(item => item.attributes("value"))).toEqual(["directory", "setup"]);
     await searchFor(wrapper, "初始化");
     expect(wrapper.find('.console-search-results a[href="/users?section=setup"]').exists()).toBe(true);
     expect(api.manualVerificationCodes).not.toHaveBeenCalled();

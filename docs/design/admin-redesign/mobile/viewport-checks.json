@@ -1,0 +1,124 @@
+[
+  {
+    "label": "柜机列表 430",
+    "errors": [],
+    "pageWidth": 415,
+    "panels": [],
+    "viewport": {
+      "height": 932,
+      "width": 430
+    }
+  },
+  {
+    "label": "柜机详情 430",
+    "errors": [],
+    "pageWidth": 415,
+    "panels": [],
+    "viewport": {
+      "height": 932,
+      "width": 430
+    }
+  },
+  {
+    "label": "柜机详情 320",
+    "errors": [],
+    "pageWidth": 305,
+    "panels": [],
+    "viewport": {
+      "height": 740,
+      "width": 320
+    }
+  },
+  {
+    "label": "操作日志 320",
+    "errors": [],
+    "pageWidth": 305,
+    "panels": [
+      {
+        "className": "logs-filters admin-panel admin-panel-block",
+        "scrollWidth": 298,
+        "width": 275
+      }
+    ],
+    "viewport": {
+      "height": 740,
+      "width": 320
+    }
+  },
+  {
+    "label": "操作日志 320 修复日期筛选后",
+    "errors": [],
+    "pageWidth": 305,
+    "panels": [],
+    "viewport": {
+      "height": 740,
+      "width": 320
+    }
+  },
+  {
+    "label": "货品管理平板 768",
+    "errors": [],
+    "pageWidth": 753,
+    "panels": [
+      {
+        "className": "admin-panel admin-panel-block goods-contained-table",
+        "scrollWidth": 1212,
+        "width": 700
+      }
+    ],
+    "viewport": {
+      "height": 1024,
+      "width": 768
+    }
+  },
+  {
+    "label": "桌面人员页 1440",
+    "errors": [],
+    "pageWidth": 1425,
+    "panels": [],
+    "viewport": {
+      "height": 1000,
+      "width": 1440
+    }
+  },
+  {
+    "label": "货品管理平板 768 完成适配",
+    "errors": [],
+    "pageWidth": 753,
+    "panels": [],
+    "viewport": {
+      "height": 1024,
+      "width": 768
+    }
+  },
+  {
+    "label": "仓库过期处置 375",
+    "errors": [],
+    "pageWidth": 360,
+    "panels": [],
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  },
+  {
+    "label": "人员管理 320",
+    "errors": [],
+    "pageWidth": 305,
+    "panels": [],
+    "viewport": {
+      "height": 740,
+      "width": 320
+    }
+  },
+  {
+    "label": "工作台 375",
+    "errors": [],
+    "pageWidth": 360,
+    "panels": [],
+    "viewport": {
+      "height": 812,
+      "width": 375
+    }
+  }
+]

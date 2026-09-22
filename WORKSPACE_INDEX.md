@@ -7,6 +7,7 @@
 - 分支：`codex/admin-workspace-redesign`，后续后台修改继续在此分支进行。
 - [预览启动、工作树位置与截图](docs/design/admin-redesign/README.md)：`http://127.0.0.1:5188/`，演示账号 `admin / admin`。
 - [交互与流程回归记录](docs/design/admin-redesign/REGRESSION.md)：修复项、测试范围、复验截图与验证边界。
+- [手机布局验收](docs/design/admin-redesign/MOBILE.md)：窄屏问题、手机适配规则、桌面回归与截图。
 - `.codex-run/` 是不提交的本地演练数据和日志；依赖目录及构建输出不作为源代码维护。
 
 ## 按问题定位
@@ -14,6 +15,7 @@
 | 要修改或排查什么 | 优先入口 | 接着看什么 |
 | --- | --- | --- |
 | 布局、搜索、账户弹窗、手机导航 | [AdminLayout.vue](apps/admin-web/src/layouts/AdminLayout.vue) | [AdminNavigation.vue](apps/admin-web/src/components/AdminNavigation.vue)、[workspace.css](apps/admin-web/src/styles/workspace.css) |
+| 手机布局、表格卡片、固定保存栏 | [mobile.css](apps/admin-web/src/styles/mobile.css) | 800px 及以下启用；页面标记字段和操作，复用原数据与处理函数 |
 | 菜单、功能搜索、分区及显示权限 | [admin-navigation.ts](apps/admin-web/src/utils/admin-navigation.ts) | [WorkspaceSections.vue](apps/admin-web/src/components/WorkspaceSections.vue)、[use-workspace-section.ts](apps/admin-web/src/utils/use-workspace-section.ts) |
 | URL、详情跳转、路由权限 | [router/index.ts](apps/admin-web/src/router/index.ts) | [session.ts](apps/admin-web/src/stores/session.ts)，默认落点也在此定义 |
 | 页面调用接口、权限预检 | [api/admin.ts](apps/admin-web/src/api/admin.ts) | [api/client.ts](apps/admin-web/src/api/client.ts)、[HTTP 请求层](packages/shared-client/src/http.ts) |
@@ -49,7 +51,8 @@
 2. **新分区**：工作台、人员、货品、仓库在 `admin-navigation.ts` 定义分区；页面用 `getAdminWorkspaceSections()` 补实时角标，搜索同步更新。详情页按对象能力定义分区。用 `useWorkspaceSection()` 处理无效 URL；有操作意图的跳转需写 `query.section`，例如保存人员后直达 `rules`。
 3. **新请求**：核对 `api/admin.ts` 的权限预检，避免无权调用的辅助请求拖垮 `Promise.all`。对象切换使用 `createLatestRequestGuard()`，卸载时失效；轮询用 `usePagePolling()`，上次完成后再计时。失败要有可见提示及恢复入口。
 4. **新写操作**：处理等待、防重复、取消和失败重试；库存、结算继续走已有服务端流程。同页分区用 `v-show` 保留草稿，跨人员/柜机时清空旧明细。导航浮层先关闭，再让未保存确认接管。
-5. **新测试**：纯规则放 `src/utils/*.test.ts`，组件与路由交互放 `src/tests/*.test.ts`，只替换 API 边界；服务端规则放 `apps/api/test/`，使用已有隔离运行器。
+5. **手机适配**：后台专用规则集中在 `mobile.css`，不要直接改领取端 `apps/mobile`。常规列表可加 `admin-table--mobile-cards`，每个数据格补 `data-label`，标题、通栏内容和操作分别用 `mobile-card__title`、`mobile-card__wide`、`mobile-card__actions`。不复制请求和事件处理；复杂对照表仍单独检查滚动与入口可达性。至少复验 320/375/430px、短屏弹窗和桌面断点。
+6. **新测试**：纯规则放 `src/utils/*.test.ts`，组件与路由交互放 `src/tests/*.test.ts`，只替换 API 边界；服务端规则放 `apps/api/test/`，使用已有隔离运行器。
 
 人员和柜机详情仍是较大的业务页面，后续可沿现有分区逐步拆组件。导航、分区、轮询和响应有效性判断已经有独立入口，新增功能应复用这些入口。
 

@@ -523,7 +523,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-<section class="admin-page settings-page"><section class="admin-page__section"><div class="admin-page__section-head settings-page__topbar">
+<section class="admin-page settings-page" :class="{ 'settings-page--dirty': hasDirtyChanges }"><section class="admin-page__section"><div class="admin-page__section-head settings-page__topbar">
         <div class="settings-page__heading-copy">
           <p class="admin-copy">
             {{ exampleSettingsIntro }}
@@ -547,6 +547,8 @@ onBeforeUnmount(() => {
           >
             {{ restartSubmitting ? "安排中" : "重启当前实例" }}
           </button>
+          <div class="settings-page__save-actions" :class="{ 'is-dirty': hasDirtyChanges }">
+          <span v-if="hasDirtyChanges" class="settings-page__mobile-save-note">{{ dirtyKeys.length }} 项更改未保存</span>
           <button
             class="admin-button admin-button--ghost"
             type="button"
@@ -558,6 +560,7 @@ onBeforeUnmount(() => {
           <button class="admin-button" type="button" :disabled="saving || !hasDirtyChanges || !canUpdateSettings" @click="saveSettings">
             {{ saving ? "保存中" : "保存设置" }}
           </button>
+          </div>
         </div>
       </div>
 <div v-if="!canUpdateSettings" class="admin-note settings-page__note">

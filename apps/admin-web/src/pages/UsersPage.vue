@@ -1995,7 +1995,7 @@ const expandedUserId = ref<string>();
         </label>
 
         <div class="users-filters__summary users-compact-status">
-          当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。人员台账默认按地区分组，特殊群体领取状态单独显示。
+          当前结果 {{ filteredUsers.length }} 人，已选 {{ selectedUserIds.length }} 人。
         </div>
       </div>
     </section>
@@ -2005,9 +2005,9 @@ const expandedUserId = ref<string>();
             <span class="admin-kicker">人员台账</span>
             <h3 class="admin-panel__title">人员列表</h3>
           </div>
-          <div class="admin-inline-links">
+          <div class="admin-inline-links users-batch-actions" :class="{ 'has-selection': selectedUsers.length > 0 }">
             <button class="admin-button admin-button--ghost" @click="toggleSelectAll">{{ allFilteredSelected ? "取消全选" : "全选当前结果" }}</button>
-            <select v-if="canManageUsers" v-model="migrationRegionId" class="admin-select users-region-migrate-select">
+            <select v-if="canManageUsers" v-model="migrationRegionId" class="admin-select users-region-migrate-select" aria-label="批量迁移到地区">
               <option value="">迁移到地区</option>
               <option v-for="region in regionOptions" :key="region.id" :value="region.id">{{ region.name }}</option>
             </select>
@@ -2034,33 +2034,34 @@ const expandedUserId = ref<string>();
           </div>
         </div>
 
+        <p v-if="canManageUsers && !selectedUsers.length" class="users-selection-hint">勾选人员后可批量迁移或删除。</p>
         <div v-if="groupedUsers.length" class="users-region-groups users-directory-table">
           <section v-for="group in groupedUsers" :key="group.regionName" class="users-region-group">
             <div class="users-region-group__head">
               <span class="admin-kicker">{{ group.regionName }}</span>
               <span class="admin-table__subtext">{{ group.users.length }} 人</span>
             </div>
-            <table class="admin-table">
+            <table class="admin-table admin-table--mobile-cards users-directory-cards">
               <thead><tr><th>选择</th><th>人员 / 角色</th><th>手机号</th><th>地区 / 标签</th><th>每日物资</th><th>台账状态</th><th>操作</th></tr></thead>
               <tbody>
-                <template v-for="user in group.users" :key="user.id"><tr><td><input type="checkbox" :checked="selectedUserIds.includes(user.id)" :aria-label="`选择人员 ${user.name}`" @change="toggleUser(user.id)" /></td>
-<td>
+                <template v-for="user in group.users" :key="user.id"><tr :class="{ 'is-selected': selectedUserIds.includes(user.id) }"><td class="mobile-card__selection"><label class="users-card-select"><input type="checkbox" :checked="selectedUserIds.includes(user.id)" :aria-label="`选择人员 ${user.name}`" @change="toggleUser(user.id)" /></label></td>
+<td class="mobile-card__title">
                     <RouterLink class="admin-link" :to="`/users/${user.id}`">{{ user.name }}</RouterLink>
                     <span class="admin-table__subtext">{{ formatRole(user.role) }}</span>
                   </td>
-<td>
+<td data-label="手机号">
                     <span class="admin-code">{{ user.phone }}</span>
                     <span class="admin-table__subtext">{{ registrationLabel(user) }}</span>
                   </td>
-<td>
+<td data-label="地区 / 标签">
                     <span class="admin-table__strong">{{ user.regionName || "未分配区域" }}</span>
                     <span class="admin-table__subtext">{{ user.tags.join("、") || "无标签" }}</span>
                   </td>
-<td><span class="admin-table__strong">{{ user.role === "special" ? policySummary(user.id) : "不适用" }}</span></td>
-<td>
+<td data-label="每日物资"><span class="admin-table__strong">{{ user.role === "special" ? policySummary(user.id) : "不适用" }}</span></td>
+<td data-label="台账状态">
                     <span class="admin-pill" :class="ledgerStatusTone(user.ledgerStatus)">{{ formatLedgerStatus(user.ledgerStatus) }}</span>
                   </td>
-<td>
+<td class="mobile-card__actions">
                     <div class="admin-inline-links">
                       <RouterLink class="admin-link" :to="`/users/${user.id}`">详情</RouterLink>
                       <button v-if="canManageUsers" class="admin-text-button" @click="openEditUser(user)">编辑</button>

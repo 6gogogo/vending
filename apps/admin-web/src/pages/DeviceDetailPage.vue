@@ -1706,7 +1706,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </div>
 
           <div class="device-table-scroll">
-            <table class="admin-table">
+            <table class="admin-table admin-table--mobile-cards">
               <thead>
                 <tr>
                   <th>货品</th>
@@ -1719,13 +1719,13 @@ const activeSection = useWorkspaceSection(workspaceSections);
               </thead>
               <tbody>
                 <tr v-for="goods in selectedDoorGoods" :key="goods.goodsId">
-                  <td>
+                  <td class="mobile-card__title">
                     <span class="admin-table__strong">{{ goods.name }}</span>
                     <span class="admin-table__subtext">{{ goods.goodsId }}</span>
                   </td>
-                  <td>{{ categoryLabelMap[goods.category] ?? goods.category }}</td>
-                  <td class="admin-code">{{ formatGoodsStock(goods) }}</td>
-                  <td>
+                  <td data-label="分类">{{ categoryLabelMap[goods.category] ?? goods.category }}</td>
+                  <td data-label="库存" class="admin-code">{{ formatGoodsStock(goods) }}</td>
+                  <td data-label="今日变化">
                     <span
                       class="admin-pill"
                       :class="(stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? 'admin-pill--success' : 'admin-pill--warning'"
@@ -1733,13 +1733,13 @@ const activeSection = useWorkspaceSection(workspaceSections);
                       {{ (stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0) >= 0 ? "+" : "" }}{{ stockChangeMap.get(goods.goodsId)?.deltaSinceStartOfBusinessDay ?? 0 }}
                     </span>
                   </td>
-                  <td class="admin-code">
+                  <td data-label="临期" class="admin-code">
                     {{ formatDate(goods.expiresAt) }}
                     <span v-if="goods.expiresAt && Date.parse(goods.expiresAt) <= Date.now()" class="admin-pill admin-pill--warning">
                       {{ detail.goodsExpiryMode === "warning_only" ? "登记已到期 · 仅提醒" : "已到期" }}
                     </span>
                   </td>
-                  <td>
+                  <td class="mobile-card__actions">
                     <button
                       v-if="canManageDevice && goods.stock <= 0"
                       class="admin-button admin-button--ghost"

@@ -287,7 +287,7 @@ onMounted(async () => {
           当前筛选命中 {{ logs.length }} 条，页面先展示最近 {{ visibleLogs.length }} 条；需要更精确结果可继续筛选，完整数据请使用导出。
           <span v-if="hiddenLogsCount">还有 {{ hiddenLogsCount }} 条未在当前页面展开。</span>
         </div>
-        <table v-if="logs.length" class="admin-table">
+        <table v-if="logs.length" class="admin-table admin-table--mobile-cards logs-mobile-cards">
           <thead>
             <tr>
               <th>时间</th>
@@ -300,8 +300,8 @@ onMounted(async () => {
           </thead>
           <tbody>
             <tr v-for="log in visibleLogs" :key="log.id">
-              <td class="admin-code">{{ formatDateTime(log.occurredAt) }}</td>
-              <td>
+              <td data-label="时间" class="admin-code mobile-card__wide">{{ formatDateTime(log.occurredAt) }}</td>
+              <td class="mobile-card__title">
                 <div class="admin-context-main">
                   <RouterLink class="admin-link" :to="`/logs/${log.id}`">{{ log.description }}</RouterLink>
                 </div>
@@ -313,7 +313,7 @@ onMounted(async () => {
                   <span class="admin-table__subtext">{{ formatActorTypeLabel(log.actor.type) }} · {{ formatLogCategoryLabel(log.category) }} · {{ log.type }}</span>
                 </div>
               </td>
-              <td>
+              <td data-label="业务对象" class="mobile-card__wide">
                 <span class="admin-context-main">{{ logContextSummary(log) }}</span>
                 <span v-if="logSubjectSummary(log)" class="admin-context-meta">{{ logSubjectSummary(log) }}</span>
                 <span v-if="logReferenceSummary(log)" class="admin-context-meta admin-code">{{ logReferenceSummary(log) }}</span>
@@ -334,13 +334,13 @@ onMounted(async () => {
                   </RouterLink>
                 </div>
               </td>
-              <td>
+              <td data-label="状态">
                 <span class="admin-pill" :class="log.status === 'warning' ? 'admin-pill--warning' : log.status === 'failed' ? 'admin-pill--danger' : log.status === 'success' ? 'admin-pill--success' : 'admin-pill--neutral'">
                   {{ formatLogStatus(log.status) }}
                 </span>
                 <span class="admin-table__subtext">{{ undoStateLabel(log) }}</span>
               </td>
-              <td>
+              <td data-label="撤销">
                 <button
                   v-if="canUndoLogs && log.metadata?.undoState === 'undoable'"
                   class="admin-button admin-button--ghost"
@@ -351,7 +351,7 @@ onMounted(async () => {
                 </button>
                 <span v-else class="admin-table__subtext">{{ canUndoLogs ? undoStateLabel(log) : "需要撤销操作日志权限" }}</span>
               </td>
-              <td>
+              <td class="mobile-card__actions">
                 <span class="admin-table__subtext">{{ log.detail }}</span>
                 <RouterLink class="admin-link" :to="`/logs/${log.id}`">详情</RouterLink>
               </td>

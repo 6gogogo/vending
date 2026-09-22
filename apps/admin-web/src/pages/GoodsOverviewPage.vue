@@ -1078,7 +1078,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
       </div>
 
       <article class="admin-panel admin-panel-block goods-contained-table">
-        <table v-if="sortedCatalog.length" class="admin-table">
+        <table v-if="sortedCatalog.length" class="admin-table admin-table--mobile-cards">
           <thead>
             <tr>
               <th>商品名称</th>
@@ -1096,26 +1096,26 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </thead>
           <tbody>
             <tr v-for="item in sortedCatalog" :key="item.goodsId">
-              <td>
+              <td class="mobile-card__title">
                 <RouterLink class="admin-link admin-table__strong" :to="`/goods/${item.goodsId}`">
                   {{ item.name }}
                 </RouterLink>
                 <span class="admin-table__subtext">{{ item.goodsId }}</span>
               </td>
-              <td>{{ item.fullName || item.name }}</td>
-              <td class="admin-code">{{ item.goodsCode }}</td>
-              <td class="admin-code">{{ item.price }}</td>
-              <td>{{ item.categoryName || categoryLabelMap[item.category] }}</td>
-              <td class="admin-code">{{ formatDateTime(item.createdAt) }}</td>
-              <td>{{ item.packageForm || "-" }}</td>
-              <td>{{ item.specification || "-" }}</td>
-              <td>{{ item.manufacturer || "-" }}</td>
-              <td>
+              <td data-label="商品全称" class="mobile-card__wide">{{ item.fullName || item.name }}</td>
+              <td data-label="商品编号" class="admin-code">{{ item.goodsCode }}</td>
+              <td data-label="零售价" class="admin-code">{{ item.price }}</td>
+              <td data-label="分类">{{ item.categoryName || categoryLabelMap[item.category] }}</td>
+              <td data-label="加入时间" class="admin-code">{{ formatDateTime(item.createdAt) }}</td>
+              <td data-label="包装形式">{{ item.packageForm || "-" }}</td>
+              <td data-label="商品规格">{{ item.specification || "-" }}</td>
+              <td data-label="厂家">{{ item.manufacturer || "-" }}</td>
+              <td data-label="状态">
                 <span class="admin-pill" :class="item.status === 'inactive' ? 'admin-pill--neutral' : 'admin-pill--success'">
                   {{ item.status === "inactive" ? "停用" : "正常" }}
                 </span>
               </td>
-              <td>
+              <td class="mobile-card__actions">
                 <div class="admin-inline-links goods-table-actions">
                   <RouterLink class="admin-link" :to="`/goods/${item.goodsId}`">详情</RouterLink>
                   <RouterLink v-if="canAdjustStock" class="admin-link" :to="`/goods/${item.goodsId}?action=inbound`">手动进货</RouterLink>
@@ -1143,7 +1143,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </div>
         </div>
 
-        <table v-if="goodsRows.length" class="admin-table">
+        <table v-if="goodsRows.length" class="admin-table admin-table--mobile-cards">
           <thead>
             <tr>
               <th>货品</th>
@@ -1157,7 +1157,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </thead>
           <tbody>
             <tr v-for="item in goodsRows" :key="item.goodsId">
-              <td>
+              <td class="mobile-card__title">
                 <RouterLink class="admin-link admin-table__strong" :to="`/goods/${item.goodsId}`">
                   {{ item.goodsName }}
                 </RouterLink>
@@ -1165,11 +1165,11 @@ const activeSection = useWorkspaceSection(workspaceSections);
                   {{ item.meta?.categoryName || categoryLabelMap[item.category] }}
                 </span>
               </td>
-              <td class="admin-code">{{ item.totalStock }}</td>
-              <td class="admin-code">{{ item.warehouseStock }}</td>
-              <td class="admin-code">{{ item.outOfStockDevices }}</td>
-              <td class="admin-code">{{ item.lowStockDevices }}</td>
-              <td>
+              <td data-label="总库存" class="admin-code">{{ item.totalStock }}</td>
+              <td data-label="仓库在库" class="admin-code">{{ item.warehouseStock }}</td>
+              <td data-label="缺货柜机" class="admin-code">{{ item.outOfStockDevices }}</td>
+              <td data-label="低库存柜机" class="admin-code">{{ item.lowStockDevices }}</td>
+              <td data-label="批次明细" class="mobile-card__wide">
                 <div class="goods-distribution-list">
                   <div
                     v-for="batch in item.batches.slice(0, 5)"
@@ -1186,7 +1186,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
                   </span>
                 </div>
               </td>
-              <td>
+              <td data-label="分布" class="mobile-card__wide">
                 <div class="goods-distribution-list">
                   <div
                     v-for="distribution in item.deviceDistribution.slice(0, 4)"

@@ -5,6 +5,7 @@ import App from "./App.vue";
 import { router } from "./router";
 import "./styles/global.css";
 import "./styles/workspace.css";
+import "./styles/mobile.css";
 
 const app = createApp(App);
 app.use(createPinia());

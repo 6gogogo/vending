@@ -1,0 +1,149 @@
+/* 手机后台：复用同一份数据、字段和操作，只改变窄屏的信息排列。 */
+.workspace-sections__mobile,
+.settings-page__mobile-save-note,
+.users-selection-hint { display: none; }
+.settings-page__save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 800px) {
+  html { scroll-padding-top: 80px; }
+  html:has(dialog[open], .users-drawer-backdrop, .goods-editor-backdrop, .operations-drawer-backdrop, .dashboard-drawer-backdrop, .settings-page__modal-backdrop) { overflow: hidden; }
+  .console-topbar { flex-wrap: wrap; padding-top: max(10px, env(safe-area-inset-top)); }
+  .console-topbar__context { flex: 1 1 120px; }
+  .console-tenant { flex: 1; min-width: 0; }
+  .console-topbar__actions { flex-shrink: 0; }
+  .console-account-shortcut { width: 44px; height: 44px; flex-basis: 44px; }
+  .console-shell :is(.admin-input, .admin-select),
+  .console-search-field input { min-width: 0; max-width: 100%; min-height: 44px; font-size: 16px; }
+  .console-shell .admin-field { min-width: 0; }
+  .console-shell .admin-field__label { font-size: 12px; }
+  .console-shell .admin-button { font-size: 13px; }
+  .console-shell .admin-inline-links > :is(a, button),
+  .console-shell .admin-text-button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .console-navigation-dialog { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  .console-search-field { gap: 8px; padding-inline: 12px; }
+  .console-search-footer { display: none; }
+  .console-shell .console-main :is(.users-drawer, .goods-editor, .operations-drawer, .dashboard-drawer) {
+    overscroll-behavior: contain;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+  .console-shell .console-main :is(.users-drawer, .goods-editor, .operations-drawer, .dashboard-drawer) > .admin-panel__head {
+    position: sticky; top: -20px; z-index: 4;
+    margin: -20px -20px 0; padding: 16px 20px;
+    border-bottom: 1px solid var(--admin-line); background: var(--admin-panel);
+  }
+  .console-shell .settings-page__modal-backdrop { padding: 16px; }
+  .console-shell .settings-page__modal { max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
+}
+
+@media (max-width: 400px) {
+  /* 日期控件需要完整显示日期及日历按钮，小屏改为单列。 */
+  .console-shell .console-main .logs-filters { grid-template-columns: minmax(0, 1fr); }
+  .console-shell .console-main .logs-filters__actions { grid-column: auto; }
+}
+
+@media (max-width: 800px) {
+  .workspace-sections { display: block; overflow: visible; border: 0; margin-bottom: 0; }
+  .workspace-sections > .workspace-sections__link { display: none; }
+  .workspace-sections__mobile { display: grid; gap: 6px; color: var(--admin-muted); font-size: 12px; }
+  .workspace-sections__mobile select { color: var(--admin-accent-strong); font-weight: 600; }
+  .console-shell .console-main .users-workspace .users-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .users-filters > label:last-of-type { grid-row: 1; }
+  .users-batch-actions:not(.has-selection) > :not(:first-child) { display: none; }
+  .users-selection-hint { display: block; margin: 0; color: var(--admin-muted); font-size: 12px; }
+  .console-shell :is(.admin-copy, .admin-note, .admin-table) { font-size: 13px; }
+  .console-shell .admin-table__subtext { font-size: 12px; }
+  .console-shell .admin-pill { font-size: 11px; }
+  .console-shell .stat-tile__title { line-height: 1.5; }
+  .console-shell #admin-main-content .operations-card { min-width: 0; }
+  .console-shell #admin-main-content .operations-card__table { min-width: 0; table-layout: fixed; }
+  .console-shell #admin-main-content .operations-card__table :is(th, td) { overflow-wrap: anywhere; }
+  .console-shell #admin-main-content .operations-card__table :is(th, td):last-child { width: 42%; min-width: 0; white-space: normal; }
+  .console-shell #admin-main-content .operations-card__actions > a { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .console-shell #admin-main-content .device-detail-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .device-detail-status__item { overflow-wrap: anywhere; }
+
+  /* 有明确字段名的业务列表才能选择卡片模式；复杂对照表仍保留独立滚动。 */
+  .console-shell #admin-main-content .admin-table--mobile-cards {
+    display: block; width: 100%; min-width: 0; border: 0; border-radius: 0;
+    background: transparent; overflow: visible;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards > thead {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards > tbody { display: grid; gap: 14px; }
+  .console-shell #admin-main-content .admin-table--mobile-cards > tbody > tr {
+    position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 12px; padding: 14px; border: 1px solid var(--admin-line);
+    border-radius: 9px; background: #fff;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards > tbody > tr.is-selected { border-color: var(--admin-accent); background: #f1f9f5; }
+  .console-shell #admin-main-content .admin-table--mobile-cards > tbody > tr > td {
+    display: block; position: static; width: auto; min-width: 0; padding: 0;
+    border: 0; box-shadow: none; background: transparent; white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 5px;
+    color: var(--admin-muted); font-family: inherit; font-size: 11px; font-weight: 400;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards > tbody > tr > .mobile-card__title {
+    grid-column: 1 / -1; order: -1; font-size: 16px;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards .mobile-card__title > a { display: inline-flex; align-items: center; min-height: 32px; }
+  .console-shell #admin-main-content .admin-table--mobile-cards > tbody > tr > .mobile-card__wide { grid-column: 1 / -1; }
+  .console-shell #admin-main-content .admin-table--mobile-cards > tbody > tr > .mobile-card__actions {
+    grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid var(--admin-line);
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards .mobile-card__actions > .admin-inline-links {
+    display: flex; gap: 8px; align-items: stretch;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards .mobile-card__actions :is(a, button) {
+    display: inline-flex; justify-content: center; align-items: center;
+    flex: 1 1 auto; min-width: 44px; min-height: 44px; padding: 6px 10px;
+    border: 1px solid var(--admin-line); border-radius: 6px; background: #f7faf8;
+    font-size: 13px; text-align: center; text-decoration: none;
+  }
+  .console-shell #admin-main-content .admin-table--mobile-cards .mobile-card__actions .goods-table-actions > * { flex-basis: calc(50% - 8px); }
+  .console-shell #admin-main-content .users-directory-cards .mobile-card__title { padding-right: 42px; }
+  .console-shell #admin-main-content .users-directory-cards > tbody > tr > .mobile-card__selection {
+    position: absolute; top: 8px; right: 6px;
+  }
+  .users-card-select { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; cursor: pointer; }
+  .users-card-select input { width: 18px; height: 18px; margin: 0; accent-color: var(--admin-accent); }
+  .console-shell #admin-main-content .users-directory-cards > tbody > .users-management-row {
+    display: block; margin-top: -15px; border-top: 0; border-radius: 0 0 9px 9px; background: #f2f8f5;
+  }
+  .users-management-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 0; }
+  .users-management-grid > div { min-width: 0; overflow-wrap: anywhere; }
+  .users-management-grid > div + div { padding-top: 14px; border-top: 1px solid #dce8e1; }
+  .console-shell .users-directory-table { overflow: visible; }
+  .console-shell #admin-main-content .goods-contained-table { overflow: visible; max-height: none; }
+  .console-shell #admin-main-content .logs-mobile-cards .mobile-card__title { font-size: 14px; }
+  .console-shell #admin-main-content .logs-mobile-cards .mobile-card__actions > a { margin-top: 8px; }
+
+  /* 原来的保存按钮在手机上随未保存状态移到屏幕底部，仍调用相同的保存/放弃流程。 */
+  .settings-page--dirty { padding-bottom: calc(116px + env(safe-area-inset-bottom)); }
+  .settings-page__save-actions.is-dirty {
+    position: fixed; z-index: 30; left: 0; right: 0; bottom: 0;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+    padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--admin-line); background: #fff; box-shadow: 0 -4px 20px #102f350b;
+  }
+  .settings-page__mobile-save-note { display: block; grid-column: 1 / -1; color: var(--admin-text-muted); font-size: 12px; }
+  .console-shell .settings-page__modal-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .console-shell #admin-main-content :is(.warehouse-confirm__head, .goods-transfer-confirm__head) {
+    flex-direction: row; align-items: flex-start;
+  }
+  .console-shell #admin-main-content :is(.warehouse-confirm__summary, .goods-transfer-confirm__summary, .remote-open-dialog__summary) > div {
+    grid-template-columns: 76px minmax(0, 1fr); gap: 10px; padding: 10px;
+  }
+  .console-shell #admin-main-content :is(.warehouse-confirm__actions, .goods-transfer-confirm__actions) {
+    position: sticky; bottom: -20px; z-index: 3; flex-direction: row;
+    margin: 0 -20px -20px; padding: 12px 20px max(12px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--admin-line); background: #fff;
+  }
+  .console-shell #admin-main-content :is(.warehouse-confirm__actions, .goods-transfer-confirm__actions) > button {
+    flex: 1; min-width: 0; padding-inline: 8px; white-space: normal;
+  }
+}
