@@ -1431,6 +1431,30 @@ export type OperationLogCategory =
 
 export type OperationLogStatus = "success" | "pending" | "warning" | "failed";
 
+export interface PlatformGoodsSyncReport {
+  id: string;
+  trigger: "manual" | "nightly";
+  scheduledDate?: string;
+  status: "running" | "success" | "partial" | "failed" | "interrupted";
+  startedAt: string;
+  finishedAt?: string;
+  deviceCount: number;
+  goodsCount: number;
+  doors: Array<{
+    deviceCode: string;
+    deviceName: string;
+    doorNum: string;
+    status: "pending" | "success" | "failed";
+    goodsCount: number;
+    message?: string;
+  }>;
+}
+
+export interface PlatformGoodsSyncStatus {
+  schedule: string;
+  report: PlatformGoodsSyncReport | null;
+}
+
 export interface OperationLogActor {
   type: "admin" | "merchant" | "restocker" | "special" | "system";
   id?: string;

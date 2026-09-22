@@ -1,4 +1,5 @@
 import type {
+  PlatformGoodsSyncStatus,
   AccessQuota,
   AiAdminCustomQueryReply,
   AiEventDiagnosis,
@@ -856,6 +857,16 @@ export const adminApi = {
     return adminClient.post(`/devices/${deviceCode}/sync-goods`, undefined, {
       query: { doorNum }
     });
+  },
+
+  platformGoodsSyncStatus() {
+    requireBackofficePermission("goods:view");
+    return adminClient.get<PlatformGoodsSyncStatus>("/goods-overview/sync/status");
+  },
+
+  syncPlatformGoods() {
+    requireBackofficePermission("goods:manage");
+    return adminClient.post<PlatformGoodsSyncStatus>("/goods-overview/sync");
   },
   updateDeviceGoodsThreshold(
     deviceCode: string,

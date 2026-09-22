@@ -20,6 +20,7 @@ import { SmartVmGateway } from "../devices/smartvm.gateway";
 
 @Injectable()
 export class GoodsService {
+  private platformSyncQueue: Promise<unknown> = Promise.resolve();
   constructor(
     @Inject(InMemoryStoreService) private readonly store: InMemoryStoreService,
     @Inject(InventoryBatchChangesService) private readonly inventoryBatchChanges: InventoryBatchChangesService,
@@ -907,6 +908,18 @@ export class GoodsService {
   }
 
   async syncDeviceGoods(deviceCode: string, doorNum = "1", actorUserId?: string) {
+    const result = await this.syncPlatformDoor(deviceCode, doorNum, actorUserId);
+    return result.goods;
+  }
+
+  /** 单柜与全柜同步共用队列，避免较早的响应覆盖较新的资料。 */
+  syncPlatformDoor(deviceCode: string, doorNum: string, actorUserId?: string, beforeApply: () => void = () => {}) {
+    const result = this.platformSyncQueue.then(() => this.applyPlatformDoor(deviceCode, doorNum, actorUserId, beforeApply));
+    this.platformSyncQueue = result.catch(() => undefined);
+    return result;
+  }
+
+  private async applyPlatformDoor(deviceCode: string, doorNum: string, actorUserId: string | undefined, beforeApply: () => void) {
     const device = this.store.devices.find((entry) => entry.deviceCode === deviceCode);
 
     if (!device) {
@@ -917,8 +930,16 @@ export class GoodsService {
       (await this.smartVmGateway.getGoodsInfo({
         deviceCode,
         doorNum
-      })) ?? [];
-
+      }));
+    beforeApply();
+    if (!Array.isArray(remoteGoods) || remoteGoods.some((item) => !item.goodsId || !item.name ||
+      !item.goodsCode || !Number.isFinite(item.price) || item.price < 0)) {
+      throw new BadRequestException("平台未返回有效货品资料，请检查平台连接后重试。");
+    }
+    // 查询期间柜机可能已被管理员移除，不能再写入孤立资料。
+    if (!this.store.devices.includes(device)) throw new NotFoundException("柜机已移除，请刷新后重试。");
+    const goodsIds: string[] = [];
+    return this.store.runAtomicMutation(() => {
     const targetDoor =
       device.doors.find((door) => door.doorNum === doorNum) ??
       (() => {
@@ -943,6 +964,7 @@ export class GoodsService {
         status: this.store.goodsCatalog.find((entry) => entry.goodsId === remoteItem.goodsId)?.status ?? "active"
       });
 
+      goodsIds.push(catalogItem.goodsId);
       this.store.ensureDeviceGoodsEntry(deviceCode, {
         goodsId: catalogItem.goodsId,
         goodsCode: catalogItem.goodsCode,
@@ -950,19 +972,19 @@ export class GoodsService {
         price: catalogItem.price,
         imageUrl: catalogItem.imageUrl,
         category: catalogItem.category
-      });
+      }, doorNum);
     }
 
     if (!remoteGoods.length) {
       this.store.syncDeviceStocksFromBatches(deviceCode);
-      return targetDoor.goods;
+      return { goods: targetDoor.goods, goodsIds };
     }
 
     this.store.logOperation({
       category: "goods",
       type: "sync-device-goods",
       status: "success",
-      actor: this.getActor(actorUserId),
+      actor: actorUserId ? this.getActor(actorUserId) : { type: "system", name: "平台货品同步" },
       primarySubject: {
         type: "device",
         id: device.deviceCode,
@@ -970,12 +992,14 @@ export class GoodsService {
       },
       metadata: {
         deviceCode: device.deviceCode,
+        doorNum,
         count: remoteGoods.length,
         undoState: "not_undoable"
       }
     });
 
-    return targetDoor.goods;
+    return { goods: targetDoor.goods, goodsIds };
+    });
   }
 
   private buildDistributionForGoods(goodsId: string) {

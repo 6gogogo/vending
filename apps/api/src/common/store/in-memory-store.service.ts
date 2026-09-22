@@ -2303,7 +2303,9 @@ export class InMemoryStoreService {
     const resolvedId = this.resolveGoodsId(item.goodsId);
     if (resolvedId !== item.goodsId) {
       const canonical = this.goodsCatalog.find((goods) => goods.goodsId === resolvedId)!;
-      return this.ensureGoodsCatalogItem({ ...canonical, name: item.name, price: item.price, imageUrl: item.imageUrl });
+      return this.ensureGoodsCatalogItem({ ...canonical, name: item.name,
+        fullName: !canonical.fullName || canonical.fullName === canonical.name ? item.name : canonical.fullName,
+        price: item.price, imageUrl: item.imageUrl });
     }
     const sameName = this.goodsCatalog.filter((entry) =>
       entry.goodsId !== item.goodsId && entry.status !== "inactive" &&
@@ -2320,6 +2322,7 @@ export class InMemoryStoreService {
     const metadata = existing ?? sameName[0];
     const canonical = this.ensureGoodsCatalogItem({
       ...metadata, ...item,
+      fullName: !metadata?.fullName || metadata.fullName === metadata.name ? item.name : metadata.fullName,
       category: metadata?.category ?? item.category,
       taxonomyNodeId: metadata?.taxonomyNodeId ?? item.taxonomyNodeId,
       createdAt: metadata?.createdAt ?? item.createdAt,
@@ -2517,20 +2520,20 @@ export class InMemoryStoreService {
     return trace;
   }
 
-  ensureDeviceGoodsEntry(deviceCode: string, goods: Omit<DeviceGoods, "stock"> & { stock?: number }) {
+  ensureDeviceGoodsEntry(deviceCode: string, goods: Omit<DeviceGoods, "stock"> & { stock?: number }, doorNum?: string) {
     const device = this.devices.find((entry) => entry.deviceCode === deviceCode);
 
     if (!device) {
       return undefined;
     }
 
-    const targetDoor = device.doors[0] ?? {
-      doorNum: "1",
-      label: "右门",
+    const targetDoor = (doorNum ? device.doors.find((door) => door.doorNum === doorNum) : device.doors[0]) ?? {
+      doorNum: doorNum ?? "1",
+      label: doorNum ? `门 ${doorNum}` : "右门",
       goods: []
     };
 
-    if (!device.doors.length) {
+    if (!device.doors.includes(targetDoor)) {
       device.doors.push(targetDoor);
     }
 

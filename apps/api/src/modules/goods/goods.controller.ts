@@ -10,10 +10,30 @@ import {
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { GoodsService } from "./goods.service";
+import { PlatformGoodsSyncService } from "./platform-goods-sync.service";
 
 @Controller()
 export class GoodsController {
-  constructor(@Inject(GoodsService) private readonly goodsService: GoodsService) {}
+  constructor(
+    @Inject(GoodsService) private readonly goodsService: GoodsService,
+    @Inject(PlatformGoodsSyncService) private readonly platformSync: PlatformGoodsSyncService
+  ) {}
+
+  @Get("goods-overview/sync/status")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:view")
+  syncStatus() {
+    return ok(this.platformSync.getStatus());
+  }
+
+  @Post("goods-overview/sync")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("admin")
+  @AllowedBackofficePermissions("goods:manage")
+  syncAll(@Req() request: { authUser?: { id: string } }) {
+    return ok(this.platformSync.start(request.authUser?.id), "同步已开始");
+  }
 
   @Get("goods-overview")
   @UseGuards(RoleGuard)

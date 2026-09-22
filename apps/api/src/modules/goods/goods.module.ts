@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { FinancialOperationCoordinatorModule } from "../../common/coordination/financial-operation-coordinator.module";
+import { PlatformGoodsSyncService } from "./platform-goods-sync.service";
 
 import { GuardsModule } from "../../common/guards/guards.module";
 import { DevicesModule } from "../devices/devices.module";
@@ -8,9 +10,9 @@ import { GoodsTaxonomyController } from "./goods-taxonomy.controller";
 import { GoodsTaxonomyService } from "./goods-taxonomy.service";
 
 @Module({
-  imports: [GuardsModule, DevicesModule],
+  imports: [GuardsModule, DevicesModule, FinancialOperationCoordinatorModule],
   controllers: [GoodsController, GoodsTaxonomyController],
-  providers: [GoodsService, GoodsTaxonomyService],
+  providers: [GoodsService, GoodsTaxonomyService, PlatformGoodsSyncService],
   exports: [GoodsService, GoodsTaxonomyService]
 })
 export class GoodsModule {}

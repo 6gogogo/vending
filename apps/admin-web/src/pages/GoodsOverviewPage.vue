@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import type {
+  PlatformGoodsSyncStatus,
   DeviceRecord,
   GoodsAlertPolicy,
   GoodsBatchRecord,
@@ -24,6 +25,41 @@ const canAdjustStock = computed(() => sessionStore.can("goods:stock-adjust"));
 const canExportGoods = computed(() => sessionStore.can("goods:export"));
 const canTransferWarehouse = computed(() => sessionStore.can("warehouse:transfer"));
 const canUploadImages = computed(() => sessionStore.can("uploads:images"));
+const platformSync = ref<PlatformGoodsSyncStatus | null>(null);
+const startingSync = ref(false);
+const syncStatusError = ref("");
+const syncBusy = computed(() => startingSync.value || platformSync.value?.report?.status === "running");
+const syncStateLabels = { running: "同步中", success: "同步完成", partial: "部分完成", failed: "同步失败", interrupted: "同步中断，请重试" };
+let syncTimer: ReturnType<typeof setTimeout> | undefined;
+let syncDisposed = false;
+
+const refreshSyncStatus = async () => {
+  if (syncTimer) clearTimeout(syncTimer);
+  try {
+    const wasRunning = platformSync.value?.report?.status === "running";
+    platformSync.value = await adminApi.platformGoodsSyncStatus();
+    syncStatusError.value = "";
+    if (wasRunning && platformSync.value.report?.status !== "running") await load();
+  } catch (error) {
+    syncStatusError.value = `同步状态读取失败：${readErrorMessage(error, "请稍后刷新")}`;
+  }
+  if (!syncDisposed && (platformSync.value?.report?.status === "running" || syncStatusError.value)) {
+    syncTimer = setTimeout(() => { void refreshSyncStatus(); }, 3000);
+  }
+};
+
+const syncPlatformGoods = async () => {
+  startingSync.value = true;
+  try {
+    platformSync.value = await adminApi.syncPlatformGoods();
+    await refreshSyncStatus();
+  } catch (error) {
+    showMessage("error", `同步未启动：${readErrorMessage(error, "请稍后重试")}`);
+  } finally { startingSync.value = false; }
+};
+
+onMounted(() => { void refreshSyncStatus(); });
+onUnmounted(() => { syncDisposed = true; if (syncTimer) clearTimeout(syncTimer); });
 
 const categoryLabelMap: Record<GoodsCategory, string> = {
   food: "食品",
@@ -932,11 +968,31 @@ function resolveGoodsName(goodsId: string) {
         </div>
         <div class="admin-toolbar">
           <span class="admin-copy">货品主数据、分类、阈值模板和本地仓库调拨统一在此维护</span>
+          <button v-if="canManageGoods" class="admin-button" :disabled="syncBusy" @click="syncPlatformGoods">
+            {{ syncBusy ? "同步中…" : "同步平台货品" }}
+          </button>
           <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">
             {{ loading ? "刷新中" : "刷新数据" }}
           </button>
           <button v-if="canExportGoods" class="admin-button admin-button--ghost" @click="exportOverview">导出 Excel</button>
         </div>
+      </div>
+
+      <div class="admin-note" aria-live="polite">
+        <p>每天 23:00（北京时间）自动同步全部柜机的货品资料，新增柜机自动纳入。库存与领取规则在本地维护。</p>
+        <p v-if="platformSync?.report">
+          {{ syncStateLabels[platformSync.report.status] }} · {{ formatDateTime(platformSync.report.startedAt) }} ·
+          {{ platformSync.report.deviceCount }} 台柜机，
+          {{ platformSync.report.doors.filter(door => door.status === 'success').length }}/{{ platformSync.report.doors.length }} 个柜门成功，
+          汇总 {{ platformSync.report.goodsCount }} 种货品
+        </p>
+        <p v-else>尚无全部柜机同步记录。</p>
+        <p v-if="syncStatusError" role="alert">{{ syncStatusError }}</p>
+        <ul v-if="platformSync?.report?.doors.some(door => door.status === 'failed')">
+          <li v-for="door in platformSync.report.doors.filter(door => door.status === 'failed')" :key="`${door.deviceCode}-${door.doorNum}`">
+            {{ door.deviceName }}（{{ door.deviceCode }}）· 门 {{ door.doorNum }}：{{ door.message }}
+          </li>
+        </ul>
       </div>
 
       <div
