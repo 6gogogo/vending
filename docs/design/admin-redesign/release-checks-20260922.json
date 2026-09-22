@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "preparedAt": "2026-09-22T08:57:03.506Z",
+  "status": "prepared-not-deployed",
+  "branch": "codex/admin-workspace-redesign",
+  "applicationCommit": "f73e32951397c26c49c283a94a068586ff50d4b1",
+  "baseCommit": "d9f38423cae7ab5cc383c53f6bc4042d7be192f9",
+  "scope": {
+    "apiChanged": false,
+    "mobileApplicationChanged": false,
+    "sharedPackagesChanged": false,
+    "deploymentUnitsChanged": false,
+    "dataMigrationRequired": false
+  },
+  "local": {
+    "testResults": [
+      {
+        "node": "24.14.0",
+        "npm": "11.9.0",
+        "platform": "win32-x64",
+        "cleanInstall": false,
+        "command": "npm run check:local:full",
+        "exitCode": 0,
+        "tests": 1007,
+        "pass": 1001,
+        "fail": 0,
+        "skipped": 6,
+        "log": "release-check-local-full.log"
+      },
+      {
+        "node": "22.22.2",
+        "npm": "10.9.7",
+        "platform": "win32-x64",
+        "cleanInstall": true,
+        "command": "npm run check:local:full",
+        "exitCode": 0,
+        "tests": 1007,
+        "pass": 1001,
+        "fail": 0,
+        "skipped": 6,
+        "log": "release-check-node22-full.log"
+      }
+    ],
+    "productionWebBuild": {
+      "command": "npm run build:public-web",
+      "exitCode": 0,
+      "nodeVersions": [
+        "24.14.0",
+        "22.22.2"
+      ],
+      "adminApi": "/api",
+      "mobileH5Base": "/mobile/",
+      "mobileH5Api": "/api",
+      "weixinApi": "https://vending.5gogogo.top/api",
+      "staticChecks": [
+        {
+          "node": "v24.14.0",
+          "checks": 13,
+          "assets": 152,
+          "failed": 0
+        },
+        {
+          "node": "v22.22.2",
+          "checks": 13,
+          "assets": 152,
+          "failed": 0
+        }
+      ],
+      "assetHashesIdenticalAcrossBuilds": false,
+      "note": "Each build was checked independently; hashes are evidence for that build, not a cross-platform reproducibility guarantee."
+    },
+    "runtimeDataVerify": {
+      "exitCode": 0,
+      "data": "isolated-simulation-copy",
+      "productionDataVerified": false,
+      "warnings": [
+        "4 default demo credentials; never deploy this data"
+      ]
+    }
+  },
+  "dependencyAudit": {
+    "command": "npm audit --omit=dev --package-lock-only",
+    "baseline": {
+      "info": 0,
+      "low": 3,
+      "moderate": 27,
+      "high": 22,
+      "critical": 0,
+      "total": 52
+    },
+    "candidate": {
+      "info": 0,
+      "low": 3,
+      "moderate": 27,
+      "high": 22,
+      "critical": 0,
+      "total": 52
+    },
+    "samePackageSeverityRangeAndAdvisorySignatures": true,
+    "releaseRiskReviewPending": true,
+    "note": "Counts are affected package entries, not unique vulnerabilities or exploitability findings."
+  },
+  "existingProduction": {
+    "checkedAt": "2026-09-22T08:53:11.111026+00:00",
+    "readOnly": true,
+    "services": {
+      "vending-api-candidate.service": {
+        "MainPID": "2114012",
+        "ExecMainStartTimestamp": "Tue 2026-09-22 11:39:24 CST",
+        "WorkingDirectory": "/home/fivegogogo/vending/current",
+        "ActiveState": "active",
+        "SubState": "running"
+      },
+      "vending-public-web.service": {
+        "MainPID": "2114022",
+        "ExecMainStartTimestamp": "Tue 2026-09-22 11:39:24 CST",
+        "WorkingDirectory": "/home/fivegogogo/vending/current",
+        "ActiveState": "active",
+        "SubState": "running"
+      }
+    },
+    "sourceCommit": "d9f38423cae7ab5cc383c53f6bc4042d7be192f9",
+    "sourceClean": true,
+    "node": "v22.22.2",
+    "npm": "10.9.7",
+    "platform": "Linux-6.17.0-1014-nvidia-aarch64-with-glibc2.39",
+    "linger": "Linger=yes",
+    "availableBytes": 2385459970048,
+    "http": {
+      "http://127.0.0.1:8100/api/health": 200,
+      "http://127.0.0.1:8100/api/health/production-readiness": 200,
+      "http://10.66.66.2:5795/": 200,
+      "http://10.66.66.2:5795/api/health": 403
+    },
+    "public": {
+      "checkedAt": "2026-09-22T16:56:25.5551153+08:00",
+      "origin": "https://vending.5gogogo.top",
+      "anonymous": true,
+      "earlierAttempt": "One TLS connection timeout on /login; bounded retry executed",
+      "checks": [
+        {
+          "path": "/",
+          "status": 200
+        },
+        {
+          "path": "/login",
+          "status": 200
+        },
+        {
+          "path": "/mobile/",
+          "status": 200
+        },
+        {
+          "path": "/api/health",
+          "status": 200
+        },
+        {
+          "path": "/api/health/production-readiness",
+          "status": 200
+        },
+        {
+          "path": "/api/users",
+          "status": 403
+        }
+      ]
+    },
+    "candidateDeployed": false
+  },
+  "pending": [
+    "explicit-production-deployment-authorization",
+    "physical-mobile-browser-acceptance",
+    "existing-dependency-risk-review",
+    "stop-writes-and-verify-live-data-and-backup",
+    "linux-aarch64-build-and-posix-validation",
+    "candidate-public-and-role-acceptance"
+  ]
+}

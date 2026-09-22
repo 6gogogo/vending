@@ -8,6 +8,7 @@
 - [预览启动、工作树位置与截图](docs/design/admin-redesign/README.md)：`http://127.0.0.1:5188/`，演示账号 `admin / admin`。
 - [交互与流程回归记录](docs/design/admin-redesign/REGRESSION.md)：修复项、测试范围、复验截图与验证边界。
 - [手机布局验收](docs/design/admin-redesign/MOBILE.md)：窄屏问题、手机适配规则、桌面回归与截图。
+- [发布准备与交接](docs/design/admin-redesign/RELEASE_READINESS.md)：候选版本、完整检查、线上只读预检、发布顺序和回退条件；当前等待上线指令。
 - `.codex-run/` 是不提交的本地演练数据和日志；依赖目录及构建输出不作为源代码维护。
 
 ## 按问题定位
