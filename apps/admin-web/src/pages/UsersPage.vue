@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import WorkspaceSections from "../components/WorkspaceSections.vue";
 import { useWorkspaceSection } from "../utils/use-workspace-section";
+import { getAdminWorkspaceSections } from "../utils/admin-navigation";
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { readSheet } from "read-excel-file/browser";
@@ -912,7 +913,7 @@ const load = async () => {
             return null;
           })
         : Promise.resolve(null),
-      adminApi.devices(),
+      sessionStore.can("devices:view") ? adminApi.devices() : Promise.resolve([] as DeviceRecord[]),
       canManageManualVerificationCodes.value
         ? adminApi.manualVerificationCodes()
         : Promise.resolve([] as ManualVerificationGrantSnapshot[]),
@@ -1284,6 +1285,7 @@ const closeDrawer = () => {
 };
 
 const submitUserForm = async (configureAccess = false) => {
+  if (saving.value || !canManageUsers.value) return;
   const regionPayload = resolveRegionPayload(userForm.value);
   const isCreate = drawerMode.value === "create-user";
   if (
@@ -1320,7 +1322,7 @@ const submitUserForm = async (configureAccess = false) => {
     await load();
     showActionMessage("success", isCreate ? `已新增人员 ${payload.name}。` : `已保存人员 ${payload.name}。`);
     if (configureAccess && savedUser?.role === "special") {
-      await router.push(`/users/${savedUser.id}`);
+      await router.push({ path: `/users/${savedUser.id}`, query: { section: "rules" } });
     }
   } catch (error) {
     showActionMessage("error", `人员保存失败：${readErrorMessage(error, "请稍后重试")}`);
@@ -1942,13 +1944,10 @@ const applyBatchPolicies = async () => {
 };
 
 onMounted(load);
-const workspaceSections = computed(() => [
-  { value: "directory", label: "人员台账", count: users.value.length },
-  ...(canReviewRegistrations.value ? [{ value: "registrations", label: "注册审核", count: pendingRegistrationCount.value }] : []),
-  ...(showExtendedUserConfiguration.value ? [{ value: "rules", label: "领取与预约" }] : [{ value: "setup", label: "初始化指引" }]),
-  ...(showExtendedUserConfiguration.value && canManageUsers.value ? [{ value: "regions", label: "地区管理" }] : []),
-  ...(canManageManualVerificationCodes.value ? [{ value: "verification", label: "验证码记录" }] : [])
-]);
+const workspaceSections = computed(() => getAdminWorkspaceSections("/users", sessionStore.can, {
+  directory: users.value.length,
+  registrations: pendingRegistrationCount.value
+}));
 const activeSection = useWorkspaceSection(workspaceSections);
 const expandedUserId = ref<string>();
 </script>

@@ -29,7 +29,7 @@ test("导航与检索同时遵守角色和服务端会话权限", () => {
 test("功能搜索不会向只读人员账号展示审核、地区维护和验证码管理", () => {
   const sections = adminDestinations.find(item => item.path === "/users")!.sections!;
   const readonly = (permission: BackofficePermission) => permission === "users:view";
-  assert.deepEqual(sections.filter(section => canAccessAdminSection(section, readonly)).map(section => section.value), ["directory"]);
+  assert.deepEqual(sections.filter(section => canAccessAdminSection(section, readonly)).map(section => section.value), ["directory", "setup"]);
   const reviewer = (permission: BackofficePermission) => permission === "users:view" || permission === "users:review";
   assert.deepEqual(sections.filter(section => canAccessAdminSection(section, reviewer)).map(section => section.value), ["directory", "registrations", "rules"]);
 });

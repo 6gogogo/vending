@@ -41,7 +41,12 @@ const searchableEntries = computed(() => visibleDestinations.value.flatMap(item 
     label: section.label, detail: item.label, to: `${item.path}?section=${section.value}`, searchText: item.label + section.label + (section.keywords || "")
   }))
 ]).filter(item => !search.value.trim() || item.searchText.toLowerCase().includes(search.value.trim().toLowerCase())));
-const openSearch = () => { search.value = ""; searchDialog.value?.showModal(); };
+const openSearch = () => {
+  // 不把导航浮层叠在尚未处理的业务确认框上。
+  if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+  search.value = "";
+  searchDialog.value?.showModal();
+};
 const closeAccount = () => {
   if (passwordBusy.value) return;
   accountDialog.value?.close();
@@ -64,6 +69,7 @@ const logout = async () => {
   }
 
   logoutBusy.value = true;
+  closeAccount();
   try {
     await adminApi.logout();
   } catch {
@@ -169,7 +175,7 @@ const submitPasswordChange = async () => {
         <span><strong>小柜大爱</strong><small>公益智助柜 · 运营后台</small></span>
       </RouterLink>
       <button class="console-search-trigger" @click="openSearch"><Search :size="16" aria-hidden="true" />查找功能<kbd>Ctrl K</kbd></button>
-      <AdminNavigation :sections="visibleNavSections" />
+      <AdminNavigation :sections="visibleNavSections" @navigate="navigationDialog?.close()" />
       <button class="console-account" @click="accountDialog?.showModal()">
         <span class="console-avatar" aria-hidden="true">{{ (sessionStore.user?.name || "管").slice(0, 1) }}</span>
         <span class="console-account__copy"><strong>{{ sessionStore.user?.name || "后台用户" }}</strong><small>{{ roleLabel }}</small></span>
@@ -204,14 +210,14 @@ const submitPasswordChange = async () => {
 
     <dialog ref="navigationDialog" class="console-navigation-dialog" aria-label="工作空间导航">
       <div class="console-dialog-heading"><strong>小柜大爱 · 运营后台</strong><button class="console-icon-button" aria-label="关闭导航" @click="navigationDialog?.close()"><X :size="20" /></button></div>
-      <AdminNavigation :sections="visibleNavSections" />
+      <AdminNavigation :sections="visibleNavSections" @navigate="navigationDialog?.close()" />
     </dialog>
 
     <dialog ref="searchDialog" class="console-search-dialog" aria-label="查找功能">
       <div class="console-search-field"><Search :size="20" aria-hidden="true" /><input v-model="search" autofocus placeholder="搜索功能，如：导入、审核、调拨…" aria-label="搜索功能名称" /><button class="console-icon-button" aria-label="关闭搜索" @click="searchDialog?.close()"><X :size="18" /></button></div>
       <div class="console-search-results">
         <p class="console-search-caption">{{ search.trim() ? `找到 ${searchableEntries.length} 个入口` : "全部功能 · 可直接打开具体分区" }}</p>
-        <RouterLink v-for="entry in searchableEntries" :key="entry.to" :to="entry.to" class="console-search-result">
+        <RouterLink v-for="entry in searchableEntries" :key="entry.to" :to="entry.to" class="console-search-result" @click="searchDialog?.close()">
           <span><strong>{{ entry.label }}</strong><small>{{ entry.detail }}</small></span><ArrowUpRight :size="17" aria-hidden="true" />
         </RouterLink>
         <div v-if="!searchableEntries.length" class="admin-empty"><strong>没有找到相关功能</strong><p>试试“人员”“库存”或“设置”。</p></div>

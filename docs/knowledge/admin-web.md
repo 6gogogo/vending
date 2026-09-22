@@ -1,5 +1,7 @@
 # admin-web 知识点与目录说明
 
+按业务定位文件和扩展入口请先看 [工作区索引](../../WORKSPACE_INDEX.md)，当前后台的 [流程回归记录](../design/admin-redesign/REGRESSION.md)列出了交互检查与测试入口。
+
 如果你只学过 HTML 和 CSS，可以把 `admin-web` 理解为“在 HTML/CSS 基础上，加了 Vue 组件、路由和接口请求”。
 
 ## 目录结构
@@ -63,8 +65,8 @@
 - `/dashboard` 显示总览页
 - `/operations` 显示柜机监控页
 - `/users` 显示用户页
-- `/rules` 显示规则页
-- `/alerts` 显示预警页
+- `/users?section=rules` 显示领取与预约分区
+- `/dashboard?section=tasks` 显示待办任务分区
 
 ### 5. 组件复用
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import WorkspaceSections from "../components/WorkspaceSections.vue";
 import { useWorkspaceSection } from "../utils/use-workspace-section";
+import { getAdminWorkspaceSections } from "../utils/admin-navigation";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import type {
@@ -397,7 +398,7 @@ const load = async () => {
         adminApi.goodsCatalog(),
         adminApi.goodsCategories(),
         adminApi.goodsAlertPolicies(),
-        adminApi.devices()
+        sessionStore.can("devices:view") ? adminApi.devices() : Promise.resolve([] as DeviceRecord[])
       ]);
 
     overview.value = overviewResponse;
@@ -784,6 +785,7 @@ const submitTransfer = async () => {
   }
 
   if (
+    warehouseSnapshot.value?.goodsExpiryMode !== "warning_only" &&
     selectedBatch.value.expiresAt &&
     Date.parse(selectedBatch.value.expiresAt) <= Date.now()
   ) {
@@ -958,11 +960,7 @@ function sortExpiry(current?: string, next?: string) {
 function resolveGoodsName(goodsId: string) {
   return catalog.value.find((item) => item.goodsId === goodsId)?.name ?? goodsId;
 }
-const workspaceSections = [
-  { value: "catalog", label: "货品台账" },
-  { value: "inventory", label: "库存与预警" },
-  { value: "transfer", label: "库存调拨" }
-];
+const workspaceSections = computed(() => getAdminWorkspaceSections("/goods", sessionStore.can));
 const activeSection = useWorkspaceSection(workspaceSections);
 </script>
 
@@ -1372,7 +1370,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           <div v-if="selectedBatch" class="admin-note">
             当前选择批次：保质期 {{ formatBatchDate(selectedBatch.expiresAt) }}，可调拨 {{ selectedBatch.remainingQuantity }} 件。
           </div>
-          <div v-else class="admin-note">当前来源没有可调拨批次；已过期批次不能进入正常调拨流程。</div>
+          <div v-else class="admin-note">当前来源没有可调拨批次；可用范围以当前保质期策略和批次数量为准。</div>
           <div class="admin-note">货品调拨和仓库流转只维护本地库存台账，不会在平台创建调拨、补货或退货订单。</div>
           <button class="admin-button" :disabled="saving || !selectedBatch" @click="submitTransfer">{{ saving ? "处理中" : "提交调拨" }}</button>
         </div>

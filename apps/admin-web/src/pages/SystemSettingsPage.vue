@@ -61,6 +61,7 @@ const restartConfirmation = ref("");
 const restartReason = ref("");
 const restartMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 let resolveLeaveDecision: ((decision: LeaveDecision) => void) | undefined;
+let pendingLeaveDecision: Promise<LeaveDecision> | undefined;
 
 const settings = computed(() => settingsSnapshot.value?.settings ?? []);
 const canUpdateSettings = computed(() => sessionStore.can("system-settings:update"));
@@ -244,6 +245,7 @@ const loadSettings = async () => {
 };
 
 const saveSettings = async () => {
+  if (saving.value) return false;
   if (!canUpdateSettings.value) {
     saveMessage.value = {
       type: "error",
@@ -462,7 +464,7 @@ const canEditSetting = (key: string) => {
 };
 
 const requestLeaveDecision = () =>
-  new Promise<LeaveDecision>((resolve) => {
+  pendingLeaveDecision ??= new Promise<LeaveDecision>((resolve) => {
     resolveLeaveDecision = resolve;
     leaveDialogOpen.value = true;
   });
@@ -471,6 +473,7 @@ const resolveLeave = (decision: LeaveDecision) => {
   leaveDialogOpen.value = false;
   resolveLeaveDecision?.(decision);
   resolveLeaveDecision = undefined;
+  pendingLeaveDecision = undefined;
 };
 
 const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -483,7 +486,8 @@ const handleBeforeUnload = (event: BeforeUnloadEvent) => {
 };
 
 onBeforeRouteLeave(async () => {
-  if (!hasDirtyChanges.value) {
+  // 登出或退出实例已经轮换会话，不能让草稿阻止进入登录页/平台页。
+  if (!sessionStore.isAuthenticated || !sessionStore.can("system-settings:view") || !hasDirtyChanges.value) {
     return true;
   }
 
@@ -513,6 +517,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (pendingLeaveDecision) resolveLeave("stay");
   window.removeEventListener("beforeunload", handleBeforeUnload);
 });
 </script>
@@ -898,11 +903,11 @@ onBeforeUnmount(() => {
         当前为免费领取：零元订单会自动完成并上报平台，无需支付配置；历史订单仍可在订单和日志中查询。
       </div></div></details>
   <div v-if="leaveDialogOpen" class="settings-page__modal-backdrop">
-      <section class="admin-panel settings-page__modal">
+      <section class="admin-panel settings-page__modal" role="dialog" aria-modal="true" aria-labelledby="settings-leave-title">
         <div class="admin-panel__head">
           <div>
             <span class="admin-kicker">未保存更改</span>
-            <h3 class="admin-panel__title">离开前是否保存设置</h3>
+            <h3 id="settings-leave-title" class="admin-panel__title">离开前是否保存设置</h3>
           </div>
         </div>
         <p class="admin-copy">

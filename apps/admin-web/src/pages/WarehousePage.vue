@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import WorkspaceSections from "../components/WorkspaceSections.vue";
 import { useWorkspaceSection } from "../utils/use-workspace-section";
+import { getAdminWorkspaceSections } from "../utils/admin-navigation";
+import { createLatestRequestGuard } from "../utils/latest-request";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 
@@ -28,6 +30,7 @@ const saving = ref(false);
 const snapshot = ref<WarehouseInventorySnapshot>();
 const devices = ref<DeviceRecord[]>([]);
 const stocktakeDetail = ref<DeviceMonitoringDetail>();
+const stocktakeRequests = createLatestRequestGuard();
 const message = ref<{ type: "success" | "error"; text: string }>();
 const confirmation = ref<{
   title: string;
@@ -217,19 +220,30 @@ const resetDispositionForm = () => {
 };
 
 const loadStocktakeDevice = async (deviceCode: string) => {
+  const isLatest = stocktakeRequests.begin();
+  const isCurrent = () => isLatest() && deviceCode === stocktakeForm.value.deviceCode;
+  // 切柜后不允许拿上一台柜机的盘点明细提交。
+  stocktakeDetail.value = undefined;
+  stocktakeItems.value = [];
   if (!deviceCode) {
     stocktakeDetail.value = undefined;
     stocktakeItems.value = [];
     return;
   }
 
-  stocktakeDetail.value = await adminApi.deviceDetail(deviceCode);
-  stocktakeItems.value = stocktakeDetail.value.stockChanges.map((item) => ({
+  try {
+    const nextDetail = await adminApi.deviceDetail(deviceCode);
+    if (!isCurrent()) return;
+    stocktakeDetail.value = nextDetail;
+    stocktakeItems.value = nextDetail.stockChanges.map((item) => ({
     goodsId: item.goodsId,
     goodsName: item.goodsName,
     actualQuantity: item.currentStock,
     systemQuantity: item.currentStock
-  }));
+    }));
+  } catch (error) {
+    if (isCurrent()) showMessage("error", `盘点柜机加载失败：${readErrorMessage(error, "请重选柜机或刷新后重试")}`);
+  }
 };
 
 const load = async () => {
@@ -237,7 +251,7 @@ const load = async () => {
   try {
     const [warehouseResponse, deviceResponse] = await Promise.all([
       adminApi.warehouseInventory(),
-      adminApi.devices()
+      sessionStore.can("devices:view") ? adminApi.devices() : Promise.resolve([] as DeviceRecord[])
     ]);
 
     snapshot.value = warehouseResponse;
@@ -557,6 +571,7 @@ watch(
 
 onMounted(load);
 onUnmounted(() => {
+  stocktakeRequests.invalidate();
   confirmationResolver?.(false);
   confirmationResolver = undefined;
   confirmationPreviousFocus = undefined;
@@ -607,12 +622,9 @@ function isBatchTransferable(batch: Pick<GoodsBatchRecord, "expiresAt">, now = D
   const expiresAt = Date.parse(batch.expiresAt);
   return Number.isFinite(expiresAt) && expiresAt > now;
 }
-const workspaceSections = computed(() => [
-  { value: "inventory", label: "库存台账" },
-  { value: "transfer", label: "上架与盘点" },
-  { value: "expiry", label: "过期处置", count: expiredWarehouseBatches.value.length },
-  { value: "records", label: "出入库记录" }
-]);
+const workspaceSections = computed(() => getAdminWorkspaceSections("/warehouse", sessionStore.can, {
+  expiry: expiredWarehouseBatches.value.length
+}));
 const activeSection = useWorkspaceSection(workspaceSections);
 </script>
 

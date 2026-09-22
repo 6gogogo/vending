@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import WorkspaceSections from "../components/WorkspaceSections.vue";
 import { useWorkspaceSection } from "../utils/use-workspace-section";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { createLatestRequestGuard } from "../utils/latest-request";
 import { RouterLink, useRoute } from "vue-router";
 import type {
   CabinetReservationRecord,
@@ -73,6 +74,9 @@ const goodsCatalog = ref<Array<{ goodsId: string; name: string; category: "food"
 const goodsTaxonomyNodes = ref<GoodsTaxonomyNode[]>([]);
 const policyTemplates = ref<SpecialAccessPolicy[]>([]);
 const loading = ref(false);
+const loadError = ref("");
+const detailRequests = createLatestRequestGuard();
+const settlementRequests = createLatestRequestGuard();
 const saving = ref(false);
 const applyingNowPolicyId = ref("");
 const calendarMonth = ref("");
@@ -294,12 +298,16 @@ const removeManualSettlementItem = (index: number) => {
 };
 
 const loadManualSettlementCandidates = async (userId: string) => {
+  const isLatest = settlementRequests.begin();
+  const isCurrent = () => isLatest() && userId === String(route.params.userId);
   if (!canRecoverSettlement.value) {
     manualSettlementCandidates.value = [];
     return;
   }
   try {
-    manualSettlementCandidates.value = await adminApi.manualSettlementCandidates(userId);
+    const candidates = await adminApi.manualSettlementCandidates(userId);
+    if (!isCurrent()) return;
+    manualSettlementCandidates.value = candidates;
     const requestedEventId = routeManualSettlementEventId.value;
     const nextEventId = manualSettlementCandidates.value.some(
       (entry) => entry.eventId === requestedEventId
@@ -320,6 +328,7 @@ const loadManualSettlementCandidates = async (userId: string) => {
     }
     if (!nextEventId) selectedManualSettlementEventId.value = "";
   } catch (error) {
+    if (!isCurrent()) return;
     manualSettlementCandidates.value = [];
     showActionMessage(
       "error",
@@ -428,20 +437,25 @@ const ensureCalendarState = () => {
 };
 
 const load = async () => {
+  const isLatest = detailRequests.begin();
+  const userId = String(route.params.userId);
+  const isCurrent = () => isLatest() && userId === String(route.params.userId);
   loading.value = true;
+  loadError.value = "";
   try {
     const month = calendarMonth.value || new Date().toISOString().slice(0, 7);
     const date = selectedDateKey.value || `${month}-01`;
     const [detailResponse, devicesResponse, goodsCatalogResponse, templateResponse, reservationsResponse, taxonomyResponse] = await Promise.all([
-      adminApi.userDetail(String(route.params.userId), { month, date }),
-      adminApi.devices(),
+      adminApi.userDetail(userId, { month, date }),
+      sessionStore.can("devices:view") ? adminApi.devices() : Promise.resolve([] as DeviceRecord[]),
       adminApi.goodsCatalog(),
       adminApi.policies(),
-      adminApi.reservations(String(route.params.userId)),
+      adminApi.reservations(userId),
       sessionStore.can("goods:view")
         ? adminApi.goodsTaxonomy()
         : Promise.resolve({ revision: 0, nodes: [], goods: [], unassignedGoodsIds: [] })
     ]);
+    if (!isCurrent()) return;
     detail.value = detailResponse;
     devices.value = devicesResponse;
     policyTemplates.value = templateResponse;
@@ -458,6 +472,7 @@ const load = async () => {
     }
     if (detailResponse.user.role === "special") {
       await loadManualSettlementCandidates(detailResponse.user.id);
+      if (!isCurrent()) return;
       const requestedEvent = detailResponse.recentEvents.find(
         (event) =>
           event.eventId === routeManualSettlementEventId.value &&
@@ -475,8 +490,10 @@ const load = async () => {
       selectedManualSettlementEventId.value = "";
       manualSettlementRecord.value = undefined;
     }
+  } catch (error) {
+    if (isCurrent()) loadError.value = readErrorMessage(error, "人员详情加载失败，请重试。");
   } finally {
-    loading.value = false;
+    if (isCurrent()) loading.value = false;
   }
 };
 
@@ -938,6 +955,9 @@ watch(selectedDeviceGoods, (goodsList) => {
 });
 
 watch(() => route.params.userId, async () => {
+  detailRequests.invalidate();
+  settlementRequests.invalidate();
+  detail.value = undefined;
   calendarMonth.value = "";
   selectedDateKey.value = "";
   templateApplyForm.value.policyIds = [];
@@ -970,6 +990,10 @@ onMounted(async () => {
   ensureCalendarState();
   await load();
 });
+onUnmounted(() => {
+  detailRequests.invalidate();
+  settlementRequests.invalidate();
+});
 const workspaceSections = computed(() => [
   { value: "overview", label: "人员概况" },
   ...(detail.value?.user.role === "special" ? [{ value: "rules", label: "领取规则" }] : []),
@@ -983,13 +1007,17 @@ const activeSection = computed(() => !route.query.section && route.query.manualS
 <template>
 <section class="admin-page user-detail-workspace"><section class="admin-page__section">
       <div class="admin-page__section-head">
-        <div><p class="admin-kicker">人员详情</p><h3 class="admin-page__section-title">{{ detail?.user.name ?? "加载中" }}</h3></div>
+        <div><p class="admin-kicker">人员详情</p><h3 class="admin-page__section-title">{{ detail?.user.name ?? (loading ? "加载中" : "人员资料暂不可用") }}</h3></div>
       </div>
       <div v-if="actionMessage" class="admin-alert" :class="{ 'admin-alert--danger': actionMessage.type === 'error' }">
         {{ actionMessage.text }}
       </div>
     </section>
 <WorkspaceSections :active="activeSection" :items="workspaceSections" />
+<div v-if="loadError" class="admin-alert admin-alert--danger" role="alert">
+  <span>{{ loadError }}</span>
+  <button class="admin-button admin-button--ghost" :disabled="loading" @click="load">重新加载</button>
+</div>
 <template v-if="detail">
   <section v-show="activeSection === 'overview'" class="admin-grid admin-grid--main-aside"><div class="admin-grid"><article class="admin-panel admin-panel-block">
           <div class="admin-panel__head"><div><span class="admin-kicker">基本信息</span><h3 class="admin-panel__title">人员信息与当前状态</h3></div></div>

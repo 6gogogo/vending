@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import WorkspaceSections from "../components/WorkspaceSections.vue";
 import { useWorkspaceSection } from "../utils/use-workspace-section";
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { usePagePolling } from "../utils/use-page-polling";
+import { createLatestRequestGuard } from "../utils/latest-request";
 import { RouterLink, useRoute } from "vue-router";
 import { ApiError } from "@vm/shared-client";
 import type { DeviceRecord, UserRole } from "@vm/shared-types";
@@ -121,10 +123,9 @@ const completingZeroCostEventId = ref("");
 const refundingOrderNo = ref("");
 const reconcilingRefundId = ref("");
 const loadError = ref("");
+const detailRequests = createLatestRequestGuard();
 const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 
-let timer: ReturnType<typeof setInterval> | undefined;
-let visibilityHandler: (() => void) | undefined;
 let remoteOpenPreviousFocus: HTMLElement | undefined;
 let financialPreviousFocus: HTMLElement | undefined;
 let doorClosedPreviousFocus: HTMLElement | undefined;
@@ -683,13 +684,17 @@ const shouldShowRefundAction = (
 };
 
 const load = async () => {
+  const isLatest = detailRequests.begin();
+  const deviceCode = String(route.params.deviceCode);
+  const isCurrent = () => isLatest() && deviceCode === String(route.params.deviceCode);
   loading.value = true;
   loadError.value = "";
   try {
     const [deviceDetail, catalogResponse] = await Promise.all([
-      adminApi.deviceDetail(String(route.params.deviceCode)),
+      adminApi.deviceDetail(deviceCode),
       adminApi.goodsCatalog()
     ]);
+    if (!isCurrent()) return;
     detail.value = deviceDetail;
     goodsCatalog.value = catalogResponse;
     financialOutcomePending.value = financialOutcomePending.value.filter(
@@ -722,9 +727,9 @@ const load = async () => {
     }
     lastUpdatedAt.value = formatNowInBeijing();
   } catch (error) {
-    loadError.value = readErrorMessage(error, "柜机详情加载失败");
+    if (isCurrent()) loadError.value = readErrorMessage(error, "柜机详情加载失败");
   } finally {
-    loading.value = false;
+    if (isCurrent()) loading.value = false;
   }
 };
 
@@ -1567,45 +1572,21 @@ const removeGoods = async (goodsId: string) => {
 watch(
   () => route.params.deviceCode,
   async () => {
+    detailRequests.invalidate();
+    detail.value = undefined;
     await resetRemoteOpenDialog(false);
     await resetFinancialDialog(false);
     await load();
   }
 );
 
-onMounted(async () => {
-  await load();
-  timer = setInterval(load, 8_000);
-  if (typeof document !== "undefined") {
-    visibilityHandler = () => {
-      if (document.hidden) {
-        if (timer) {
-          clearInterval(timer);
-          timer = undefined;
-        }
-        return;
-      }
-
-      void load();
-      if (timer) {
-        clearInterval(timer);
-      }
-      timer = setInterval(load, 8_000);
-    };
-    document.addEventListener("visibilitychange", visibilityHandler);
-  }
-});
+usePagePolling(load, 8_000);
 
 onUnmounted(() => {
+  detailRequests.invalidate();
   doorClosedDialog.value?.close();
   remoteOpenDialog.value?.close();
   financialDialog.value?.close();
-  if (timer) {
-    clearInterval(timer);
-  }
-  if (visibilityHandler) {
-    document.removeEventListener("visibilitychange", visibilityHandler);
-  }
 });
 const workspaceSections = computed(() => [
   { value: "inventory", label: "库存与领取" },
@@ -1622,7 +1603,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
       <div class="admin-page__section-head">
         <div>
           <p class="admin-kicker">单柜机值守页</p>
-          <h3 class="admin-page__section-title">{{ detail?.device.name ?? "加载中" }}</h3>
+          <h3 class="admin-page__section-title">{{ detail?.device.name ?? (loading ? "加载中" : "柜机资料暂不可用") }}</h3>
         </div>
         <div class="admin-toolbar">
           <span class="admin-copy">自动刷新 8 秒一次</span>

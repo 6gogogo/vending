@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import WorkspaceSections from "../components/WorkspaceSections.vue";
 import { useWorkspaceSection } from "../utils/use-workspace-section";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { getAdminWorkspaceSections } from "../utils/admin-navigation";
+import { computed, ref } from "vue";
+import { usePagePolling } from "../utils/use-page-polling";
 import { RouterLink } from "vue-router";
 import type { DashboardSnapshot, OperationLogRecord } from "@vm/shared-types";
 
@@ -38,8 +40,6 @@ const actionMessage = ref<{ type: "success" | "error"; text: string }>();
 const activeBucket = ref<BucketKey>();
 const resolvingTaskId = ref<string>();
 const activeTask = ref<NonNullable<typeof pendingTasks.value>[number]>();
-let timer: ReturnType<typeof setInterval> | undefined;
-let visibilityHandler: (() => void) | undefined;
 
 const summaryLogs = computed(() => dashboard.value?.summaryLogs ?? []);
 const pendingTasks = computed(() => dashboard.value?.pendingTasks ?? []);
@@ -288,42 +288,10 @@ const resolveTask = async (id: string) => {
   }
 };
 
-onMounted(async () => {
-  await load();
-  timer = setInterval(load, 15_000);
-  if (typeof document !== "undefined") {
-    visibilityHandler = () => {
-      if (document.hidden) {
-        if (timer) {
-          clearInterval(timer);
-          timer = undefined;
-        }
-        return;
-      }
-
-      void load();
-      if (timer) {
-        clearInterval(timer);
-      }
-      timer = setInterval(load, 15_000);
-    };
-    document.addEventListener("visibilitychange", visibilityHandler);
-  }
-});
-
-onUnmounted(() => {
-  if (timer) {
-    clearInterval(timer);
-  }
-  if (visibilityHandler) {
-    document.removeEventListener("visibilitychange", visibilityHandler);
-  }
-});
-const workspaceSections = computed(() => [
-  { value: "overview", label: "今日概况" },
-  { value: "tasks", label: "待办任务", count: pendingTasks.value.length },
-  { value: "activity", label: "近期动态" }
-]);
+usePagePolling(load, 15_000);
+const workspaceSections = computed(() => getAdminWorkspaceSections("/dashboard", sessionStore.can, {
+  tasks: pendingTasks.value.length
+}));
 const activeSection = useWorkspaceSection(workspaceSections);
 </script>
 

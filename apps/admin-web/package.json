@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "tsx --test src/utils/*.test.ts",
+    "test": "npm run test:unit && npm run test:flows",
+    "test:unit": "tsx --test src/utils/*.test.ts",
+    "test:flows": "vitest run",
     "typecheck": "vue-tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -21,9 +23,12 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "2.4.6",
+    "happy-dom": "^20.14.5",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "vite": "^6.2.0",
+    "vitest": "^4.1.11",
     "vue-tsc": "^3.3.11"
   }
 }
