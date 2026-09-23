@@ -5,6 +5,7 @@ enableAutoUnmount(afterEach);
 beforeEach(() => {
   localStorage.clear();
   window.alert = vi.fn();
+  window.confirm = vi.fn(() => false);
 });
 afterEach(() => {
   vi.restoreAllMocks();

@@ -246,6 +246,10 @@ const closeTaskDetail = () => {
 };
 
 const resolveTask = async (id: string) => {
+  if (resolvingTaskId.value) {
+    return;
+  }
+
   if (!canManageAlerts.value) {
     actionMessage.value = {
       type: "error",
@@ -257,12 +261,6 @@ const resolveTask = async (id: string) => {
   const task = pendingTasks.value.find((entry) => entry.id === id);
 
   if (!task) {
-    return;
-  }
-
-  const confirmed = window.confirm(task.grade === "fault" ? "确认标记为已知晓？" : "确认手动完成这条待办？");
-
-  if (!confirmed) {
     return;
   }
 
@@ -532,7 +530,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
                   <button
                     v-if="canManageAlerts"
                     class="admin-button admin-button--ghost"
-                    :disabled="resolvingTaskId === task.id"
+                    :disabled="Boolean(resolvingTaskId)"
                     @click="resolveTask(task.id)"
                   >
                     {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}

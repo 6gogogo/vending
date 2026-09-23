@@ -47,7 +47,6 @@ const resolve = async (alert: AlertTask) => {
     return;
   }
 
-  if (!window.confirm(alert.grade === "fault" ? "确认标记为已知晓？该任务仍会保留在未完成列表，需要继续跟进设备状态。" : `确认${resolveLabel(alert)}？完成后会移入最近已完成记录。`)) return;
   resolvingId.value = alert.id;
   actionMessage.value = undefined;
   try {
@@ -134,7 +133,7 @@ onMounted(load);
               <span class="admin-pill" :class="alert.grade === 'fault' ? 'admin-pill--danger' : alert.grade === 'feedback' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ gradeLabel(alert) }}</span>
               <span class="admin-pill" :class="alert.status === 'open' ? 'admin-pill--warning' : 'admin-pill--neutral'">{{ statusLabel(alert) }}</span>
               <button class="admin-button admin-button--ghost" @click="activeAlert = alert">详情</button>
-              <button v-if="canManageAlerts" class="admin-button admin-button--ghost" :disabled="resolvingId === alert.id" @click="resolve(alert)">{{ resolvingId === alert.id ? "处理中" : resolveLabel(alert) }}</button>
+              <button v-if="canManageAlerts" class="admin-button admin-button--ghost" :disabled="Boolean(resolvingId)" @click="resolve(alert)">{{ resolvingId === alert.id ? "处理中" : resolveLabel(alert) }}</button>
               <span v-else class="admin-table__subtext">需要预警处理权限</span>
             </div>
           </div>

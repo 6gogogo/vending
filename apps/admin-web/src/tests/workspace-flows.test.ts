@@ -10,6 +10,7 @@ import SystemSettingsPage from "../pages/SystemSettingsPage.vue";
 import GoodsOverviewPage from "../pages/GoodsOverviewPage.vue";
 import WarehousePage from "../pages/WarehousePage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
+import AlertsPage from "../pages/AlertsPage.vue";
 import DeviceDetailPage from "../pages/DeviceDetailPage.vue";
 import UserDetailPage from "../pages/UserDetailPage.vue";
 import { useAdminSessionStore } from "../stores/session";
@@ -20,7 +21,7 @@ const api = vi.hoisted(() => Object.fromEntries([
   "registrationApplications", "manualVerificationCodes", "goodsTaxonomy", "reservationSettings",
   "createUser", "systemSettings", "saveSystemSettings", "paymentDiagnostics", "logout", "exitPlatformTenant",
   "goodsOverview", "warehouseInventory", "goodsCategories", "goodsAlertPolicies", "platformGoodsSyncStatus",
-  "createInventoryTransfer", "createExpiredBatchDisposition", "deviceDetail", "dashboard", "userDetail", "reservations", "manualSettlementCandidates"
+  "createInventoryTransfer", "createExpiredBatchDisposition", "deviceDetail", "dashboard", "userDetail", "reservations", "manualSettlementCandidates", "alerts", "resolveAlert"
 ].map(name => [name, vi.fn()])));
 vi.mock("../api/admin", () => ({ adminApi: api }));
 
@@ -82,6 +83,7 @@ async function start(path = "/users", role: BackofficeRole = "admin", permission
       { path: "/platform", component: placeholder }, { path: "/operations", component: placeholder },
       { path: "/goods", component: GoodsOverviewPage }, { path: "/warehouse", component: WarehousePage },
       { path: "/poll-dashboard", component: DashboardPage }, { path: "/poll-device/:deviceCode", component: DeviceDetailPage },
+      { path: "/poll-alerts", component: AlertsPage },
       { path: "/poll-user/:userId", component: UserDetailPage },
       { path: "/:rest(.*)*", component: placeholder }
     ] }
@@ -238,6 +240,53 @@ describe("货品调拨与仓库确认", () => {
     expect(calls[0]![1]).toMatchObject({ confirmed: true, quantity: 1, reason: "模拟过期登记" });
     expect(calls[0]![1].idempotencyKey).toBeTruthy();
     expect(calls[1]![1].idempotencyKey).toBe(calls[0]![1].idempotencyKey);
+  });
+});
+
+describe("待办直接处理", () => {
+  const pages = ["/poll-dashboard?section=tasks", "/poll-alerts", "/poll-device/CAB-TEST?section=manage"];
+  const prepareTasks = (grade = "warning") => {
+    const tasks = [{ id: "task-test", type: "inventory", grade, status: "open", title: "模拟待办", detail: "仅用于交互回归", dueAt: "2026-09-23T00:00:00Z" }];
+    const bucket = () => ({ count: 0, users: [] });
+    api.dashboard.mockImplementation(async () => ({ pendingTasks: [...tasks], serviceOverview: { completeUsers: bucket(), partialUsers: bucket(), unservedUsers: bucket(), totalUsers: 0 }, taskGradeSummary: { fault: 0, feedback: 0, warning: 1 }, summaryLogs: [], serviceTrend: [] }));
+    api.alerts.mockImplementation(async () => [...tasks]);
+    api.deviceDetail.mockImplementation(async () => ({ device: { deviceCode: "CAB-TEST", name: "测试柜机", status: "online", doors: [] }, runtime: { doorState: "closed", openedAfterLastCommand: false }, pendingTasks: [...tasks], recentEvents: [], recentLogs: [], businessDayServedUsers: [], stockChanges: [], totalStock: 0, servedUsers: 0 }));
+    return tasks;
+  };
+
+  it.each(pages.flatMap(path => ["warning", "fault"].map(grade => [path, grade])))("%s 的 %s 待办单击直接提交，快速连点不重复请求", async (path, grade) => {
+    const tasks = prepareTasks(grade);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    let finish!: () => void;
+    api.resolveAlert.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    const { wrapper } = await start(path);
+    const action = button(wrapper, grade === "fault" ? "标记已知晓" : "手动完成");
+    await Promise.all([action.trigger("click"), action.trigger("click")]);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(api.resolveAlert).toHaveBeenCalledTimes(1);
+    expect(api.resolveAlert.mock.calls[0]![0]).toBe("task-test");
+    expect(button(wrapper, "处理中").attributes("disabled")).toBeDefined();
+    if (grade === "fault") tasks[0]!.status = "acknowledged";
+    else tasks.splice(0);
+    finish();
+    await flushPromises();
+    expect(wrapper.text()).toContain(grade === "fault" ? "已标记为知晓" : "已完成");
+    expect(wrapper.findAll("button").some(item => item.text() === "处理中")).toBe(false);
+  });
+
+  it.each(pages)("%s 处理失败显示原因并允许直接重试", async path => {
+    prepareTasks();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    api.resolveAlert.mockRejectedValueOnce(new Error("模拟处理失败"));
+    const { wrapper } = await start(path);
+    await button(wrapper, "手动完成").trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("模拟处理失败");
+    expect(button(wrapper, "手动完成").attributes("disabled")).toBeUndefined();
+    await button(wrapper, "手动完成").trigger("click");
+    await flushPromises();
+    expect(api.resolveAlert).toHaveBeenCalledTimes(2);
+    expect(confirm).not.toHaveBeenCalled();
   });
 });
 

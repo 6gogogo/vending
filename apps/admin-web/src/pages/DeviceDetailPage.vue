@@ -1456,13 +1456,17 @@ const reconcilePendingRefund = async () => {
 };
 
 const resolveTask = async (taskId: string) => {
+  if (resolvingTaskId.value) {
+    return;
+  }
+
   if (!canManageAlerts.value) {
     showActionMessage("error", "当前账号没有预警处理权限，不能处理待办。");
     return;
   }
 
   const task = pendingTasks.value.find((entry) => entry.id === taskId);
-  if (!task || !window.confirm(task.grade === "fault" ? "确认标记为已知晓？故障任务仍会保留为需继续跟进的状态。" : `确认${taskActionLabel(task)}？完成后会移入处理记录。`)) {
+  if (!task) {
     return;
   }
   resolvingTaskId.value = taskId;
@@ -1880,7 +1884,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
                   <button
                     v-if="canManageAlerts && task.status === 'open' && task.title !== '结算回调超时待补记'"
                     class="admin-button admin-button--ghost"
-                    :disabled="resolvingTaskId === task.id"
+                    :disabled="Boolean(resolvingTaskId)"
                     @click="resolveTask(task.id)"
                   >
                     {{ resolvingTaskId === task.id ? "处理中" : taskActionLabel(task) }}
