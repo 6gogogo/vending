@@ -9,8 +9,8 @@
 - [交互与流程回归记录](docs/design/admin-redesign/REGRESSION.md)：修复项、测试范围、复验截图与验证边界。
 - [手机布局验收](docs/design/admin-redesign/MOBILE.md)：窄屏问题、手机适配规则、桌面回归与截图。
 - [发布准备与交接](docs/design/admin-redesign/RELEASE_READINESS.md)：上线前的完整检查、线上只读预检、发布顺序和回退条件。
-- [2026-09-23 正式发布与回滚回执](docs/design/admin-redesign/DEPLOYMENT_20260923.md)：已上线 `48650d2`；服务器、备份、实际回滚、公网与浏览器验收证据。
-- [待办交互与回调警告排查](docs/design/admin-redesign/TODO_CALLBACK_20260923.md)：单击处理、重复提交防护，以及回调延迟和货品目录缺项的证据。
+- [2026-09-23 首轮正式发布与回滚回执](docs/design/admin-redesign/DEPLOYMENT_20260923.md)：`48650d2`；服务器、备份、实际回滚、公网与浏览器验收证据。
+- [待办交互与回调警告排查](docs/design/admin-redesign/TODO_CALLBACK_20260923.md)：当前线上 `818dfdb`；单击处理、重复提交防护、回调延迟和货品目录缺项证据，以及新回滚点。
 - `.codex-run/` 是不提交的本地演练数据和日志；依赖目录及构建输出不作为源代码维护。
 
 ## 按问题定位

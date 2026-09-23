@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "status": "deployed-public-acceptance-passed",
+  "acceptedAt": "2026-09-23T07:48:03.261Z",
+  "sourceCommit": "818dfdbb71692501f7e59196578c862588467d10",
+  "previousCommit": "48650d2360f5478e12654e4350f4cdb9dcbbf0a5",
+  "developmentBranch": "codex/admin-workspace-redesign",
+  "server": {
+    "checkedAt": "2026-09-23T07:45:50.459256+00:00",
+    "status": "server-ready-awaiting-public-acceptance",
+    "oldCommit": "48650d2360f5478e12654e4350f4cdb9dcbbf0a5",
+    "newCommit": "818dfdbb71692501f7e59196578c862588467d10",
+    "finalCommit": "818dfdbb71692501f7e59196578c862588467d10",
+    "maintenanceStartedAt": "2026-09-23T07:43:26.008761+00:00",
+    "maintenanceEndedAt": "2026-09-23T07:44:56.808826+00:00",
+    "backup": {
+      "directory": "/home/fivegogogo/vending/runtime-planes/xiaoguidai-live-v2/backups/2026-09-23T07-43-28-696Z-pre-release-todo-direct-20260923",
+      "manifestSha256": "9ece0937623dd60b1c6d51af683808772868c23c0247841088da6170f524d54b",
+      "verified": true
+    },
+    "rollbackArchive": {
+      "file": "previous-runtime.tar",
+      "sha256": "136cd7d129928ebf56353f2dfcd4869aba24199532e4ae82d072c3fafe69f75b",
+      "bytes": 586536960,
+      "directories": [
+        "node_modules",
+        "apps/admin-web/dist",
+        "apps/api/dist",
+        "apps/mobile/dist"
+      ]
+    },
+    "linuxTests": {
+      "tests": 1016,
+      "pass": 1016,
+      "fail": 0,
+      "skipped": 0
+    },
+    "sourceStatus": "",
+    "services": {
+      "vending-api-candidate.service": [
+        "Result=success",
+        "NRestarts=0",
+        "ActiveState=active",
+        "SubState=running"
+      ],
+      "vending-public-web.service": [
+        "Result=success",
+        "NRestarts=0",
+        "ActiveState=active",
+        "SubState=running"
+      ]
+    },
+    "privateChecks": [
+      {
+        "url": "http://127.0.0.1:8100/api/health",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "url": "http://127.0.0.1:8100/api/health/production-readiness",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "url": "http://10.66.66.2:5795/",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "url": "http://10.66.66.2:5795/api/health",
+        "status": 403,
+        "expected": 403,
+        "pass": true
+      }
+    ]
+  },
+  "publicHttp": {
+    "checkedAt": "2026-09-23T07:45:50.035Z",
+    "baseUrl": "https://vending.5gogogo.top",
+    "checks": [
+      {
+        "path": "/",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "path": "/login",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "path": "/mobile/",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "path": "/api/health",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "path": "/api/health/production-readiness",
+        "status": 200,
+        "expected": 200,
+        "pass": true
+      },
+      {
+        "path": "/api/users",
+        "status": 403,
+        "expected": 403,
+        "pass": true
+      }
+    ],
+    "assets": [
+      {
+        "path": "/assets/index-Cf80JwFy.js",
+        "status": 200,
+        "contentType": "text/javascript; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/assets/index-Bc8p6aU1.css",
+        "status": 200,
+        "contentType": "text/css; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/mobile/assets/uni.5616fd21.css",
+        "status": 200,
+        "contentType": "text/css; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/mobile/assets/index-DzKB0u-n.js",
+        "status": 200,
+        "contentType": "text/javascript; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/mobile/assets/index-D9PnkiCf.css",
+        "status": 200,
+        "contentType": "text/css; charset=utf-8",
+        "pass": true
+      }
+    ],
+    "pass": true
+  },
+  "browser": {
+    "checkedAt": "2026-09-23T07:47:42.310Z",
+    "production": {
+      "appScripts": [
+        "/assets/index-Cf80JwFy.js"
+      ],
+      "heading": "工作台",
+      "overflow": false,
+      "page": "/dashboard?section=tasks"
+    },
+    "consoleErrors": [],
+    "productionTaskState": "当前没有待处理事件；未在生产创建或处理验收待办",
+    "localSimulation": {
+      "completedWarningWithSingleClick": true,
+      "acknowledgedFaultWithSingleClick": true,
+      "confirmationDialogs": 0,
+      "mobileWidth": 375
+    },
+    "screenshots": [
+      "local-direct-complete.png",
+      "local-mobile-acknowledge.png",
+      "production-tasks.png"
+    ]
+  },
+  "localValidation": {
+    "node": "22.22.2",
+    "npm": "10.9.7",
+    "checkLocalFull": {
+      "tests": 1016,
+      "pass": 1010,
+      "fail": 0,
+      "skipped": 6
+    },
+    "simulationDataVerifyPassed": true
+  },
+  "vncPrivateChecks": {
+    "webRoot": 200,
+    "apiHealth": 200
+  },
+  "rollbackEvidenceDirectory": "/home/fivegogogo/vending/release-evidence/20260923-todo-direct-818dfdb",
+  "scope": "只修改待办交互和测试/文档；回调调查只读，没有变更后端账务处理",
+  "newBusinessActionsOnProduction": false
+}

@@ -42,4 +42,20 @@
 - 正常结算与重试：`apps/api/src/modules/cabinet-events/cabinet-events.service.ts` 的 `handleSettlement()`。
 - 生产证据：受控 live 平面的 `store.json` 中事件/流水/额度/告警/同步日志，以及 `system-audit.ndjson` 的回调请求和异常记录；不将原始账本或凭据提交到 Git。
 
-本文件提交时本地验证已完成；正式发布结果与新回滚点另记于后续发布回执。
+## 正式发布结果
+
+本次修复已发布为 `818dfdbb71692501f7e59196578c862588467d10`，正式机 Linux aarch64 的 **1016 项测试全部通过，0 失败、0 跳过**。维护窗口为 15:43:26–15:44:56，约 91 秒；停写备份、验证、Git 拉取、安装、全量检查、正式构建、分层启动均成功。
+
+15:45 公网 `/`、`/login`、`/mobile/`、health 和 production-readiness 均为 200，未登录人员接口为 403；Spark 来源限制、VNC 私网入口和 5 个入口 JS/CSS 均通过。正式浏览器已加载新入口 `/assets/index-Cf80JwFy.js`，待办空态正常、没有 console error。当前没有待处理任务，因此没有为了验收在生产新增或处理业务提醒；单击动作在隔离模拟环境和三个页面的组件回归中验证。用户原先的数据分析页面没有被刷新，刷新后台后可使用新交互。
+
+机器可读回执见 [todo-deployment-20260923.json](todo-deployment-20260923.json)。线上证据目录为 `/home/fivegogogo/vending/release-evidence/20260923-todo-direct-818dfdb/`，保留发布日志、`status.json`、`PUBLIC_ACCEPTANCE.json`、`ROLLBACK.md` 和旧运行归档。
+
+| 回滚备案 | 内容 |
+| --- | --- |
+| 回滚目标 | `48650d2360f5478e12654e4350f4cdb9dcbbf0a5` |
+| 运行数据备份 | `/home/fivegogogo/vending/runtime-planes/xiaoguidai-live-v2/backups/2026-09-23T07-43-28-696Z-pre-release-todo-direct-20260923` |
+| 备份清单 SHA256 | `9ece0937623dd60b1c6d51af683808772868c23c0247841088da6170f524d54b` |
+| 旧产物 | `previous-runtime.tar`，586,536,960 字节 |
+| 旧产物 SHA256 | `136cd7d129928ebf56353f2dfcd4869aba24199532e4ae82d072c3fafe69f75b` |
+
+回滚沿用 [首轮已实际验证的流程](DEPLOYMENT_20260923.md#回滚备案)，但使用上表目标提交与本次归档。只恢复应用版本，保留当前 live 数据，不回灌旧账本。
