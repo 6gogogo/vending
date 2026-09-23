@@ -185,6 +185,17 @@ test(
     assert.throws(
       () =>
         apiConfig({ PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE: join(linkedDirectory, "relay-token") }),
+      /PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE parent must be a directory/u
+    );
+
+    // 直接父目录和更上层祖先分别触发不同门禁，不能只验证同一个符号链接位置。
+    const nestedDirectory = join(tokenDirectory, "nested");
+    mkdirSync(nestedDirectory, { mode: 0o700 });
+    writeFileSync(join(nestedDirectory, "relay-token"), defaultSharedToken, { mode: 0o600 });
+    assert.throws(
+      () => apiConfig({
+        PUBLIC_EDGE_RELAY_SHARED_TOKEN_FILE: join(linkedDirectory, "nested", "relay-token")
+      }),
       /parent chain must contain only directories/u
     );
 
