@@ -2,13 +2,14 @@
 
 先按问题找入口，再读对应模块；业务语言和边界以 [CONTEXT.md](CONTEXT.md) 与 [ADR](docs/adr/) 为准。
 
-## 当前后台评审工作区
+## 当前后台开发与发布工作区
 
 - 分支：`codex/admin-workspace-redesign`，后续后台修改继续在此分支进行。
 - [预览启动、工作树位置与截图](docs/design/admin-redesign/README.md)：`http://127.0.0.1:5188/`，演示账号 `admin / admin`。
 - [交互与流程回归记录](docs/design/admin-redesign/REGRESSION.md)：修复项、测试范围、复验截图与验证边界。
 - [手机布局验收](docs/design/admin-redesign/MOBILE.md)：窄屏问题、手机适配规则、桌面回归与截图。
-- [发布准备与交接](docs/design/admin-redesign/RELEASE_READINESS.md)：候选版本、完整检查、线上只读预检、发布顺序和回退条件；当前等待上线指令。
+- [发布准备与交接](docs/design/admin-redesign/RELEASE_READINESS.md)：上线前的完整检查、线上只读预检、发布顺序和回退条件。
+- [2026-09-23 正式发布与回滚回执](docs/design/admin-redesign/DEPLOYMENT_20260923.md)：已上线 `48650d2`；服务器、备份、实际回滚、公网与浏览器验收证据。
 - `.codex-run/` 是不提交的本地演练数据和日志；依赖目录及构建输出不作为源代码维护。
 
 ## 按问题定位

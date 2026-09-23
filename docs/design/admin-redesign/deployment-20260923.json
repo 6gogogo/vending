@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 1,
+  "status": "deployed-public-acceptance-passed",
+  "acceptedAt": "2026-09-23T07:20:07.995Z",
+  "authorization": "用户要求：如果回滚有备案，就实机上线",
+  "sourceCommit": "48650d2360f5478e12654e4350f4cdb9dcbbf0a5",
+  "previousCommit": "d9f38423cae7ab5cc383c53f6bc4042d7be192f9",
+  "developmentBranch": "codex/admin-workspace-redesign",
+  "releaseBranch": "codex/UI",
+  "productionUrl": "https://vending.5gogogo.top",
+  "runtime": {
+    "host": "spark",
+    "platform": "linux-aarch64",
+    "node": "22.22.2",
+    "npm": "10.9.7",
+    "services": {
+      "vending-api-candidate.service": {
+        "active": "running",
+        "restarts": 0
+      },
+      "vending-public-web.service": {
+        "active": "running",
+        "restarts": 0
+      }
+    }
+  },
+  "maintenance": {
+    "startedAt": "2026-09-23T07:07:56.918170+00:00",
+    "endedAt": "2026-09-23T07:09:26.556379+00:00"
+  },
+  "linuxTests": {
+    "tests": 1007,
+    "pass": 1007,
+    "fail": 0,
+    "skipped": 0
+  },
+  "firstAttempt": {
+    "status": "rolled-back",
+    "previousRuntimeArchive": {
+      "file": "previous-runtime.tar",
+      "sha256": "9531d2629bdd689e3e96fd141caadf523fb44821790c59aebd38b664bec6b07a",
+      "bytes": 539944960,
+      "directories": [
+        "node_modules",
+        "apps/admin-web/dist",
+        "apps/api/dist",
+        "apps/mobile/dist"
+      ]
+    },
+    "maintenanceStartedAt": "2026-09-23T06:59:38.083178+00:00",
+    "rollbackCompletedAt": "2026-09-23T07:00:53.634457+00:00",
+    "failure": "Linux 符号链接拒绝错误的测试断言与实现不符，自动恢复旧版本成功；在本地修正测试、复验并推送后重新部署",
+    "dataRestored": false
+  },
+  "rollback": {
+    "target": "d9f38423cae7ab5cc383c53f6bc4042d7be192f9",
+    "evidenceDirectory": "/home/fivegogogo/vending/release-evidence/20260923-admin-redesign-48650d2-retry",
+    "backup": {
+      "directory": "/home/fivegogogo/vending/runtime-planes/xiaoguidai-live-v2/backups/2026-09-23T07-07-59-521Z-pre-release-admin-redesign-20260923-retry",
+      "manifestSha256": "8a83dfb3a2e8425742291ae6780a1e97367c5f99a283003f53331e268b547bc5",
+      "verified": true
+    },
+    "runtimeArchive": {
+      "file": "previous-runtime.tar",
+      "sha256": "a51c92338b4369168aa24d73521f1b9d32381f83ce27f94e285b414510efe8e8",
+      "bytes": 539944960,
+      "directories": [
+        "node_modules",
+        "apps/admin-web/dist",
+        "apps/api/dist",
+        "apps/mobile/dist"
+      ]
+    },
+    "applicationOnlyByDefault": true
+  },
+  "externalPreflight": {
+    "exitCode": 0,
+    "status": "skip",
+    "summary": {
+      "pass": 19,
+      "warn": 0,
+      "fail": 0,
+      "skip": 4
+    },
+    "report": "/home/fivegogogo/vending/release-evidence/20260923-admin-redesign-48650d2-retry/external-preflight/external-service-preflight-2026-09-23T07-10-07-805Z.json",
+    "skips": [
+      "未额外提供管理员 token 的支付诊断读取",
+      "显式跳过 SmartVM 只读探测",
+      "默认不发送真实短信",
+      "当前关闭新支付链路，未探测支付渠道"
+    ]
+  },
+  "publicChecks": {
+    "checkedAt": "2026-09-23T07:17:29.121Z",
+    "baseUrl": "https://vending.5gogogo.top",
+    "checks": [
+      {
+        "path": "/",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/login",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/mobile/",
+        "expected": 200,
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/api/health",
+        "expected": 200,
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/api/health/production-readiness",
+        "expected": 200,
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/api/users",
+        "expected": 403,
+        "status": 403,
+        "contentType": "application/json; charset=utf-8",
+        "pass": true
+      }
+    ],
+    "entryAssets": [
+      {
+        "path": "/assets/index-DdDB3PX_.js",
+        "status": 200,
+        "contentType": "text/javascript; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/assets/index-Bc8p6aU1.css",
+        "status": 200,
+        "contentType": "text/css; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/mobile/assets/uni.5616fd21.css",
+        "status": 200,
+        "contentType": "text/css; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/mobile/assets/index-DzKB0u-n.js",
+        "status": 200,
+        "contentType": "text/javascript; charset=utf-8",
+        "pass": true
+      },
+      {
+        "path": "/mobile/assets/index-D9PnkiCf.css",
+        "status": 200,
+        "contentType": "text/css; charset=utf-8",
+        "pass": true
+      }
+    ],
+    "pass": true
+  },
+  "browser": {
+    "checkedAt": "2026-09-23T07:16:50.054Z",
+    "baseUrl": "https://vending.5gogogo.top",
+    "browser": "Edge",
+    "role": "服务商已授权实例会话",
+    "consoleErrors": [],
+    "checks": [
+      {
+        "heading": "工作台",
+        "height": 850,
+        "overflow": false,
+        "page": "/dashboard",
+        "width": 1699
+      },
+      {
+        "dialogs": 0,
+        "heading": "人员管理",
+        "height": 854,
+        "overflow": false,
+        "page": "/users?section=rules",
+        "width": 1699
+      },
+      {
+        "check": "function-search-and-history",
+        "pass": true,
+        "path": "/users?section=rules",
+        "details": "搜索直达领取规则，弹层关闭；后退到工作台，前进恢复规则分区"
+      },
+      {
+        "heading": "人员管理",
+        "height": 812,
+        "overflow": false,
+        "page": "/users?section=directory",
+        "width": 375
+      },
+      {
+        "check": "new-person-form-no-submit",
+        "height": 500,
+        "overflow": false,
+        "page": "/users?section=directory",
+        "width": 320
+      },
+      {
+        "heading": "货品管理",
+        "height": 812,
+        "overflow": false,
+        "page": "/goods?section=transfer",
+        "width": 375
+      },
+      {
+        "heading": "本地仓库",
+        "height": 854,
+        "overflow": false,
+        "page": "/warehouse",
+        "width": 1699
+      },
+      {
+        "check": "settings-readonly-load",
+        "pass": true,
+        "changesSaved": false
+      },
+      {
+        "heading": "柜机监控",
+        "height": 854,
+        "overflow": false,
+        "page": "/operations",
+        "width": 1699
+      },
+      {
+        "check": "provider-exit-instance",
+        "pass": true,
+        "path": "https://vending.5gogogo.top/platform"
+      },
+      {
+        "check": "provider-reenter-same-instance",
+        "pass": true,
+        "path": "https://vending.5gogogo.top/users",
+        "observedDefault": "人员管理"
+      },
+      {
+        "check": "task-detail-open-close",
+        "pass": true,
+        "statusMutation": false
+      },
+      {
+        "check": "person-management-expand-collapse",
+        "pass": true,
+        "smsSent": false
+      }
+    ],
+    "limits": [
+      "桌面浏览器窄屏验收，不等于物理手机验收",
+      "未保存生产业务表单；未开柜、发送短信、付款或退款",
+      "仅服务商实例会话做了公网交互抽查；其他角色由本地自动回归覆盖"
+    ]
+  },
+  "privateNetwork": {
+    "checkedAt": "2026-09-23T07:17:54.060009+00:00",
+    "spark": {
+      "apiHealth": 200,
+      "apiReadiness": 200,
+      "webRoot": 200,
+      "unauthorizedRelaySource": 403
+    },
+    "vnc": {
+      "webRoot": 200,
+      "apiHealth": 200
+    },
+    "note": "Spark 辅助探针最初继承代理导致私有 URL 返回 502；仅关闭探针代理后直连全部通过，未修改生产配置"
+  },
+  "dependencyAudit": {
+    "affectedPackageEntries": 52,
+    "high": 22,
+    "moderate": 27,
+    "low": 3,
+    "unchangedFromBaseline": true
+  },
+  "boundaries": {
+    "businessFormsSubmitted": false,
+    "physicalCabinetOpened": false,
+    "smsSent": false,
+    "paymentOrRefundPerformed": false,
+    "physicalMobileBrowsersTested": false,
+    "miniProgramsUploaded": false,
+    "productionDataRestored": false,
+    "allProductionRolesManuallyTested": false
+  },
+  "evidence": {
+    "privateScreenshots": ".codex-run/production-20260923/",
+    "validScreenshotNames": [
+      "01-dashboard-desktop.png",
+      "02-rules-desktop.png",
+      "03-users-mobile.png",
+      "04-person-form-320-short.png",
+      "05-person-form-320-actions.png",
+      "06-mobile-navigation.png",
+      "07-transfer-mobile-form.png",
+      "08-operations-desktop.png",
+      "09-task-detail-desktop.png"
+    ]
+  }
+}
