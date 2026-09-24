@@ -49,4 +49,18 @@
 
 首轮回滚目标为 `818dfdbb71692501f7e59196578c862588467d10`，证据目录 `/home/fivegogogo/vending/release-evidence/20260924-callback-expiry-591d934/`。备份为 `2026-09-24T07-56-23-998Z-pre-release-callback-expiry-20260924`，清单 SHA256 `8c6796e5f534af87cc8a253118ead8e51c93e7ff7905e31d29ba6bdb1d12b050`；旧运行归档 SHA256 `64def0df9675262ecb81c005ac1b3a7dd9a8146cbc40799ef5a6a330b7bdba98`。
 
-仓库提示修正再次通过完整本地检查，随后按同一发布流程补发。失败时恢复源码和构建归档，不回退发布后的业务数据；最终发布与回滚点在完成公网复验后补录。
+最终版本为 **`6ccb02aa20cd88e39c2cfe1ebd19b1e90e020434`**，仓库提示修正再次通过完整本地检查和实机 Linux 1019 项测试。第二轮维护窗口 16:09:42–16:11:10 HKT（约 88 秒），证据目录 `/home/fivegogogo/vending/release-evidence/20260924-expiry-copy-6ccb02a/`。
+
+16:12–16:14 公网后台、登录、H5、health/readiness 均为 200，未登录人员接口为 403，VNC 私网入口通过。公开入口为 `/assets/index-DWrQex3D.js`；仓库资源 `/assets/WarehousePage-q0kRes8X.js` 已核实包含新提示。API/Web 均 active/running、Result=success、NRestarts=0，源码干净；源码及构建后的报警常量均为 150，配置摘要未变。
+
+最终提示在本地浏览器已完成可视化检查；补发后正式标签页控制超时，未取得最终版本的新公网页面截图，不将资源校验写成第二次生产浏览器可视化验收。此前已在正式登录后的仓库页面核对运行策略，此轮未操作真实柜门、短信、支付或库存。
+
+| 当前回滚备案 | 内容 |
+| --- | --- |
+| 回滚目标 | `591d934c5bbfae2fe13a1a751e1491f9648131e0`，仍保留 150 分钟报警 |
+| 停写备份 | `2026-09-24T08-09-44-933Z-pre-release-expiry-copy-20260924` |
+| 备份清单 SHA256 | `34840366d48102f5f83fb11a944b150e291cffddb2d20c9ca2cf7e7d79388b6e` |
+| 旧运行归档 | `previous-runtime.tar`，586,536,960 字节 |
+| 归档 SHA256 | `11ad5dd677e291400f4b49aef07828bebe89bbf40810d0f41d18d337670a5b47` |
+
+失败时恢复源码和构建归档，不回退发布后的业务数据。两轮的备份、测试和公网检查汇总见 [机器可读回执](callback-expiry-deployment-20260924.json)。

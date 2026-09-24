@@ -1,0 +1,261 @@
+{
+  "schemaVersion": 1,
+  "status": "deployed-public-acceptance-passed",
+  "acceptedAt": "2026-09-24T08:16:15.520470+00:00",
+  "sourceCommit": "6ccb02aa20cd88e39c2cfe1ebd19b1e90e020434",
+  "previousCommit": "591d934c5bbfae2fe13a1a751e1491f9648131e0",
+  "developmentBranch": "codex/admin-workspace-redesign",
+  "alarmMinutes": 150,
+  "manualRecoveryEligibilityMinutes": 10,
+  "goodsExpiryMode": "warning_only",
+  "localChecks": {
+    "runtime": "Node 22.22.2 / npm 10.9.7",
+    "checkLocalFull": {
+      "tests": 1019,
+      "pass": 1013,
+      "fail": 0,
+      "skipped": 6
+    },
+    "targetedTests": 37,
+    "isolatedDataVerify": true
+  },
+  "visualChecks": {
+    "localApi": "http://127.0.0.1:4188/api",
+    "localAdmin": "http://127.0.0.1:5188",
+    "desktopViewport": {
+      "width": 1365,
+      "height": 900
+    },
+    "mobileViewport": {
+      "width": 375,
+      "height": 812,
+      "clientWidth": 360,
+      "scrollWidth": 360
+    },
+    "expiredAndNoExpiryBatchesSelectable": true,
+    "simulatedExpiredTransferQuantity": 8,
+    "warningOnlyEmptyCopyVerifiedLocally": true,
+    "localConsoleErrors": 0,
+    "productionAuthenticatedWarehousePolicyVerifiedBeforeCopyFollowup": true,
+    "finalProductionCopyAssetVerified": true,
+    "finalProductionCopyScreenshot": "not completed: browser tab controls timed out after initial production policy verification",
+    "screenshotsDirectory": ".codex-run/callback-expiry-20260924/",
+    "realCabinetOperationPerformed": false,
+    "productionInventoryMutationPerformed": false
+  },
+  "finalServerCheck": {
+    "checkedAt": "2026-09-24T08:14:47.726054+00:00",
+    "sourceStatus": "",
+    "sourceAndCompiledAlarmMinutes": 150,
+    "apiService": "active/running, Result=success, NRestarts=0",
+    "webService": "active/running, Result=success, NRestarts=0",
+    "vncRootHealthReadiness": [
+      200,
+      200,
+      200
+    ]
+  },
+  "releases": [
+    {
+      "sourceCommit": "591d934c5bbfae2fe13a1a751e1491f9648131e0",
+      "previousCommit": "818dfdbb71692501f7e59196578c862588467d10",
+      "evidenceDirectory": "/home/fivegogogo/vending/release-evidence/20260924-callback-expiry-591d934",
+      "maintenanceStartedAt": "2026-09-24T07:56:21.384637+00:00",
+      "maintenanceEndedAt": "2026-09-24T07:57:50.616209+00:00",
+      "backup": {
+        "directory": "/home/fivegogogo/vending/runtime-planes/xiaoguidai-live-v2/backups/2026-09-24T07-56-23-998Z-pre-release-callback-expiry-20260924",
+        "manifestSha256": "8c6796e5f534af87cc8a253118ead8e51c93e7ff7905e31d29ba6bdb1d12b050",
+        "verified": true
+      },
+      "rollbackArchive": {
+        "file": "previous-runtime.tar",
+        "sha256": "64def0df9675262ecb81c005ac1b3a7dd9a8146cbc40799ef5a6a330b7bdba98",
+        "bytes": 586536960,
+        "directories": [
+          "node_modules",
+          "apps/admin-web/dist",
+          "apps/api/dist",
+          "apps/mobile/dist"
+        ]
+      },
+      "linuxTests": {
+        "tests": 1019,
+        "pass": 1019,
+        "fail": 0,
+        "skipped": 0
+      },
+      "goodsExpiryMode": "warning_only",
+      "runtimeConfigurationUnchanged": true,
+      "publicHttp": {
+        "checkedAt": "2026-09-24T07:59:58.943135+00:00",
+        "checks": [
+          {
+            "path": "/",
+            "status": 200,
+            "expected": 200,
+            "contentType": "text/html; charset=utf-8"
+          },
+          {
+            "path": "/login",
+            "status": 200,
+            "expected": 200,
+            "contentType": "text/html; charset=utf-8"
+          },
+          {
+            "path": "/mobile/",
+            "status": 200,
+            "expected": 200,
+            "contentType": "text/html; charset=utf-8"
+          },
+          {
+            "path": "/api/health",
+            "status": 200,
+            "expected": 200,
+            "contentType": "application/json; charset=utf-8"
+          },
+          {
+            "path": "/api/health/production-readiness",
+            "status": 200,
+            "expected": 200,
+            "contentType": "application/json; charset=utf-8"
+          },
+          {
+            "path": "/api/users",
+            "status": 403,
+            "expected": 403,
+            "contentType": "application/json; charset=utf-8"
+          },
+          {
+            "path": "/assets/index-Bc8p6aU1.css",
+            "status": 200,
+            "contentType": "text/css; charset=utf-8"
+          },
+          {
+            "path": "/assets/index-Cf80JwFy.js",
+            "status": 200,
+            "contentType": "text/javascript; charset=utf-8"
+          },
+          {
+            "path": "/mobile/assets/index-D9PnkiCf.css",
+            "status": 200,
+            "contentType": "text/css; charset=utf-8"
+          },
+          {
+            "path": "/mobile/assets/index-DzKB0u-n.js",
+            "status": 200,
+            "contentType": "text/javascript; charset=utf-8"
+          },
+          {
+            "path": "/mobile/assets/uni.5616fd21.css",
+            "status": 200,
+            "contentType": "text/css; charset=utf-8"
+          }
+        ],
+        "passed": true
+      }
+    },
+    {
+      "sourceCommit": "6ccb02aa20cd88e39c2cfe1ebd19b1e90e020434",
+      "previousCommit": "591d934c5bbfae2fe13a1a751e1491f9648131e0",
+      "evidenceDirectory": "/home/fivegogogo/vending/release-evidence/20260924-expiry-copy-6ccb02a",
+      "maintenanceStartedAt": "2026-09-24T08:09:42.292355+00:00",
+      "maintenanceEndedAt": "2026-09-24T08:11:10.653012+00:00",
+      "backup": {
+        "directory": "/home/fivegogogo/vending/runtime-planes/xiaoguidai-live-v2/backups/2026-09-24T08-09-44-933Z-pre-release-expiry-copy-20260924",
+        "manifestSha256": "34840366d48102f5f83fb11a944b150e291cffddb2d20c9ca2cf7e7d79388b6e",
+        "verified": true
+      },
+      "rollbackArchive": {
+        "file": "previous-runtime.tar",
+        "sha256": "11ad5dd677e291400f4b49aef07828bebe89bbf40810d0f41d18d337670a5b47",
+        "bytes": 586536960,
+        "directories": [
+          "node_modules",
+          "apps/admin-web/dist",
+          "apps/api/dist",
+          "apps/mobile/dist"
+        ]
+      },
+      "linuxTests": {
+        "tests": 1019,
+        "pass": 1019,
+        "fail": 0,
+        "skipped": 0
+      },
+      "goodsExpiryMode": "warning_only",
+      "runtimeConfigurationUnchanged": true,
+      "publicHttp": {
+        "checkedAt": "2026-09-24T08:12:48.807491+00:00",
+        "checks": [
+          {
+            "path": "/",
+            "status": 200,
+            "expected": 200,
+            "contentType": "text/html; charset=utf-8"
+          },
+          {
+            "path": "/login",
+            "status": 200,
+            "expected": 200,
+            "contentType": "text/html; charset=utf-8"
+          },
+          {
+            "path": "/mobile/",
+            "status": 200,
+            "expected": 200,
+            "contentType": "text/html; charset=utf-8"
+          },
+          {
+            "path": "/api/health",
+            "status": 200,
+            "expected": 200,
+            "contentType": "application/json; charset=utf-8"
+          },
+          {
+            "path": "/api/health/production-readiness",
+            "status": 200,
+            "expected": 200,
+            "contentType": "application/json; charset=utf-8"
+          },
+          {
+            "path": "/api/users",
+            "status": 403,
+            "expected": 403,
+            "contentType": "application/json; charset=utf-8"
+          },
+          {
+            "path": "/assets/index-Bc8p6aU1.css",
+            "status": 200,
+            "contentType": "text/css; charset=utf-8"
+          },
+          {
+            "path": "/assets/index-DWrQex3D.js",
+            "status": 200,
+            "contentType": "text/javascript; charset=utf-8"
+          },
+          {
+            "path": "/mobile/assets/index-D9PnkiCf.css",
+            "status": 200,
+            "contentType": "text/css; charset=utf-8"
+          },
+          {
+            "path": "/mobile/assets/index-DzKB0u-n.js",
+            "status": 200,
+            "contentType": "text/javascript; charset=utf-8"
+          },
+          {
+            "path": "/mobile/assets/uni.5616fd21.css",
+            "status": 200,
+            "contentType": "text/css; charset=utf-8"
+          },
+          {
+            "path": "/assets/WarehousePage-q0kRes8X.js",
+            "status": 200,
+            "warningOnlyCopyPresent": true
+          }
+        ],
+        "passed": true
+      }
+    }
+  ]
+}
