@@ -864,8 +864,8 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </tbody>
         </table>
         <div v-else class="admin-empty">
-          <div class="admin-empty__title">当前没有过期待处置批次</div>
-          <div class="admin-empty__body">过期批次会自动隔离在此，不会混入可调拨库存。</div>
+          <div class="admin-empty__title">{{ snapshot?.goodsExpiryMode === 'warning_only' ? '当前仓库没有登记到期批次' : '当前没有过期待处置批次' }}</div>
+          <div class="admin-empty__body">{{ snapshot?.goodsExpiryMode === 'warning_only' ? '登记到期批次仍保留在库存和调拨列表；无保质期的用品可以不填写日期。' : '过期批次会自动隔离在此，不会混入可调拨库存。' }}</div>
         </div>
       </article>
 
