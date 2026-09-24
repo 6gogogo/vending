@@ -268,21 +268,25 @@ test("平台补充的实际商品及时扣库存并零元完结，失败后按�
   assert.equal(h.store.paymentOrders.length, 0);
 }));
 
-test("保质期仅提醒时到期批次贯通查询、预约、预结算、实际领取及库存扣减", async () => withHarness(async (h) => {
+for (const [label, expiresAt] of [
+  ["登记已到期", "2000-01-01T00:00:00.000Z"],
+  ["未设保质期", undefined]
+] as const) {
+test(`保质期仅提醒时${label}批次贯通查询、预约、预结算、实际领取及库存扣减`, async () => withHarness(async (h) => {
   const previous = process.env.VM_GOODS_EXPIRY_MODE;
   process.env.VM_GOODS_EXPIRY_MODE = "warning_only";
   try {
     h.store.goodsBatches.splice(0);
     const batches = new InventoryBatchChangesService(h.store);
-    const expired = batches.recordBatchOnly({ deviceCode: h.device.deviceCode, goodsId: h.goods.goodsId,
-      quantity: 5, expiresAt: "2000-01-01T00:00:00.000Z", sourceType: "system" }).createdBatches[0]!;
+    const batch = batches.recordBatchOnly({ deviceCode: h.device.deviceCode, goodsId: h.goods.goodsId,
+      quantity: 5, expiresAt, sourceType: "system" }).createdBatches[0]!;
     const devices = new DevicesService(h.store, batches, { getGoodsInfo: async () => [] } as never);
     const visible = (await devices.getGoods(h.device.deviceCode, "1", "special")).find((goods) => goods.goodsId === h.goods.goodsId)!;
     assert.equal(visible.stock, 5);
     assert.equal(visible.expiresAt, undefined, "未核实的登记日期只在后台提醒");
     const detail = devices.monitoringDetail(h.device.deviceCode);
     assert.equal(detail.goodsExpiryMode, "warning_only");
-    assert.equal(detail.device.doors[0]!.goods.find((goods) => goods.goodsId === h.goods.goodsId)?.expiresAt, expired.expiresAt);
+    assert.equal(detail.device.doors[0]!.goods.find((goods) => goods.goodsId === h.goods.goodsId)?.expiresAt, expiresAt);
     const intentItems = [{ goodsId: h.goods.goodsId, goodsName: h.goods.name, category: h.goods.category, quantity: 1 }];
     const reservation = h.reservations.create({ deviceCode: h.device.deviceCode, doorNum: "1", intentItems }, h.actor);
     const preview = h.service.previewOpenSettlement({ ...h.request, pickupMode: undefined, reservationId: reservation.id, intentItems }, h.actor);
@@ -290,16 +294,17 @@ test("保质期仅提醒时到期批次贯通查询、预约、预结算、实�
     h.reservations.cancel(reservation.id, h.actor);
     await h.service.openCabinet(h.request, h.actor);
     await h.settle(1);
-    assert.equal(expired.remainingQuantity, 4);
+    assert.equal(batch.remainingQuantity, 4);
     assert.equal(h.store.getAvailableStock(h.device.deviceCode, h.goods.goodsId), 4);
     assert.equal(h.store.goodsBatches.some((batch) => batch.remainingQuantity < 0), false);
     assert.equal(h.rules.getQuotaSummaryForUser(h.user).remainingFreeTotal, 0);
-    assert.equal(expired.expiresAt, "2000-01-01T00:00:00.000Z");
+    assert.equal(batch.expiresAt, expiresAt);
   } finally {
     if (previous === undefined) delete process.env.VM_GOODS_EXPIRY_MODE;
     else process.env.VM_GOODS_EXPIRY_MODE = previous;
   }
 }));
+}
 
 test("停用货品即使仍有库存也不能从旧客户端预约或预选开柜，恢复启用后按原额度领取", async () => withHarness(async (h) => {
   h.config.set("VM_RESERVATION_ONLY_PICKUP", "false");

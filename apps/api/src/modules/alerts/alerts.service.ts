@@ -4,6 +4,10 @@ import type { AlertGrade, AlertTask } from "@vm/shared-types";
 
 import { InMemoryStoreService } from "../../common/store/in-memory-store.service";
 
+// 平台识别结算可能延迟；此处只控制自动提醒，不延后人工现场核对入口。
+const SETTLEMENT_CALLBACK_ALERT_WAIT_MINUTES = 150;
+const SETTLEMENT_CALLBACK_ALERT_WAIT_MS = SETTLEMENT_CALLBACK_ALERT_WAIT_MINUTES * 60_000;
+
 const RECOVERABLE_CALLBACK_ALERT_TITLES = new Set([
   "预约取货完成状态回写平台失败",
   "公益领取完成状态回写平台失败",
@@ -467,7 +471,7 @@ export class AlertsService {
           entry.payload.status === "CLOSED"
       );
       const closedAtMs = closeLog ? Date.parse(closeLog.receivedAt) : Number.NaN;
-      if (!Number.isFinite(closedAtMs) || now - closedAtMs < 10 * 60_000) {
+      if (!Number.isFinite(closedAtMs) || now - closedAtMs < SETTLEMENT_CALLBACK_ALERT_WAIT_MS) {
         continue;
       }
       this.create({
@@ -476,8 +480,8 @@ export class AlertsService {
         title: "结算回调超时待补记",
         deviceCode: event.deviceCode,
         targetUserId: event.userId,
-        dueAt: new Date(closedAtMs + 10 * 60_000).toISOString(),
-        detail: `事件 ${event.eventId} 已可信关门满 10 分钟但尚无结算流水，请核对实际取走商品。`,
+        dueAt: new Date(closedAtMs + SETTLEMENT_CALLBACK_ALERT_WAIT_MS).toISOString(),
+        detail: `事件 ${event.eventId} 已可信关门满 ${SETTLEMENT_CALLBACK_ALERT_WAIT_MINUTES} 分钟但尚无结算流水，请核对实际取走商品。`,
         relatedEventId: event.eventId
       });
     }

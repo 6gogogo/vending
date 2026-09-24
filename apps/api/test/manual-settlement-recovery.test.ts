@@ -83,7 +83,7 @@ const withApi = async (
   }
 };
 
-const appendClosedSpecialEvent = (store: InMemoryStoreService) => {
+const appendClosedSpecialEvent = (store: InMemoryStoreService, closedMinutes = 11) => {
   const user = store.users.find((entry) => entry.role === "special" && entry.status === "active");
   const device = store.devices.find(
     (entry) => store.getDeviceTenantId(entry) === store.getDefaultTenantId()
@@ -91,7 +91,7 @@ const appendClosedSpecialEvent = (store: InMemoryStoreService) => {
   assert.ok(user);
   assert.ok(device);
 
-  const closedAt = new Date(Date.now() - 11 * 60_000).toISOString();
+  const closedAt = new Date(Date.now() - closedMinutes * 60_000).toISOString();
   const event: CabinetEventRecord = {
     eventId: "event-manual-settlement-candidate",
     orderNo: "order-manual-settlement-candidate",
@@ -102,7 +102,7 @@ const appendClosedSpecialEvent = (store: InMemoryStoreService) => {
     doorNum: "1",
     status: "closed",
     physicalDoorState: "closed",
-    createdAt: new Date(Date.now() - 15 * 60_000).toISOString(),
+    createdAt: new Date(Date.now() - (closedMinutes + 4) * 60_000).toISOString(),
     updatedAt: closedAt,
     amount: 0,
     billingStatus: "pending",
@@ -204,7 +204,7 @@ const createManualSettlementConflict = async (context: {
   return { event, user, device, goods, batch };
 };
 
-test("实例管理员只会看到可信关门满十分钟且缺少结算的特殊群体事件", async () => {
+test("可信关门满十分钟可人工核对，未满150分钟不自动生成超时报警", async () => {
   await withApi(async ({ baseUrl, store, token, devicesService }) => {
     const { event, user, device, closedAt } = appendClosedSpecialEvent(store);
 
@@ -221,7 +221,7 @@ test("实例管理员只会看到可信关门满十分钟且缺少结算的特�
           entry.title === "结算回调超时待补记" &&
           entry.status === "open"
       ),
-      true
+      false
     );
 
     const response = await fetch(
@@ -247,6 +247,35 @@ test("实例管理员只会看到可信关门满十分钟且缺少结算的特�
     assert.equal(payload.data?.[0]?.platformOrderNo, event.orderNo);
     assert.equal(payload.data?.[0]?.closedAt, closedAt);
     assert.equal(payload.data?.[0]?.device?.deviceCode, device.deviceCode);
+  });
+});
+
+test("结算回调超时报警在可信关门满150分钟生成，边界前不报警且重复刷新不重复创建", async (t) => {
+  await withApi(async ({ store, alertsService }) => {
+    let now = Date.now();
+    t.mock.method(Date, "now", () => now);
+    const { event } = appendClosedSpecialEvent(store, 150);
+    const closeLog = store.callbackLog.find((entry) => entry.payload.eventId === event.eventId)!;
+    const closedAtMs = Date.parse(closeLog.receivedAt);
+    const matchingAlerts = () => store.alerts.filter(
+      (entry) => entry.relatedEventId === event.eventId && entry.title === "结算回调超时待补记"
+    );
+
+    now = closedAtMs + 150 * 60_000 - 1;
+    alertsService.refreshManualSettlementTasks();
+    assert.equal(matchingAlerts().length, 0, "149分59.999秒时仍等待平台回调");
+
+    now += 1;
+    alertsService.refreshManualSettlementTasks();
+    assert.equal(matchingAlerts().length, 1);
+    assert.equal(matchingAlerts()[0]!.dueAt, new Date(now).toISOString());
+    assert.match(matchingAlerts()[0]!.detail ?? "", /满 150 分钟/);
+    assert.equal(matchingAlerts()[0]!.status, "open");
+
+    now += 60_000;
+    alertsService.refreshManualSettlementTasks();
+    assert.equal(matchingAlerts().length, 1);
+    assert.equal(matchingAlerts()[0]!.dueAt, new Date(closedAtMs + 150 * 60_000).toISOString());
   });
 });
 
@@ -837,7 +866,7 @@ test("人工结算补记中途失败会整体回滚", async () => {
 
 test("平台回写前整单撤销会恢复原批次和额度流水", async () => {
   await withApi(async ({ baseUrl, store, alertsService, token }) => {
-    const { event, user, device } = appendClosedSpecialEvent(store);
+    const { event, user, device } = appendClosedSpecialEvent(store, 151);
     alertsService.list();
     const candidateAlert = store.alerts.find(
       (entry) =>
@@ -1277,6 +1306,7 @@ test("人工结算候选严格要求可信关门满十分钟且不能跨实例�
     );
     const mismatchedClosePayload = (await mismatchedClose.json()) as { data?: unknown[] };
     assert.equal(mismatchedClosePayload.data?.length, 0);
+    closeLog.receivedAt = new Date(Date.now() - 151 * 60_000).toISOString();
     alertsService.refreshOperationalTasks();
     assert.equal(
       store.alerts.some(
@@ -1608,7 +1638,7 @@ test("不同实例同订单号的流水不会压制当前事件结算或超时�
     alertsService,
     inventoryOrdersService
   }) => {
-    const { event, user, device } = appendClosedSpecialEvent(store);
+    const { event, user, device } = appendClosedSpecialEvent(store, 151);
     event.orderNo = "mock-shared-order-normal-settlement";
     const goods = device.doors.flatMap((entry) => entry.goods)[0] ?? store.goodsCatalog[0];
     assert.ok(goods);
