@@ -568,7 +568,7 @@ export class DevicesService {
             lowStockThreshold: thresholdEnabled ? setting?.lowStockThreshold : undefined,
             expiringSoon
           };
-        }).filter((goods) => viewerRole !== "special" || goods.status !== "inactive")
+        }).filter((goods) => viewerRole !== "special" || (goods.status !== "inactive" && goods.stock > 0))
       }))
     };
   }
@@ -615,7 +615,7 @@ export class DevicesService {
       if (!goodsById.has(goodsId)) goodsById.set(goodsId, goods);
     }
 
-    // 按本地目录的最终状态过滤，平台仍返回该商品时也不能重新展示给普通用户。
+    // 按本地目录和可领取库存过滤，平台观测不能让停用或缺货商品重新显示给普通用户。
     return [...goodsById].map(([goodsId, goods]) => {
       const localMatch = localGoods.get(goodsId);
       const catalogMatch = this.store.goodsCatalog.find((entry) => entry.goodsId === goodsId);
@@ -637,7 +637,7 @@ export class DevicesService {
             : this.store.getNearestAvailableExpiryAt(deviceCode, goodsId)
           : this.store.getNearestExpiryAt(deviceCode, goodsId) ?? goods.expiresAt
       };
-    }).filter((goods) => viewerRole !== "special" || goods.status !== "inactive");
+    }).filter((goods) => viewerRole !== "special" || (goods.status !== "inactive" && goods.stock > 0));
   }
 
   private buildGoodsTaxonomyPath(nodeId?: string) {

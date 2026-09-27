@@ -11,7 +11,8 @@
 - [发布准备与交接](docs/design/admin-redesign/RELEASE_READINESS.md)：上线前的完整检查、线上只读预检、发布顺序和回退条件。
 - [2026-09-23 首轮正式发布与回滚回执](docs/design/admin-redesign/DEPLOYMENT_20260923.md)：`48650d2`；服务器、备份、实际回滚、公网与浏览器验收证据。
 - [待办交互与回调警告排查](docs/design/admin-redesign/TODO_CALLBACK_20260923.md)：9 月 23 日发布 `818dfdb`；单击处理、重复提交防护、回调延迟和货品目录缺项证据。
-- [150 分钟结算报警与批次可见性](docs/design/admin-redesign/CALLBACK_EXPIRY_20260924.md)：当前线上 `6ccb02a`；报警边界、仅后台提醒配置、无保质期用品、回归入口及两轮发布回滚回执。
+- [150 分钟结算报警与批次可见性](docs/design/admin-redesign/CALLBACK_EXPIRY_20260924.md)：9 月 24 日发布 `6ccb02a`；报警边界、仅后台提醒配置、无保质期用品、回归入口及两轮发布回滚回执。
+- [普通用户隐藏停用及缺货商品](docs/design/admin-redesign/GOODS_VISIBILITY_20260927.md)：角色过滤、补货恢复、手机验收和发布回执。
 - `.codex-run/` 是不提交的本地演练数据和日志；依赖目录及构建输出不作为源代码维护。
 
 ## 按问题定位

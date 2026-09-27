@@ -56,9 +56,9 @@ test("平台只返回部分货品时仍返回柜内完整清单，库存与首�
   const service = new DevicesService(h.store, h.batches, { getGoodsInfo: async () => remote } as never);
   const before = structuredClone(h.store.snapshot());
   const goods = await service.getGoods(h.device.deviceCode, "1", "special");
-  assert.deepEqual(new Set(goods.map((item) => item.goodsId)), new Set(h.items.map((item) => item.goodsId)));
+  assert.deepEqual(new Set(goods.map((item) => item.goodsId)), new Set(["9232701", "9240463", "9110016"]));
   const quantities = Object.fromEntries(goods.map((item) => [item.goodsId, item.stock]));
-  assert.deepEqual(quantities, { "9232701": 19, "9240463": 10, "9110016": 6, "8242266": 0, "9220354": 0 });
+  assert.deepEqual(quantities, { "9232701": 19, "9240463": 10, "9110016": 6 });
   assert.equal(goods.find((item) => item.goodsId === "9232701")?.price, 500, "平台价格仍来自平台观测");
   assert.equal(goods.find((item) => item.goodsId === "9110016")?.expiresAt, undefined);
   assert.deepEqual(h.store.snapshot(), before, "查询不能同步配置、商品状态或改写库存");
@@ -84,7 +84,7 @@ test("空响应和平台故障均保留本地清单，指定柜门不带出其�
       return mode === "partial" ? [h.items[0]!] : mode === "empty" ? [] : undefined;
     } } as never);
     const goods = await service.getGoods(h.device.deviceCode, "1", "special");
-    assert.deepEqual(new Set(goods.map((item) => item.goodsId)), new Set(h.device.doors[0]!.goods.map((item) => item.goodsId)), mode);
+    assert.deepEqual(new Set(goods.map((item) => item.goodsId)), new Set(["9232701", "9240463", "9110016"]), mode);
     assert.ok(!goods.some((item) => item.goodsId === secondDoorGoods.goodsId));
   }
 });
@@ -103,7 +103,7 @@ test("普通用户隐藏停用商品，管理员保留查看，平台观测与�
   assert.equal(goods.filter((item) => item.goodsId === canonical.goodsId).length, 1);
   assert.ok(!goods.some((item) => item.goodsId === alias.goodsId));
   assert.ok(!goods.some((item) => item.goodsId === biscuits.goodsId));
-  assert.equal(goods.find((item) => item.goodsId === remoteOnly.goodsId)?.stock, 0);
+  assert.ok(!goods.some((item) => item.goodsId === remoteOnly.goodsId));
   assert.deepEqual(h.store.snapshot(), before);
   const adminGoods = await service.getGoods(h.device.deviceCode, "1", "admin");
   assert.equal(adminGoods.find((item) => item.goodsId === biscuits.goodsId)?.status, "inactive");
@@ -119,7 +119,7 @@ test("普通用户隐藏停用商品，管理员保留查看，平台观测与�
 });
 
 for (const mode of ["platform-active", "platform-empty", "platform-failed"] as const) {
-  test(`普通用户商品可见性跟随启停状态，保留零库存商品且不受平台响应影响：${mode}`, async () => {
+  test(`普通用户商品可见性跟随启停状态，隐藏零库存和负库存商品且不受平台响应影响：${mode}`, async () => {
     const h = harness();
     const biscuits = h.store.goodsCatalog.find((item) => item.goodsId === "9240463")!;
     const service = new DevicesService(h.store, h.batches, { getGoodsInfo: async () => {
@@ -130,11 +130,16 @@ for (const mode of ["platform-active", "platform-empty", "platform-failed"] as c
     const before = structuredClone(h.store.snapshot());
     const goods = await service.getGoods(h.device.deviceCode, "1", "special");
     assert.ok(!goods.some((item) => item.goodsId === biscuits.goodsId));
-    assert.equal(goods.find((item) => item.goodsId === "9220354")?.stock, 0, "启用但无库存的商品仍可查询");
+    assert.ok(!goods.some((item) => item.goodsId === "9220354" || item.goodsId === "8242266"), "普通用户不展示零库存或负库存商品");
+    assert.ok(service.getViewByCode(h.device.deviceCode, "special").doors[0]!.goods.every((item) => item.status !== "inactive" && item.stock > 0));
     const adminGoods = await service.getGoods(h.device.deviceCode, "1", "admin");
     assert.equal(adminGoods.find((item) => item.goodsId === biscuits.goodsId)?.status, "inactive");
     assert.equal(adminGoods.find((item) => item.goodsId === biscuits.goodsId)?.stock, 10);
+    assert.equal(adminGoods.find((item) => item.goodsId === "9220354")?.stock, 0);
+    assert.equal(adminGoods.find((item) => item.goodsId === "8242266")?.stock, -3);
     assert.deepEqual(h.store.snapshot(), before);
+    h.batches.recordBatchOnly({ deviceCode: h.device.deviceCode, goodsId: "9220354", quantity: 2, sourceType: "system" });
+    assert.equal((await service.getGoods(h.device.deviceCode, "1", "special")).find((item) => item.goodsId === "9220354")?.stock, 2, "补货后恢复展示");
     biscuits.status = "active";
     const reenabled = await service.getGoods(h.device.deviceCode, "1", "special");
     assert.equal(reenabled.find((item) => item.goodsId === biscuits.goodsId)?.stock, 10, "重新启用后立即恢复展示");

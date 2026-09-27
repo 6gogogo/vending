@@ -259,6 +259,7 @@ test("特殊用户货品查询只读返回当前目录中的分类路径", async
   store.goodsTaxonomyNodes.splice(0, store.goodsTaxonomyNodes.length, root, food);
   const catalogGoods = store.goodsCatalog.find((entry) => entry.goodsId === goods.goodsId);
   assert.ok(catalogGoods);
+  service.recordBatchOnly({ deviceCode: device.deviceCode, goodsId: goods.goodsId, quantity: 2, sourceType: "system" });
   catalogGoods.taxonomyNodeId = food.id;
   delete catalogGoods.taxonomyPath;
 
@@ -291,6 +292,7 @@ test("只读货品查询不把远端返回写入全局目录或柜机本地配�
   assert.ok(device);
   assert.ok(door);
   assert.ok(localGoods);
+  batches.recordBatchOnly({ deviceCode: device.deviceCode, goodsId: localGoods.goodsId, quantity: 2, sourceType: "system" });
   const beforeCatalog = structuredClone(store.goodsCatalog);
   const beforeDevices = structuredClone(store.devices);
   const devices = new DevicesService(
