@@ -89,7 +89,7 @@ test("空响应和平台故障均保留本地清单，指定柜门不带出其�
   }
 });
 
-test("补回本地商品时保留停用状态，平台观测与历史别名均不产生重复或写入", async () => {
+test("普通用户隐藏停用商品，管理员保留查看，平台观测与历史别名均不产生重复或写入", async () => {
   const h = harness();
   const biscuits = h.store.goodsCatalog.find((item) => item.goodsId === "9240463")!;
   biscuits.status = "inactive";
@@ -102,14 +102,42 @@ test("补回本地商品时保留停用状态，平台观测与历史别名均�
   const goods = await service.getGoods(h.device.deviceCode, "1", "special");
   assert.equal(goods.filter((item) => item.goodsId === canonical.goodsId).length, 1);
   assert.ok(!goods.some((item) => item.goodsId === alias.goodsId));
-  assert.equal(goods.find((item) => item.goodsId === biscuits.goodsId)?.status, "inactive");
-  assert.equal(goods.find((item) => item.goodsId === biscuits.goodsId)?.stock, 0);
+  assert.ok(!goods.some((item) => item.goodsId === biscuits.goodsId));
   assert.equal(goods.find((item) => item.goodsId === remoteOnly.goodsId)?.stock, 0);
   assert.deepEqual(h.store.snapshot(), before);
   const adminGoods = await service.getGoods(h.device.deviceCode, "1", "admin");
+  assert.equal(adminGoods.find((item) => item.goodsId === biscuits.goodsId)?.status, "inactive");
   assert.equal(adminGoods.find((item) => item.goodsId === biscuits.goodsId)?.stock, 10);
   const home = service.list(undefined, "special").find((item) => item.deviceCode === h.device.deviceCode)!;
-  const homeBiscuits = home.doors[0]!.goods.find((item) => item.goodsId === biscuits.goodsId)!;
-  assert.equal(homeBiscuits.status, "inactive");
-  assert.equal(homeBiscuits.stock, 0);
+  assert.ok(!home.doors[0]!.goods.some((item) => item.goodsId === biscuits.goodsId));
+  assert.ok(!service.getViewByCode(h.device.deviceCode, "special").doors[0]!.goods.some((item) => item.goodsId === biscuits.goodsId));
+  const adminDetail = service.getViewByCode(h.device.deviceCode, "admin");
+  assert.equal(adminDetail.doors[0]!.goods.find((item) => item.goodsId === biscuits.goodsId)?.stock, 10);
+  assert.deepEqual(h.store.goodsCatalog, before.goodsCatalog, "展示过滤不得删除货品或改变启停状态");
+  assert.deepEqual(h.store.goodsBatches, before.goodsBatches, "展示过滤不得改变库存批次");
+  assert.deepEqual(h.store.inventory, before.inventory, "展示过滤不得改变领取流水");
 });
+
+for (const mode of ["platform-active", "platform-empty", "platform-failed"] as const) {
+  test(`普通用户商品可见性跟随启停状态，保留零库存商品且不受平台响应影响：${mode}`, async () => {
+    const h = harness();
+    const biscuits = h.store.goodsCatalog.find((item) => item.goodsId === "9240463")!;
+    const service = new DevicesService(h.store, h.batches, { getGoodsInfo: async () => {
+      if (mode === "platform-failed") throw new Error("平台暂不可用");
+      return mode === "platform-empty" ? [] : h.items.map((item) => ({ ...item, status: "active", stock: 999 }));
+    } } as never);
+    biscuits.status = "inactive";
+    const before = structuredClone(h.store.snapshot());
+    const goods = await service.getGoods(h.device.deviceCode, "1", "special");
+    assert.ok(!goods.some((item) => item.goodsId === biscuits.goodsId));
+    assert.equal(goods.find((item) => item.goodsId === "9220354")?.stock, 0, "启用但无库存的商品仍可查询");
+    const adminGoods = await service.getGoods(h.device.deviceCode, "1", "admin");
+    assert.equal(adminGoods.find((item) => item.goodsId === biscuits.goodsId)?.status, "inactive");
+    assert.equal(adminGoods.find((item) => item.goodsId === biscuits.goodsId)?.stock, 10);
+    assert.deepEqual(h.store.snapshot(), before);
+    biscuits.status = "active";
+    const reenabled = await service.getGoods(h.device.deviceCode, "1", "special");
+    assert.equal(reenabled.find((item) => item.goodsId === biscuits.goodsId)?.stock, 10, "重新启用后立即恢复展示");
+    assert.ok(service.getViewByCode(h.device.deviceCode, "special").doors[0]!.goods.some((item) => item.goodsId === biscuits.goodsId));
+  });
+}
