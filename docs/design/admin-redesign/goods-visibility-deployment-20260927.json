@@ -1,0 +1,197 @@
+{
+  "startedAt": "2026-09-27T06:38:15.121109+00:00",
+  "oldCommit": "6ccb02aa20cd88e39c2cfe1ebd19b1e90e020434",
+  "newCommit": "eaacc187c55cbea78e6f30b9d6aaf39a84b72cbb",
+  "status": "public-accepted",
+  "steps": [
+    {
+      "name": "01-bundle-verify",
+      "startedAt": "2026-09-27T06:38:15.362807+00:00",
+      "finishedAt": "2026-09-27T06:38:15.370696+00:00",
+      "exitCode": 0,
+      "log": "01-bundle-verify.log"
+    },
+    {
+      "name": "02-archive-previous-runtime",
+      "startedAt": "2026-09-27T06:38:15.370915+00:00",
+      "finishedAt": "2026-09-27T06:38:15.837625+00:00",
+      "exitCode": 0,
+      "log": "02-archive-previous-runtime.log"
+    },
+    {
+      "name": "03-stop-web",
+      "startedAt": "2026-09-27T06:38:16.133734+00:00",
+      "finishedAt": "2026-09-27T06:38:16.149639+00:00",
+      "exitCode": 0,
+      "log": "03-stop-web.log"
+    },
+    {
+      "name": "04-stop-api",
+      "startedAt": "2026-09-27T06:38:16.149760+00:00",
+      "finishedAt": "2026-09-27T06:38:16.213384+00:00",
+      "exitCode": 0,
+      "log": "04-stop-api.log"
+    },
+    {
+      "name": "05-verify-live-data",
+      "startedAt": "2026-09-27T06:38:16.233945+00:00",
+      "finishedAt": "2026-09-27T06:38:17.655167+00:00",
+      "exitCode": 0,
+      "log": "05-verify-live-data.log"
+    },
+    {
+      "name": "06-backup-live-data",
+      "startedAt": "2026-09-27T06:38:17.655817+00:00",
+      "finishedAt": "2026-09-27T06:38:21.387465+00:00",
+      "exitCode": 0,
+      "log": "06-backup-live-data.log"
+    },
+    {
+      "name": "07-verify-backup",
+      "startedAt": "2026-09-27T06:38:21.388078+00:00",
+      "finishedAt": "2026-09-27T06:38:22.808830+00:00",
+      "exitCode": 0,
+      "log": "07-verify-backup.log"
+    },
+    {
+      "name": "08-verify-latest-backup",
+      "startedAt": "2026-09-27T06:38:22.809338+00:00",
+      "finishedAt": "2026-09-27T06:38:25.186589+00:00",
+      "exitCode": 0,
+      "log": "08-verify-latest-backup.log"
+    },
+    {
+      "name": "09-git-pull-origin",
+      "startedAt": "2026-09-27T06:38:25.196501+00:00",
+      "finishedAt": "2026-09-27T06:38:26.829422+00:00",
+      "exitCode": 0,
+      "log": "09-git-pull-origin.log"
+    },
+    {
+      "name": "11-install-locked-dependencies",
+      "startedAt": "2026-09-27T06:38:26.837016+00:00",
+      "finishedAt": "2026-09-27T06:38:42.028526+00:00",
+      "exitCode": 0,
+      "log": "11-install-locked-dependencies.log"
+    },
+    {
+      "name": "12-linux-local-check",
+      "startedAt": "2026-09-27T06:38:42.029052+00:00",
+      "finishedAt": "2026-09-27T06:39:29.780220+00:00",
+      "exitCode": 0,
+      "log": "12-linux-local-check.log"
+    },
+    {
+      "name": "13-build-workspaces",
+      "startedAt": "2026-09-27T06:39:29.780713+00:00",
+      "finishedAt": "2026-09-27T06:39:38.735346+00:00",
+      "exitCode": 0,
+      "log": "13-build-workspaces.log"
+    },
+    {
+      "name": "14-build-public-web",
+      "startedAt": "2026-09-27T06:39:38.735808+00:00",
+      "finishedAt": "2026-09-27T06:39:45.577355+00:00",
+      "exitCode": 0,
+      "log": "14-build-public-web.log"
+    },
+    {
+      "name": "15-verify-live-before-start",
+      "startedAt": "2026-09-27T06:39:45.577833+00:00",
+      "finishedAt": "2026-09-27T06:39:46.797586+00:00",
+      "exitCode": 0,
+      "log": "15-verify-live-before-start.log"
+    },
+    {
+      "name": "16-start-api",
+      "startedAt": "2026-09-27T06:39:46.798012+00:00",
+      "finishedAt": "2026-09-27T06:39:46.829681+00:00",
+      "exitCode": 0,
+      "log": "16-start-api.log"
+    },
+    {
+      "name": "17-start-web",
+      "startedAt": "2026-09-27T06:39:47.880456+00:00",
+      "finishedAt": "2026-09-27T06:39:47.912218+00:00",
+      "exitCode": 0,
+      "log": "17-start-web.log"
+    }
+  ],
+  "runtimeDataPlane": "live",
+  "runtimeDataRoot": "/home/fivegogogo/vending/runtime-planes/xiaoguidai-live-v2",
+  "repository": "/home/fivegogogo/vending/current",
+  "goodsExpiryMode": "warning_only",
+  "recentInProgressEvents": 0,
+  "previousRuntimeArchive": {
+    "file": "previous-runtime.tar",
+    "sha256": "54fe6dc9f9b73a5b73801f1162d27d75e9694efd44ff21e5aaaf8e9cc5557134",
+    "bytes": 586536960,
+    "directories": [
+      "node_modules",
+      "apps/admin-web/dist",
+      "apps/api/dist",
+      "apps/mobile/dist"
+    ]
+  },
+  "maintenanceStartedAt": "2026-09-27T06:38:16.133570+00:00",
+  "backup": {
+    "directory": "/home/fivegogogo/vending/runtime-planes/xiaoguidai-live-v2/backups/2026-09-27T06-38-18-980Z-pre-release-available-goods-20260927",
+    "manifestSha256": "101dd04dd95cb700ab7c0eaff379a14429a8a6a99710ea2f35efa1913629e204",
+    "verified": true
+  },
+  "runtimeConfigurationUnchanged": true,
+  "maintenanceEndedAt": "2026-09-27T06:39:48.980167+00:00",
+  "finalCommit": "eaacc187c55cbea78e6f30b9d6aaf39a84b72cbb",
+  "localHttp": {
+    "apiHealth": 200,
+    "productionReadiness": 200,
+    "webRoot": 200,
+    "unauthorizedRelaySource": 403
+  },
+  "publicAcceptedAt": "2026-09-27T06:41:14.248195+00:00",
+  "publicHttp": [
+    {
+      "path": "/",
+      "status": 200
+    },
+    {
+      "path": "/login",
+      "status": 200
+    },
+    {
+      "path": "/mobile/",
+      "status": 200
+    },
+    {
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "path": "/api/health/production-readiness",
+      "status": 200
+    },
+    {
+      "path": "/api/users",
+      "status": 403
+    }
+  ],
+  "vncPrivateIngressHealth": 200,
+  "localTests": {
+    "tests": 1022,
+    "passed": 1016,
+    "failed": 0,
+    "skipped": 6
+  },
+  "linuxTests": {
+    "tests": 1022,
+    "passed": 1022,
+    "failed": 0,
+    "skipped": 0
+  },
+  "services": {
+    "api": "active/running",
+    "web": "active/running",
+    "restarts": 0
+  },
+  "visualVerification": "Local H5 390x844 with isolated ordinary user; local administrator goods details. No physical cabinet, SMS or payment action."
+}

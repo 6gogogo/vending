@@ -19,3 +19,13 @@
 - 仅本地模拟账号登录，没有开真实柜门、发送真实短信、发起扣款或改写实机库存。本次为服务端过滤，现有小程序刷新数据即可生效，无需重新发布小程序。
 
 本地可视化截图与 HTTP 断言位于 `.codex-run/available-goods-mobile.png`、`.codex-run/available-goods-http-qa.json`；此目录不提交。
+
+## 发布与回滚回执
+
+- 正式版本：`eaacc187c55cbea78e6f30b9d6aaf39a84b72cbb`，服务器通过 Git 快进拉取，工作树干净；仅隐藏停用的中间提交没有单独上线。
+- 停写维护窗口：14:38:16–14:39:48 HKT。Linux 1022 项测试全部通过、0 失败/跳过，服务端及公网构建完成。
+- 公网 `/`、`/login`、`/mobile/`、`/api/health`、`/api/health/production-readiness` 均为 200；未登录 `/api/users` 为 403；VNC 到 Spark 私网健康端点为 200。API/Web 均 active/running，NRestarts=0。
+- 运行配置摘要未变，保质期模式继续为 `warning_only`。本轮仅完成本地已登录角色页面的可视化验收；未冒用现场用户会话做生产登录，不将公网健康检查表述为微信实机领取验收。
+- 回滚目标：`6ccb02aa20cd88e39c2cfe1ebd19b1e90e020434`。已验证停写备份 `2026-09-27T06-38-18-980Z-pre-release-available-goods-20260927`，清单 SHA256：`101dd04dd95cb700ab7c0eaff379a14429a8a6a99710ea2f35efa1913629e204`。
+- 旧依赖与构建归档 `previous-runtime.tar`，SHA256：`54fe6dc9f9b73a5b73801f1162d27d75e9694efd44ff21e5aaaf8e9cc5557134`。自动回滚恢复程序和构建，不回退业务数据；本次未触发回滚。
+- 服务器证据：`/home/fivegogogo/vending/release-evidence/20260927-available-goods-eaacc18/`，逐条命令退出码、备份与公网检查见[机器可读回执](goods-visibility-deployment-20260927.json)。
