@@ -23,4 +23,11 @@
 
 本地 `verify:api-data`、Node 22.22.2 / npm 10.9.7 的 `check:local:full` 全部通过：TAP 976 项（通过 970，Windows 平台跳过 6），前端交互 49 项通过，总计 1,025 项。手机卡片调整后单独复跑后台类型检查、全部后台测试和构建通过。
 
-发布结果在通过服务器构建、公网接口和页面验证后补记。
+## 正式发布回执
+
+- 代码版本 `a02ea5b438d4bcdc08ceede1e16304b6d61db960`；继续使用 `codex/admin-workspace-redesign`，发布分支 `codex/UI`。
+- 2026-09-29 北京时间 16:42:02–16:43:36 完成受控停写、备份、Git 拉取、安装、检查、构建和恢复服务。服务器 1,025 项测试全部通过，无跳过。
+- 旧版本 `eaacc187c55cbea78e6f30b9d6aaf39a84b72cbb` 的运行包已归档；单写租约下的数据备份和 latest 校验通过，配置哈希未变化。自动回滚只恢复旧代码和运行包，不覆盖上线后的业务账本。
+- 公网 `/`、`/login`、`/mobile/`、`/api/health`、`/api/health/production-readiness` 均 200，未授权 `/api/users` 为 403；API/Web active，重启计数 0，服务器 Git 工作树干净。
+- 公网浏览器已读到三条原提醒的等待时长和超阈值时长。随后截图工具连续超时，未保存公网截图；本地桌面和手机视觉验收截图保留于 `.codex-run/`。
+- 详细步骤、时间、备份清单 SHA256 和公网检查见 [机器可读回执](settlement-wait-deployment-20260929.json)。服务器完整日志：`/home/fivegogogo/vending/release-evidence/20260929-settlement-wait-a02ea5b/`。
