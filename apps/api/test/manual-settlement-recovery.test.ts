@@ -279,6 +279,41 @@ test("结算回调超时报警在可信关门满150分钟生成，边界前不�
   });
 });
 
+test("已有结算提醒每次查询更新等待时长，不改写提醒、不猜测缺失关门时间，完成后停止显示", async (t) => {
+  await withApi(async ({ store, alertsService }) => {
+    let now = Date.now();
+    t.mock.method(Date, "now", () => now);
+    const { event, closedAt } = appendClosedSpecialEvent(store, 150);
+    const read = () => alertsService.list().find((entry) => entry.relatedEventId === event.eventId)!;
+    const first = read();
+    assert.deepEqual(first.settlementWaiting, {
+      closedAt, checkedAt: new Date(now).toISOString(), elapsedMinutes: 150, overdueMinutes: 0
+    });
+    const saved = store.alerts.find((entry) => entry.id === first.id)!;
+    const originalDetail = saved.detail;
+    now += (24 * 60 + 67) * 60_000 + 59_999;
+    const later = read();
+    assert.equal(later.id, first.id);
+    assert.equal(later.settlementWaiting?.elapsedMinutes, 1657);
+    assert.equal(later.settlementWaiting?.overdueMinutes, 1507);
+    assert.equal(saved.settlementWaiting, undefined, "展示时长不写入账本");
+    assert.equal(saved.detail, originalDetail);
+    assert.equal(saved.dueAt, first.dueAt);
+    const closeLog = store.callbackLog.find((entry) => entry.payload.eventId === event.eventId)!;
+    closeLog.payload.deviceCode = "another-device";
+    assert.equal(read().settlementWaiting, undefined, "不采用其他柜机的记录");
+    closeLog.payload.deviceCode = event.deviceCode;
+    closeLog.receivedAt = "invalid";
+    assert.equal(read().settlementWaiting, undefined);
+    closeLog.receivedAt = new Date(now + 60_000).toISOString();
+    assert.equal(read().settlementWaiting, undefined, "未来时间不能显示负数等待");
+    closeLog.receivedAt = closedAt;
+    saved.status = "resolved";
+    saved.resolvedAt = new Date(now).toISOString();
+    assert.equal(read().settlementWaiting, undefined);
+  });
+});
+
 test("人工结算补记一次扣减库存并把事件和额度流水记为已人工核对", async () => {
   await withApi(async ({ baseUrl, store, token }) => {
     const { event, user, device, closedAt } = appendClosedSpecialEvent(store);

@@ -1407,6 +1407,13 @@ export interface AlertTask {
   createdAt: string;
   detail: string;
   previewDetail?: string;
+  /** 查询时按服务端时间计算，不持久化倒计时，不代表回调已经到达。 */
+  settlementWaiting?: {
+    closedAt: string;
+    checkedAt: string;
+    elapsedMinutes: number;
+    overdueMinutes: number;
+  };
   sourceLogId?: string;
   relatedEventId?: string;
   resolvedAt?: string;

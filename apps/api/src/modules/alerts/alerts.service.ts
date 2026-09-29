@@ -46,6 +46,7 @@ export class AlertsService {
       resolved: 2
     };
 
+    const now = Date.now();
     return alerts
       .slice()
       .sort((left, right) => {
@@ -54,7 +55,34 @@ export class AlertsService {
         }
 
         return left.dueAt.localeCompare(right.dueAt);
-      });
+      })
+      .map((alert) => this.withSettlementWaiting(alert, now));
+  }
+
+  private withSettlementWaiting(alert: AlertTask, now: number): AlertTask {
+    // 仅装饰查询响应，已有提醒也可实时更新；完成任务不再显示持续等待。
+    const result = { ...alert };
+    delete result.settlementWaiting;
+    if (alert.status === "resolved" || alert.type !== "callback" || alert.title !== "结算回调超时待补记") {
+      return result;
+    }
+    const event = this.store.events.find((entry) => entry.eventId === alert.relatedEventId);
+    if (!event) return result;
+    const closeLog = this.store.callbackLog.find((entry) =>
+      entry.type === "door-status" && entry.payload.eventId === event.eventId &&
+      entry.payload.deviceCode === event.deviceCode && entry.payload.status === "CLOSED"
+    );
+    const closedAtMs = closeLog ? Date.parse(closeLog.receivedAt) : Number.NaN;
+    // 不用开门时间或提醒截止时间猜测缺失的可信关门时间。
+    if (!Number.isFinite(closedAtMs) || closedAtMs > now) return result;
+    const elapsedMinutes = Math.floor((now - closedAtMs) / 60_000);
+    result.settlementWaiting = {
+      closedAt: new Date(closedAtMs).toISOString(),
+      checkedAt: new Date(now).toISOString(),
+      elapsedMinutes,
+      overdueMinutes: Math.max(0, elapsedMinutes - SETTLEMENT_CALLBACK_ALERT_WAIT_MINUTES)
+    };
+    return result;
   }
 
   resolveRecoveredCallbackFailures(relatedEventId?: string) {

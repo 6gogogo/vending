@@ -244,6 +244,34 @@ describe("货品调拨与仓库确认", () => {
 });
 
 describe("待办直接处理", () => {
+  it.each(["/poll-dashboard?section=tasks", "/poll-alerts"])("%s 等待时长随轮询更新，已打开详情同步更新", async path => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const task = {
+      id: "waiting-test", type: "callback", grade: "warning", status: "open",
+      title: "结算回调超时待补记", detail: "尚未收到结算流水", dueAt: "2026-09-29T04:33:00Z",
+      settlementWaiting: { closedAt: "2026-09-29T02:03:00Z", checkedAt: "2026-09-29T07:39:00Z", elapsedMinutes: 336, overdueMinutes: 186 }
+    };
+    const bucket = () => ({ count: 0, users: [] });
+    api.alerts.mockImplementation(async () => [structuredClone(task)]);
+    api.dashboard.mockImplementation(async () => ({ pendingTasks: [structuredClone(task)], serviceOverview: { completeUsers: bucket(), partialUsers: bucket(), unservedUsers: bucket(), totalUsers: 0 }, taskGradeSummary: { warning: 1 }, summaryLogs: [], serviceTrend: [] }));
+    const { wrapper } = await start(path);
+    try {
+      expect(wrapper.text()).toContain("已等待结算 5 小时 36 分钟");
+      expect(wrapper.text()).toContain("超过提醒阈值 3 小时 6 分钟");
+      await button(wrapper, "详情").trigger("click");
+      expect(wrapper.text()).toContain("从可信关门");
+      task.settlementWaiting = { ...task.settlementWaiting, elapsedMinutes: 337, overdueMinutes: 187 };
+      await vi.advanceTimersByTimeAsync(15_000);
+      await flushPromises();
+      expect(wrapper.text()).toContain("已等待结算 5 小时 37 分钟");
+      expect(wrapper.text()).not.toContain("已等待结算 5 小时 36 分钟");
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   const pages = ["/poll-dashboard?section=tasks", "/poll-alerts", "/poll-device/CAB-TEST?section=manage"];
   const prepareTasks = (grade = "warning") => {
     const tasks = [{ id: "task-test", type: "inventory", grade, status: "open", title: "模拟待办", detail: "仅用于交互回归", dueAt: "2026-09-23T00:00:00Z" }];

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import type { AlertTask } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
+import SettlementWaiting from "../components/SettlementWaiting.vue";
+import { usePagePolling } from "../utils/use-page-polling";
 import { useAdminSessionStore } from "../stores/session";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
@@ -27,6 +29,9 @@ const load = async () => {
   loadError.value = "";
   try {
     alerts.value = await adminApi.alerts();
+    if (activeAlert.value) {
+      activeAlert.value = alerts.value.find((alert) => alert.id === activeAlert.value?.id);
+    }
   } catch (error) {
     loadError.value = readErrorMessage(error, "任务列表加载失败");
   } finally {
@@ -68,7 +73,7 @@ const resolve = async (alert: AlertTask) => {
   }
 };
 
-onMounted(load);
+usePagePolling(load, 15_000);
 </script>
 
 <template>
@@ -79,7 +84,7 @@ onMounted(load);
           <p class="admin-kicker">任务总览</p>
           <h3 class="admin-page__section-title">未完成任务优先，故障与反馈可直接查看完整详情</h3>
         </div>
-        <p class="admin-copy">{{ loading ? "任务列表正在刷新。" : "处理按钮统一需要二次确认。" }}</p>
+        <p class="admin-copy">{{ loading ? "任务列表正在刷新。" : "每 15 秒自动更新，等待时长从可信关门起算。" }}</p>
       </div>
       <div v-if="loadError" class="admin-alert admin-alert--danger">
         {{ loadError }}
@@ -126,6 +131,7 @@ onMounted(load);
           <div v-for="alert in openAlerts" :key="alert.id" class="admin-list__row">
             <div class="admin-list__main">
               <span class="admin-list__title">{{ alert.title }}</span>
+              <SettlementWaiting :waiting="alert.settlementWaiting" />
               <span class="admin-list__meta">{{ alert.previewDetail || alert.detail }}</span>
               <span class="admin-list__meta">截止时间 {{ formatDateTime(alert.dueAt) }}</span>
             </div>
@@ -203,7 +209,7 @@ onMounted(load);
           </div>
           <div class="admin-kv__row">
             <span class="admin-kv__label">详细内容</span>
-            <span class="admin-kv__value alerts-detail">{{ activeAlert.detail }}</span>
+            <span class="admin-kv__value alerts-detail"><SettlementWaiting :waiting="activeAlert.settlementWaiting" detail />{{ activeAlert.detail }}</span>
           </div>
         </div>
       </section>

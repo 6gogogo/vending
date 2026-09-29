@@ -9,6 +9,7 @@ import type { DashboardSnapshot, OperationLogRecord } from "@vm/shared-types";
 
 import { adminApi } from "../api/admin";
 import StatTile from "../components/StatTile.vue";
+import SettlementWaiting from "../components/SettlementWaiting.vue";
 import { useAdminSessionStore } from "../stores/session";
 import { resolveActorLink, resolveSubjectLink } from "../utils/entity-links";
 import { formatDateTime } from "../utils/datetime";
@@ -221,6 +222,9 @@ const load = async () => {
   try {
     // 后台首页首先要回答“今天还有谁没被服务到、还有哪些问题没处理完”。
     dashboard.value = await adminApi.dashboard();
+    if (activeTask.value) {
+      activeTask.value = pendingTasks.value.find((task) => task.id === activeTask.value?.id);
+    }
     loadError.value = "";
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : "加载运营总览失败";
@@ -456,7 +460,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
               class="dashboard-mini-list__row"
               @click="openTaskDetail(task)"
             >
-              <span>{{ task.title }}</span>
+              <span>{{ task.title }}<SettlementWaiting :waiting="task.settlementWaiting" /></span>
               <strong>{{ taskGradeLabel(task.grade) }}</strong>
             </button>
           </div>
@@ -491,7 +495,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           <span class="admin-pill admin-pill--warning">待处理 {{ pendingTasks.length }}</span>
         </div>
 
-        <table v-if="pendingTasks.length" class="admin-table">
+        <table v-if="pendingTasks.length" class="admin-table admin-table--mobile-cards">
           <thead>
             <tr>
               <th>到期时间</th>
@@ -502,13 +506,14 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </thead>
           <tbody>
             <tr v-for="task in pendingTasks" :key="task.id">
-              <td class="admin-code">{{ formatDateTime(task.dueAt) }}</td>
-              <td>
+              <td class="admin-code mobile-card__wide" data-label="到期时间">{{ formatDateTime(task.dueAt) }}</td>
+              <td class="mobile-card__title">
                 <span class="admin-table__strong">{{ task.title }}</span>
+                <SettlementWaiting :waiting="task.settlementWaiting" />
                 <span class="admin-table__subtext">分级：{{ taskGradeLabel(task.grade) }} · 状态：{{ task.status === "acknowledged" ? "已知晓" : "待处理" }}</span>
                 <span class="admin-table__subtext">{{ task.previewDetail || task.detail }}</span>
               </td>
-              <td>
+              <td class="mobile-card__wide" data-label="业务对象">
                 <span class="admin-context-main">{{ taskContextSummary(task) }}</span>
                 <span v-if="taskIdentitySummary(task)" class="admin-context-meta admin-code">{{ taskIdentitySummary(task) }}</span>
                 <span v-if="taskReferenceSummary(task)" class="admin-context-meta admin-code">{{ taskReferenceSummary(task) }}</span>
@@ -521,7 +526,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
                   </RouterLink>
                 </div>
               </td>
-              <td class="dashboard-task-cell">
+              <td class="dashboard-task-cell mobile-card__actions">
                 <div class="dashboard-task-actions">
                   <button class="admin-button admin-button--ghost" @click="openTaskDetail(task)">详情</button>
                   <RouterLink v-if="sessionStore.can('ai-insights:view')" class="admin-link" :to="resolveTaskAiLink(task)">
@@ -727,7 +732,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </div>
           <div class="admin-kv__row">
             <span class="admin-kv__label">完整备注</span>
-            <span class="admin-kv__value">{{ activeTask.detail }}</span>
+            <span class="admin-kv__value"><SettlementWaiting :waiting="activeTask.settlementWaiting" detail />{{ activeTask.detail }}</span>
           </div>
         </div>
       </article>
