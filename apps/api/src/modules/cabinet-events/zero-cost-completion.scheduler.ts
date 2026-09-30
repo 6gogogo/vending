@@ -53,10 +53,12 @@ export class ZeroCostCompletionScheduler implements OnApplicationBootstrap, OnAp
       if (isProductionRuntime()) {
         intent = this.audit.beginCriticalIntent({ method: "SYSTEM", path: this.auditPath });
       }
-      await this.events.completePendingZeroCostOrders(() => {
+      const assertRuntimeSafety = () => {
         this.writer.assertHeld();
         if (!this.isReady()) throw new Error("零元订单自动完结的运行条件不可用。");
-      });
+      };
+      await this.events.retryPendingSettlements(assertRuntimeSafety);
+      await this.events.completePendingZeroCostOrders(assertRuntimeSafety);
       completed = true;
       return true;
     } catch {

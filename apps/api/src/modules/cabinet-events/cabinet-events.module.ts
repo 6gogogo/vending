@@ -12,10 +12,13 @@ import { CabinetEventsController } from "./cabinet-events.controller";
 import { CabinetEventsService } from "./cabinet-events.service";
 import { ManualSettlementRecoveryService } from "./manual-settlement-recovery.service";
 import { ZeroCostCompletionScheduler } from "./zero-cost-completion.scheduler";
+import { GoodsModule } from "../goods/goods.module";
+import { SettlementRecoveryService } from "./settlement-recovery.service";
 
 @Module({
   imports: [
     FinancialOperationCoordinatorModule,
+    GoodsModule,
     AccessRulesModule,
     DevicesModule,
     InventoryOrdersModule,
@@ -24,7 +27,7 @@ import { ZeroCostCompletionScheduler } from "./zero-cost-completion.scheduler";
     GuardsModule
   ],
   controllers: [CabinetEventsController],
-  providers: [CabinetEventsService, CabinetOpenQuoteService, ManualSettlementRecoveryService, ZeroCostCompletionScheduler],
+  providers: [CabinetEventsService, CabinetOpenQuoteService, ManualSettlementRecoveryService, ZeroCostCompletionScheduler, SettlementRecoveryService],
   exports: [CabinetEventsService, ManualSettlementRecoveryService]
 })
 export class CabinetEventsModule {}

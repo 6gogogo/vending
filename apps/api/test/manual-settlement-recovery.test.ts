@@ -1,7 +1,7 @@
 import "reflect-metadata";
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -18,6 +18,10 @@ import { AccessRulesService } from "../src/modules/access-rules/access-rules.ser
 import { DevicesService } from "../src/modules/devices/devices.service";
 import { SmartVmGateway } from "../src/modules/devices/smartvm.gateway";
 import { InventoryOrdersService } from "../src/modules/inventory-orders/inventory-orders.service";
+import { CabinetEventsService } from "../src/modules/cabinet-events/cabinet-events.service";
+import { SettlementRecoveryService } from "../src/modules/cabinet-events/settlement-recovery.service";
+import { GoodsService } from "../src/modules/goods/goods.service";
+import { validatePersistedState } from "../src/common/store/persisted-state-integrity";
 import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
 const withApi = async (
@@ -30,6 +34,8 @@ const withApi = async (
     smartVmGateway: SmartVmGateway;
     inventoryOrdersService: InventoryOrdersService;
     accessRulesService: AccessRulesService;
+    cabinetEvents: CabinetEventsService;
+    goodsService: GoodsService;
     token: string;
   }) => Promise<void>
 ) => {
@@ -65,6 +71,8 @@ const withApi = async (
       smartVmGateway: app.get(SmartVmGateway),
       inventoryOrdersService: app.get(InventoryOrdersService),
       accessRulesService: app.get(AccessRulesService),
+      cabinetEvents: app.get(CabinetEventsService),
+      goodsService: app.get(GoodsService),
       token
     });
   } finally {
@@ -360,6 +368,111 @@ test("迟到的零元空取货结算完成后立即关闭超时提醒，不依�
     assert.equal(event.status, "settled");
     assert.equal(event.paymentNotifyStatus, "success");
     assert.equal(alert.status, "resolved");
+  });
+});
+
+const recoveryPayload = (event: CabinetEventRecord) => ({
+  eventId: event.eventId, orderNo: event.orderNo, deviceCode: event.deviceCode, phone: event.phone,
+  amount: 990, notifyUrl: "https://smartvm.example.test/api/pay/container/paymentSuccess",
+  detail: [{ goodsId: "recovery-cookie", goodsName: "恢复测试饼干", quantity: 1, unitPrice: 990 }],
+  clientId: "smartvm-client", nonceStr: "recovery-test", sign: "local-mock", timestamp: Math.floor(Date.now() / 1000)
+});
+
+test("缺少货品立即同步后结算，并发和重复回调只入账一次，已完成待办关闭", async () => {
+  await withApi(async ({ store, cabinetEvents, smartVmGateway }) => {
+    const { event } = appendClosedSpecialEvent(store, 151);
+    event.orderNo = "mock-recovery-cookie"; event.pickupMode = "actual";
+    let syncs = 0;
+    smartVmGateway.getGoodsInfo = async () => {
+      syncs++;
+      return [{ goodsId: "recovery-cookie", goodsCode: "recovery-cookie", name: "恢复测试饼干", imageUrl: "", price: 990, category: "daily", stock: 1 }];
+    };
+    const payload = recoveryPayload(event);
+    await Promise.all([cabinetEvents.handleSettlementWithRecovery(payload), cabinetEvents.handleSettlementWithRecovery(payload)]);
+    await cabinetEvents.handleSettlementWithRecovery(payload);
+    assert.equal(syncs, 1);
+    assert.equal(event.settlementRecovery?.status, "succeeded");
+    assert.equal(event.paymentNotifyStatus, "success");
+    assert.equal(event.amount, 0);
+    assert.equal(store.inventory.filter(x => x.eventId === event.eventId && x.type === "pickup").length, 1);
+    assert.equal(store.alerts.find(x => x.title === "结算处理失败待恢复" && x.relatedEventId === event.eventId)?.status, "resolved");
+    const persisted = JSON.parse(readFileSync(process.env.API_DATA_FILE!, "utf8"));
+    assert.deepEqual(validatePersistedState(persisted).errors, []);
+    assert.equal(JSON.stringify(event.settlementRecovery).includes("local-mock"), false);
+  });
+});
+
+test("同步失败按十分钟间隔最多重试三次，持久化恢复、重复回调与旧补发周期不能突破上限", async () => {
+  await withApi(async ({ store, cabinetEvents, smartVmGateway, goodsService, alertsService }) => {
+    const { event } = appendClosedSpecialEvent(store, 151);
+    event.orderNo = "mock-recovery-exhausted"; event.pickupMode = "actual";
+    let syncs = 0;
+    smartVmGateway.getGoodsInfo = async () => { syncs++; throw new Error("模拟平台断线"); };
+    const payload = recoveryPayload(event);
+    await assert.rejects(cabinetEvents.handleSettlementWithRecovery(payload));
+    assert.equal(event.settlementRecovery?.attempts, 1);
+    assert(Date.parse(event.settlementRecovery!.nextAttemptAt!) - Date.now() > 599_000);
+    await cabinetEvents.retryPendingSettlements(() => {});
+    await assert.rejects(cabinetEvents.handleSettlementWithRecovery(payload));
+    assert.equal(syncs, 1);
+    for (let attempt = 2; attempt <= 4; attempt++) {
+      // 用重新构造的恢复服务读取已落盘的进度，模拟进程内队列丢失后的恢复。
+      event.settlementRecovery = JSON.parse(readFileSync(process.env.API_DATA_FILE!, "utf8")).events.find((e: CabinetEventRecord) => e.eventId === event.eventId).settlementRecovery;
+      event.settlementRecovery!.nextAttemptAt = new Date(Date.now() - 1).toISOString();
+      const restarted = new SettlementRecoveryService(store, goodsService, alertsService);
+      await restarted.retryDue(() => async () => { throw new Error("不应在同步失败后结算"); }, () => {});
+      assert.equal(event.settlementRecovery!.attempts, attempt);
+    }
+    await cabinetEvents.retryPendingSettlements(() => {});
+    await cabinetEvents.completePendingZeroCostOrders();
+    await assert.rejects(cabinetEvents.handleSettlementWithRecovery(payload));
+    assert.equal(syncs, 4);
+    assert.equal(event.settlementRecovery?.status, "exhausted");
+    assert.equal(event.settlementRecovery?.nextAttemptAt, undefined);
+    assert.match(store.alerts.find(x => x.title === "结算处理失败待恢复" && x.relatedEventId === event.eventId)!.detail, /停止自动重试/);
+    assert.equal(store.inventory.filter(x => x.eventId === event.eventId).length, 0);
+  });
+});
+
+test("结算已入账但平台回写失败时重试沿用交易号且不重复库存，分钟补发遵守恢复等待", async () => {
+  await withApi(async ({ store, cabinetEvents, smartVmGateway }) => {
+    const { event } = appendClosedSpecialEvent(store, 151);
+    event.orderNo = "mock-recovery-notify"; event.pickupMode = "actual";
+    smartVmGateway.getGoodsInfo = async () => [{ goodsId: "recovery-cookie", goodsCode: "recovery-cookie", name: "恢复测试饼干", imageUrl: "", price: 990, category: "daily", stock: 1 }];
+    const notify = smartVmGateway.notifyPaymentSuccess.bind(smartVmGateway);
+    const transactions: string[] = [];
+    smartVmGateway.notifyPaymentSuccess = async (payload, options) => {
+      transactions.push(payload.transactionId);
+      if (transactions.length === 1) throw new Error("模拟回写失败");
+      return notify(payload, options);
+    };
+    await assert.rejects(cabinetEvents.handleSettlementWithRecovery(recoveryPayload(event)));
+    await cabinetEvents.completePendingZeroCostOrders();
+    assert.equal(transactions.length, 1);
+    event.settlementRecovery!.nextAttemptAt = new Date(Date.now() - 1).toISOString();
+    await cabinetEvents.retryPendingSettlements(() => {});
+    assert.equal(event.settlementRecovery?.status, "succeeded");
+    assert.equal(event.paymentNotifyStatus, "success");
+    assert.equal(transactions.length, 2);
+    assert.equal(transactions[0], transactions[1]);
+    assert.equal(store.inventory.filter(x => x.eventId === event.eventId && x.type === "pickup").length, 1);
+  });
+});
+
+test("未验签或无效数量不会创建恢复任务和同步商品", async () => {
+  await withApi(async ({ store, cabinetEvents, smartVmGateway }) => {
+    const { event } = appendClosedSpecialEvent(store, 151);
+    event.orderNo = "mock-recovery-untrusted";
+    smartVmGateway.verifySignedPayload = () => false;
+    let syncs = 0;
+    smartVmGateway.getGoodsInfo = async () => { syncs++; return []; };
+    const payload = recoveryPayload(event);
+    smartVmGateway.isUsingMockTransport = () => false;
+    await assert.rejects(cabinetEvents.handleSettlementWithRecovery({ ...payload, sign: "invalid" }));
+    smartVmGateway.isUsingMockTransport = () => true;
+    await assert.rejects(cabinetEvents.handleSettlementWithRecovery({ ...payload, detail: [{ ...payload.detail[0], quantity: -1 }] }));
+    assert.equal(syncs, 0);
+    assert.equal(event.settlementRecovery, undefined);
   });
 });
 

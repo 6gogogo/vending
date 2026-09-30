@@ -511,7 +511,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
                 <span class="admin-table__strong">{{ task.title }}</span>
                 <SettlementWaiting :waiting="task.settlementWaiting" />
                 <span class="admin-table__subtext">分级：{{ taskGradeLabel(task.grade) }} · 状态：{{ task.status === "acknowledged" ? "已知晓" : "待处理" }}</span>
-                <span class="admin-table__subtext">{{ task.previewDetail || task.detail }}</span>
+                <span class="admin-table__subtext">{{ task.title === '结算处理失败待恢复' ? task.detail : (task.previewDetail || task.detail) }}</span>
               </td>
               <td class="mobile-card__wide" data-label="业务对象">
                 <span class="admin-context-main">{{ taskContextSummary(task) }}</span>

@@ -13,6 +13,7 @@ import { ConfigService } from "@nestjs/config";
 
 import type {
   CabinetEventRecord,
+  CallbackLogRecord,
   CabinetEventStatus,
   CabinetIntentItem,
   CabinetOpenPreviewResult,
@@ -56,6 +57,7 @@ import { InventoryOrdersService } from "../inventory-orders/inventory-orders.ser
 import { ReservationsService } from "../reservations/reservations.service";
 import { CabinetOpenQuoteService } from "./cabinet-open-quote.service";
 import { ManualSettlementRecoveryService } from "./manual-settlement-recovery.service";
+import { SettlementRecoveryService } from "./settlement-recovery.service";
 
 type CallbackBilling = Pick<
   CabinetPreSettlement,
@@ -90,7 +92,9 @@ export class CabinetEventsService {
     financialOperations?: FinancialOperationCoordinator,
     @Optional()
     @Inject(ManualSettlementRecoveryService)
-    private readonly manualSettlementRecoveryService?: ManualSettlementRecoveryService
+    private readonly manualSettlementRecoveryService?: ManualSettlementRecoveryService,
+    @Optional() @Inject(SettlementRecoveryService)
+    private readonly settlementRecovery?: SettlementRecoveryService
   ) {
     this.deviceOperations = deviceOperations ?? new DeviceOperationCoordinator(store);
     this.openQuotes = openQuotes ?? new CabinetOpenQuoteService();
@@ -741,14 +745,55 @@ export class CabinetEventsService {
     this.assertSmartVmCallbackBinding(event, payload);
     this.assertSmartVmCallbackFreshness(payload, event);
 
-    const callbackReplay = this.isSmartVmCallbackReplay("settlement", payload);
+    return this.applyTrustedSettlement(event, payload);
+  }
+
+  async handleSettlementWithRecovery(payload: SmartVmSettlementPayload & Record<string, unknown>) {
+    this.assertSignature(payload);
+    const event = this.getSettlementEvent(payload);
+    this.assertSmartVmCallbackBinding(event, payload);
+    this.assertSmartVmCallbackFreshness(payload, event);
+    this.inventoryOrdersService.validateSettlementPayload(event, payload);
+    if (!this.settlementRecovery) return this.applyTrustedSettlement(event, payload);
+    this.getOrCreateSmartVmCallbackLog("settlement", payload, this.isSmartVmCallbackReplay("settlement", payload));
+    return this.settlementRecovery.handle(event, payload, (trusted) => this.applyRecoveredSettlement(event, trusted));
+  }
+
+  async retryPendingSettlements(assertSafe: () => void) {
+    await this.settlementRecovery?.retryDue(event => payload => this.applyRecoveredSettlement(event, payload), assertSafe);
+  }
+
+  private async applyRecoveredSettlement(event: CabinetEventRecord, payload: SmartVmSettlementPayload & Record<string, unknown>) {
+    this.assertSmartVmCallbackBinding(event, payload);
+    const recordedBeforeAttempt = event.status === "settled" && this.hasSettlementRecord(event);
+    const retained = event.settlementRecovery ? this.store.callbackLog.find(c =>
+      c.id === event.settlementRecovery!.callbackLogId && c.type === "settlement" &&
+      c.payload.eventId === event.eventId && c.payload.deviceCode === event.deviceCode) : undefined;
+    if (event.settlementRecovery && !retained) throw new BadRequestException("恢复任务缺少可信结算来源。");
+    const result = await this.applyTrustedSettlement(event, payload, retained);
+    // 库存已经入账时只重试零元回写，交易号沿用原值，不重复记账。
+    if (event.settlementRecovery && recordedBeforeAttempt && event.status === "settled" && event.amount === 0 &&
+      ["free", "admin_confirmed"].includes(event.billingStatus ?? "") &&
+      event.paymentNotifyStatus !== "success" &&
+      event.manualSettlement?.status !== "conflict" && event.manualSettlement?.status !== "reverted") {
+      event.paymentTransactionId ??= this.store.createReference("zero-cost-completion");
+      this.store.persist();
+      await this.tryAutoForwardPaymentSuccess(event, { eventId: event.eventId, orderNo: event.orderNo,
+        deviceCode: event.deviceCode, transactionId: event.paymentTransactionId, amount: 0 }, payload.notifyUrl);
+    }
+    return result;
+  }
+
+  private applyTrustedSettlement(event: CabinetEventRecord, payload: SmartVmSettlementPayload & Record<string, unknown>, retainedCallback?: CallbackLogRecord) {
+
+    const callbackReplay = retainedCallback ? true : this.isSmartVmCallbackReplay("settlement", payload);
     if (
       event.manualSettlement &&
       event.manualSettlement.status !== "reverted" &&
       this.manualSettlementRecoveryService
     ) {
       this.inventoryOrdersService.validateSettlementPayload(event, payload);
-      const callbackLog = this.getOrCreateSmartVmCallbackLog(
+      const callbackLog = retainedCallback ?? this.getOrCreateSmartVmCallbackLog(
         "settlement",
         payload,
         callbackReplay
@@ -831,7 +876,7 @@ export class CabinetEventsService {
       };
     }
 
-    const callbackLog = this.getOrCreateSmartVmCallbackLog("settlement", payload, callbackReplay);
+    const callbackLog = retainedCallback ?? this.getOrCreateSmartVmCallbackLog("settlement", payload, callbackReplay);
     const callbackBilling = settlementWasAlreadyRecorded
       ? undefined
       : this.buildCallbackBilling(event, payload);
@@ -1539,6 +1584,7 @@ export class CabinetEventsService {
     const candidates = this.store.events.filter((event) => {
       const emptyPickup = this.isEmptyPickupSettlement(event);
       return event.status === "settled" && event.physicalDoorState === "closed" && event.amount === 0 &&
+        (!event.settlementRecovery || event.settlementRecovery.status === "succeeded") &&
         event.paymentNotifyStatus !== "success" && Boolean(event.paymentNotifyUrl) &&
         (!event.adjustments?.length || event.adjustments.every((entry) => this.isConfirmedFreeAdjustment(event, entry))) &&
         !this.store.paymentOrders.some((order) => order.eventId === event.eventId) &&

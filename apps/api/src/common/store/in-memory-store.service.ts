@@ -1673,7 +1673,10 @@ export class InMemoryStoreService {
     this.callbackLog.unshift(record);
 
     if (this.callbackLog.length > MAX_CALLBACK_LOGS) {
-      this.callbackLog.splice(MAX_CALLBACK_LOGS);
+      const retained = new Set(this.events.filter(event => event.settlementRecovery &&
+        ["waiting", "running"].includes(event.settlementRecovery.status)).map(event => event.settlementRecovery!.callbackLogId));
+      const overflow = this.callbackLog.splice(MAX_CALLBACK_LOGS);
+      this.callbackLog.push(...overflow.filter(callback => retained.has(callback.id)));
     }
 
     return record;

@@ -684,6 +684,29 @@ const validateReservationRecords = (
   }
 };
 
+const validateSettlementRecoveryRecords = (parsed: Record<string, unknown>, result: PersistedStateValidationResult) => {
+  for (const [index, event] of (Array.isArray(parsed.events) ? parsed.events : []).entries()) {
+    if (!isRecord(event) || event.settlementRecovery === undefined) continue;
+    const state = event.settlementRecovery;
+    const fail = () => result.errors.push(`events[${index}].settlementRecovery 恢复状态或来源无效。`);
+    if (!isRecord(state) || !["waiting", "running", "succeeded", "exhausted"].includes(String(state.status)) ||
+      !Number.isSafeInteger(state.attempts) || Number(state.attempts) < 1 || Number(state.attempts) > 4 ||
+      !isNonEmptyString(state.updatedAt) || !Number.isFinite(Date.parse(state.updatedAt)) || !isRecord(state.payload)) { fail(); continue; }
+    const payload = state.payload;
+    if (payload.eventId !== event.eventId || payload.orderNo !== event.orderNo || payload.deviceCode !== event.deviceCode ||
+      !isNonNegativeSafeInteger(payload.amount) || !isNonEmptyString(payload.notifyUrl) ||
+      Object.keys(payload).some(key => !["eventId", "orderNo", "deviceCode", "amount", "notifyUrl", "detail"].includes(key))) fail();
+    if (["waiting", "running"].includes(String(state.status)) &&
+      (!isNonEmptyString(state.nextAttemptAt) || !Number.isFinite(Date.parse(state.nextAttemptAt)))) fail();
+    const callbacks = Array.isArray(parsed.callbackLog) ? parsed.callbackLog : [];
+    if (["waiting", "running"].includes(String(state.status)) && !callbacks.some(c => isRecord(c) && c.id === state.callbackLogId && c.type === "settlement" &&
+      isRecord(c.payload) && c.payload.eventId === event.eventId && c.payload.deviceCode === event.deviceCode)) fail();
+    if (payload.detail !== undefined && (!Array.isArray(payload.detail) || payload.detail.some(item =>
+      !isRecord(item) || !isNonEmptyString(item.goodsId) || !isNonEmptyString(item.goodsName) ||
+      !Number.isSafeInteger(item.quantity) || Number(item.quantity) <= 0 || !isNonNegativeSafeInteger(item.unitPrice)))) fail();
+  }
+};
+
 const validateManualSettlementRecords = (
   state: Record<string, unknown>,
   result: PersistedStateValidationResult
@@ -1346,6 +1369,7 @@ export const validatePersistedState = (parsed: unknown): PersistedStateValidatio
   validateReferenceField(parsed, "paymentOrders", "eventId", eventIds, "开柜事件", result, true);
   validateReferenceField(parsed, "goodsBatches", "goodsId", catalogGoodsIds, "货品", result);
   validateManualSettlementRecords(parsed, result);
+  validateSettlementRecoveryRecords(parsed, result);
   validatePaymentRefundCompletionMarkers(parsed, result);
   validatePaymentRefundBindings(parsed, result);
 

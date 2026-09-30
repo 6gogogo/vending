@@ -486,6 +486,7 @@ export class AlertsService {
         (deviceCode && event.deviceCode !== deviceCode) ||
         event.role !== "special" ||
         event.status !== "closed" ||
+        Boolean(event.settlementRecovery) ||
         event.physicalDoorState !== "closed" ||
         (event.manualSettlement && event.manualSettlement.status !== "reverted") ||
         event.refundedAt ||

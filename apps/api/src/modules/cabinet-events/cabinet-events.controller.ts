@@ -254,7 +254,7 @@ export class CabinetEventsController {
   @Post("callbacks/settlement")
   @HttpCode(200)
   async settlement(@Body() body: SmartVmSettlementPayload & Record<string, unknown>) {
-    await this.cabinetEventsService.handleSettlement(body);
+    await this.cabinetEventsService.handleSettlementWithRecovery(body);
     return ack();
   }
 

@@ -7,6 +7,7 @@ test("零元自动完结需要写租约，重复周期和关闭后的周期不�
   let calls = 0;
   let finish: () => void = () => {};
   const scheduler = new ZeroCostCompletionScheduler({
+    retryPendingSettlements: async () => {},
     completePendingZeroCostOrders: async (check: () => void) => {
       check(); calls++;
       await new Promise<void>((resolve) => { finish = resolve; });
@@ -16,6 +17,7 @@ test("零元自动完结需要写租约，重复周期和关闭后的周期不�
   assert.equal(await scheduler.runCycle(), false);
   held = true;
   const running = scheduler.runCycle();
+  await Promise.resolve();
   assert.equal(await scheduler.runCycle(), false);
   const stopping = scheduler.onApplicationShutdown();
   finish();
@@ -33,6 +35,7 @@ test("生产零元补发先写审计，数据未就绪或中途丢失写租约�
     let held = true;
     const sequence: string[] = [];
     const scheduler = new ZeroCostCompletionScheduler({
+      retryPendingSettlements: async () => {},
       completePendingZeroCostOrders: async (check: () => void) => {
         check(); sequence.push("first"); held = false; check(); sequence.push("second");
       }

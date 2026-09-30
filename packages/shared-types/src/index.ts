@@ -1246,6 +1246,16 @@ export interface CabinetEventRecord {
   /** 开柜时固定流程，历史选择式订单继续按原规则核对。 */
   pickupMode?: "actual";
   zeroCostCompletionAttemptedAt?: string;
+  /** 已验签结算的恢复进度；不保存签名、密钥或手机号。 */
+  settlementRecovery?: {
+    status: "waiting" | "running" | "succeeded" | "exhausted";
+    attempts: number;
+    callbackLogId: string;
+    nextAttemptAt?: string;
+    updatedAt: string;
+    lastError?: string;
+    payload: Omit<SmartVmSettlementPayload, "phone">;
+  };
   intentItems?: CabinetIntentItem[];
   preSettlement?: CabinetPreSettlement;
   settlementComparison?: CabinetSettlementComparison;
