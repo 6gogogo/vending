@@ -1,0 +1,77 @@
+{
+  "checkedAt": "2026-09-30T01:58:10.872159+00:00",
+  "source": "public HTTPS",
+  "http": {
+    "/": 200,
+    "/login": 200,
+    "/mobile/": 200,
+    "/api/health": 200,
+    "/api/health/production-readiness": 200,
+    "/api/users": 403
+  },
+  "targetAlerts": [
+    {
+      "id": "alert-mum95pvc6abkg",
+      "relatedEventId": "event-mum18i50fui1v",
+      "status": "resolved",
+      "resolvedAt": "2026-09-30T01:58:12.062Z",
+      "resolutionNote": "结算已完成且平台回写成功，系统自动关闭结算超时提醒。"
+    },
+    {
+      "id": "alert-mum9i2vgx6p6n",
+      "relatedEventId": "event-mum44pmaqfqde",
+      "status": "resolved",
+      "resolvedAt": "2026-09-30T01:58:12.062Z",
+      "resolutionNote": "结算已完成且平台回写成功，系统自动关闭结算超时提醒。"
+    },
+    {
+      "id": "alert-mumat750srh2t",
+      "relatedEventId": "event-mum49w9x68zzp",
+      "status": "resolved",
+      "resolvedAt": "2026-09-30T01:58:12.062Z",
+      "resolutionNote": "结算已完成且平台回写成功，系统自动关闭结算超时提醒。"
+    }
+  ],
+  "targetEvents": [
+    {
+      "eventId": "event-mum49w9x68zzp",
+      "orderNo": "91110265H260929112836H026062H103",
+      "status": "settled",
+      "billingStatus": "free",
+      "amount": 0,
+      "paymentNotifyStatus": "success",
+      "paymentNotifiedAt": "2026-09-29T12:04:40.302Z"
+    },
+    {
+      "eventId": "event-mum44pmaqfqde",
+      "orderNo": "91110265H260929112434H021411H103",
+      "status": "settled",
+      "billingStatus": "free",
+      "amount": 0,
+      "paymentNotifyStatus": "success",
+      "paymentNotifiedAt": "2026-09-29T12:04:59.708Z"
+    },
+    {
+      "eventId": "event-mum18i50fui1v",
+      "orderNo": "91110265H260929100332H345310H103",
+      "status": "settled",
+      "billingStatus": "free",
+      "amount": 0,
+      "paymentNotifyStatus": "success",
+      "paymentNotifiedAt": "2026-09-29T12:09:45.583Z"
+    }
+  ],
+  "closureLogCounts": {
+    "event-mum18i50fui1v": 1,
+    "event-mum44pmaqfqde": 1,
+    "event-mum49w9x68zzp": 1
+  },
+  "testSessionLoggedOut": true,
+  "tests": {
+    "tests": 978,
+    "pass": 978,
+    "fail": 0,
+    "skipped": 0
+  },
+  "vitest49Passed": true
+}
