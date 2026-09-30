@@ -1,0 +1,60 @@
+{
+  "checkedAt": "2026-09-30T09:31:54.760834+00:00",
+  "source": "public HTTPS",
+  "http": {
+    "/": 200,
+    "/login": 200,
+    "/mobile/": 200,
+    "/api/health": 200,
+    "/api/health/production-readiness": 200,
+    "/api/users": 403
+  },
+  "targetEvents": [
+    {
+      "eventId": "event-munr9zvf14pza",
+      "orderNo": "91110265H260930150018H713398H103",
+      "status": "settled",
+      "amount": 0,
+      "billingStatus": "free",
+      "paymentNotifyStatus": "success",
+      "paymentNotifiedAt": "2026-09-30T09:07:49.533Z"
+    },
+    {
+      "eventId": "event-munpxhx64njk3",
+      "orderNo": "91110265H260930142235H902565H103",
+      "status": "settled",
+      "amount": 0,
+      "billingStatus": "free",
+      "paymentNotifyStatus": "success",
+      "paymentNotifiedAt": "2026-09-30T09:07:50.530Z"
+    },
+    {
+      "eventId": "event-munk53x0yjr79",
+      "orderNo": "91110265H260930114033H172560H103",
+      "status": "settled",
+      "amount": 0,
+      "billingStatus": "free",
+      "paymentNotifyStatus": "success",
+      "paymentNotifiedAt": "2026-09-30T09:07:51.461Z"
+    }
+  ],
+  "pickupCounts": {
+    "event-munr9zvf14pza": 1,
+    "event-munpxhx64njk3": 1,
+    "event-munk53x0yjr79": 1
+  },
+  "noNewPaymentOrders": true,
+  "openRecoveryTasks": 0,
+  "testSessionLoggedOut": true,
+  "tests": {
+    "tests": 982,
+    "pass": 982,
+    "fail": 0,
+    "skipped": 0
+  },
+  "vitest49Passed": true,
+  "services": {
+    "vending-api-candidate.service": "NRestarts=0\nActiveState=active",
+    "vending-public-web.service": "NRestarts=0\nActiveState=active"
+  }
+}
