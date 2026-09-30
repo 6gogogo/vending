@@ -3715,7 +3715,10 @@ const createCabinetHarness = (options?: {
     } as unknown as AccessRulesService,
     gateway as unknown as SmartVmGateway,
     inventoryOrders as unknown as InventoryOrdersService,
-    { create(entry: unknown) { alerts.push(entry); return entry; } } as unknown as AlertsService,
+    {
+      create(entry: unknown) { alerts.push(entry); return entry; },
+      resolveRecoveredCallbackFailures() { return 0; }
+    } as unknown as AlertsService,
     {
       markFulfilled(reservationId: string | undefined, eventId: string) {
         fulfilledReservations.push({ reservationId, eventId });

@@ -314,6 +314,55 @@ test("已有结算提醒每次查询更新等待时长，不改写提醒、不�
   });
 });
 
+test("结算超时提醒仅在结算与平台回写都完成后自动关闭，旧提醒和已知晓提醒也恢复且不重复留日志", async () => {
+  await withApi(async ({ store, alertsService, devicesService }) => {
+    const { event, device } = appendClosedSpecialEvent(store, 151);
+    const alert = alertsService.list().find((entry) => entry.relatedEventId === event.eventId)!;
+    const saved = store.alerts.find((entry) => entry.id === alert.id)!;
+    event.paymentNotifyStatus = "success";
+    assert.equal(alertsService.resolveRecoveredCallbackFailures(event.eventId), 0, "仅有关门，不能关闭");
+    event.status = "settled";
+    event.billingStatus = "free";
+    for (const status of ["pending", "failed"] as const) {
+      event.paymentNotifyStatus = status;
+      assert(alertsService.list("open").some((entry) => entry.id === alert.id), "平台回写未完成仍提醒");
+    }
+    saved.status = "acknowledged";
+    event.paymentNotifyStatus = "success";
+    devicesService.monitoringDetail(device.deviceCode, store.getDefaultTenantId());
+    assert.equal(saved.status, "resolved", "从柜机详情查询也能修复旧提醒");
+    assert.match(saved.resolutionNote ?? "", /结算已完成且平台回写成功/);
+    assert(!alertsService.list("open").some((entry) => entry.id === alert.id));
+    assert.equal(alertsService.list("resolved").find((entry) => entry.id === alert.id)?.settlementWaiting, undefined);
+    assert.equal(alertsService.resolveRecoveredCallbackFailures(event.eventId), 0);
+    assert.equal(store.logs.filter((entry) => entry.type === "resolve-alert" && entry.relatedEventId === event.eventId).length, 1);
+  });
+});
+
+test("迟到的零元空取货结算完成后立即关闭超时提醒，不依赖列表查询", async () => {
+  await withApi(async ({ baseUrl, store, alertsService }) => {
+    const { event } = appendClosedSpecialEvent(store, 151);
+    event.orderNo = "mock-late-empty-settlement";
+    alertsService.refreshManualSettlementTasks();
+    const alert = store.alerts.find((entry) => entry.relatedEventId === event.eventId)!;
+    assert.equal(alert.status, "open");
+    const response = await fetch(`${baseUrl}/cabinet-events/callbacks/settlement`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        orderNo: event.orderNo, eventId: event.eventId, phone: event.phone,
+        deviceCode: event.deviceCode, amount: 0, detail: [],
+        notifyUrl: "https://smartvm.example.test/api/pay/container/paymentSuccess",
+        clientId: "smartvm-client", nonceStr: "late-empty-settlement", sign: "local-mock",
+        timestamp: Math.floor(Date.now() / 1000)
+      })
+    });
+    assert.equal(response.status, 200, await response.text());
+    assert.equal(event.status, "settled");
+    assert.equal(event.paymentNotifyStatus, "success");
+    assert.equal(alert.status, "resolved");
+  });
+});
+
 test("人工结算补记一次扣减库存并把事件和额度流水记为已人工核对", async () => {
   await withApi(async ({ baseUrl, store, token }) => {
     const { event, user, device, closedAt } = appendClosedSpecialEvent(store);
@@ -1768,6 +1817,8 @@ test("不同实例同订单号的流水不会压制当前事件结算或超时�
     });
     const callbackBody = await callback.json();
     assert.equal(callback.status, 200, JSON.stringify(callbackBody));
+    assert.equal(event.paymentNotifyStatus, "pending");
+    assert.equal(store.alerts.find((entry) => entry.relatedEventId === event.eventId && entry.title === "结算回调超时待补记")?.status, "open", "有结算流水但仍等待平台完结时，保留提醒");
     assert.equal(
       store.inventory.some(
         (entry) =>

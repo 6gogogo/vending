@@ -14,6 +14,7 @@
 - [150 分钟结算报警与批次可见性](docs/design/admin-redesign/CALLBACK_EXPIRY_20260924.md)：9 月 24 日发布 `6ccb02a`；报警边界、仅后台提醒配置、无保质期用品、回归入口及两轮发布回滚回执。
 - [普通用户隐藏停用及缺货商品](docs/design/admin-redesign/GOODS_VISIBILITY_20260927.md)：角色过滤、补货恢复、手机验收和发布回执。
 - [结算等待时长展示](docs/design/admin-redesign/SETTLEMENT_WAITING_20260929.md)：可信关门计时、已有提醒刷新、手机待办卡片和回归入口。
+- [已结算订单关闭超时提醒](docs/design/admin-redesign/SETTLEMENT_RESOLVED_20260930.md)：结算与平台回写双条件、历史修复和幂等关闭审计。
 - `.codex-run/` 是不提交的本地演练数据和日志；依赖目录及构建输出不作为源代码维护。
 
 ## 按问题定位

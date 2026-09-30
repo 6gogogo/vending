@@ -2435,6 +2435,7 @@ export class CabinetEventsService {
         undoState: "not_undoable"
       }
     });
+    this.alertsService.resolveRecoveredCallbackFailures(event.eventId);
     return {
       orderNo: payload.orderNo,
       forwarded: true,

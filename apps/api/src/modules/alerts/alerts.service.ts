@@ -9,6 +9,7 @@ const SETTLEMENT_CALLBACK_ALERT_WAIT_MINUTES = 150;
 const SETTLEMENT_CALLBACK_ALERT_WAIT_MS = SETTLEMENT_CALLBACK_ALERT_WAIT_MINUTES * 60_000;
 
 const RECOVERABLE_CALLBACK_ALERT_TITLES = new Set([
+  "结算回调超时待补记",
   "预约取货完成状态回写平台失败",
   "公益领取完成状态回写平台失败",
   "付款成功回写平台失败"
@@ -100,10 +101,18 @@ export class AlertsService {
         continue;
       }
 
-      const orderNo = /(?:^|；)订单 (\S+) 回写平台/.exec(alert.detail)?.[1];
       const event = this.store.events.find(
         (entry) => entry.eventId === alert.relatedEventId
       );
+      const settlementTimeout = alert.title === "结算回调超时待补记";
+      // 迟到回调只有在结算和平台回写均完成后才关闭提醒；冲突或撤销仍需处理。
+      if (settlementTimeout && (!event || event.status !== "settled" ||
+        event.manualSettlement?.status === "conflict" || event.manualSettlement?.status === "reverted")) {
+        continue;
+      }
+      const orderNo = settlementTimeout
+        ? event?.orderNo
+        : /(?:^|；)订单 (\S+) 回写平台/.exec(alert.detail)?.[1];
       if (!orderNo || !event) {
         continue;
       }
@@ -119,7 +128,9 @@ export class AlertsService {
 
       alert.status = "resolved";
       alert.resolvedAt = resolvedAt;
-      alert.resolutionNote = "平台回写已成功，系统自动关闭历史故障。";
+      alert.resolutionNote = settlementTimeout
+        ? "结算已完成且平台回写成功，系统自动关闭结算超时提醒。"
+        : "平台回写已成功，系统自动关闭历史故障。";
       this.store.decorateAlert(alert);
       this.store.logOperation({
         category: "alert",
@@ -139,7 +150,9 @@ export class AlertsService {
           id: event.eventId,
           label: orderNo
         },
-        description: `订单 ${orderNo} 的平台回写已恢复，历史故障已自动关闭。`,
+        description: settlementTimeout
+          ? `订单 ${orderNo} 已完成结算和平台回写，超时提醒已自动关闭。`
+          : `订单 ${orderNo} 的平台回写已恢复，历史故障已自动关闭。`,
         relatedEventId: event.eventId,
         relatedOrderNo: orderNo,
         metadata: {
@@ -460,6 +473,9 @@ export class AlertsService {
   }
 
   refreshManualSettlementTasks(deviceCode?: string) {
+    if (this.resolveRecoveredCallbackFailures() > 0) {
+      this.store.persist();
+    }
     const now = Date.now();
     for (const event of this.store.events) {
       const ignoredMovementIds =
