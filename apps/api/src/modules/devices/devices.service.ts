@@ -790,9 +790,14 @@ export class DevicesService {
   confirmDoorClosed(
     deviceCode: string,
     actorUserId?: string,
-    actorTenantId?: string
+    actorTenantId?: string,
+    recovery?: { evidence?: "later-platform-close"; eventIds?: string[]; reason?: string }
   ) {
     const device = this.getByCodeForTenant(deviceCode, actorTenantId);
+    if (recovery?.evidence !== undefined) {
+      if (recovery.evidence !== "later-platform-close") throw new BadRequestException("无效的关门证据类型。");
+      return this.resolveUnopenedWithLaterClose(device, recovery, actorUserId, actorTenantId);
+    }
     const confirmedAt = new Date().toISOString();
     let reconciledEventCount = 0;
 
@@ -838,6 +843,71 @@ export class DevicesService {
     });
     this.store.persist();
 
+    return this.monitoringDetail(device.deviceCode, actorTenantId);
+  }
+
+  /** 管理员处理网络故障遗留意图：使用后续真实关门回调，不冒充现场确认或结算。 */
+  private resolveUnopenedWithLaterClose(
+    device: DeviceRecord,
+    payload: { eventIds?: string[]; reason?: string },
+    actorUserId?: string,
+    actorTenantId?: string
+  ) {
+    if (!actorTenantId || !Array.isArray(payload.eventIds) || !payload.eventIds.length ||
+      payload.eventIds.length > 100 || payload.eventIds.some(id => typeof id !== "string") || !payload.reason?.trim()) {
+      throw new BadRequestException("请选择故障事件并填写处理原因。");
+    }
+    const events = [...new Set(payload.eventIds)].map(id => {
+      const event = this.store.events.find(e => e.eventId === id && e.deviceCode === device.deviceCode);
+      const user = event && this.store.users.find(u => u.id === event.userId);
+      if (!event || !user || this.store.getUserTenantId(user) !== actorTenantId) throw new BadRequestException("事件不属于当前柜机或实例。");
+      return event;
+    });
+    const runtime = this.store.getDeviceRuntime(device.deviceCode);
+    if (runtime.doorState !== "closed") throw new ConflictException("当前柜门状态未确认关闭。");
+    const plans = events.map(event => {
+      const prior = this.store.logs.find(log => log.type === "resolve-unopened-event" && log.relatedEventId === event.eventId);
+      if (prior && event.status === "failed" && event.physicalDoorState === "closed") return { event, callback: undefined };
+      const networkFailure = this.store.logs.some(log => {
+        const exchange = log.metadata?.smartVmExchange as { responseBody?: { reason?: string } } | undefined;
+        return log.relatedEventId === event.eventId && exchange?.responseBody?.reason === "network_error";
+      });
+      if (!["created", "opening", "timeout_unopened"].includes(event.status) ||
+        !networkFailure || !event.orderNo.startsWith("pending-") || event.amount !== 0 || event.goods.length || event.manualSettlement ||
+        event.adjustments?.length || event.refundedAt || Date.now() - Date.parse(event.createdAt) < 10 * 60_000 ||
+        this.store.inventory.some(m => m.eventId === event.eventId) ||
+        this.store.paymentOrders.some(p => p.eventId === event.eventId) ||
+        this.store.callbackLog.some(c => c.payload.eventId === event.eventId && ["settlement", "adjustment", "door-status"].includes(c.type))) {
+        throw new ConflictException("仅可关闭没有平台订单、实物流水或回调的超时开门意图。");
+      }
+      const callback = this.store.callbackLog.find(c => {
+        const source = this.store.events.find(e => e.eventId === c.payload.eventId);
+        return c.type === "door-status" && c.payload.status === "CLOSED" &&
+          c.payload.deviceCode === device.deviceCode && source?.deviceCode === device.deviceCode &&
+          source.doorNum === event.doorNum && Date.parse(c.receivedAt) > Date.parse(event.createdAt);
+      });
+      if (!callback) throw new ConflictException("缺少同柜门后续可信关门回调，不能关闭遗留意图。");
+      return { event, callback };
+    });
+    const now = new Date().toISOString();
+    for (const { event, callback } of plans) {
+      if (!callback) continue;
+      event.status = "failed";
+      event.physicalDoorState = "closed";
+      event.billingStatus = "admin_confirmed";
+      event.billingResolvedAt = now;
+      event.billingConfirmedByUserId = actorUserId;
+      event.billingResolutionNote = payload.reason!.trim();
+      event.updatedAt = now;
+      for (const alert of this.store.alerts.filter(a => a.relatedEventId === event.eventId && a.status === "open")) {
+        alert.status = "resolved"; alert.resolvedAt = now; alert.resolutionNote = payload.reason!.trim();
+      }
+      this.store.logOperation({ category: "device", type: "resolve-unopened-event", status: "success",
+        actor: this.getAdminActor(actorUserId), description: "管理员关闭了网络故障遗留的未开门意图。",
+        detail: payload.reason!.trim(), relatedEventId: event.eventId, relatedOrderNo: event.orderNo,
+        metadata: { deviceCode: device.deviceCode, evidence: "later-platform-close", callbackLogId: callback.id, undoState: "not_undoable" } });
+    }
+    this.store.persist();
     return this.monitoringDetail(device.deviceCode, actorTenantId);
   }
 

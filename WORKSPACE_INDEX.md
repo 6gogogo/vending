@@ -16,6 +16,7 @@
 - [结算等待时长展示](docs/design/admin-redesign/SETTLEMENT_WAITING_20260929.md)：可信关门计时、已有提醒刷新、手机待办卡片和回归入口。
 - [已结算订单关闭超时提醒](docs/design/admin-redesign/SETTLEMENT_RESOLVED_20260930.md)：结算与平台回写双条件、历史修复和幂等关闭审计。
 - [结算失败同步与限次恢复](docs/design/admin-redesign/SETTLEMENT_RECOVERY_20260930.md)：即时同步、十分钟间隔、三次追加重试、动态待办和历史旧单处理边界。
+- [故障订单冲突与领取时段](docs/design/admin-redesign/ORDER_SCHEDULE_20261002.md)：网络失败意图受控关闭、模板时段立即同步、额度与历史保留。
 - `.codex-run/` 是不提交的本地演练数据和日志；依赖目录及构建输出不作为源代码维护。
 
 ## 按问题定位

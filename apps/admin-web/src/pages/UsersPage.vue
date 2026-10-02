@@ -2919,6 +2919,7 @@ const expandedUserId = ref<string>();
         </div>
 
         <div v-else-if="drawerMode === 'create-policy' || drawerMode === 'edit-policy'" class="users-drawer__body">
+          <p v-if="drawerMode === 'edit-policy'" class="admin-note">保存后，星期和领取时段立即同步给仍绑定此模板的人员；已领取额度不会重置。货品和数量的变更仍需重新下发。</p>
           <label class="admin-field">
             <span class="admin-field__label">模板名称</span>
             <input v-model="policyForm.name" class="admin-input" placeholder="例如早餐关怀" />

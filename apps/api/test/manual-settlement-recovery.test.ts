@@ -21,6 +21,8 @@ import { InventoryOrdersService } from "../src/modules/inventory-orders/inventor
 import { CabinetEventsService } from "../src/modules/cabinet-events/cabinet-events.service";
 import { SettlementRecoveryService } from "../src/modules/cabinet-events/settlement-recovery.service";
 import { GoodsService } from "../src/modules/goods/goods.service";
+import { SpecialAccessPoliciesService } from "../src/modules/special-access-policies/special-access-policies.service";
+import { getActiveWindowEntitlementQuota } from "../src/common/policies/special-access-policy.utils";
 import { validatePersistedState } from "../src/common/store/persisted-state-integrity";
 import { listenOnFetchSafeLoopbackPort } from "./support/fetch-safe-api-listener";
 
@@ -131,6 +133,73 @@ const appendClosedSpecialEvent = (store: InMemoryStoreService, closedMinutes = 1
 
   return { event, user, device, closedAt };
 };
+
+test("网络故障遗留意图须有后续同门可信关门；处理幂等且不生成库存或付款", async () => {
+  await withApi(async ({ baseUrl, store, token }) => {
+    const { event, device } = appendClosedSpecialEvent(store);
+    event.status = "timeout_unopened"; event.physicalDoorState = "unknown";
+    event.orderNo = `pending-${event.eventId}`;
+    store.callbackLog.splice(0, 1);
+    store.logOperation({ category: "device", type: "open-cabinet", status: "pending", description: "模拟网络故障",
+      relatedEventId: event.eventId, actor: { type: "system", name: "测试" },
+      metadata: { smartVmExchange: { responseBody: { reason: "network_error" } } } });
+    store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
+    const before = JSON.stringify([store.inventory, store.paymentOrders]);
+    const submit = (eventIds = [event.eventId]) => fetch(`${baseUrl}/devices/${device.deviceCode}/confirm-door-closed`, {
+      method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ evidence: "later-platform-close", eventIds, reason: "核对故障后的真实关门回调，关闭遗留记录。" })
+    });
+    assert.equal((await submit()).status, 409, "没有后续真实回调时不能凭在线标记确认");
+    const later = { ...structuredClone(event), eventId: "later-real-event", orderNo: "later-real-order", status: "closed" as const, physicalDoorState: "closed" as const };
+    store.events.unshift(later);
+    store.logCallback("door-status", { eventId: later.eventId, deviceCode: device.deviceCode, status: "CLOSED" });
+    assert.equal((await submit([event.eventId, "missing-event"])).status, 400);
+    assert.equal(event.status, "timeout_unopened", "批量预检失败时不部分处理");
+    const res = await submit(); assert.equal(res.status, 201, await res.text());
+    assert.equal(event.status, "failed"); assert.equal(event.physicalDoorState, "closed");
+    assert.equal(event.billingStatus, "admin_confirmed");
+    assert.equal(event.paymentNotifyStatus, undefined, "不能伪造平台完结成功");
+    assert.equal((await submit()).status, 201);
+    assert.equal(store.logs.filter(l => l.type === "resolve-unopened-event" && l.relatedEventId === event.eventId).length, 1);
+    assert.equal(JSON.stringify([store.inventory, store.paymentOrders]), before);
+  });
+});
+
+test("已有真实订单号或回调的事件不能按网络遗留意图关闭", async () => {
+  await withApi(async ({ devicesService, store }) => {
+    const { event, device, user } = appendClosedSpecialEvent(store);
+    event.status = "timeout_unopened"; event.physicalDoorState = "unknown";
+    store.updateDeviceRuntime(device.deviceCode, { doorState: "closed" });
+    assert.throws(() => devicesService.confirmDoorClosed(device.deviceCode, undefined, store.getUserTenantId(user), {
+      evidence: "later-platform-close", eventIds: [event.eventId], reason: "核对"
+    }), /仅可关闭/);
+    assert.equal(event.status, "timeout_unopened");
+  });
+});
+
+test("模板时段更新同步已绑定个人副本，09:59拒绝10:00允许且额度标识不重置", async () => {
+  await withApi(async ({ store }) => {
+    const user = store.users.find(u => u.role === "special")!;
+    const goods = store.goodsCatalog[0]!;
+    const service = new SpecialAccessPoliciesService(store);
+    const policy = service.create({ name: "领取时段回归", weekdays: [0,1,2,3,4,5,6], startHour: 8, endHour: 22,
+      status: "active", applicableUserIds: [user.id], goodsLimits: [], entitlementLimits: [{ id: "pool-keep", targetType: "goods", targetId: goods.goodsId, quantity: 1 }] });
+    const personal = { ...structuredClone(policy), id: "personal-keep", sourcePolicyId: policy.id, createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z" };
+    user.accessPolicies = [personal, { ...structuredClone(personal), id: "history", status: "inactive", effectiveToDateKey: "2026-09-30" }];
+    const quotaBefore = JSON.stringify(personal.entitlementLimits);
+    service.update(policy.id, { startHour: 10, endHour: 22 });
+    assert.equal(personal.startHour, 10); assert.equal(user.accessPolicies[1].startHour, 8);
+    assert.equal(personal.id, "personal-keep"); assert.equal(JSON.stringify(personal.entitlementLimits), quotaBefore);
+    const quotaAt = (time: string) => getActiveWindowEntitlementQuota(user, store.specialAccessPolicies, [], store.goodsCatalog, store.goodsTaxonomyNodes, new Date(time));
+    assert.equal(quotaAt("2026-10-02T09:59:00+08:00").activeWindows.length, 0);
+    assert.equal(quotaAt("2026-10-02T10:00:00+08:00").activeWindows.length, 1);
+    assert.equal(quotaAt("2026-10-02T22:00:00+08:00").activeWindows.length, 0);
+    personal.startHour = 8;
+    service.update(policy.id, { name: "只改名称" }); assert.equal(personal.startHour, 8);
+    policy.applicableUserIds = [];
+    service.update(policy.id, { startHour: 11 }); assert.equal(personal.startHour, 8, "不影响已解绑个人规则");
+  });
+});
 
 const createManualSettlementConflict = async (context: {
   baseUrl: string;

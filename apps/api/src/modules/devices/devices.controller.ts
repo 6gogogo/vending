@@ -167,13 +167,15 @@ export class DevicesController {
   @AllowedBackofficePermissions("devices:operate")
   confirmDoorClosed(
     @Param("deviceCode") deviceCode: string,
-    @Req() request: { authUser?: { id: string; tenantId?: string } }
+    @Req() request: { authUser?: { id: string; tenantId?: string } },
+    @Body() body?: { evidence?: "later-platform-close"; eventIds?: string[]; reason?: string }
   ) {
     return ok(
       this.devicesService.confirmDoorClosed(
         deviceCode,
         request.authUser?.id,
-        request.authUser?.tenantId
+        request.authUser?.tenantId,
+        body
       ),
       "柜门关闭状态已确认"
     );

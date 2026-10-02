@@ -50,6 +50,25 @@ export class SpecialAccessPoliciesService {
     });
 
     Object.assign(policy, normalized);
+    const scheduleIncluded = ["startHour", "endHour", "weekdays"].some(key => Object.prototype.hasOwnProperty.call(payload, key));
+    const synchronizedUserIds: string[] = [];
+    if (scheduleIncluded) {
+      const now = new Date().toISOString();
+      for (const user of this.store.users) {
+        if (!policy.applicableUserIds.includes(user.id)) continue;
+        let synchronized = false;
+        for (const personal of user.accessPolicies ?? []) {
+          if (personal.sourcePolicyId !== policy.id || personal.status !== "active") continue;
+          // 只同步关联模板的服务时段，保留额度池标识和数量，避免已领取额度被重置。
+          personal.weekdays = [...policy.weekdays];
+          personal.startHour = policy.startHour;
+          personal.endHour = policy.endHour;
+          personal.updatedAt = now;
+          synchronized = true;
+        }
+        if (synchronized) synchronizedUserIds.push(user.id);
+      }
+    }
     this.store.logOperation({
       category: "policy",
       type: "update-special-policy",
@@ -57,7 +76,9 @@ export class SpecialAccessPoliciesService {
       actor: this.getActor(actorUserId),
       metadata: {
         policyId: policy.id,
-        policyName: policy.name
+        policyName: policy.name,
+        synchronizedUserIds,
+        schedule: scheduleIncluded ? { weekdays: policy.weekdays, startHour: policy.startHour, endHour: policy.endHour } : undefined
       }
     });
 
