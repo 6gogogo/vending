@@ -419,10 +419,23 @@ export class AlertsService {
   }
 
   private refreshDeviceFaultTasks() {
+    let resolvedUnopenedAlerts = false;
     for (const event of this.store.events) {
       const pendingDuration = Date.now() - new Date(event.updatedAt).getTime();
       const sourceLog = this.store.logs.find((entry) => entry.relatedEventId === event.eventId);
       const deviceLabel = this.getDeviceLabel(event.deviceCode);
+
+      // 人工按后续关门证据关闭的网络意图，不能再按 failed 生成新故障待办。
+      if (event.status === "failed" && event.physicalDoorState === "closed" && event.billingResolvedAt &&
+        this.store.logs.some(log => log.type === "resolve-unopened-event" && log.relatedEventId === event.eventId)) {
+        for (const alert of this.store.alerts.filter(a => a.relatedEventId === event.eventId && a.type === "device_fault" && a.status !== "resolved")) {
+          alert.status = "resolved";
+          alert.resolvedAt = event.billingResolvedAt;
+          alert.resolutionNote = event.billingResolutionNote;
+          resolvedUnopenedAlerts = true;
+        }
+        continue;
+      }
 
       if (["created", "opening"].includes(event.status) && pendingDuration > 90 * 1000) {
         if (event.status !== "timeout_unopened") {
@@ -470,6 +483,7 @@ export class AlertsService {
         });
       }
     }
+    if (resolvedUnopenedAlerts) this.store.persist();
   }
 
   refreshManualSettlementTasks(deviceCode?: string) {

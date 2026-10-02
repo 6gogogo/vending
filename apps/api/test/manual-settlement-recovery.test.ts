@@ -135,7 +135,7 @@ const appendClosedSpecialEvent = (store: InMemoryStoreService, closedMinutes = 1
 };
 
 test("网络故障遗留意图须有后续同门可信关门；处理幂等且不生成库存或付款", async () => {
-  await withApi(async ({ baseUrl, store, token }) => {
+  await withApi(async ({ baseUrl, store, token, alertsService }) => {
     const { event, device } = appendClosedSpecialEvent(store);
     event.status = "timeout_unopened"; event.physicalDoorState = "unknown";
     event.orderNo = `pending-${event.eventId}`;
@@ -162,6 +162,12 @@ test("网络故障遗留意图须有后续同门可信关门；处理幂等且�
     assert.equal((await submit()).status, 201);
     assert.equal(store.logs.filter(l => l.type === "resolve-unopened-event" && l.relatedEventId === event.eventId).length, 1);
     assert.equal(JSON.stringify([store.inventory, store.paymentOrders]), before);
+    assert.equal(alertsService.list("open").some(a => a.relatedEventId === event.eventId), false, "巡检不再生成已处理故障");
+    alertsService.create({ type: "device_fault", title: `${device.name}开门失败`, deviceCode: device.deviceCode,
+      relatedEventId: event.eventId, dueAt: event.updatedAt, detail: "模拟旧版残留的重复待办" });
+    assert.equal(alertsService.list("open").some(a => a.relatedEventId === event.eventId), false);
+    assert.equal(store.alerts.find(a => a.relatedEventId === event.eventId)?.status, "resolved");
+    assert.equal(alertsService.list("open").some(a => a.relatedEventId === event.eventId), false, "刷新保持已处理");
   });
 });
 
