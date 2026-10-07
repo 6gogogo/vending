@@ -87,7 +87,7 @@ export class AnalyticsService {
     const allPendingTasks = this.alertsService
       .list("open")
       .slice()
-      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+      .sort((left, right) => right.dueAt.localeCompare(left.dueAt));
     const pendingTasks = allPendingTasks.slice(0, 12);
     const goodsOverview = this.goodsService.getOverview();
 
