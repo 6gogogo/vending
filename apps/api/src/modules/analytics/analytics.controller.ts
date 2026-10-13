@@ -1,15 +1,18 @@
-import { Controller, Get, Inject, Query, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, Query, Req, Res, UseGuards } from "@nestjs/common";
 
 import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
   AllowedRoles,
+  AllowedBackofficeAllPermissions,
   TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AnalyticsService } from "./analytics.service";
 import type { BackofficeRole, DataMonitorRange, ServiceVisitQuery } from "@vm/shared-types";
+
+import type { PickupReportQuery } from "./pickup-report.model";
 
 @Controller("analytics")
 @UseGuards(RoleGuard)
@@ -17,6 +20,22 @@ import type { BackofficeRole, DataMonitorRange, ServiceVisitQuery } from "@vm/sh
 @AllowedBackofficePermissions("dashboard:view")
 export class AnalyticsController {
   constructor(@Inject(AnalyticsService) private readonly analyticsService: AnalyticsService) {}
+
+  @Get("pickups/export")
+  @AllowedBackofficeAllPermissions("analytics:data-monitor:view", "operation-logs:export")
+  @AllowedBackofficePermissions("analytics:data-monitor:view")
+  @TenantScopedBackofficeRoute()
+  async exportPickups(
+    @Query() query: PickupReportQuery,
+    @Req() request: { authUser?: { tenantId?: string } },
+    @Res() response: { setHeader(name: string, value: string): void; send(body: Buffer): void }
+  ) {
+    const file = await this.analyticsService.exportPickups(query, request.authUser?.tenantId);
+    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
+    response.setHeader("Cache-Control", "no-store");
+    response.send(file.body);
+  }
 
   @Get("dashboard")
   dashboard(@Req() request: { authUser?: { backofficeRole?: BackofficeRole } }) {

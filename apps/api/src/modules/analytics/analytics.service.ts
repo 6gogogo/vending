@@ -28,6 +28,9 @@ import { GoodsService } from "../goods/goods.service";
 import type { ServiceVisitQuery } from "@vm/shared-types";
 import { buildServiceVisits } from "./service-visits";
 
+import { collectPickupReport, type PickupReportQuery } from "./pickup-report.model";
+import { buildPickupWorkbook } from "./pickup-report.workbook";
+
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -35,6 +38,11 @@ export class AnalyticsService {
     @Inject(AlertsService) private readonly alertsService: AlertsService,
     @Inject(GoodsService) private readonly goodsService: GoodsService
   ) {}
+
+  async exportPickups(query: PickupReportQuery, tenantId?: string) {
+    const report = collectPickupReport(this.store, tenantId, query);
+    return { filename: `领取报告_${report.startDate}至${report.endDate}.xlsx`, body: await buildPickupWorkbook(report) };
+  }
 
   getServiceVisits(tenantId: string | undefined, query: ServiceVisitQuery) {
     return buildServiceVisits(this.store, tenantId, query);

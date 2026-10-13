@@ -163,6 +163,15 @@ export const router = createRouter({
           },
           children: [
             {
+              path: "export",
+              component: () => import("../pages/DataExportPage.vue"),
+              meta: {
+                eyebrow: "数据导出",
+                title: "数据导出",
+                description: "按自选时间范围导出领取明细、概览与汇总。"
+              }
+            },
+            {
               path: "",
               component: DataMonitorPage
             },
@@ -176,6 +185,10 @@ export const router = createRouter({
               }
             }
           ]
+        },
+        {
+          path: "/data-analysis",
+          redirect: "/data-monitor/export"
         },
         {
           path: "/service-visits",

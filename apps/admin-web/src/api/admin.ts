@@ -253,6 +253,17 @@ export const adminApi = {
       query
     });
   },
+  async exportPickups(filters: { startDate: string; endDate: string; fields: string[]; sections: string[] }, token: string) {
+    requireBackofficePermission("analytics:data-monitor:view");
+    requireBackofficePermission("operation-logs:export");
+    const query = new URLSearchParams({ startDate: filters.startDate, endDate: filters.endDate, fields: filters.fields.join(","), sections: filters.sections.join(",") });
+    const response = await fetch(`${adminApiBaseUrl}/analytics/pickups/export?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(typeof error.message === "string" ? error.message : "导出失败，请重试");
+    }
+    return { blob: await response.blob(), filename: `领取报告_${filters.startDate}至${filters.endDate}.xlsx` };
+  },
   registrationApplications(status?: RegistrationApplication["status"]) {
     requireBackofficePermission("users:view");
     return adminClient.get<RegistrationApplication[]>("/registration-applications", {

@@ -4,7 +4,8 @@ import { RouterLink, RouterView, useRoute } from "vue-router";
 const route = useRoute();
 const modules = [
   { path: "/data-monitor", label: "每日运营" },
-  { path: "/data-monitor/service-visits", label: "服务人次" }
+  { path: "/data-monitor/service-visits", label: "服务人次" },
+  { path: "/data-monitor/export", label: "数据导出" }
 ];
 </script>
 
@@ -55,4 +56,9 @@ const modules = [
   box-shadow: 0 1px 4px #233a3014;
 }
 .statistics-modules a:focus-visible { outline: 2px solid #216e56; outline-offset: 2px; }
+
+@media (max-width: 480px) {
+  .statistics-modules { width: 100%; }
+  .statistics-modules a { flex: 1; padding: 10px 8px; text-align: center; }
+}
 </style>
