@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
@@ -111,13 +111,20 @@ test("两个真实进程同时接管过期租约时只有一个 fencing token �
       version: 1,
       ownerId: "expired-owner",
       pid: 987_654,
-      hostname: "dead-host",
+      hostname: hostname(),
       acquiredAt: "2026-07-18T00:00:00.000Z",
       heartbeatAt: "2026-07-18T00:00:01.000Z",
       expiresAt: "2026-07-18T00:00:02.000Z"
     }),
     "utf8"
   );
+
+  if (process.platform === "linux") {
+    writeFileSync(`${lockFile}.lifecycle`, JSON.stringify({
+      version: 1, token: "legacy-dead-guard", ownerId: "expired-owner",
+      pid: 987_654, hostname: hostname(), createdAt: "2026-07-18T00:00:01.000Z"
+    }));
+  }
 
   const spawnContender = (
     ownerId: string,

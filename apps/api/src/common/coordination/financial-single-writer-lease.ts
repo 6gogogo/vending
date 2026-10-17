@@ -4,6 +4,7 @@ import {
   existsSync,
   ftruncateSync,
   fsyncSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -14,8 +15,28 @@ import {
 } from "node:fs";
 import { hostname as readHostname } from "node:os";
 import { dirname } from "node:path";
+import { withLinuxFileMutex } from "./linux-file-mutex";
 
-export interface FinancialWriterLeaseSnapshot {
+interface ProcessIdentity {
+  bootId?: string;
+  processStartTicks?: string;
+}
+
+const validProcessIdentity = (identity: ProcessIdentity) =>
+  (identity.bootId === undefined || (typeof identity.bootId === "string" &&
+    /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(identity.bootId))) &&
+  (identity.processStartTicks === undefined || (typeof identity.processStartTicks === "string" &&
+    /^\d+$/.test(identity.processStartTicks)));
+
+const readProcessStartTicks = (pid: number) => {
+  const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  // comm 可以含空格和括号；最后一个右括号之后从字段 3 开始，starttime 为字段 22。
+  const value = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  if (!value || !/^\d+$/.test(value)) throw new Error("无法核验金融写者的进程启动标识。");
+  return value;
+};
+
+export interface FinancialWriterLeaseSnapshot extends ProcessIdentity {
   version: 2;
   ownerId: string;
   fencingToken: string;
@@ -26,7 +47,7 @@ export interface FinancialWriterLeaseSnapshot {
   expiresAt: string;
 }
 
-interface LegacyFinancialWriterLeaseSnapshot {
+interface LegacyFinancialWriterLeaseSnapshot extends ProcessIdentity {
   version: 1;
   ownerId: string;
   pid: number;
@@ -45,7 +66,7 @@ interface LeaseFileRecord {
   snapshot: StoredFinancialWriterLeaseSnapshot;
 }
 
-interface LifecycleGuardSnapshot {
+interface LifecycleGuardSnapshot extends ProcessIdentity {
   version: 1;
   ownerId: string;
   token: string;
@@ -80,6 +101,7 @@ export class FinancialSingleWriterLease {
   private readonly hostname: string;
   private readonly pid: number;
   private readonly isProcessAlive: (pid: number) => boolean;
+  private readonly processIdentity: ProcessIdentity;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private snapshot?: FinancialWriterLeaseSnapshot;
   private lostReason?: string;
@@ -108,6 +130,10 @@ export class FinancialSingleWriterLease {
     this.hostname = options.hostname?.trim() || readHostname();
     this.pid = options.pid ?? process.pid;
     this.isProcessAlive = options.isProcessAlive ?? this.defaultIsProcessAlive;
+    this.processIdentity = process.platform === "linux" ? {
+      bootId: readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(),
+      ...(this.pid === process.pid ? { processStartTicks: readProcessStartTicks(process.pid) } : {})
+    } : {};
   }
 
   acquire(): FinancialWriterLeaseSnapshot {
@@ -156,19 +182,18 @@ export class FinancialSingleWriterLease {
           existing.acquiredAt,
           existing.fencingToken
         );
-        let descriptor: number | undefined;
-
-        try {
-          descriptor = openSync(this.lockFile, "r+");
-          const serialized = JSON.stringify(next, null, 2);
-          ftruncateSync(descriptor, 0);
-          writeSync(descriptor, serialized, 0, "utf8");
-          fsyncSync(descriptor);
-          closeSync(descriptor);
-          descriptor = undefined;
-        } finally {
-          if (descriptor !== undefined) {
-            closeSync(descriptor);
+        if (process.platform === "linux") {
+          // 先同步完整临时文件，再原子替换；断电不能把原租约截断为半份 JSON。
+          this.publishLinuxSnapshot(this.lockFile, next, true);
+        } else {
+          let descriptor: number | undefined;
+          try {
+            descriptor = openSync(this.lockFile, "r+");
+            ftruncateSync(descriptor, 0);
+            writeSync(descriptor, JSON.stringify(next, null, 2), 0, "utf8");
+            fsyncSync(descriptor);
+          } finally {
+            if (descriptor !== undefined) closeSync(descriptor);
           }
         }
 
@@ -265,6 +290,10 @@ export class FinancialSingleWriterLease {
   private createLeaseFile() {
     const now = this.now();
     const snapshot = this.createSnapshot(now);
+    if (process.platform === "linux") {
+      this.publishLinuxSnapshot(this.lockFile, snapshot, false);
+      return snapshot;
+    }
     let descriptor: number | undefined;
 
     try {
@@ -289,6 +318,7 @@ export class FinancialSingleWriterLease {
   ): FinancialWriterLeaseSnapshot {
     return {
       version: 2,
+      ...this.processIdentity,
       ownerId: this.ownerId,
       fencingToken,
       pid: this.pid,
@@ -329,12 +359,28 @@ export class FinancialSingleWriterLease {
   }
 
   private isActive(snapshot: StoredFinancialWriterLeaseSnapshot, now: Date) {
+    if (this.isPreviousBoot(snapshot)) return false;
     const expired = Date.parse(snapshot.expiresAt) <= now.getTime();
-    const sameHostProcessAlive =
-      snapshot.hostname === this.hostname &&
-      snapshot.pid > 0 &&
-      this.isProcessAlive(snapshot.pid);
-    return !expired || sameHostProcessAlive;
+    return !expired || this.isOwnerAlive(snapshot);
+  }
+
+  private isPreviousBoot(snapshot: ProcessIdentity & { hostname: string }) {
+    return snapshot.hostname === this.hostname && Boolean(snapshot.bootId) &&
+      Boolean(this.processIdentity.bootId) && snapshot.bootId !== this.processIdentity.bootId;
+  }
+
+  private isOwnerAlive(snapshot: ProcessIdentity & { hostname: string; pid: number }) {
+    if (snapshot.hostname !== this.hostname || this.isPreviousBoot(snapshot)) return false;
+    if (!this.isProcessAlive(snapshot.pid)) return false;
+    if (process.platform === "linux" && snapshot.processStartTicks) {
+      try {
+        return readProcessStartTicks(snapshot.pid) === snapshot.processStartTicks;
+      } catch (error) {
+        // 只有明确消失才算退出；权限/格式等不确定错误继续按存活处理。
+        return (error as NodeJS.ErrnoException).code !== "ENOENT";
+      }
+    }
+    return true;
   }
 
   private createExistingOwnerError(snapshot: StoredFinancialWriterLeaseSnapshot) {
@@ -393,7 +439,7 @@ export class FinancialSingleWriterLease {
         Boolean(record.fencingToken.trim())
       );
 
-    if (!commonFieldsValid || !fencingTokenValid) {
+    if (!commonFieldsValid || !fencingTokenValid || !validProcessIdentity(record)) {
       throw new Error("金融单写者租约内容不完整。");
     }
 
@@ -401,6 +447,17 @@ export class FinancialSingleWriterLease {
   }
 
   private withLifecycleGuard<T>(operation: () => T): T {
+    if (process.platform === "linux") {
+      mkdirSync(dirname(this.lockFile), { recursive: true });
+      return withLinuxFileMutex(`${this.lifecycleGuardFile}.mutex`, () => {
+        this.recoverDeadLifecycleGuard();
+        return this.withFileLifecycleGuard(operation);
+      });
+    }
+    return this.withFileLifecycleGuard(operation);
+  }
+
+  private withFileLifecycleGuard<T>(operation: () => T): T {
     const guard = this.acquireLifecycleGuard();
 
     try {
@@ -410,10 +467,49 @@ export class FinancialSingleWriterLease {
     }
   }
 
+  private recoverDeadLifecycleGuard() {
+    if (!existsSync(this.lifecycleGuardFile)) return;
+    const guard = JSON.parse(readFileSync(this.lifecycleGuardFile, "utf8")) as LifecycleGuardSnapshot;
+    if (!guard || !validProcessIdentity(guard) || guard.version !== 1 || !Number.isSafeInteger(guard.pid) || guard.pid <= 0 ||
+        typeof guard.token !== "string" || !guard.token || guard.hostname !== this.hostname ||
+        !Number.isFinite(Date.parse(guard.createdAt)) || this.isOwnerAlive(guard)) {
+      throw new Error("金融生命周期旧锁所有者仍存活或无法核验，已停止接管。");
+    }
+    if (existsSync(this.lockFile) && this.isActive(this.readExistingLeaseRecord().snapshot, this.now())) {
+      throw new Error("金融生命周期旧锁关联的租约仍有效，已停止接管。");
+    }
+    // 内核互斥区内隔离证据；旧版不会回收别人的锁，仍使用 wx 协议互斥。
+    renameSync(this.lifecycleGuardFile,
+      `${this.lifecycleGuardFile}.stale.${this.now().toISOString().replace(/[:.]/g, "-")}.${randomUUID()}`);
+    this.syncLockDirectory();
+  }
+
+  private syncLockDirectory() {
+    const descriptor = openSync(dirname(this.lockFile), "r");
+    try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+  }
+
+  private publishLinuxSnapshot(path: string, snapshot: object, replace: boolean) {
+    const temporary = `${path}.tmp.${randomUUID()}`;
+    const descriptor = openSync(temporary, "wx", 0o600);
+    try {
+      try {
+        writeFileSync(descriptor, JSON.stringify(snapshot, null, 2), "utf8");
+        fsyncSync(descriptor);
+      } finally { closeSync(descriptor); }
+      if (replace) renameSync(temporary, path);
+      else linkSync(temporary, path); // 原子发布完整内容，同时保留 wx 的不覆盖语义。
+      this.syncLockDirectory();
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
+  }
+
   private acquireLifecycleGuard(): LifecycleGuardSnapshot {
     mkdirSync(dirname(this.lifecycleGuardFile), { recursive: true });
     const guard: LifecycleGuardSnapshot = {
       version: 1,
+      ...this.processIdentity,
       ownerId: this.ownerId,
       token: randomUUID(),
       pid: this.pid,
@@ -423,6 +519,10 @@ export class FinancialSingleWriterLease {
     let descriptor: number | undefined;
 
     try {
+      if (process.platform === "linux") {
+        this.publishLinuxSnapshot(this.lifecycleGuardFile, guard, false);
+        return guard;
+      }
       descriptor = openSync(this.lifecycleGuardFile, "wx", 0o600);
       writeFileSync(descriptor, JSON.stringify(guard, null, 2), "utf8");
       fsyncSync(descriptor);
@@ -487,7 +587,8 @@ export class FinancialSingleWriterLease {
       process.kill(pid, 0);
       return true;
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "EPERM";
+      // 只有 ESRCH 能证明进程消失；权限不足和其他未知错误不能触发清锁。
+      return (error as NodeJS.ErrnoException).code !== "ESRCH";
     }
   };
 }

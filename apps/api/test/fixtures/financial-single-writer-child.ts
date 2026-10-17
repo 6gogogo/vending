@@ -1,4 +1,6 @@
 import { existsSync, writeFileSync } from "node:fs";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 
 import { FinancialSingleWriterLease } from "../../src/common/coordination/financial-single-writer-lease";
 
@@ -18,7 +20,7 @@ if (!lockFile || !ownerId || !mode) {
   const lease = new FinancialSingleWriterLease({
     lockFile,
     ownerId,
-    leaseDurationMs: 10_000,
+    leaseDurationMs: mode.startsWith("crash-") ? 1_000 : 10_000,
     heartbeatIntervalMs: 1_000
   });
 
@@ -34,7 +36,24 @@ if (!lockFile || !ownerId || !mode) {
     }
 
     lease.acquire();
-    if (mode === "hold") {
+    if (mode === "crash-before-heartbeat-publish") {
+      const original = fs.renameSync;
+      fs.renameSync = (source, target) => {
+        if (target === lockFile) {
+          writeFileSync(readyFile!, ownerId, "utf8");
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+        }
+        return original(source, target);
+      };
+      syncBuiltinESMExports();
+      lease.heartbeat();
+    } else if (mode === "crash-in-fence") {
+      lease.runWithFence(() => {
+        writeFileSync(readyFile!, ownerId, "utf8");
+        // 测试在持有互斥区时 SIGKILL，不能通过 finally 帮忙释放。
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+      });
+    } else if (mode === "hold") {
       if (!readyFile || !releaseFile) {
         throw new Error("hold 模式缺少就绪或释放文件路径。");
       }

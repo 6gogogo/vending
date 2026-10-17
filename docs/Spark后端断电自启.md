@@ -25,6 +25,8 @@ bash deploy/scripts/install-spark-backend-autostart.sh
 
 两个业务单元使用 `Restart=always` 和 `StartLimitIntervalSec=0`。因此，即使开机时 WireGuard 地址尚未出现，公网 Web 也会继续重试，不会因启动次数达到上限而永久停止。
 
+Linux 金融租约使用内核互斥并记录开机与进程启动标识，异常退出留下的可核验旧锁由下次启动自动隔离，不能只因 `.lifecycle` 文件存在就永久阻止恢复。部署机必须提供 `/usr/bin/flock`；永久锚点 `.lifecycle.mutex` 不能删除或替换。仍有效、异机或无法核验的锁继续拒绝接管。恢复边界和回归场景见[支付安全自动恢复与单写者运行边界](支付安全自动恢复与单写者运行边界-2026-07-19.md#linux-异常重启后的锁恢复)。
+
 ## 验证
 
 安装后或主机重启后执行：
