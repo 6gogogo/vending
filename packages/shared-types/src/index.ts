@@ -1987,6 +1987,52 @@ export interface DataMonitorDailySummary {
   recentLogs: OperationLogRecord[];
 }
 
+export type ServiceVisitPeriod = "all" | "year" | "month" | "recent-month" | "recent-year";
+
+export interface ServiceVisitQuery {
+  period?: ServiceVisitPeriod;
+  year?: string;
+  month?: string;
+  userId?: string;
+}
+
+export interface ServiceVisitTotals {
+  visits: number;
+  people: number;
+  units: number;
+  activeDays: number;
+}
+
+export interface ServiceVisitPerson {
+  userId: string;
+  name: string;
+  neighborhood: string;
+  visits: number;
+  lifetimeVisits: number;
+  units: number;
+  activeDays: number;
+  lastPickupAt?: string;
+}
+
+export interface ServiceVisitSnapshot {
+  period: ServiceVisitPeriod;
+  startDate: string;
+  endDate: string;
+  today: string;
+  generatedAt: string;
+  businessDayStartHour: number;
+  timezoneOffsetHours: number;
+  grain: "day" | "month" | "year";
+  summary: ServiceVisitTotals;
+  lifetime: ServiceVisitTotals;
+  previous?: ServiceVisitTotals & { startDate: string; endDate: string };
+  series: Array<ServiceVisitTotals & { key: string; label: string }>;
+  people: ServiceVisitPerson[];
+  personOptions: Array<{ userId: string; name: string }>;
+  availableYears: string[];
+  legacyVisitCount: number;
+}
+
 export interface DataMonitorSnapshot {
   monthKey: string;
   selectedDateKey: string;

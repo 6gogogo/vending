@@ -215,7 +215,7 @@ onUnmounted(() => {
     <section class="admin-page__section">
       <div class="admin-page__section-head">
         <div>
-          <p class="admin-kicker">数据监控</p>
+          <p class="admin-kicker">每日运营</p>
           <h3 class="admin-page__section-title">按业务日、时间段与区域查看服务走势</h3>
         </div>
         <div class="admin-toolbar">

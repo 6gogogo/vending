@@ -25,6 +25,9 @@ import { InMemoryStoreService } from "../../common/store/in-memory-store.service
 import { AlertsService } from "../alerts/alerts.service";
 import { GoodsService } from "../goods/goods.service";
 
+import type { ServiceVisitQuery } from "@vm/shared-types";
+import { buildServiceVisits } from "./service-visits";
+
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -32,6 +35,10 @@ export class AnalyticsService {
     @Inject(AlertsService) private readonly alertsService: AlertsService,
     @Inject(GoodsService) private readonly goodsService: GoodsService
   ) {}
+
+  getServiceVisits(tenantId: string | undefined, query: ServiceVisitQuery) {
+    return buildServiceVisits(this.store, tenantId, query);
+  }
 
   getDailyPickupSummary(date?: string): DailyPickupSummary {
     const businessDateKey = date ?? getBusinessDayKey();

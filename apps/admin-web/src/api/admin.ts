@@ -21,6 +21,8 @@ import type {
   DataMonitorRange,
   DataMonitorSnapshot,
   DashboardSnapshot,
+  ServiceVisitQuery,
+  ServiceVisitSnapshot,
   DeviceMonitoringDetail,
   DeviceRecord,
   ExpiredBatchDispositionMethod,
@@ -240,6 +242,10 @@ export const adminApi = {
   },
   exitPlatformTenant() {
     return adminClient.post<BackofficeSessionSnapshot>("/platform/exit-instance");
+  },
+  serviceVisits(query: ServiceVisitQuery) {
+    requireBackofficePermission("analytics:data-monitor:view");
+    return adminClient.get<ServiceVisitSnapshot>("/analytics/service-visits", { query: { ...query } });
   },
   dataMonitor(query?: { month?: string; date?: string; range?: DataMonitorRange }) {
     requireBackofficePermission("analytics:data-monitor:view");

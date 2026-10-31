@@ -1,3 +1,4 @@
+import DataStatisticsLayout from "../layouts/DataStatisticsLayout.vue";
 import { createRouter, createWebHistory } from "vue-router";
 import {
   isBackofficePermission,
@@ -151,15 +152,34 @@ export const router = createRouter({
         },
         {
           path: "/data-monitor",
-          component: DataMonitorPage,
+          component: DataStatisticsLayout,
           meta: {
-            group: "总览",
-            eyebrow: "数据监控",
-            title: "按日数据监控",
-            description: "使用日历与柱状图查看每日服务、货品、事件和日志变化。",
+            group: "数据分析",
+            eyebrow: "每日运营",
+            title: "数据分析",
+            description: "查看每日运营数据与累计服务人次。",
             permission: "analytics:data-monitor:view",
             backofficeRoles: ["super_admin", "admin"]
-          }
+          },
+          children: [
+            {
+              path: "",
+              component: DataMonitorPage
+            },
+            {
+              path: "service-visits",
+              component: () => import("../pages/ServiceVisitsPage.vue"),
+              meta: {
+                eyebrow: "服务人次",
+                title: "服务人次",
+                description: "按人员、年度与月份，查看每一次实际领取。"
+              }
+            }
+          ]
+        },
+        {
+          path: "/service-visits",
+          redirect: "/data-monitor/service-visits"
         },
         {
           path: "/warehouse",

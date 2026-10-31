@@ -4,11 +4,12 @@ import { ok } from "../../common/dto/api-response";
 import {
   AllowedBackofficePermissions,
   AllowedBackofficeSessionPermissions,
-  AllowedRoles
+  AllowedRoles,
+  TenantScopedBackofficeRoute
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AnalyticsService } from "./analytics.service";
-import type { BackofficeRole, DataMonitorRange } from "@vm/shared-types";
+import type { BackofficeRole, DataMonitorRange, ServiceVisitQuery } from "@vm/shared-types";
 
 @Controller("analytics")
 @UseGuards(RoleGuard)
@@ -20,6 +21,13 @@ export class AnalyticsController {
   @Get("dashboard")
   dashboard(@Req() request: { authUser?: { backofficeRole?: BackofficeRole } }) {
     return ok(this.analyticsService.getDashboard(request.authUser?.backofficeRole));
+  }
+
+  @Get("service-visits")
+  @TenantScopedBackofficeRoute()
+  @AllowedBackofficePermissions("analytics:data-monitor:view")
+  serviceVisits(@Req() request: { authUser?: { tenantId?: string } }, @Query() query: ServiceVisitQuery) {
+    return ok(this.analyticsService.getServiceVisits(request.authUser?.tenantId, query));
   }
 
   @Get("personas")
