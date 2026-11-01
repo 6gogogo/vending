@@ -58,9 +58,6 @@ const pageCount = computed(() =>
 const displayedPeople = computed(() =>
   filteredPeople.value.slice((page.value - 1) * 8, page.value * 8),
 );
-const maxPersonVisits = computed(() =>
-  Math.max(1, ...(snapshot.value?.people.map((person) => person.visits) ?? [])),
-);
 const comparison = computed(() => {
   const current = snapshot.value?.summary.visits ?? 0;
   const previous = snapshot.value?.previous;
@@ -163,26 +160,6 @@ onMounted(load);
 
 <template>
   <section class="visits-page" :aria-busy="loading">
-    <div class="visits-heading">
-      <div>
-        <span class="visits-eyebrow">每一次领取，都被看见</span>
-        <h2>服务人次，一目了然。</h2>
-      </div>
-      <button class="visits-button" :disabled="loading" @click="load">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.7"
-          aria-hidden="true"
-        >
-          <path d="M20 7v5h-5M4 17v-5h5" />
-          <path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17" />
-        </svg>
-        {{ loading ? "更新中" : "刷新数据" }}
-      </button>
-    </div>
-
     <div class="visits-filters">
       <div class="visits-periods" role="group" aria-label="统计周期">
         <button
@@ -195,315 +172,302 @@ onMounted(load);
           {{ item.label }}
         </button>
       </div>
-      <div class="visits-selectors">
-        <label v-if="period === 'year'" class="visits-select"
-          ><span>年度</span
-          ><select v-model="year" aria-label="选择年度">
-            <option v-for="value in availableYears" :key="value" :value="value">
-              {{ value }} 年
-            </option>
-          </select></label
+      <div class="visits-filter-actions">
+        <div class="visits-selectors">
+          <label v-if="period === 'year'" class="visits-select">
+            <span>年度</span>
+            <select v-model="year" aria-label="选择年度">
+              <option
+                v-for="value in availableYears"
+                :key="value"
+                :value="value"
+              >
+                {{ value }} 年
+              </option>
+            </select>
+          </label>
+          <label v-if="period === 'month'" class="visits-select">
+            <span>月份</span>
+            <input
+              v-model="month"
+              aria-label="选择月份"
+              type="month"
+              min="2000-01"
+              :max="businessToday.slice(0, 7)"
+            />
+          </label>
+          <label class="visits-select visits-person-select">
+            <span class="visits-sr-only">统计人员</span>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="8" r="3.5" />
+              <path d="M5 21v-2a7 7 0 0 1 14 0v2" />
+            </svg>
+            <select v-model="userId" aria-label="按个人统计">
+              <option value="">全部人员</option>
+              <option
+                v-for="person in personOptions"
+                :key="person.userId"
+                :value="person.userId"
+              >
+                {{ person.name }} · {{ person.userId }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <button
+          class="visits-refresh"
+          :disabled="loading"
+          :aria-label="loading ? '正在更新服务统计' : '刷新服务统计'"
+          title="刷新数据"
+          @click="load"
         >
-        <label v-if="period === 'month'" class="visits-select"
-          ><span>月份</span
-          ><input
-            v-model="month"
-            aria-label="选择月份"
-            type="month"
-            min="2000-01"
-            :max="businessToday.slice(0, 7)"
-        /></label>
-        <label class="visits-select visits-person-select"
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             stroke-width="1.7"
             aria-hidden="true"
           >
-            <circle cx="12" cy="8" r="3.5" />
-            <path d="M5 21v-2a7 7 0 0 1 14 0v2" /></svg
-          ><select v-model="userId" aria-label="按个人统计">
-            <option value="">全部人员</option>
-            <option
-              v-for="person in personOptions"
-              :key="person.userId"
-              :value="person.userId"
-            >
-              {{ person.name }} · {{ person.userId }}
-            </option>
-          </select></label
-        >
+            <path d="M20 7v5h-5M4 17v-5h5" />
+            <path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17" />
+          </svg>
+          <span>{{ loading ? "更新中" : "刷新" }}</span>
+        </button>
       </div>
     </div>
 
     <div v-if="error" class="visits-error" role="alert">
-      <strong>暂时无法获取统计</strong>
-      <p>{{ error }}</p>
-      <button class="visits-button" @click="load">重新加载</button>
+      <div>
+        <strong>暂时无法获取统计</strong>
+        <p>{{ error }}</p>
+      </div>
+      <button class="visits-refresh" @click="load">重新加载</button>
     </div>
     <div v-else-if="loading" class="visits-loading" role="status">
-      <div class="visits-skeleton"></div>
-      <div class="visits-skeleton"></div>
-      <div class="visits-skeleton"></div>
       <span>正在汇总领取记录…</span>
+      <div class="visits-skeleton visits-skeleton-overview"></div>
+      <div class="visits-skeleton visits-skeleton-chart"></div>
     </div>
 
     <template v-else-if="snapshot">
       <div class="visits-context" aria-live="polite">
-        <span
-          ><i></i>{{ scopeLabel
-          }}<button v-if="userId" @click="userId = ''">
-            返回全部人员 ×
-          </button></span
-        ><span
-          >{{ snapshot.startDate }} <span class="visits-date-separator">—</span>
-          {{ snapshot.endDate
-          }}<small v-if="period === 'recent-month'">近 30 个业务日</small
-          ><small v-else-if="period === 'recent-year'"
-            >近 365 个业务日</small
-          ></span
-        >
+        <div class="visits-scope">
+          <span>{{ scopeLabel }}</span>
+          <button v-if="userId" @click="userId = ''">清除个人筛选 ×</button>
+        </div>
+        <div class="visits-date-range">
+          <time :datetime="snapshot.startDate">{{ snapshot.startDate }}</time>
+          <span>至</span>
+          <time :datetime="snapshot.endDate">{{ snapshot.endDate }}</time>
+          <small v-if="period === 'recent-month'">近 30 个业务日</small>
+          <small v-else-if="period === 'recent-year'">近 365 个业务日</small>
+        </div>
       </div>
 
-      <div class="visits-summary">
-        <article class="visits-lifetime">
-          <div class="visits-lifetime-top">
-            <span>{{ userId ? "个人累计服务人次" : "累计服务人次" }}</span
-            ><svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              aria-hidden="true"
+      <section class="visits-hero" aria-label="服务数据展示">
+        <div class="visits-hero-layout">
+          <div class="visits-primary">
+            <span class="visits-primary-label">
+              <i aria-hidden="true"></i>{{ periodLabel }}服务人次
+            </span>
+            <div class="visits-primary-value">
+              {{ number(snapshot.summary.visits) }}<small>人次</small>
+            </div>
+            <p
+              class="visits-comparison"
+              :title="
+                snapshot.previous
+                  ? `${snapshot.previous.startDate} 至 ${snapshot.previous.endDate}：${snapshot.previous.visits} 人次`
+                  : undefined
+              "
             >
-              <path d="M4 16l5-5 4 3 7-9M15 5h5v5" />
-            </svg>
+              {{ comparison }}
+            </p>
+            <dl class="visits-hero-metrics">
+              <div>
+                <dt>服务人数</dt>
+                <dd>{{ number(snapshot.summary.people) }}<small>人</small></dd>
+                <p>所选时段内去重</p>
+              </div>
+              <div>
+                <dt>领取物资</dt>
+                <dd>{{ number(snapshot.summary.units) }}<small>件</small></dd>
+                <p>已抵减退回物资</p>
+              </div>
+            </dl>
           </div>
-          <div class="visits-lifetime-value">
-            {{ number(snapshot.lifetime.visits) }}<span>人次</span>
-          </div>
-          <p>自首条有效记录起 · 全部历史累计</p>
-          <div class="visits-lifetime-bottom">
-            <span
-              >覆盖
-              <b>{{ number(snapshot.lifetime.people) }}</b> 位领取人员</span
-            ><span class="visits-lifetime-symbol" aria-hidden="true">↗</span>
-          </div>
-        </article>
-        <article class="visits-metric visits-metric-primary">
-          <span class="visits-metric-label"
-            >{{ periodLabel }}<span class="visits-mini-tag">人次</span></span
-          >
-          <div class="visits-metric-value">
-            {{ number(snapshot.summary.visits) }}<small>次</small>
-          </div>
-          <p
-            :title="
-              snapshot.previous
-                ? `${snapshot.previous.startDate} 至 ${snapshot.previous.endDate}：${snapshot.previous.visits} 人次`
-                : undefined
-            "
-          >
-            {{ comparison }}
-          </p>
-          <span class="visits-metric-note">每次实际领取计 1 人次</span>
-        </article>
-        <article class="visits-metric">
-          <span class="visits-metric-label"
-            >服务人数<svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              aria-hidden="true"
-            >
-              <circle cx="9" cy="8" r="3" />
-              <path
-                d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 4v2"
-              /></svg
-          ></span>
-          <div class="visits-metric-value">
-            {{ number(snapshot.summary.people) }}<small>人</small>
-          </div>
-          <p>所选时段内去重统计</p>
-          <span class="visits-metric-note">同一个人仅计 1 位</span>
-        </article>
-        <article class="visits-metric">
-          <span class="visits-metric-label"
-            >领取物资<svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              aria-hidden="true"
-            >
-              <path
-                d="M12 3L3 8v9l9 5 9-5V8L12 3ZM3 8l9 5 9-5M12 13v9M7.5 5.5l9 5"
-              /></svg
-          ></span>
-          <div class="visits-metric-value">
-            {{ number(snapshot.summary.units) }}<small>件</small>
-          </div>
-          <p>已抵减退回物资</p>
-          <span class="visits-metric-note">本期实际领取总件数</span>
-        </article>
-      </div>
 
-      <article class="visits-chart-panel">
-        <div class="visits-panel-heading">
-          <div>
-            <span class="visits-eyebrow">服务趋势</span>
-            <h3>每一份服务的日常</h3>
-          </div>
-          <span class="visits-chart-legend"
-            ><i></i>领取人次
-            <span
-              >· 按{{
-                snapshot.grain === "day"
-                  ? "日"
-                  : snapshot.grain === "month"
-                    ? "月"
-                    : "年"
-              }}汇总</span
-            ></span
-          >
-        </div>
-        <div class="visits-chart-readout" aria-live="polite">
-          <template v-if="activePoint"
-            ><b>{{ activePoint.label }}</b
-            ><span>{{ number(activePoint.visits) }} 人次</span
-            ><span
-              >{{ number(activePoint.people) }} 人 ·
-              {{ number(activePoint.units) }} 件</span
-            ></template
-          ><template v-else
-            ><span
-              >日均 <b>{{ number(average) }}</b> 人次</span
-            ><span
-              >有领取的业务日 <b>{{ snapshot.summary.activeDays }}</b> 天</span
-            ><span v-if="peak && peak.visits"
-              >峰值 <b>{{ peak.label }}</b> · {{ peak.visits }} 人次</span
-            ></template
-          >
-        </div>
-        <div class="visits-chart-wrap">
-          <svg
-            class="visits-chart"
-            viewBox="0 0 800 264"
-            role="group"
-            aria-label="领取人次趋势图，可聚焦数据点查看具体数值"
-          >
-            <defs>
-              <linearGradient id="visits-area" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#2b8b70" stop-opacity=".19" />
-                <stop offset="100%" stop-color="#2b8b70" stop-opacity=".01" />
-              </linearGradient>
-            </defs>
-            <g v-for="tick in 5" :key="tick">
-              <line
-                x1="52"
-                x2="770"
-                :y1="48 + (tick - 1) * 43"
-                :y2="48 + (tick - 1) * 43"
-                stroke="#e7edea"
-                :stroke-dasharray="tick === 5 ? '0' : '3 5'"
-              />
-              <text
-                x="35"
-                :y="53 + (tick - 1) * 43"
-                text-anchor="end"
-                class="visits-axis"
+          <div class="visits-hero-visual" aria-labelledby="visits-trend-title">
+            <div class="visits-hero-chart-heading">
+              <div class="visits-hero-chart-title">
+                <h3 id="visits-trend-title">服务趋势</h3>
+                <span>
+                  领取人次 · 按{{
+                    snapshot.grain === "day"
+                      ? "日"
+                      : snapshot.grain === "month"
+                        ? "月"
+                        : "年"
+                  }}汇总
+                </span>
+              </div>
+              <div class="visits-chart-readout" aria-live="polite">
+                <template v-if="activePoint">
+                  <b>{{ activePoint.label }}</b>
+                  <span>{{ number(activePoint.visits) }} 人次</span>
+                  <span>
+                    {{ number(activePoint.people) }} 人 ·
+                    {{ number(activePoint.units) }} 件
+                  </span>
+                </template>
+                <span v-else>
+                  <b>{{ snapshot.summary.activeDays }}</b> 个活跃业务日
+                </span>
+              </div>
+            </div>
+            <div class="visits-chart-wrap">
+              <svg
+                v-if="snapshot.summary.visits"
+                class="visits-chart"
+                viewBox="0 0 800 264"
+                role="group"
+                aria-label="领取人次趋势图，可聚焦数据点查看具体数值"
               >
-                {{ number((ceiling * (5 - tick)) / 4) }}
-              </text>
-            </g>
-            <path :d="chartArea" fill="url(#visits-area)" />
-            <polyline
-              :points="chartLine"
-              fill="none"
-              stroke="#278269"
-              stroke-width="2.6"
-              stroke-linejoin="round"
-              stroke-linecap="round"
-            />
-            <line
-              v-if="activePoint"
-              :x1="activePoint.x"
-              :x2="activePoint.x"
-              y1="45"
-              y2="220"
-              stroke="#85b7a7"
-              stroke-dasharray="4 4"
-            />
-            <g
-              v-for="(point, index) in points"
-              :key="point.key"
-              tabindex="0"
-              role="img"
-              :aria-label="`${point.label}，${point.visits} 人次，${point.people} 人，${point.units} 件`"
-              @mouseenter="hovered = index"
-              @mouseleave="hovered = undefined"
-              @focus="hovered = index"
-              @blur="hovered = undefined"
-              @click="hovered = index"
-            >
-              <rect
-                :x="point.x - Math.min(16, 350 / points.length)"
-                y="40"
-                :width="Math.min(32, 700 / points.length)"
-                height="182"
-                fill="transparent"
-              />
-              <circle
-                :cx="point.x"
-                :cy="point.y"
-                :r="hovered === index ? 5 : points.length < 16 ? 3 : 0"
-                fill="#278269"
-                stroke="white"
-                stroke-width="2"
-              />
-              <title>
-                {{ point.label }}：{{ point.visits }} 人次 ·
-                {{ point.people }} 人 · {{ point.units }} 件
-              </title>
-            </g>
-            <text
-              v-for="point in chartLabels"
-              :key="point.key"
-              :x="point.x"
-              y="250"
-              text-anchor="middle"
-              class="visits-axis"
-            >
-              {{ point.label }}
-            </text>
-          </svg>
-          <div v-if="!snapshot.summary.visits" class="visits-chart-empty">
-            <strong>这段时间，还没有领取记录</strong
-            ><span>可切换月份或查看全部累计。</span>
+                <defs>
+                  <linearGradient id="visits-area" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#2d7154" stop-opacity=".38" />
+                    <stop offset="100%" stop-color="#2d7154" stop-opacity=".015" />
+                  </linearGradient>
+                </defs>
+                <g v-for="tick in 5" :key="tick">
+                  <line
+                    x1="52"
+                    x2="770"
+                    :y1="48 + (tick - 1) * 43"
+                    :y2="48 + (tick - 1) * 43"
+                    stroke="#d7f8e8"
+                    stroke-opacity=".14"
+                    :stroke-dasharray="tick === 5 ? '0' : '3 5'"
+                  />
+                  <text
+                    x="35"
+                    :y="53 + (tick - 1) * 43"
+                    text-anchor="end"
+                    class="visits-axis"
+                  >
+                    {{ number((ceiling * (5 - tick)) / 4) }}
+                  </text>
+                </g>
+                <path :d="chartArea" fill="url(#visits-area)" />
+                <polyline
+                  class="visits-chart-line"
+                  :points="chartLine"
+                  fill="none"
+                  stroke="#2d7154"
+                  stroke-width="2.6"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"
+                />
+                <line
+                  v-if="activePoint"
+                  :x1="activePoint.x"
+                  :x2="activePoint.x"
+                  y1="45"
+                  y2="220"
+                  stroke="#b5e7ce"
+                  stroke-opacity=".65"
+                  stroke-dasharray="4 4"
+                />
+                <g
+                  v-for="(point, index) in points"
+                  :key="point.key"
+                  tabindex="0"
+                  role="img"
+                  :aria-label="`${point.label}，${point.visits} 人次，${point.people} 人，${point.units} 件`"
+                  @mouseenter="hovered = index"
+                  @mouseleave="hovered = undefined"
+                  @focus="hovered = index"
+                  @blur="hovered = undefined"
+                  @click="hovered = index"
+                >
+                  <rect
+                    :x="point.x - Math.min(16, 350 / points.length)"
+                    y="40"
+                    :width="Math.min(32, 700 / points.length)"
+                    height="182"
+                    fill="transparent"
+                  />
+                  <circle
+                    :cx="point.x"
+                    :cy="point.y"
+                    :r="hovered === index ? 5 : points.length < 16 ? 3 : 0"
+                    fill="#b8f6cf"
+                    stroke="#0c2c26"
+                    stroke-width="2"
+                  />
+                  <title>
+                    {{ point.label }}：{{ point.visits }} 人次 ·
+                    {{ point.people }} 人 · {{ point.units }} 件
+                  </title>
+                </g>
+                <text
+                  v-for="point in chartLabels"
+                  :key="point.key"
+                  :x="point.x"
+                  y="250"
+                  text-anchor="middle"
+                  class="visits-axis"
+                >
+                  {{ point.label }}
+                </text>
+              </svg>
+              <div v-else class="visits-chart-empty">
+                <strong>当前时段暂无领取记录</strong>
+                <span>可切换统计周期，或查看其他人员的记录。</span>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="visits-chart-foot">
-          <span>同一次领取多件物资，仅计 1 人次；未领取的日期保留为 0。</span
-          ><span v-if="snapshot.previous"
-            >对比周期 {{ snapshot.previous.startDate }} —
-            {{ snapshot.previous.endDate }}</span
-          >
-        </div>
-      </article>
 
-      <article class="visits-people-panel">
+        <dl class="visits-hero-footer">
+          <div>
+            <dt>累计服务</dt>
+            <dd>{{ number(snapshot.lifetime.visits) }}<small>人次</small></dd>
+            <p>覆盖 {{ number(snapshot.lifetime.people) }} 位领取人员</p>
+          </div>
+          <div>
+            <dt>日均服务</dt>
+            <dd>{{ number(average) }}<small>人次</small></dd>
+            <p>按所选起止日期计算</p>
+          </div>
+          <div>
+            <dt>服务峰值</dt>
+            <dd>{{ number(peak?.visits ?? 0) }}<small>人次</small></dd>
+            <p>{{ peak?.visits ? peak.label : "当前时段暂无峰值" }}</p>
+          </div>
+        </dl>
+        <div class="visits-hero-note">
+          <span>每次实际领取计 1 人次，同次多件不重复；未领取的日期保留为 0。</span>
+          <span v-if="snapshot.previous">
+            对比周期 {{ snapshot.previous.startDate }} — {{ snapshot.previous.endDate }}
+          </span>
+        </div>
+      </section>
+
+      <section class="visits-people-panel" aria-labelledby="visits-people-title">
         <div class="visits-panel-heading">
           <div>
-            <span class="visits-eyebrow">落实到每一个人</span>
-            <h3>
-              个人服务统计
-              <span class="visits-count">{{ snapshot.people.length }}</span>
-            </h3>
+            <h3 id="visits-people-title">个人明细</h3>
+            <p>{{ snapshot.people.length }} 位有领取记录的人员</p>
           </div>
-          <label class="visits-search"
-            ><svg
+          <label class="visits-search">
+            <svg
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -511,25 +475,20 @@ onMounted(load);
               aria-hidden="true"
             >
               <circle cx="10.5" cy="10.5" r="6.5" />
-              <path d="m16 16 5 5" /></svg
-            ><input
+              <path d="m16 16 5 5" />
+            </svg>
+            <input
               v-model="search"
               type="search"
               aria-label="搜索姓名、人员编号或社区"
               placeholder="搜索姓名、编号或社区"
-          /></label>
+            />
+          </label>
         </div>
-        <p class="visits-mobile-hint">左右滑动，查看完整个人明细</p>
         <div class="visits-table-wrap">
           <table class="visits-table">
             <caption class="visits-sr-only">
-              {{
-                snapshot.startDate
-              }}
-              至
-              {{
-                snapshot.endDate
-              }}
+              {{ snapshot.startDate }} 至 {{ snapshot.endDate }}
               个人领取统计，按本期人次从高到低排列
             </caption>
             <thead>
@@ -544,63 +503,50 @@ onMounted(load);
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-for="(person, index) in displayedPeople"
-                :key="person.userId"
-              >
+              <tr v-for="person in displayedPeople" :key="person.userId">
                 <td>
                   <div class="visits-person">
-                    <span
-                      class="visits-avatar"
-                      :class="`visits-avatar-${index % 3}`"
-                      >{{ person.name.slice(0, 1) }}</span
-                    ><span
-                      ><strong>{{ person.name }}</strong
-                      ><small
-                        >{{ person.neighborhood }} · {{ person.userId }}</small
-                      ></span
-                    >
+                    <strong>{{ person.name }}</strong>
+                    <small>{{ person.neighborhood }} · {{ person.userId }}</small>
                   </div>
                 </td>
-                <td>
-                  <div class="visits-person-total">
-                    <b>{{ number(person.visits) }}</b
-                    ><span class="visits-bar"
-                      ><i
-                        :style="{
-                          width: `${(person.visits / maxPersonVisits) * 100}%`,
-                        }"
-                      ></i
-                    ></span>
-                  </div>
+                <td class="visits-person-visits" data-label="本期人次">
+                  <strong>{{ number(person.visits) }}</strong>
                 </td>
-                <td class="visits-numeric">
+                <td class="visits-numeric" data-label="累计人次">
                   {{ number(person.lifetimeVisits) }}
                 </td>
-                <td class="visits-numeric">{{ number(person.units) }}</td>
-                <td class="visits-numeric">{{ person.activeDays }}</td>
-                <td class="visits-last-date">
+                <td class="visits-numeric" data-label="领取件数">
+                  {{ number(person.units) }}
+                </td>
+                <td class="visits-numeric" data-label="服务天数">
+                  {{ person.activeDays }}
+                </td>
+                <td class="visits-last-date" data-label="本期最近领取">
                   {{ formatDateTime(person.lastPickupAt) }}
                 </td>
-                <td>
+                <td class="visits-person-action">
                   <button
                     class="visits-detail"
                     :aria-label="`查看${person.name}的个人统计`"
                     :disabled="userId === person.userId"
                     @click="userId = person.userId"
                   >
-                    {{ userId === person.userId ? "当前人员" : "查看趋势"
-                    }}<span aria-hidden="true"> ↗</span>
+                    {{ userId === person.userId ? "当前人员" : "查看趋势" }}
+                    <span v-if="userId !== person.userId" aria-hidden="true">↗</span>
                   </button>
                 </td>
               </tr>
-              <tr v-if="!displayedPeople.length">
+              <tr v-if="!displayedPeople.length" class="visits-empty-row">
                 <td colspan="7" class="visits-table-empty">
-                  {{
-                    search
-                      ? "没有匹配的人员，试试其他姓名或社区。"
-                      : "暂无领取人员，产生领取记录后将在这里显示。"
-                  }}
+                  <strong>{{ search ? "没有匹配的人员" : "暂无领取人员" }}</strong>
+                  <span>
+                    {{
+                      search
+                        ? "试试其他姓名、人员编号或社区。"
+                        : "产生领取记录后，个人明细会显示在这里。"
+                    }}
+                  </span>
                 </td>
               </tr>
             </tbody>
@@ -610,9 +556,10 @@ onMounted(load);
           <span>共 {{ filteredPeople.length }} 人 · 按本期领取人次排序</span>
           <div class="visits-pagination">
             <button :disabled="page <= 1" aria-label="上一页" @click="page--">
-              ←</button
-            ><span>{{ page }} / {{ pageCount }}</span
-            ><button
+              ←
+            </button>
+            <span>{{ page }} / {{ pageCount }}</span>
+            <button
               :disabled="page >= pageCount"
               aria-label="下一页"
               @click="page++"
@@ -621,7 +568,7 @@ onMounted(load);
             </button>
           </div>
         </div>
-      </article>
+      </section>
 
       <footer class="visits-notes">
         <details>
@@ -638,17 +585,14 @@ onMounted(load);
             个业务日；按年、按月为指定自然年/月，当前周期截至今日。对比采用紧邻的上一等长周期。
           </p>
           <p v-if="snapshot.legacyVisitCount">
-            本期有
-            {{
-              snapshot.legacyVisitCount
-            }}
+            本期有 {{ snapshot.legacyVisitCount }}
             次历史记录缺少订单/开柜编号，按人员、柜机及完全相同的领取时间合并，无法追溯更细的订单边界。
           </p>
         </details>
-        <span
-          >更新于 {{ formatDateTime(snapshot.generatedAt) }} ·
-          <RouterLink to="/data-monitor">查看按日运营数据 ↗</RouterLink></span
-        >
+        <span>
+          更新于 {{ formatDateTime(snapshot.generatedAt) }} ·
+          <RouterLink to="/data-monitor">查看按日运营数据 ↗</RouterLink>
+        </span>
       </footer>
     </template>
   </section>
@@ -656,326 +600,293 @@ onMounted(load);
 
 <style scoped>
 .visits-page {
-  --visit-green: #216e56;
-  --visit-muted: #63736d;
   display: grid;
-  gap: 22px;
-  color: #233a30;
+  gap: 20px;
+  color: var(--admin-text);
 }
-.visits-heading,
-.visits-panel-heading,
+.visits-filters,
+.visits-filter-actions,
+.visits-selectors,
 .visits-context,
+.visits-scope,
+.visits-date-range,
+.visits-panel-heading,
 .visits-table-foot,
 .visits-notes {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 16px;
-}
-.visits-heading h2 {
-  margin: 7px 0 0;
-  font-size: 23px;
-  font-weight: 600;
-  letter-spacing: -0.7px;
-}
-.visits-eyebrow {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
-  color: var(--visit-muted);
-}
-.visits-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 15px;
-  border: 1px solid #d9e2dd;
-  background: white;
-  color: #37564a;
-  border-radius: 8px;
-  white-space: nowrap;
-}
-.visits-page svg:not(.visits-chart) {
-  width: 19px;
-  height: 19px;
-  flex-shrink: 0;
 }
 .visits-filters {
-  display: flex;
-  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
-  background: #fff;
-  border: 1px solid #dfe7e2;
-  border-radius: 12px;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--admin-line);
 }
 .visits-periods {
   display: flex;
-  gap: 3px;
-  padding: 3px;
-  border-radius: 8px;
-  background: #f1f4f2;
+  align-items: center;
+  gap: 4px;
 }
 .visits-periods button {
+  min-height: 38px;
+  padding: 8px 13px;
   border: 0;
-  padding: 9px 13px;
   border-radius: 6px;
   background: transparent;
-  color: #60736a;
+  color: var(--admin-text-muted);
   font-size: 12px;
   white-space: nowrap;
-  transition:
-    background 0.18s,
-    color 0.18s;
+  transition: background-color 160ms, color 160ms;
+}
+.visits-periods button:hover {
+  background: #edf2f0;
+  color: var(--admin-text);
 }
 .visits-periods button.selected {
-  background: #fff;
-  color: #205d48;
-  box-shadow: 0 1px 5px #183b2412;
-  font-weight: 700;
+  background: #e6f2ed;
+  color: var(--admin-accent-strong);
+  font-weight: 650;
 }
+.visits-filter-actions,
 .visits-selectors {
-  display: flex;
-  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
 }
 .visits-select {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #dce5df;
-  border-radius: 7px;
+  min-height: 38px;
   padding: 0 10px;
+  border: 1px solid var(--admin-line-strong);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--admin-muted);
   font-size: 12px;
-  color: #65756b;
-  min-height: 40px;
 }
 .visits-select select,
 .visits-select input {
+  min-width: 0;
+  max-width: 220px;
+  padding: 7px 2px;
   border: 0;
   background: transparent;
-  color: #304b3e;
-  padding: 7px 2px;
-  min-width: 0;
-  max-width: 215px;
+  color: var(--admin-text);
+}
+.visits-select select:focus-visible,
+.visits-select input:focus-visible,
+.visits-search input:focus-visible {
+  box-shadow: none;
+}
+.visits-select:focus-within,
+.visits-search:focus-within {
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-focus);
+}
+.visits-page svg:not(.visits-chart) {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.visits-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--admin-line-strong);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--admin-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.visits-refresh:not(:disabled):hover {
+  background: var(--admin-panel-muted);
+  color: var(--admin-accent-strong);
 }
 .visits-context {
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-top: -4px;
+  color: var(--admin-text-muted);
   font-size: 12px;
-  color: #52695c;
-  margin: -4px 2px;
   flex-wrap: wrap;
 }
-.visits-context > span {
+.visits-scope,
+.visits-date-range {
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.visits-scope > span {
+  color: var(--admin-text);
+  font-weight: 600;
+}
+.visits-scope button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--admin-accent-strong);
+  font-size: 11px;
+}
+.visits-date-range {
+  color: var(--admin-muted);
+  font-variant-numeric: tabular-nums;
+}
+.visits-date-range small {
+  padding-left: 9px;
+  border-left: 1px solid var(--admin-line-strong);
+  font-size: 11px;
+}
+.visits-hero {
+  --hero-paper: var(--admin-panel);
+  --hero-paper-strong: var(--admin-panel);
+  --hero-ink: var(--admin-text);
+  --hero-muted: var(--admin-muted);
+  --hero-line: var(--admin-line);
+  --hero-accent: var(--admin-accent);
+  --hero-highlight: var(--admin-accent);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-panel);
+  box-shadow: var(--admin-shadow);
+  color: var(--hero-ink);
+}
+.visits-hero-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.78fr) minmax(0, 1.8fr);
+  gap: 32px;
+  padding: 27px 28px 24px;
+}
+.visits-primary {
   display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding-right: 32px;
+  border-right: 1px solid var(--hero-line);
 }
-.visits-context i,
-.visits-chart-legend i {
-  display: inline-block;
+.visits-primary-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--admin-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.visits-primary-label i {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #2c8668;
+  background: var(--hero-highlight);
 }
-.visits-context button {
-  border: 0;
-  border-bottom: 1px solid #9cbaad;
-  color: #2c6c51;
-  background: transparent;
-  font-size: 11px;
-  padding: 0;
+.visits-primary-value {
+  margin: 14px 0 12px;
+  color: var(--admin-accent-strong);
+  font-size: clamp(38px, 4vw, 52px);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
-.visits-context small {
-  background: #e8eee9;
-  color: #52685b;
-  border-radius: 4px;
-  padding: 3px 7px;
-  font-size: 10px;
+.visits-primary-value small {
+  margin-left: 10px;
+  color: var(--hero-muted);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
 }
-.visits-date-separator {
-  color: #8ca394;
+.visits-comparison {
+  margin: 0;
+  color: var(--hero-muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
-.visits-summary {
+.visits-hero-metrics {
   display: grid;
-  grid-template-columns: 1.28fr repeat(3, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 26px 0 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--hero-line);
 }
-.visits-lifetime,
-.visits-metric {
-  padding: 24px 22px 20px;
-  border-radius: 12px;
+.visits-hero-metrics > div {
   min-width: 0;
 }
-.visits-lifetime {
-  position: relative;
-  overflow: hidden;
-  color: #f0f9f2;
-  background: #1d4e3c;
-  border: 1px solid #1d4e3c;
+.visits-hero-metrics dt,
+.visits-hero-footer dt {
+  color: var(--hero-muted);
+  font-size: 11px;
 }
-.visits-lifetime::after {
-  content: "";
-  position: absolute;
-  width: 200px;
-  height: 200px;
-  border: 1px solid #c0dbbd18;
-  border-radius: 50%;
-  right: -100px;
-  top: 20px;
-  box-shadow:
-    0 0 0 28px #c0dbbd08,
-    0 0 0 56px #c0dbbd06;
-  pointer-events: none;
-}
-.visits-lifetime-top,
-.visits-metric-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-.visits-lifetime-top {
-  color: #d1e4d7;
-}
-.visits-lifetime-value {
-  position: relative;
-  z-index: 1;
-  font:
-    500 clamp(32px, 3.8vw, 49px)/1.1 "Segoe UI",
-    sans-serif;
+.visits-hero-metrics dd {
+  margin: 9px 0 5px;
+  color: var(--hero-ink);
+  font-size: 28px;
+  font-weight: 550;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -1.8px;
-  margin: 22px 0 9px;
   overflow-wrap: anywhere;
 }
-.visits-lifetime-value span {
-  font:
-    12px "Microsoft YaHei",
-    sans-serif;
-  margin-left: 9px;
+.visits-hero-metrics dd small,
+.visits-hero-footer dd small {
+  margin-left: 6px;
+  color: var(--hero-muted);
+  font-size: 11px;
+  font-weight: 400;
   letter-spacing: 0;
-  color: #d0e2d4;
 }
-.visits-lifetime p {
-  font-size: 10px;
-  color: #bfd3c5;
+.visits-hero-metrics p,
+.visits-hero-footer p,
+.visits-panel-heading p {
   margin: 0;
+  color: var(--hero-muted);
+  font-size: 10px;
+  line-height: 1.6;
 }
-.visits-lifetime-bottom {
+.visits-hero-visual {
+  min-width: 0;
+  align-self: center;
+}
+.visits-hero-chart-heading {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  margin-top: 21px;
-  border-top: 1px solid #cde5d327;
-  padding-top: 13px;
-  color: #d4e8da;
+  gap: 16px;
+  min-height: 40px;
+  margin-bottom: 8px;
 }
-.visits-lifetime-bottom b {
-  font-weight: 600;
-  color: #fff;
-}
-.visits-lifetime-symbol {
-  color: #c3daa4;
-  font-size: 20px;
-  line-height: 1;
-}
-.visits-metric {
-  background: white;
-  border: 1px solid #dfe6e1;
-}
-.visits-metric-primary {
-  background: #f7faf6;
-  border-color: #cfdecf;
-}
-.visits-metric-label {
-  color: #51685a;
-}
-.visits-metric-label svg {
-  opacity: 0.7;
-}
-.visits-mini-tag {
-  font-size: 9px;
-  color: #4e7054;
-  background: #e6efdf;
-  padding: 3px 6px;
-  border-radius: 4px;
-}
-.visits-metric-value {
-  font:
-    500 clamp(27px, 3vw, 38px)/1.1 "Segoe UI",
-    sans-serif;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -1.2px;
-  margin: 24px 0 13px;
-  overflow-wrap: anywhere;
-}
-.visits-metric-value small {
-  font:
-    11px "Microsoft YaHei",
-    sans-serif;
-  margin-left: 7px;
-  color: #738275;
-}
-.visits-metric p {
-  font-size: 10px;
-  color: #4e7258;
+.visits-hero-chart-title h3 {
   margin: 0;
-  min-height: 28px;
+  color: var(--hero-ink);
+  font-size: 16px;
+  font-weight: 650;
 }
-.visits-metric-note {
+.visits-hero-chart-title > span {
   display: block;
-  margin-top: 20px;
+  margin-top: 5px;
+  color: var(--hero-muted);
   font-size: 10px;
-  color: #6a786d;
-  border-top: 1px solid #edf0ed;
-  padding-top: 13px;
-}
-.visits-chart-panel,
-.visits-people-panel {
-  background: #fff;
-  border: 1px solid #dfe7e2;
-  border-radius: 12px;
-  overflow: hidden;
-}
-.visits-chart-panel {
-  padding: 24px 26px 0;
-}
-.visits-panel-heading h3 {
-  font-size: 18px;
-  margin: 7px 0 0;
-  font-weight: 600;
-  letter-spacing: -0.4px;
-}
-.visits-chart-legend {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 11px;
-  color: #466650;
-}
-.visits-chart-legend > span {
-  color: #79847a;
 }
 .visits-chart-readout {
   display: flex;
-  gap: 22px;
   align-items: center;
-  flex-wrap: wrap;
-  margin-top: 20px;
-  font-size: 11px;
-  color: #6b7c70;
+  justify-content: flex-end;
+  gap: 5px 14px;
+  max-width: 62%;
   min-height: 20px;
+  color: var(--hero-muted);
+  font-size: 11px;
+  text-align: right;
+  flex-wrap: wrap;
 }
 .visits-chart-readout b {
-  color: #294e3a;
-  font-weight: 600;
-  margin: 0 3px;
+  color: var(--hero-accent);
+  font-weight: 650;
 }
 .visits-chart-wrap {
   position: relative;
@@ -984,93 +895,151 @@ onMounted(load);
   display: block;
   width: 100%;
   height: auto;
-  max-height: 325px;
+  max-height: 260px;
   overflow: visible;
 }
+#visits-area stop:first-child {
+  stop-color: var(--hero-accent);
+  stop-opacity: 0.22;
+}
+#visits-area stop:last-child {
+  stop-color: var(--hero-accent);
+  stop-opacity: 0.025;
+}
+.visits-chart-line {
+  stroke: var(--hero-accent);
+}
+.visits-chart > g > line {
+  stroke: var(--hero-line);
+  stroke-opacity: 1;
+}
+.visits-chart > line {
+  stroke: var(--hero-highlight);
+  stroke-opacity: 0.65;
+}
+.visits-chart g[tabindex] circle {
+  fill: var(--hero-highlight);
+  stroke: var(--hero-paper-strong);
+}
 .visits-axis {
-  font:
-    11px "Segoe UI",
-    "Microsoft YaHei",
-    sans-serif;
-  fill: #6b7a70;
+  fill: var(--hero-muted);
+  font: 11px "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 .visits-chart g[tabindex] {
   cursor: crosshair;
   outline: none;
 }
 .visits-chart g[tabindex]:focus-visible circle {
-  stroke: #132d20;
+  stroke: var(--hero-ink);
   stroke-width: 3;
 }
 .visits-chart-empty {
-  position: absolute;
-  left: 50%;
-  top: 45%;
-  transform: translate(-50%, -50%);
-  text-align: center;
   display: grid;
-  gap: 7px;
-  padding: 17px 25px;
-  border: 1px solid #e5ece5;
-  border-radius: 9px;
-  background: #fffffff2;
-  width: max-content;
-  max-width: 95%;
-  font-size: 12px;
-  color: #798679;
-  pointer-events: none;
+  place-content: center;
+  gap: 8px;
+  min-height: 240px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.visits-chart-empty::before {
+  content: "";
+  width: 48px;
+  height: 26px;
+  margin: 0 auto 8px;
+  border-bottom: 1px solid var(--hero-line);
+  background: linear-gradient(155deg, transparent 47%, #087f6e33 48%, #087f6e33 52%, transparent 53%);
 }
 .visits-chart-empty strong {
-  font-size: 13px;
-  color: #526958;
-  font-weight: 500;
+  color: var(--hero-ink);
+  font-size: 14px;
+  font-weight: 600;
 }
-.visits-chart-foot {
+.visits-chart-empty span {
+  color: var(--hero-muted);
+  font-size: 12px;
+}
+.visits-hero-footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--hero-line);
+  background: var(--admin-panel-muted);
+}
+.visits-hero-footer > div {
+  min-width: 0;
+  padding: 19px 30px;
+  border-left: 1px solid var(--hero-line);
+}
+.visits-hero-footer > div:first-child {
+  border-left: 0;
+}
+.visits-hero-footer dd {
+  margin: 8px 0 5px;
+  color: var(--hero-ink);
+  font-size: 24px;
+  font-weight: 550;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.visits-hero-note {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  border-top: 1px solid #edf1ed;
-  padding: 14px 0;
+  gap: 8px 20px;
+  padding: 13px 30px;
+  border-top: 1px solid var(--hero-line);
+  color: var(--hero-muted);
   font-size: 10px;
-  color: #748174;
+  flex-wrap: wrap;
+}
+.visits-people-panel {
+  overflow: hidden;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: #fff;
+}
+.visits-panel-heading {
+  justify-content: space-between;
+  gap: 16px;
+}
+.visits-panel-heading h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.visits-panel-heading p {
+  margin-top: 5px;
+  color: var(--admin-muted);
+  font-size: 11px;
 }
 .visits-people-panel .visits-panel-heading {
-  padding: 24px 26px 20px;
-}
-.visits-count {
-  font-size: 11px;
-  vertical-align: middle;
-  background: #edf2ec;
-  color: #5d745c;
-  padding: 3px 7px;
-  border-radius: 5px;
-  margin-left: 6px;
+  padding: 22px 26px 19px;
 }
 .visits-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
-  border: 1px solid #e1e8e1;
-  border-radius: 7px;
-  color: #829082;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--admin-line-strong);
+  border-radius: 6px;
+  color: var(--admin-muted);
 }
 .visits-search input {
-  width: 175px;
+  width: 190px;
   max-width: 100%;
   min-width: 0;
+  padding: 0;
   border: 0;
   background: transparent;
-  font-size: 11px;
-  color: #3f5a46;
+  color: var(--admin-text);
+  font-size: 12px;
 }
 .visits-table-wrap {
-  position: relative;
   overflow-x: auto;
-}
-.visits-mobile-hint {
-  display: none;
 }
 .visits-table {
   width: 100%;
@@ -1079,18 +1048,22 @@ onMounted(load);
   white-space: nowrap;
 }
 .visits-table th {
-  color: #6d7d70;
-  font-size: 10px;
+  padding: 11px 16px;
+  border-block: 1px solid var(--admin-line);
+  background: #f7f9f8;
+  color: var(--admin-muted);
+  font-size: 11px;
   font-weight: 500;
-  background: #f7f9f6;
   text-align: left;
-  padding: 12px 16px;
-  border-block: 1px solid #eaf0e8;
 }
 .visits-table td {
-  padding: 17px 16px;
-  border-bottom: 1px solid #eef2ed;
+  padding: 16px;
+  border-bottom: 1px solid #edf1ef;
+  vertical-align: middle;
   font-variant-numeric: tabular-nums;
+}
+.visits-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 .visits-table th:first-child,
 .visits-table td:first-child {
@@ -1101,159 +1074,163 @@ onMounted(load);
   padding-right: 26px;
 }
 .visits-table tbody tr:hover {
-  background: #fafcf9;
+  background: #fafcfa;
 }
 .visits-table .visits-numeric {
   text-align: right;
 }
-.visits-person {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 .visits-person strong {
   display: block;
-  font-weight: 500;
   font-size: 12px;
+  font-weight: 600;
 }
 .visits-person small {
   display: block;
-  font-size: 9px;
-  color: #7a887c;
   margin-top: 4px;
+  color: var(--admin-muted);
+  font-size: 10px;
 }
-.visits-avatar {
-  width: 33px;
-  height: 33px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #eaf1e8;
-  color: #637d51;
-  font-size: 12px;
-}
-.visits-avatar-1 {
-  background: #f5ede0;
-  color: #95784d;
-}
-.visits-avatar-2 {
-  background: #e9eef2;
-  color: #58768c;
-}
-.visits-person-total {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 85px;
-}
-.visits-person-total b {
-  font-weight: 600;
-  min-width: 18px;
-  color: #2f5d41;
-}
-.visits-bar {
-  width: 55px;
-  height: 4px;
-  border-radius: 4px;
-  background: #edf2eb;
-  overflow: hidden;
-}
-.visits-bar i {
-  display: block;
-  height: 100%;
-  background: #8eaf81;
-  border-radius: inherit;
+.visits-person-visits strong {
+  color: var(--admin-accent-strong);
+  font-size: 14px;
+  font-weight: 650;
 }
 .visits-last-date {
-  color: #6c7f71;
-  font-size: 10px;
+  color: var(--admin-text-muted);
+  font-size: 11px;
 }
 .visits-detail {
+  min-height: 30px;
+  padding: 4px 0;
   border: 0;
-  padding: 5px 0;
   background: transparent;
-  color: #417454;
-  font-size: 10px;
+  color: var(--admin-accent-strong);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.visits-detail:not(:disabled):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .visits-table-foot {
-  padding: 15px 26px;
-  color: #768577;
-  font-size: 10px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 26px;
+  border-top: 1px solid var(--admin-line);
+  color: var(--admin-muted);
+  font-size: 11px;
 }
 .visits-pagination {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .visits-pagination button {
-  border: 1px solid #dfe8dd;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--admin-line-strong);
   border-radius: 5px;
-  background: white;
-  color: #5c765c;
-  width: 28px;
-  height: 27px;
+  background: #fff;
+  color: var(--admin-text-muted);
+}
+.visits-pagination button:not(:disabled):hover {
+  background: var(--admin-panel-muted);
 }
 .visits-table .visits-table-empty {
+  padding: 42px 20px;
   text-align: center;
-  color: #738575;
-  padding: 40px 20px;
+  white-space: normal;
+}
+.visits-table-empty strong,
+.visits-table-empty span {
+  display: block;
+}
+.visits-table-empty strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.visits-table-empty span {
+  margin-top: 6px;
+  color: var(--admin-muted);
+  font-size: 12px;
 }
 .visits-notes {
+  justify-content: space-between;
   align-items: flex-start;
-  color: #6e7f71;
-  font-size: 10px;
-  padding: 0 3px 12px;
+  gap: 14px 24px;
+  padding: 0 2px 10px;
+  color: var(--admin-muted);
+  font-size: 11px;
   flex-wrap: wrap;
 }
 .visits-notes details {
-  max-width: 630px;
+  max-width: 700px;
 }
 .visits-notes summary {
-  cursor: pointer;
   width: fit-content;
+  cursor: pointer;
+  color: var(--admin-text-muted);
 }
 .visits-notes p {
   line-height: 1.9;
 }
 .visits-notes a {
-  color: #416c50;
+  color: var(--admin-accent-strong);
   text-decoration: none;
+}
+.visits-notes a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .visits-page button:disabled {
   opacity: 0.45;
   cursor: default;
-}
-.visits-page button:not(:disabled):hover {
-  filter: brightness(0.96);
 }
 .visits-page :is(button, input, select, summary):focus-visible {
   outline: 2px solid #72a68a;
   outline-offset: 3px;
 }
 .visits-error {
-  padding: 36px;
-  border-radius: 12px;
-  background: #fff6f3;
-  border: 1px solid #edc9be;
-  color: #914d37;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 26px;
+  border: 1px solid #ead6d0;
+  border-radius: 10px;
+  background: #fffaf8;
+}
+.visits-error strong {
+  color: #8e4337;
+  font-size: 14px;
+}
+.visits-error p {
+  margin: 6px 0 0;
+  color: #875e55;
+  font-size: 12px;
 }
 .visits-loading {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
-  gap: 16px;
-  padding-bottom: 220px;
+  gap: 14px;
 }
 .visits-loading > span {
-  grid-column: 1 / -1;
-  color: #788a7a;
+  color: var(--admin-muted);
   font-size: 12px;
 }
 .visits-skeleton {
-  height: 210px;
-  border-radius: 12px;
-  background: linear-gradient(110deg, #e7eee7 25%, #f8faf6 45%, #e7eee7 65%);
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: linear-gradient(110deg, #edf1ef 25%, #f8faf9 45%, #edf1ef 65%);
   background-size: 250% 100%;
   animation: visits-shimmer 1.5s infinite;
+}
+.visits-skeleton-overview {
+  height: 440px;
+  border-radius: 16px;
+}
+.visits-skeleton-chart {
+  height: 180px;
 }
 .visits-sr-only {
   position: absolute;
@@ -1267,103 +1244,185 @@ onMounted(load);
     background-position: -150% 0;
   }
 }
-@media (max-width: 1350px) {
-  .visits-summary {
-    gap: 10px;
+@media (max-width: 1180px) {
+  .visits-filters {
+    align-items: flex-start;
+    flex-direction: column;
   }
-  .visits-lifetime,
-  .visits-metric {
-    padding: 21px 16px 17px;
+  .visits-filter-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .visits-selectors {
+    justify-content: flex-start;
   }
 }
-@media (max-width: 900px) {
-  .visits-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 1000px) {
+  .visits-hero-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
   }
-  .visits-heading h2 {
-    font-size: 19px;
+  .visits-primary {
+    padding: 0 0 23px;
+    border-right: 0;
+    border-bottom: 1px solid var(--hero-line);
   }
-  .visits-chart-foot {
-    flex-direction: column;
+  .visits-primary-value {
+    margin-block: 12px 9px;
+  }
+  .visits-hero-metrics {
+    max-width: 380px;
+    margin-top: 20px;
+  }
+  .visits-hero-chart-heading {
+    margin-bottom: 0;
+  }
+}
+@media (max-width: 800px) {
+  .visits-page {
+    gap: 18px;
+  }
+  .visits-periods button,
+  .visits-select,
+  .visits-refresh,
+  .visits-search {
+    min-height: 44px;
+  }
+  .visits-select select,
+  .visits-select input,
+  .visits-search input {
+    font-size: 16px;
   }
 }
 @media (max-width: 600px) {
   .visits-page {
     gap: 16px;
   }
-  .visits-heading {
-    align-items: flex-start;
-  }
-  .visits-heading h2 {
-    font-size: 16px;
-    line-height: 1.6;
-    max-width: 220px;
-  }
-  .visits-heading .visits-button {
-    font-size: 11px;
-    padding: 9px;
-  }
-  .visits-eyebrow {
-    font-size: 9px;
-  }
   .visits-filters {
-    padding: 9px;
+    gap: 12px;
+    padding-bottom: 14px;
   }
   .visits-periods {
     width: 100%;
+    padding-bottom: 2px;
     overflow-x: auto;
+    scrollbar-width: thin;
   }
   .visits-periods button {
-    flex: 1;
-    font-size: 10px;
-    padding: 9px 7px;
+    flex: 0 0 auto;
+    padding-inline: 11px;
+    font-size: 12px;
+  }
+  .visits-filter-actions {
+    align-items: flex-start;
+    gap: 8px;
   }
   .visits-selectors {
-    width: 100%;
-  }
-  .visits-person-select {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     flex: 1;
     min-width: 0;
   }
+  .visits-select,
+  .visits-person-select,
   .visits-person-select select {
     width: 100%;
     max-width: 100%;
   }
+  .visits-filter-actions > .visits-refresh {
+    width: 44px;
+    padding: 0;
+  }
+  .visits-filter-actions > .visits-refresh span {
+    display: none;
+  }
   .visits-context {
-    font-size: 10px;
-  }
-  .visits-lifetime,
-  .visits-metric {
-    padding: 18px 14px 15px;
-  }
-  .visits-lifetime-value {
-    font-size: 34px;
-  }
-  .visits-metric-value {
-    font-size: 30px;
-  }
-  .visits-metric-label {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: -2px;
     font-size: 11px;
   }
-  .visits-chart-panel {
-    padding: 20px 14px 0;
+  .visits-date-range {
+    gap: 7px;
+  }
+  .visits-date-range small {
+    padding-left: 7px;
+  }
+  .visits-hero {
+    border-radius: 10px;
+  }
+  .visits-hero-layout {
+    gap: 18px;
+    padding: 24px 18px 16px;
+  }
+  .visits-primary-value {
+    font-size: 42px;
+  }
+  .visits-hero-metrics {
+    gap: 12px;
+    margin-top: 20px;
+    padding-top: 17px;
+  }
+  .visits-hero-metrics dd {
+    font-size: 26px;
+  }
+  .visits-hero-chart-heading {
+    flex-direction: column;
+    gap: 9px;
+  }
+  .visits-chart-readout {
+    justify-content: flex-start;
+    max-width: 100%;
+    gap: 5px 12px;
+    font-size: 10px;
+    text-align: left;
+  }
+  .visits-chart {
+    min-height: 185px;
+  }
+  .visits-axis {
+    font-size: 22px;
+  }
+  .visits-chart-empty {
+    min-height: 210px;
+  }
+  .visits-hero-footer > div {
+    padding: 16px 12px;
+  }
+  .visits-hero-footer dt {
+    font-size: 10px;
+  }
+  .visits-hero-footer dd {
+    font-size: clamp(20px, 6vw, 26px);
+  }
+  .visits-hero-footer dd small {
+    display: block;
+    margin: 5px 0 0;
+    font-size: 10px;
+  }
+  .visits-hero-footer p {
+    font-size: 10px;
+    line-height: 1.5;
+  }
+  .visits-hero-note {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+    padding: 13px 18px;
+    line-height: 1.6;
   }
   .visits-panel-heading {
     align-items: flex-start;
-    flex-wrap: wrap;
+    gap: 12px;
   }
   .visits-panel-heading h3 {
-    font-size: 16px;
-  }
-  .visits-chart-readout {
-    gap: 10px;
-    font-size: 10px;
-  }
-  .visits-chart {
-    min-height: 180px;
+    font-size: 15px;
   }
   .visits-people-panel .visits-panel-heading {
-    padding: 20px 16px 16px;
+    align-items: stretch;
+    flex-direction: column;
+    padding: 19px 16px 15px;
   }
   .visits-search {
     width: 100%;
@@ -1371,14 +1430,131 @@ onMounted(load);
   .visits-search input {
     width: 100%;
   }
+  .visits-table-wrap {
+    overflow: visible;
+  }
+  .visits-table,
+  .visits-table tbody {
+    display: block;
+  }
+  .visits-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .visits-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 15px 10px;
+    padding: 17px 16px;
+    border-bottom: 1px solid var(--admin-line);
+    white-space: normal;
+  }
+  .visits-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .visits-table td,
+  .visits-table th:first-child,
+  .visits-table td:first-child,
+  .visits-table th:last-child,
+  .visits-table td:last-child {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+  .visits-table td:first-child {
+    grid-column: 1 / -1;
+  }
+  .visits-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 6px;
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 400;
+  }
+  .visits-person strong {
+    font-size: 13px;
+  }
+  .visits-person small {
+    font-size: 11px;
+  }
+  .visits-person-visits strong {
+    font-size: 16px;
+  }
+  .visits-last-date {
+    grid-column: span 3;
+    align-self: end;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  .visits-person-action {
+    align-self: end;
+    text-align: right !important;
+  }
+  .visits-detail {
+    min-width: 44px;
+    min-height: 44px;
+    margin: -10px 0 -10px auto;
+    font-size: 11px;
+  }
+  .visits-table .visits-empty-row {
+    display: block;
+    padding: 0;
+  }
+  .visits-table .visits-table-empty {
+    padding: 38px 18px;
+  }
   .visits-table-foot {
     padding: 13px 16px;
+    font-size: 10px;
   }
-  .visits-loading {
-    grid-template-columns: 1fr 1fr;
+  .visits-pagination {
+    gap: 8px;
   }
-  .visits-skeleton:last-of-type {
-    display: none;
+  .visits-pagination button {
+    width: 40px;
+    height: 40px;
+  }
+  .visits-notes {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .visits-error {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 20px;
+  }
+  .visits-error .visits-refresh {
+    width: 100%;
+  }
+  .visits-skeleton-overview {
+    height: 600px;
+  }
+  .visits-skeleton-chart {
+    height: 180px;
+  }
+}
+@media (max-width: 360px) {
+  .visits-hero-footer > div {
+    padding-inline: 9px;
+  }
+  .visits-hero-footer dd {
+    font-size: 20px;
+  }
+  .visits-table-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .visits-pagination {
+    align-self: flex-end;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1387,17 +1563,6 @@ onMounted(load);
   }
   .visits-periods button {
     transition: none;
-  }
-}
-@media (max-width: 600px) {
-  .visits-axis {
-    font-size: 22px;
-  }
-  .visits-mobile-hint {
-    display: block;
-    font-size: 10px;
-    color: #6e7f71;
-    margin: 0 16px 12px;
   }
 }
 </style>
