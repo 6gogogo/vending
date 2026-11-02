@@ -1,6 +1,8 @@
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import type {
   InventoryMovement,
+  ServiceVisitDayQuery,
+  ServiceVisitDaySnapshot,
   ServiceVisitQuery,
   ServiceVisitSnapshot,
   ServiceVisitTotals,
@@ -11,14 +13,22 @@ import {
   getBusinessDayKey,
   getBusinessDayStartHour,
   getBusinessTimezoneOffsetHours,
+  getWeekdayForDateKey,
 } from "../../common/time/business-day";
 
+type VisitGoods = {
+  goodsId: string;
+  quantity: number;
+  returnedQuantity: number;
+};
 type Visit = {
   userId: string;
+  deviceCode: string;
   date: string;
   happenedAt: string;
   units: number;
   legacy: boolean;
+  goods: Map<string, VisitGoods>;
 };
 const totals = (visits: Visit[]): ServiceVisitTotals => ({
   visits: visits.length,
@@ -29,37 +39,13 @@ const totals = (visits: Visit[]): ServiceVisitTotals => ({
 const inRange = (visits: Visit[], start: string, end: string) =>
   visits.filter((visit) => visit.date >= start && visit.date <= end);
 
-/** 以实际领取流水为准；同次领取的商品行合并，退款及人工补记撤销抵减原领取。 */
-export function buildServiceVisits(
+function collectServiceVisitFacts(
   store: InMemoryStoreService,
   tenantId: string | undefined,
-  query: ServiceVisitQuery = {},
-  now = new Date(),
-): ServiceVisitSnapshot {
+  now: Date,
+) {
   if (!tenantId) throw new ForbiddenException("请先进入客户实例查看服务人次。");
   const today = getBusinessDayKey(now);
-  const period = query.period ?? "recent-month";
-  if (
-    !["all", "year", "month", "recent-month", "recent-year"].includes(period)
-  ) {
-    throw new BadRequestException("请选择有效的统计周期。");
-  }
-  const year = query.year ?? today.slice(0, 4);
-  const month = query.month ?? today.slice(0, 7);
-  if (
-    period === "year" &&
-    (!/^\d{4}$/.test(year) || year < "2000" || year > today.slice(0, 4))
-  ) {
-    throw new BadRequestException("请选择 2000 年至当前年份之间的年度。");
-  }
-  if (
-    period === "month" &&
-    (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) ||
-      month < "2000-01" ||
-      month > today.slice(0, 7))
-  ) {
-    throw new BadRequestException("请选择 2000 年至当前月份之间的月份。");
-  }
   const users = new Map(store.users.map((user) => [user.id, user]));
   const devices = new Map(
     store.devices.map((device) => [device.deviceCode, device]),
@@ -124,12 +110,23 @@ export function buildServiceVisits(
     const key = orderKey(row.userId, row.deviceCode, identity);
     const current = groups.get(key) ?? {
       userId: row.userId,
+      deviceCode: row.deviceCode,
       date: "",
       happenedAt: "",
       units: 0,
       legacy: !eventId && !sourceOrder,
+      goods: new Map<string, VisitGoods>(),
     };
     current.units += row.type === "pickup" ? row.quantity : -row.quantity;
+    const goodsId = store.resolveGoodsId(row.goodsId);
+    const goods = current.goods.get(goodsId) ?? {
+      goodsId,
+      quantity: 0,
+      returnedQuantity: 0,
+    };
+    goods.quantity += row.type === "pickup" ? row.quantity : -row.quantity;
+    if (row.type === "refund") goods.returnedQuantity += row.quantity;
+    current.goods.set(goodsId, goods);
     if (
       row.type === "pickup" &&
       (!current.happenedAt || row.happenedAt < current.happenedAt)
@@ -151,6 +148,45 @@ export function buildServiceVisits(
       .map((user) => user.id),
     ...allVisits.map((visit) => visit.userId),
   ]);
+  return { allVisits, users, devices, personIds };
+}
+
+/** 以实际领取流水为准；同次领取的商品行合并，退款及人工补记撤销抵减原领取。 */
+export function buildServiceVisits(
+  store: InMemoryStoreService,
+  tenantId: string | undefined,
+  query: ServiceVisitQuery = {},
+  now = new Date(),
+): ServiceVisitSnapshot {
+  if (!tenantId) throw new ForbiddenException("请先进入客户实例查看服务人次。");
+  const today = getBusinessDayKey(now);
+  const period = query.period ?? "recent-month";
+  if (
+    !["all", "year", "month", "recent-month", "recent-year"].includes(period)
+  ) {
+    throw new BadRequestException("请选择有效的统计周期。");
+  }
+  const year = query.year ?? today.slice(0, 4);
+  const month = query.month ?? today.slice(0, 7);
+  if (
+    period === "year" &&
+    (!/^\d{4}$/.test(year) || year < "2000" || year > today.slice(0, 4))
+  ) {
+    throw new BadRequestException("请选择 2000 年至当前年份之间的年度。");
+  }
+  if (
+    period === "month" &&
+    (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) ||
+      month < "2000-01" ||
+      month > today.slice(0, 7))
+  ) {
+    throw new BadRequestException("请选择 2000 年至当前月份之间的月份。");
+  }
+  const { allVisits, users, personIds } = collectServiceVisitFacts(
+    store,
+    tenantId,
+    now,
+  );
   if (query.userId && !personIds.has(query.userId))
     throw new BadRequestException("所选人员不在当前实例统计范围内。");
   const visits = allVisits.filter(
@@ -301,6 +337,102 @@ export function buildServiceVisits(
       { length: Number(today.slice(0, 4)) - Number(firstDate.slice(0, 4)) + 1 },
       (_, index) => String(Number(today.slice(0, 4)) - index),
     ),
+    legacyVisitCount: selected.filter((visit) => visit.legacy).length,
+  };
+}
+
+export function buildServiceVisitDay(
+  store: InMemoryStoreService,
+  tenantId: string | undefined,
+  query: ServiceVisitDayQuery,
+  now = new Date(),
+): ServiceVisitDaySnapshot {
+  const today = getBusinessDayKey(now);
+  if (!query.userId) throw new BadRequestException("请选择要查看的人员。");
+  if (query.date) {
+    const parsed = new Date(`${query.date}T00:00:00.000Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(query.date) ||
+      !Number.isFinite(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== query.date ||
+      query.date < "2000-01-01" ||
+      query.date > today
+    ) {
+      throw new BadRequestException("请选择 2000 年至当前业务日之间的有效日期。");
+    }
+  }
+  const { allVisits, users, devices, personIds } = collectServiceVisitFacts(
+    store,
+    tenantId,
+    now,
+  );
+  if (!personIds.has(query.userId))
+    throw new BadRequestException("所选人员不在当前实例统计范围内。");
+  const personal = allVisits.filter((visit) => visit.userId === query.userId);
+  const date =
+    query.date ??
+    personal.reduce(
+      (latest, visit) => (visit.date > latest ? visit.date : latest),
+      personal[0]?.date ?? today,
+    );
+  const selected = personal
+    .filter((visit) => visit.date === date)
+    .sort(
+      (a, b) =>
+        a.happenedAt.localeCompare(b.happenedAt) ||
+        a.deviceCode.localeCompare(b.deviceCode),
+    );
+  const monthKey = date.slice(0, 7);
+  const firstWeekday = getWeekdayForDateKey(`${monthKey}-01`);
+  const leadingDays = firstWeekday === 0 ? 6 : firstWeekday - 1;
+  const calendarStart = addDaysToDateKey(`${monthKey}-01`, -leadingDays);
+  const goodsCatalog = new Map(
+    store.goodsCatalog.map((goods) => [goods.goodsId, goods]),
+  );
+  const user = users.get(query.userId);
+  return {
+    date,
+    monthKey,
+    today,
+    generatedAt: now.toISOString(),
+    businessDayStartHour: getBusinessDayStartHour(),
+    timezoneOffsetHours: getBusinessTimezoneOffsetHours(),
+    person: {
+      userId: query.userId,
+      name: user?.name ?? "历史领取人员",
+      neighborhood: user?.neighborhood ?? "未分配社区",
+    },
+    summary: {
+      visits: selected.length,
+      units: selected.reduce((sum, visit) => sum + visit.units, 0),
+    },
+    days: Array.from({ length: 42 }, (_, index) => {
+      const dateKey = addDaysToDateKey(calendarStart, index);
+      const daily = personal.filter((visit) => visit.date === dateKey);
+      return {
+        dateKey,
+        day: Number(dateKey.slice(-2)),
+        inCurrentMonth: dateKey.startsWith(monthKey),
+        visits: daily.length,
+        units: daily.reduce((sum, visit) => sum + visit.units, 0),
+      };
+    }),
+    visits: selected.map((visit, index) => ({
+      key: `${visit.happenedAt}:${visit.deviceCode}:${index}`,
+      happenedAt: visit.happenedAt,
+      deviceCode: visit.deviceCode,
+      deviceName: devices.get(visit.deviceCode)?.name ?? visit.deviceCode,
+      units: visit.units,
+      goods: [...visit.goods.values()]
+        .filter((goods) => goods.quantity > 0)
+        .map((goods) => ({
+          goodsId: goods.goodsId,
+          name: goodsCatalog.get(goods.goodsId)?.name ?? goods.goodsId,
+          quantity: goods.quantity,
+          returnedQuantity: goods.returnedQuantity,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
+    })),
     legacyVisitCount: selected.filter((visit) => visit.legacy).length,
   };
 }

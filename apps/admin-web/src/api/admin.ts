@@ -21,6 +21,8 @@ import type {
   DataMonitorRange,
   DataMonitorSnapshot,
   DashboardSnapshot,
+  ServiceVisitDayQuery,
+  ServiceVisitDaySnapshot,
   ServiceVisitQuery,
   ServiceVisitSnapshot,
   DeviceMonitoringDetail,
@@ -246,6 +248,10 @@ export const adminApi = {
   serviceVisits(query: ServiceVisitQuery) {
     requireBackofficePermission("analytics:data-monitor:view");
     return adminClient.get<ServiceVisitSnapshot>("/analytics/service-visits", { query: { ...query } });
+  },
+  serviceVisitDay(query: ServiceVisitDayQuery) {
+    requireBackofficePermission("analytics:data-monitor:view");
+    return adminClient.get<ServiceVisitDaySnapshot>("/analytics/service-visits/daily", { query: { ...query } });
   },
   dataMonitor(query?: { month?: string; date?: string; range?: DataMonitorRange }) {
     requireBackofficePermission("analytics:data-monitor:view");

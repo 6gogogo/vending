@@ -10,7 +10,7 @@ import {
 } from "../../common/guards/allowed-roles.decorator";
 import { RoleGuard } from "../../common/guards/role.guard";
 import { AnalyticsService } from "./analytics.service";
-import type { BackofficeRole, DataMonitorRange, ServiceVisitQuery } from "@vm/shared-types";
+import type { BackofficeRole, DataMonitorRange, ServiceVisitDayQuery, ServiceVisitQuery } from "@vm/shared-types";
 
 import type { PickupReportQuery } from "./pickup-report.model";
 
@@ -40,6 +40,13 @@ export class AnalyticsController {
   @Get("dashboard")
   dashboard(@Req() request: { authUser?: { backofficeRole?: BackofficeRole } }) {
     return ok(this.analyticsService.getDashboard(request.authUser?.backofficeRole));
+  }
+
+  @Get("service-visits/daily")
+  @TenantScopedBackofficeRoute()
+  @AllowedBackofficePermissions("analytics:data-monitor:view")
+  serviceVisitDay(@Req() request: { authUser?: { tenantId?: string } }, @Query() query: ServiceVisitDayQuery) {
+    return ok(this.analyticsService.getServiceVisitDay(request.authUser?.tenantId, query));
   }
 
   @Get("service-visits")

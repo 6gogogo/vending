@@ -2033,6 +2033,45 @@ export interface ServiceVisitSnapshot {
   legacyVisitCount: number;
 }
 
+export interface ServiceVisitDayQuery {
+  userId: string;
+  date?: string;
+}
+
+export interface ServiceVisitDayVisit {
+  key: string;
+  happenedAt: string;
+  deviceCode: string;
+  deviceName: string;
+  units: number;
+  goods: Array<{
+    goodsId: string;
+    name: string;
+    quantity: number;
+    returnedQuantity: number;
+  }>;
+}
+
+export interface ServiceVisitDaySnapshot {
+  date: string;
+  monthKey: string;
+  today: string;
+  generatedAt: string;
+  businessDayStartHour: number;
+  timezoneOffsetHours: number;
+  person: { userId: string; name: string; neighborhood: string };
+  summary: { visits: number; units: number };
+  days: Array<{
+    dateKey: string;
+    day: number;
+    inCurrentMonth: boolean;
+    visits: number;
+    units: number;
+  }>;
+  visits: ServiceVisitDayVisit[];
+  legacyVisitCount: number;
+}
+
 export interface DataMonitorSnapshot {
   monthKey: string;
   selectedDateKey: string;

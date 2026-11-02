@@ -25,8 +25,8 @@ import { InMemoryStoreService } from "../../common/store/in-memory-store.service
 import { AlertsService } from "../alerts/alerts.service";
 import { GoodsService } from "../goods/goods.service";
 
-import type { ServiceVisitQuery } from "@vm/shared-types";
-import { buildServiceVisits } from "./service-visits";
+import type { ServiceVisitDayQuery, ServiceVisitQuery } from "@vm/shared-types";
+import { buildServiceVisitDay, buildServiceVisits } from "./service-visits";
 
 import { collectPickupReport, type PickupReportQuery } from "./pickup-report.model";
 import { buildPickupWorkbook } from "./pickup-report.workbook";
@@ -46,6 +46,10 @@ export class AnalyticsService {
 
   getServiceVisits(tenantId: string | undefined, query: ServiceVisitQuery) {
     return buildServiceVisits(this.store, tenantId, query);
+  }
+
+  getServiceVisitDay(tenantId: string | undefined, query: ServiceVisitDayQuery) {
+    return buildServiceVisitDay(this.store, tenantId, query);
   }
 
   getDailyPickupSummary(date?: string): DailyPickupSummary {

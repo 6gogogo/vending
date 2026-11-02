@@ -17,7 +17,7 @@ import {
 import type { InMemoryStoreService } from "../src/common/store/in-memory-store.service";
 import { RoleGuard } from "../src/common/guards/role.guard";
 import { AnalyticsController } from "../src/modules/analytics/analytics.controller";
-import { buildServiceVisits } from "../src/modules/analytics/service-visits";
+import { buildServiceVisitDay, buildServiceVisits } from "../src/modules/analytics/service-visits";
 
 const now = new Date("2026-10-31T08:00:00Z");
 const movement = (
@@ -61,9 +61,11 @@ function fixture(inventory: InventoryMovement[] = []) {
       { ...seedDevices[0], deviceCode: "cab-b", tenantId: "tenant-b" },
     ],
     events: [],
+    goodsCatalog: [],
     inventory,
     getUserTenantId: (user: { tenantId?: string }) => user.tenantId,
     getDeviceTenantId: (device: { tenantId?: string }) => device.tenantId,
+    resolveGoodsId: (goodsId: string) => goodsId,
   } as unknown as InMemoryStoreService;
 }
 
@@ -257,6 +259,69 @@ test("空库返回零值，旧无订单流水披露合并口径，非法筛选�
   }
 });
 
+test("个人单日返回月历和与同次归并一致的领取明细", () => {
+  const store = fixture([
+    movement("line-a", {
+      eventId: "event-a",
+      orderNo: "order-a",
+      quantity: 2,
+    }),
+    movement("line-b", { orderNo: "order-a", goodsId: "milk", quantity: 3 }),
+    movement("refund", {
+      eventId: "event-a",
+      orderNo: "order-a",
+      goodsId: "milk",
+      type: "refund",
+      quantity: 1,
+    }),
+    movement("line-c", { happenedAt: "2026-10-21T06:00:00Z", quantity: 2 }),
+  ]);
+  const result = buildServiceVisitDay(
+    store,
+    "tenant-a",
+    { userId: "person-a", date: "2026-10-20" },
+    now,
+  );
+  assert.equal(result.summary.visits, 1);
+  assert.equal(result.summary.units, 4);
+  assert.equal(result.days.length, 42);
+  assert.equal(result.days.find((day) => day.dateKey === "2026-10-20")?.visits, 1);
+  assert.equal(result.visits.length, 1);
+  assert.equal(result.visits[0].deviceName, store.devices[0].name);
+  assert.equal(result.visits[0].goods.length, 2);
+  assert.deepEqual(
+    result.visits[0].goods.find((goods) => goods.goodsId === "milk"),
+    { goodsId: "milk", name: "milk", quantity: 2, returnedQuantity: 1 },
+  );
+  const latest = buildServiceVisitDay(store, "tenant-a", { userId: "person-a" }, now);
+  assert.equal(latest.date, "2026-10-21");
+  assert.equal(latest.summary.visits, 1);
+  assert.equal(latest.summary.units, 2);
+  assert.equal(
+    buildServiceVisitDay(
+      store,
+      "tenant-a",
+      { userId: "person-a", date: "2026-10-22" },
+      now,
+    ).visits.length,
+    0,
+  );
+  assert.throws(
+    () => buildServiceVisitDay(store, "tenant-a", { userId: "person-c" }, now),
+    BadRequestException,
+  );
+  assert.throws(
+    () =>
+      buildServiceVisitDay(
+        store,
+        "tenant-a",
+        { userId: "person-a", date: "2026-02-30" },
+        now,
+      ),
+    BadRequestException,
+  );
+});
+
 test("接口要求后台统计权限，实例归属来自会话而不是查询参数", () => {
   const store = fixture();
   const session = { backofficeRole: "admin", tenantId: "tenant-a" };
@@ -284,6 +349,8 @@ test("接口要求后台统计权限，实例归属来自会话而不是查询�
   const guard = new RoleGuard(new Reflector(), store);
   assert.equal(guard.canActivate(context), true);
   assert.equal(request.authUser?.tenantId, "tenant-a");
+  context.getHandler = () => AnalyticsController.prototype.serviceVisitDay;
+  assert.equal(guard.canActivate(context), true);
   permissions = [];
   assert.throws(() => guard.canActivate(context), ForbiddenException);
   request.headers.authorization = "";

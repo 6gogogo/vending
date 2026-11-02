@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import type {
   ServiceVisitPeriod,
   ServiceVisitSnapshot,
 } from "@vm/shared-types";
 import { adminApi } from "../api/admin";
+import ServiceVisitDayPanel from "../components/ServiceVisitDayPanel.vue";
 import { formatDateTime, getTodayDateKeyInBeijing } from "../utils/datetime";
 import { getAdminErrorMessage } from "../utils/error-message";
 
@@ -41,6 +42,19 @@ const selectedName = computed(
 const scopeLabel = computed(() =>
   selectedName.value ? `${selectedName.value}的领取记录` : "全体领取人员",
 );
+const pendingDailyScroll = ref(false);
+const scrollToDaily = () => {
+  const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
+  document
+    .getElementById("visits-daily-details")
+    ?.scrollIntoView({ behavior, block: "start" });
+};
+const showPersonDaily = (id: string) => {
+  pendingDailyScroll.value = true;
+  userId.value = id;
+};
 const periodLabel = computed(
   () => periods.find((item) => item.value === period.value)?.label,
 );
@@ -152,6 +166,11 @@ const load = async () => {
   }
 };
 watch([period, year, month, userId], load);
+watch(loading, (busy) => {
+  if (busy || !pendingDailyScroll.value) return;
+  pendingDailyScroll.value = false;
+  void nextTick(scrollToDaily);
+});
 watch(search, () => {
   page.value = 1;
 });
@@ -460,6 +479,13 @@ onMounted(load);
         </div>
       </section>
 
+      <ServiceVisitDayPanel
+        v-if="userId"
+        id="visits-daily-details"
+        :user-id="userId"
+        :person-name="selectedName ?? '个人'"
+      />
+
       <section class="visits-people-panel" aria-labelledby="visits-people-title">
         <div class="visits-panel-heading">
           <div>
@@ -528,11 +554,11 @@ onMounted(load);
                 <td class="visits-person-action">
                   <button
                     class="visits-detail"
-                    :aria-label="`查看${person.name}的个人统计`"
+                    :aria-label="`查看${person.name}的个人统计与领取明细`"
                     :disabled="userId === person.userId"
-                    @click="userId = person.userId"
+                    @click="showPersonDaily(person.userId)"
                   >
-                    {{ userId === person.userId ? "当前人员" : "查看趋势" }}
+                    {{ userId === person.userId ? "当前人员" : "查看明细" }}
                     <span v-if="userId !== person.userId" aria-hidden="true">↗</span>
                   </button>
                 </td>
