@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import PickupWorkbookPreview from "./PickupWorkbookPreview.vue";
+import type { PreviewSheet } from "../utils/pickup-workbook-preview";
 import { adminApi } from "../api/admin";
 import { useAdminSessionStore } from "../stores/session";
 import { getTodayDateKeyInBeijing } from "../utils/datetime";
@@ -12,6 +14,11 @@ const startDate = ref(shift(endDate.value, -6));
 const fields = ref(["date", "person", "time", "goods", "quantity"]);
 const sections = ref(["detail", "overview"]);
 const busy = ref(false), error = ref(""), success = ref("");
+const previewBusy = ref(false), previewError = ref("");
+const previewSheets = shallowRef<PreviewSheet[]>([]);
+const reportFile = shallowRef<{ blob: Blob; filename: string }>();
+let previewVersion = 0, previewTimer: ReturnType<typeof setTimeout> | undefined;
+let previewController: AbortController | undefined;
 const fieldOptions = [
   { id: "date", label: "领取日期" }, { id: "person", label: "领取人" }, { id: "time", label: "领取时间（开门时间）" },
   { id: "goods", label: "派发出的物资" }, { id: "quantity", label: "领取件数" }
@@ -26,13 +33,38 @@ const invalid = computed(() => {
   return "";
 });
 function recent(days: number) { endDate.value = getTodayDateKeyInBeijing(); startDate.value = shift(endDate.value, 1 - days); }
+function refreshPreview(delay = 0) {
+  const version = ++previewVersion;
+  clearTimeout(previewTimer); previewController?.abort();
+  reportFile.value = undefined; previewSheets.value = []; previewError.value = ""; success.value = "";
+  previewBusy.value = !invalid.value && visible.value && !!session.token;
+  if (!previewBusy.value) return;
+  const filters = { startDate: startDate.value, endDate: endDate.value, fields: [...fields.value], sections: [...sections.value] };
+  previewTimer = setTimeout(async () => {
+    previewController = new AbortController();
+    try {
+      const [file, reader] = await Promise.all([
+        adminApi.exportPickups(filters, session.token!, previewController.signal),
+        import("../utils/pickup-workbook-preview")
+      ]);
+      if (version !== previewVersion) return;
+      const sheets = await reader.readPickupWorkbook(await file.blob.arrayBuffer());
+      if (version !== previewVersion) return;
+      previewSheets.value = sheets; reportFile.value = file;
+    } catch (cause) {
+      if (version === previewVersion) previewError.value = cause instanceof Error ? cause.message : "预览生成失败";
+    } finally { if (version === previewVersion) previewBusy.value = false; }
+  }, delay);
+}
+watch(() => [startDate.value, endDate.value, fields.value.join(","), sections.value.join(","), session.token, visible.value], () => refreshPreview(450), { immediate: true });
+onBeforeUnmount(() => { ++previewVersion; clearTimeout(previewTimer); previewController?.abort(); });
 async function download() {
   error.value = ""; success.value = "";
   if (invalid.value) { error.value = invalid.value; return; }
-  if (!session.token || busy.value) return;
+  if (!reportFile.value || busy.value) return;
   busy.value = true;
   try {
-    const file = await adminApi.exportPickups({ startDate: startDate.value, endDate: endDate.value, fields: [...fields.value], sections: [...sections.value] }, session.token);
+    const file = reportFile.value;
     const url = URL.createObjectURL(file.blob), anchor = document.createElement("a");
     anchor.href = url; anchor.download = file.filename; document.body.appendChild(anchor); anchor.click(); anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -80,12 +112,14 @@ async function download() {
       <p v-if="error" class="pickup-export__error" role="alert">{{ error }}</p>
       <p v-else-if="invalid" class="pickup-export__error" role="status">{{ invalid }}</p>
       <p v-if="success" role="status">{{ success }}</p>
-      <button class="admin-button" type="submit" :disabled="busy || !!invalid">{{ busy ? '正在生成 Excel…' : '导出 Excel' }}</button>
+      <button class="admin-button" type="submit" :disabled="busy || previewBusy || !!invalid || !reportFile">{{ previewBusy ? '正在生成 Excel…' : '导出 Excel' }}</button>
     </form>
+    <PickupWorkbookPreview :sheets="previewSheets" :loading="previewBusy" :error="previewError" :invalid="invalid" @refresh="refreshPreview()" />
   </details>
 </template>
 
 <style scoped>
+.pickup-export { display: block; min-width: 0; }
 .pickup-export__summary { cursor: pointer; padding: 4px 0; }
 .pickup-export__summary strong { margin-right: 14px; }
 .pickup-export__summary span { color: var(--text-muted, #657479); font-size: .9rem; }

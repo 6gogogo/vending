@@ -253,11 +253,11 @@ export const adminApi = {
       query
     });
   },
-  async exportPickups(filters: { startDate: string; endDate: string; fields: string[]; sections: string[] }, token: string) {
+  async exportPickups(filters: { startDate: string; endDate: string; fields: string[]; sections: string[] }, token: string, signal?: AbortSignal) {
     requireBackofficePermission("analytics:data-monitor:view");
     requireBackofficePermission("operation-logs:export");
     const query = new URLSearchParams({ startDate: filters.startDate, endDate: filters.endDate, fields: filters.fields.join(","), sections: filters.sections.join(",") });
-    const response = await fetch(`${adminApiBaseUrl}/analytics/pickups/export?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch(`${adminApiBaseUrl}/analytics/pickups/export?${query}`, { headers: { Authorization: `Bearer ${token}` }, signal });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       throw new Error(typeof error.message === "string" ? error.message : "导出失败，请重试");
