@@ -87,7 +87,7 @@ test("凌晨时段按业务日归属，次日白天的领取不能填入前一�
   assert.equal(summary(user, [pickup(user, { happenedAt: "2026-09-21T02:00:00.000Z" })]).fulfilledGoods, 0);
 });
 
-test("总览、趋势、人员台账和日历统计一致，只计入已注册且启用的领取人", (context) => {
+test("总览和趋势只计入已注册启用且曾领取的人，台账保留未领取者的状态", (context) => {
   context.mock.timers.enable({ apis: ["Date"], now: new Date(now) });
   const directory = mkdtempSync(join(tmpdir(), "vm-service-coverage-"));
   const previous = process.env.API_DATA_FILE;
@@ -97,13 +97,15 @@ test("总览、趋势、人员台账和日历统计一致，只计入已注册�
     const complete = person("complete");
     const partial = person("partial", 2);
     const unserved = person("unserved");
+    const never = person("never");
     const pending = { ...person("unregistered"), mobileProfileCompleted: false };
     const inactive = { ...person("inactive"), status: "inactive" as const };
-    store.users.splice(0, store.users.length, complete, partial, unserved, pending, inactive);
+    store.users.splice(0, store.users.length, complete, partial, unserved, never, pending, inactive);
     store.specialAccessPolicies.splice(0);
     store.goodsCatalog.splice(0, store.goodsCatalog.length, ...structuredClone(goods));
     store.goodsTaxonomyNodes.splice(0, store.goodsTaxonomyNodes.length, ...structuredClone(nodes));
-    store.inventory.splice(0, store.inventory.length, pickup(complete), pickup(partial));
+    store.inventory.splice(0, store.inventory.length, pickup(complete), pickup(partial),
+      pickup(unserved, { happenedAt: "2026-09-19T02:00:00.000Z", entitlementAllocations: undefined }));
     store.events.splice(0);
     store.logs.splice(0);
     const analytics = new AnalyticsService(store, { list: () => [] } as never,
@@ -121,6 +123,7 @@ test("总览、趋势、人员台账和日历统计一致，只计入已注册�
     assert.equal(detail.policyCalendar?.selectedDateSummary?.fulfilledGoods, 1);
     assert.equal(detail.policyCalendar?.days.find((day) => day.dateKey === dateKey)?.completionStatus, "complete");
     assert.equal(users.detail(unserved.id).user.ledgerStatus, "quota_unclaimed");
+    assert.equal(users.detail(never.id).user.ledgerStatus, "quota_unclaimed");
     assert.equal(users.detail(pending.id).user.ledgerStatus, "unregistered");
   } finally {
     if (previous === undefined) delete process.env.API_DATA_FILE; else process.env.API_DATA_FILE = previous;

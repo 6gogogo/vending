@@ -86,6 +86,7 @@ export class AnalyticsService {
       (user) => user.role === "special" && user.status === "active" && user.mobileProfileCompleted === true
     );
     const usersWithPolicies = activeSpecialUsers
+      .filter((user) => this.hasPickupHistory(user.id, businessDateKey))
       .map((user) => {
         const summary = summarizeBusinessDayForUser(
           user,
@@ -102,7 +103,7 @@ export class AnalyticsService {
         };
       })
       .filter((entry) => entry.summary.totalGoods > 0);
-    // 总览不只统计“做了多少”，还要把今天尚未被服务到的人明确找出来。
+    // 服务覆盖只统计已有实际领取记录的人，注册但从未领取不计为未服务。
     const allPendingTasks = this.alertsService
       .list("open")
       .slice()
@@ -138,7 +139,7 @@ export class AnalyticsService {
     const partialUsers = usersWithPolicies
       .filter((entry) => entry.summary.completionStatus === "partial")
       .map(mapPerson);
-    // “未服务人数”是街道最需要优先关注的名单，所以这里单独聚合并保留可展开明细。
+    // 保留曾经领取过、当前业务日尚未领取的人员明细。
     const unservedUsers = usersWithPolicies
       .filter((entry) => entry.summary.completionStatus === "unserved")
       .map(mapPerson);
@@ -279,6 +280,13 @@ export class AnalyticsService {
     return points;
   }
 
+  private hasPickupHistory(userId: string, dateKey: string) {
+    const history = this.store.inventory.filter(
+      (entry) => entry.userId === userId && getBusinessDayKey(entry.happenedAt) <= dateKey
+    );
+    return sumNetPickupQuantity(history, () => true) > 0;
+  }
+
   private buildWeeklyServiceTrend(activeSpecialUsers: UserRecord[], allPendingTasks: AlertTask[]): DashboardServiceTrendPoint[] {
     const points: DashboardServiceTrendPoint[] = [];
 
@@ -293,6 +301,8 @@ export class AnalyticsService {
       };
 
       activeSpecialUsers.forEach((user) => {
+        // 每一天分别判断，首次领取之前的日期不追溯计入未服务。
+        if (!this.hasPickupHistory(user.id, key)) return;
         const summary = summarizeBusinessDayForUser(
           user,
           this.store.specialAccessPolicies,

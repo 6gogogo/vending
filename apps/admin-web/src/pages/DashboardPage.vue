@@ -44,10 +44,10 @@ const activeTask = ref<NonNullable<typeof pendingTasks.value>[number]>();
 
 const summaryLogs = computed(() => dashboard.value?.summaryLogs ?? []);
 const pendingTasks = computed(() => dashboard.value?.pendingTasks ?? []);
-const serviceFollowUpCount = computed(() => {
+const servedUsersCount = computed(() => {
   const overview = dashboard.value?.serviceOverview;
 
-  return (overview?.partialUsers.count ?? 0) + (overview?.unservedUsers.count ?? 0);
+  return (overview?.completeUsers.count ?? 0) + (overview?.partialUsers.count ?? 0);
 });
 const serviceTotalCount = computed(() => {
   const overview = dashboard.value?.serviceOverview;
@@ -71,6 +71,8 @@ const serviceMixStyle = computed(() => {
 });
 const highPriorityTasks = computed(() =>
   pendingTasks.value
+    // 暂时从重点待办隐藏结算超时通知，完整待办仍保留记录和处理入口。
+    .filter((task) => !(task.type === "callback" && task.title === "结算回调超时待补记"))
     .filter((task) => task.grade === "fault" || task.grade === "warning")
     .slice(0, 4)
 );
@@ -82,9 +84,6 @@ const pendingTasksTrend = computed(() => serviceTrend.value.map((point) => point
 const servedUsersTrend = computed(() =>
   serviceTrend.value.map((point) => point.completeUsers + point.partialUsers)
 );
-const followUpUsersTrend = computed(() =>
-  serviceTrend.value.map((point) => point.partialUsers + point.unservedUsers)
-);
 
 const trendChartBounds = {
   left: 24,
@@ -94,7 +93,7 @@ const trendChartBounds = {
 };
 
 const trendMaxValue = computed(() => {
-  const values = [...servedUsersTrend.value, ...followUpUsersTrend.value].filter((value) =>
+  const values = servedUsersTrend.value.filter((value) =>
     Number.isFinite(value)
   );
 
@@ -134,17 +133,12 @@ const createTrendPlot = (
 const servedTrendPlot = computed(() =>
   createTrendPlot(servedUsersTrend.value, serviceTrend.value, trendMaxValue.value)
 );
-const followUpTrendPlot = computed(() =>
-  createTrendPlot(followUpUsersTrend.value, serviceTrend.value, trendMaxValue.value)
-);
 const trendChartLabel = computed(() =>
   serviceTrend.value.length
     ? serviceTrend.value
         .map(
           (point) =>
-            `${point.label} 已服务 ${point.completeUsers + point.partialUsers} 人，需跟进 ${
-              point.partialUsers + point.unservedUsers
-            } 人`
+            `${point.label} 已服务 ${point.completeUsers + point.partialUsers} 人`
         )
         .join("；")
     : "近 7 日服务趋势暂无数据"
@@ -162,8 +156,8 @@ const bucketMeta: Record<BucketKey, { title: string; hint: string; tone: "accent
     tone: "warning"
   },
   unservedUsers: {
-    title: "今日未服务人数",
-    hint: "业务日内尚未领取任何应领物资",
+    title: "今日未领取人数",
+    hint: "仅统计曾领取过、当前业务日尚未领取的人员",
     tone: "neutral"
   }
 };
@@ -318,7 +312,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
       <div class="admin-skeleton admin-skeleton--short"></div>
     </article>
 <section v-show="activeSection === 'overview'" v-if="dashboard" class="admin-page__section">
-      <div class="workspace-toolbar dashboard-intro"><p>今日已统计 <strong>{{ serviceTotalCount }}</strong> 位服务对象，<strong>{{ serviceFollowUpCount }}</strong> 位需要跟进。</p><span class="admin-pill admin-pill--success">每 15 秒自动更新</span></div>
+      <div class="workspace-toolbar dashboard-intro"><p>统计有领取记录的服务对象 <strong>{{ serviceTotalCount }}</strong> 人，今日已服务 <strong>{{ servedUsersCount }}</strong> 人。</p><span class="admin-pill admin-pill--success">每 15 秒自动更新</span></div>
 
       <div class="admin-grid admin-grid--stats-4">
         <button class="dashboard-stat-button" @click="openBucket('completeUsers')">
@@ -350,7 +344,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
             :hint="bucketMeta.unservedUsers.hint"
             action-label="查看名单"
             :sparkline="unservedUsersTrend"
-            sparkline-label="近 7 日未服务人数趋势"
+            sparkline-label="近 7 日曾领取人员当日未领取人数趋势"
           />
         </button>
         <StatTile
@@ -368,7 +362,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
           <div class="admin-panel__head">
             <div>
               <span class="admin-kicker">服务趋势</span>
-              <h3 class="admin-panel__title">近 7 日服务趋势</h3>
+              <h3 class="admin-panel__title">近 7 日已服务人数</h3>
             </div>
             <span class="admin-pill admin-pill--success">实时</span>
           </div>
@@ -387,11 +381,6 @@ const activeSection = useWorkspaceSection(workspaceSections);
               class="dashboard-line-chart__line dashboard-line-chart__line--main"
               :points="servedTrendPlot.points"
             />
-            <polyline
-              v-if="followUpTrendPlot.points"
-              class="dashboard-line-chart__line dashboard-line-chart__line--sub"
-              :points="followUpTrendPlot.points"
-            />
             <g class="dashboard-line-chart__points dashboard-line-chart__points--main">
               <circle
                 v-for="point in servedTrendPlot.markers"
@@ -403,17 +392,6 @@ const activeSection = useWorkspaceSection(workspaceSections);
                 <title>{{ point.label }} 已服务 {{ point.value }} 人</title>
               </circle>
             </g>
-            <g class="dashboard-line-chart__points dashboard-line-chart__points--sub">
-              <circle
-                v-for="point in followUpTrendPlot.markers"
-                :key="`follow-${point.label}`"
-                :cx="point.x"
-                :cy="point.y"
-                r="2.8"
-              >
-                <title>{{ point.label }} 需跟进 {{ point.value }} 人</title>
-              </circle>
-            </g>
           </svg>
           <div v-if="hasServiceTrendChart" class="dashboard-line-chart__labels">
             <span v-for="(point, index) in serviceTrend" :key="point.label" :style="{ left: `${(servedTrendPlot.markers[index]?.x ?? 0) / 460 * 100}%` }">{{ point.label }}</span>
@@ -423,7 +401,6 @@ const activeSection = useWorkspaceSection(workspaceSections);
           </div>
           <div class="dashboard-chart-legend">
             <span><i class="dashboard-chart-legend__dot"></i>已服务人数（完全+部分）</span>
-            <span><i class="dashboard-chart-legend__dot dashboard-chart-legend__dot--sub"></i>需跟进人数（部分+未服务）</span>
           </div>
         </article>
 
@@ -441,7 +418,7 @@ const activeSection = useWorkspaceSection(workspaceSections);
             <div class="dashboard-mix-card__legend">
               <span><i></i>完全服务 {{ dashboard.serviceOverview.completeUsers.count }}</span>
               <span><i></i>部分服务 {{ dashboard.serviceOverview.partialUsers.count }}</span>
-              <span><i></i>未服务 {{ dashboard.serviceOverview.unservedUsers.count }}</span>
+              <span><i></i>今日未领取 {{ dashboard.serviceOverview.unservedUsers.count }}</span>
             </div>
           </div>
         </article>
