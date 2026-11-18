@@ -42,7 +42,7 @@ import {
 } from "../utils/backoffice-provisioning";
 import { formatDateTime } from "../utils/datetime";
 import { getAdminErrorMessage as readErrorMessage } from "../utils/error-message";
-import { cloneEntitlementLimits } from "../utils/user-entitlement-policy";
+import { cloneEntitlementLimits, createEntitlementLimitId, createUserEntitlementLimit } from "../utils/user-entitlement-policy";
 import {
   parsePersonnelImportRows,
   type PersonnelImportCell,
@@ -808,7 +808,7 @@ const resetPolicyForm = () => {
     mode: taxonomyNodeOptions.value.length ? "taxonomy" : "goods",
     goodsLimits: [{ goodsId: goodsCatalog.value[0]?.goodsId ?? "", quantity: 1 }],
     entitlementLimits: taxonomyNodeOptions.value[0]
-      ? [{ id: globalThis.crypto.randomUUID(), targetType: "taxonomy_node", targetId: taxonomyNodeOptions.value[0].id, quantity: 1 }]
+      ? [createPolicyEntitlementLimit()]
       : []
   };
 };
@@ -939,7 +939,7 @@ const load = async () => {
     if (reservationSettingsResponse) applyReservationSettings(reservationSettingsResponse);
     if (!policyForm.value.goodsLimits[0]?.goodsId && goodsCatalogResponse[0]) policyForm.value.goodsLimits[0].goodsId = goodsCatalogResponse[0].goodsId;
     if (!policyForm.value.entitlementLimits.length && taxonomyNodeOptions.value[0]) {
-      policyForm.value.entitlementLimits = [{ id: globalThis.crypto.randomUUID(), targetType: "taxonomy_node", targetId: taxonomyNodeOptions.value[0].id, quantity: 1 }];
+      policyForm.value.entitlementLimits = [createPolicyEntitlementLimit()];
     }
   } catch (error) {
     showActionMessage("error", `人员与规则数据加载失败：${readErrorMessage(error, "请稍后重试")}`);
@@ -1042,7 +1042,7 @@ const openEditPolicy = (policy: SpecialAccessPolicy) => {
     entitlementLimits: policy.entitlementLimits?.length
       ? cloneEntitlementLimits(policy.entitlementLimits)
       : taxonomyNodeOptions.value[0]
-        ? [{ id: globalThis.crypto.randomUUID(), targetType: "taxonomy_node", targetId: taxonomyNodeOptions.value[0].id, quantity: 1 }]
+        ? [createPolicyEntitlementLimit()]
         : []
   };
   drawerMode.value = "edit-policy";
@@ -1828,12 +1828,7 @@ const removePolicyGoodsLimit = (index: number) => {
   policyForm.value.goodsLimits.splice(index, 1);
   if (!policyForm.value.goodsLimits.length) addPolicyGoodsLimit();
 };
-const createPolicyEntitlementLimit = (): EntitlementLimit => ({
-  id: globalThis.crypto.randomUUID(),
-  targetType: "taxonomy_node",
-  targetId: taxonomyNodeOptions.value[0]?.id ?? "",
-  quantity: 1
-});
+const createPolicyEntitlementLimit = () => createUserEntitlementLimit(taxonomyNodeOptions.value[0]?.id);
 const addPolicyEntitlementLimit = () => {
   policyForm.value.entitlementLimits.push(createPolicyEntitlementLimit());
 };
@@ -1873,7 +1868,7 @@ const submitPolicyForm = async () => {
           if (item.targetType === "goods" && !goodsCatalogMap.value.has(item.targetId)) {
             throw new Error(`未找到货品 ${item.targetId}。`);
           }
-          return { ...item, id: item.id || globalThis.crypto.randomUUID() };
+          return { ...item, id: item.id || createEntitlementLimitId() };
         });
       const targetKeys = entitlementLimits.map((item) => `${item.targetType}:${item.targetId}`);
       if (new Set(targetKeys).size !== targetKeys.length) throw new Error("同一分类或货品只能设置一个额度池。");

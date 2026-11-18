@@ -19,7 +19,7 @@ import { useAdminSessionStore } from "../stores/session";
 const api = vi.hoisted(() => Object.fromEntries([
   "users", "devices", "policies", "regions", "goodsCatalog", "backofficeCredentials",
   "registrationApplications", "manualVerificationCodes", "goodsTaxonomy", "reservationSettings",
-  "createUser", "systemSettings", "saveSystemSettings", "paymentDiagnostics", "logout", "exitPlatformTenant",
+  "createUser", "createPolicy", "systemSettings", "saveSystemSettings", "paymentDiagnostics", "logout", "exitPlatformTenant",
   "goodsOverview", "warehouseInventory", "goodsCategories", "goodsAlertPolicies", "platformGoodsSyncStatus",
   "createInventoryTransfer", "createExpiredBatchDisposition", "deviceDetail", "dashboard", "userDetail", "reservations", "manualSettlementCandidates", "alerts", "resolveAlert"
 ].map(name => [name, vi.fn()])));
@@ -434,6 +434,39 @@ describe("设置保存和取消", () => {
 });
 
 describe("人员页面分区和提交", () => {
+  it("浏览器没有 randomUUID 时仍能加载人员并保存分类额度模板", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    api.goodsTaxonomy.mockResolvedValue({
+      revision: 1,
+      nodes: [{ id: "taxonomy-root", name: "任意", parentId: null, status: "active" }],
+      goods: [],
+      unassignedGoodsIds: []
+    });
+    api.goodsCatalog.mockResolvedValue([{ goodsId: "g1", name: "测试物资", category: "food", status: "active" }]);
+    try {
+      const { wrapper } = await start("/users?section=rules");
+      expect(wrapper.text()).not.toContain("人员与规则数据加载失败");
+
+      await button(wrapper, "新增模板").trigger("click");
+      await field(wrapper, "模板名称").setValue("兼容浏览器规则");
+      await button(wrapper, "继续添加额度池").trigger("click");
+      const rows = wrapper.findAll(".users-policy-entitlement-row");
+      expect(rows).toHaveLength(2);
+      await rows[1]!.findAll("select")[0]!.setValue("goods");
+      await button(wrapper, "保存每日物资模板").trigger("click");
+      await flushPromises();
+
+      expect(api.createPolicy).toHaveBeenCalledTimes(1);
+      const [first, second] = api.createPolicy.mock.calls[0]![0].entitlementLimits;
+      const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+      expect(first).toMatchObject({ id: expect.stringMatching(uuidV4), targetType: "taxonomy_node", targetId: "taxonomy-root" });
+      expect(second).toMatchObject({ id: expect.stringMatching(uuidV4), targetType: "goods", targetId: "g1" });
+      expect(first.id).not.toBe(second.id);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("快速重复点击保存只写入一次，等待期间禁用再次提交", async () => {
     let finish!: (value: UserRecord) => void;
     api.createUser.mockImplementation(() => new Promise<UserRecord>(resolve => { finish = resolve; }));
